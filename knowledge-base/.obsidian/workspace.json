@@ -1,0 +1,225 @@
+{
+  "main": {
+    "id": "ba2097ed386c392e",
+    "type": "split",
+    "children": [
+      {
+        "id": "0aa68886c126e849",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "93041ca7fffbb64c",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "wiki/workflows/escopo-projeto-assinatura.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "escopo-projeto-assinatura"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "91f2494bf6d49850",
+    "type": "split",
+    "children": [
+      {
+        "id": "63b8f1e64e8ea9ec",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "41249b32bfdbc7d7",
+            "type": "leaf",
+            "state": {
+              "type": "file-explorer",
+              "state": {
+                "sortOrder": "alphabetical",
+                "autoReveal": false
+              },
+              "icon": "lucide-folder-closed",
+              "title": "Explorador de arquivos"
+            }
+          },
+          {
+            "id": "a6427b4bb95e5262",
+            "type": "leaf",
+            "state": {
+              "type": "search",
+              "state": {
+                "query": "tag:gabi",
+                "matchingCase": false,
+                "explainSearch": false,
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical"
+              },
+              "icon": "lucide-search",
+              "title": "Procurar"
+            }
+          },
+          {
+            "id": "68c68fce28f5b3cf",
+            "type": "leaf",
+            "state": {
+              "type": "bookmarks",
+              "state": {},
+              "icon": "lucide-bookmark",
+              "title": "Marcadores"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300
+  },
+  "right": {
+    "id": "e0d23a8a42d3ac1a",
+    "type": "split",
+    "children": [
+      {
+        "id": "1ba71ebb9b0e99c9",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "c2488b707ac8b707",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-coming-in",
+              "title": "Links inversos"
+            }
+          },
+          {
+            "id": "f5d1e16cb1ce9be2",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-going-out",
+              "title": "Links de saída"
+            }
+          },
+          {
+            "id": "31c6eeade8086f5a",
+            "type": "leaf",
+            "state": {
+              "type": "tag",
+              "state": {
+                "sortOrder": "frequency",
+                "useHierarchy": true,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-tags",
+              "title": "Etiquetas"
+            }
+          },
+          {
+            "id": "bb12fe68f8e530e5",
+            "type": "leaf",
+            "state": {
+              "type": "all-properties",
+              "state": {
+                "sortOrder": "frequency",
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-archive",
+              "title": "Todas as propriedades"
+            }
+          },
+          {
+            "id": "b873f0232f12889f",
+            "type": "leaf",
+            "state": {
+              "type": "outline",
+              "state": {
+                "followCursor": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-list",
+              "title": "Sumário"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300,
+    "collapsed": true
+  },
+  "left-ribbon": {
+    "hiddenItems": {
+      "switcher:Abrir a troca rápida": false,
+      "graph:Abrir visualização em gráfico": false,
+      "canvas:Criar novo canvas": false,
+      "daily-notes:Abrir a nota de hoje": false,
+      "templates:Inserir modelo": false,
+      "command-palette:Abrir paleta de comandos": false,
+      "bases:Criar nova base": false
+    }
+  },
+  "active": "41249b32bfdbc7d7",
+  "lastOpenFiles": [
+    "wiki/outputs/calendario-notion-execucao-2026-04-01-2026-05-13.csv",
+    "wiki/outputs/calendario-notion-execucao-2026-04-01-2026-05-13.md",
+    "wiki/architecture/agente-multimodelo.md",
+    "wiki/architecture/designer-frontend.md",
+    "wiki/architecture/designer-backend.md",
+    "wiki/migrations/2026-05-05.md",
+    "wiki/migrations/2026-05-03.md",
+    "wiki/migrations/2026-04-22.md",
+    "wiki/integrations/canva-connect-api.md",
+    "wiki/features/secretaria-ai-mes2.md",
+    "wiki/features/secretaria-ai-gabi.md",
+    "wiki/features/galeria-gestao.md",
+    "wiki/features/fabrica-v2.md",
+    "wiki/features/fabrica-redesign.md",
+    "wiki/features/fabrica-biblioteca-layouts.md",
+    "wiki/features/bot-gabi.md",
+    "wiki/features/automacao-notificacao-marcelle.md",
+    "wiki/index.md",
+    "wiki/log.md",
+    "wiki/overview.md",
+    "wiki/tracking.canvas",
+    "wiki/outputs/auditoria-ux-logica-designer.md",
+    "wiki/outputs/auditoria-libs-configs.md",
+    "wiki/outputs/agentes-mapa-funcoes.canvas",
+    "wiki/outputs/auditoria-geral-designer-2026-05-13.md",
+    "wiki/outputs/benchmarking-fabrica-ux.md",
+    "wiki/outputs/designer-plano-implementacao.md",
+    "wiki/outputs/designer-auditoria-jornada.canvas",
+    "wiki/log.md.tmp.20248.c6ab24c99409",
+    "wiki/features/agente-designer.md.tmp.20248.3c0126c09860",
+    "wiki/features/agente-designer.md.tmp.20248.767c7db19b46",
+    "wiki/features/agente-designer.md.tmp.20248.978234f287ee",
+    "wiki/architecture/designer-frontend.md.tmp.20248.4dae4ba9d6cf",
+    "wiki/architecture/designer-frontend.md.tmp.20248.25f415306b37",
+    "wiki/architecture/designer-frontend.md.tmp.20248.7b6f58e5831e",
+    "wiki/architecture/designer-frontend.md.tmp.20248.f58839c77cb1",
+    "wiki/features/agente-designer.md",
+    "CLAUDE.md.tmp.5808.1776895101452",
+    "wiki/stakeholders"
+  ]
+}

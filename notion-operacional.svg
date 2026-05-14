@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" fill="none">
+  <title>Operacional</title>
+  <rect width="512" height="512" rx="112" fill="#0A0A0A"/>
+  <rect x="80" y="80" width="352" height="352" rx="88" stroke="#FAFAF7" stroke-opacity="0.12" stroke-width="2"/>
+  <path d="M256 144V198" stroke="#FAFAF7" stroke-width="22" stroke-linecap="round"/>
+  <path d="M256 314V368" stroke="#FAFAF7" stroke-width="22" stroke-linecap="round"/>
+  <path d="M144 256H198" stroke="#FAFAF7" stroke-width="22" stroke-linecap="round"/>
+  <path d="M314 256H368" stroke="#FAFAF7" stroke-width="22" stroke-linecap="round"/>
+  <path d="M184 184L222 222" stroke="#FAFAF7" stroke-width="18" stroke-linecap="round"/>
+  <path d="M290 290L328 328" stroke="#FAFAF7" stroke-width="18" stroke-linecap="round"/>
+  <path d="M328 184L290 222" stroke="#FAFAF7" stroke-width="18" stroke-linecap="round"/>
+  <path d="M222 290L184 328" stroke="#FAFAF7" stroke-width="18" stroke-linecap="round"/>
+  <circle cx="256" cy="256" r="62" fill="#FAFAF7"/>
+  <circle cx="256" cy="256" r="28" fill="#0A0A0A"/>
+  <circle cx="256" cy="144" r="12" fill="#FAFAF7" fill-opacity="0.5"/>
+  <circle cx="368" cy="256" r="12" fill="#FAFAF7" fill-opacity="0.5"/>
+  <circle cx="256" cy="368" r="12" fill="#FAFAF7" fill-opacity="0.5"/>
+  <circle cx="144" cy="256" r="12" fill="#FAFAF7" fill-opacity="0.5"/>
+  <circle cx="128" cy="128" r="8" fill="#FAFAF7" fill-opacity="0.42"/>
+  <circle cx="384" cy="128" r="8" fill="#FAFAF7" fill-opacity="0.42"/>
+  <circle cx="128" cy="384" r="8" fill="#FAFAF7" fill-opacity="0.42"/>
+  <circle cx="384" cy="384" r="8" fill="#FAFAF7" fill-opacity="0.42"/>
+</svg>
