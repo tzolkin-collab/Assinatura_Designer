@@ -1,0 +1,501 @@
+.backLink {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-4);
+  transition: color var(--transition-fast);
+}
+
+.backLink:hover {
+  color: var(--color-text);
+}
+
+.grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.sectionTitle {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--color-text);
+  margin-bottom: var(--space-6);
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: var(--space-3);
+}
+
+.colorGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--space-4);
+  margin-top: var(--space-2);
+}
+
+.colorItem {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background-color: var(--color-surface);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.colorItem:hover {
+  border-color: var(--color-border-hover);
+  box-shadow: var(--shadow-sm);
+}
+
+.colorSwatchContainer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.colorInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.colorLabel {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text);
+  margin: 0;
+}
+
+.colorDesc {
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+
+.colorInput {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border);
+  padding: 2px;
+  cursor: pointer;
+  background: none;
+}
+
+.inputGroup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.inputLabel {
+  font-size: var(--text-sm);
+  color: var(--color-text);
+  font-weight: 500;
+}
+
+.textInput {
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  outline: none;
+  transition: all var(--transition-fast);
+}
+
+.textInput:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15);
+}
+
+.swatchLabel {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  font-family: var(--font-mono);
+}
+
+.typeRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+}
+
+.dropdownList {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  max-height: 200px;
+  overflow-y: auto;
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  margin-top: 4px;
+  box-shadow: var(--shadow-lg);
+  z-index: 50;
+}
+
+.dropdownItem {
+  padding: 8px 12px;
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+  color: var(--color-text);
+}
+
+.dropdownItem:hover {
+  background-color: var(--color-bg-secondary);
+  color: var(--color-accent);
+}
+
+.uploadArea {
+  display: block;
+  border: 2px dashed var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-10);
+  text-align: center;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.logoPreview {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.logoImg {
+  max-width: 100%;
+  max-height: 120px;
+  object-fit: contain;
+  border-radius: var(--radius-md);
+}
+
+.logoPreview p {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  margin: 0;
+}
+
+.uploadArea:hover {
+  border-color: var(--color-border-hover);
+  background-color: var(--color-surface);
+}
+
+.uploadAreaDragging {
+  border-color: var(--color-brand);
+  background-color: var(--color-brand-light);
+  transform: scale(1.02);
+}
+
+.uploadHint {
+  display: block;
+  margin-top: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+}
+
+.guidelinesGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-4);
+}
+
+@media (max-width: 640px) {
+  .guidelinesGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.textarea {
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+  resize: vertical;
+  outline: none;
+  transition: all var(--transition-fast);
+}
+
+.textarea:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15);
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.spinIcon {
+  animation: spin 1s linear infinite;
+  flex-shrink: 0;
+}
+
+.extractingBanner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.suggestionPanel {
+  margin-top: var(--space-4);
+  padding: var(--space-4);
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.suggestionHeader {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-accent);
+}
+
+.suggestionColors {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.suggestionSwatch {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.suggestionSwatchLabel {
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  margin-left: var(--space-1);
+}
+
+.suggestionText {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  margin: 0;
+  line-height: var(--leading-relaxed);
+}
+
+.suggestionText strong {
+  color: var(--color-text);
+}
+
+.suggestionActions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-1);
+}
+
+.dismissBtn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  transition: color var(--transition-fast);
+}
+
+.dismissBtn:hover {
+  color: var(--color-text);
+}
+
+/* ── Modal de branding extraído do logo ── */
+
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  padding: var(--space-4);
+}
+
+.modal {
+  background: var(--color-surface);
+  border: 1px solid rgba(0, 0, 0, 0.04);
+  border-radius: var(--radius-2xl);
+  padding: var(--space-6);
+  width: 100%;
+  max-width: 480px;
+  box-shadow: 0 32px 120px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  max-height: 90vh;
+  overflow-y: auto;
+  animation: modalPop 400ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes modalPop {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.modalHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.modalTitleRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.modalCheckIcon {
+  color: #22c55e;
+  flex-shrink: 0;
+}
+
+.modalTitle {
+  font-family: var(--font-serif);
+  font-size: var(--text-2xl);
+  font-weight: 500;
+  color: var(--color-text);
+  margin: 0;
+}
+
+.modalClose {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  padding: var(--space-1);
+  border-radius: var(--radius-md);
+  transition: color var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.modalClose:hover {
+  color: var(--color-text);
+}
+
+.modalSubtitle {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  margin: 0;
+  line-height: var(--leading-relaxed);
+}
+
+.modalSection {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.modalSectionLabel {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 0;
+}
+
+.modalSectionValue {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  margin: 0;
+  line-height: var(--leading-relaxed);
+}
+
+.modalSwatches {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.modalSwatch {
+  width: 52px;
+  height: 52px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 4px;
+  flex-shrink: 0;
+}
+
+.modalSwatchHex {
+  font-size: 9px;
+  font-family: var(--font-mono);
+  color: rgba(255,255,255,0.85);
+  text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+  line-height: 1;
+}
+
+.modalActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border);
+}
+
+.modalCancelBtn {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-md);
+  transition: color var(--transition-fast);
+}
+
+.modalCancelBtn:hover {
+  color: var(--color-text);
+}

@@ -1,0 +1,22 @@
+{
+  "name": "Assinatura Design Studio",
+  "short_name": "Assinatura",
+  "description": "Plataforma interna de criação e gestão de designs para redes sociais",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#000000",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icons/app-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "/icons/app-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

@@ -1,0 +1,118 @@
+.page {
+  max-width: 600px;
+  margin: 0 auto;
+  padding: 40px 24px;
+}
+
+.stepper {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 40px;
+  position: relative;
+}
+
+.stepper::before {
+  content: '';
+  position: absolute;
+  top: 20px;
+  left: 40px;
+  right: 40px;
+  height: 2px;
+  background-color: var(--color-border);
+  z-index: 0;
+}
+
+.step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-text-tertiary);
+  position: relative;
+  z-index: 1;
+  background-color: var(--color-bg);
+}
+
+.stepActive {
+  color: var(--color-accent);
+}
+
+.stepIcon {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background-color: var(--color-surface);
+  border: 2px solid var(--color-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition-fast);
+}
+
+.stepActive .stepIcon {
+  background-color: var(--color-accent);
+  border-color: var(--color-accent);
+  color: white;
+}
+
+.stepLabel {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.stepLine {
+  position: absolute;
+  top: 20px;
+  left: calc(50% + 20px);
+  width: calc(100% - 40px);
+  height: 2px;
+  background-color: var(--color-border);
+  z-index: -1;
+}
+
+.contentCard {
+  padding: 32px;
+  min-height: 300px;
+  display: flex;
+  flex-direction: column;
+}
+
+.stepContent {
+  flex: 1;
+}
+
+.stepContent h2 {
+  font-size: 24px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: var(--color-text);
+}
+
+.stepContent p {
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.actions {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 32px;
+  padding-top: 24px;
+  border-top: 1px solid var(--color-border);
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.errorBox {
+  background-color: rgba(239, 68, 68, 0.1);
+  color: var(--color-danger, #ef4444);
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-size: 14px;
+  margin-bottom: 24px;
+}

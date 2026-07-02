@@ -1,0 +1,83 @@
+.page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--color-bg-secondary);
+  padding: var(--space-4);
+}
+
+.card {
+  width: 100%;
+  max-width: 400px;
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  padding: var(--space-10);
+  box-shadow: var(--shadow-lg);
+  animation: slideInUp var(--transition-slow);
+}
+
+/* ── Logo ── */
+.logoArea {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-8);
+}
+
+.logoMark {
+  width: 48px;
+  height: 48px;
+  background-color: var(--color-accent);
+  color: #ffffff;
+  border-radius: var(--radius-lg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: var(--text-2xl);
+  margin-bottom: var(--space-2);
+}
+
+.logoTitle {
+  font-size: var(--text-2xl);
+  font-weight: 700;
+  color: var(--color-text);
+  line-height: 1;
+}
+
+.logoSub {
+  font-size: var(--text-sm);
+  color: var(--color-text-tertiary);
+}
+
+/* ── Form ── */
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.error {
+  font-size: var(--text-sm);
+  color: var(--color-error);
+  text-align: center;
+  padding: var(--space-2) var(--space-3);
+  background-color: var(--color-error-light);
+  border-radius: var(--radius-md);
+}
+
+.hint {
+  margin-top: var(--space-6);
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  text-align: center;
+  line-height: var(--leading-relaxed);
+}
+
+.hint strong {
+  color: var(--color-text-secondary);
+  font-weight: 500;
+}

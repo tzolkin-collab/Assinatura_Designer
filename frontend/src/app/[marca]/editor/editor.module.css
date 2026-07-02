@@ -1,0 +1,103 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - var(--space-16));
+}
+
+/* ── Iframe ── */
+
+.iframeWrapper {
+  flex: 1;
+  position: relative;
+  border-radius: var(--radius-2xl);
+  overflow: hidden;
+  border: 1px solid rgba(0, 0, 0, 0.04);
+  background-color: var(--color-surface);
+  min-height: 0;
+  box-shadow: 0 4px 32px rgba(0, 0, 0, 0.03);
+  animation: scaleIn 500ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.98) translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+  display: block;
+  transition: opacity 0.2s ease;
+}
+
+.iframeLoading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  color: var(--color-text-secondary);
+  font-size: var(--text-base);
+  background-color: var(--color-surface);
+}
+
+.spinner {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* ── Empty state (Penpot not configured) ── */
+
+.emptyState {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  text-align: center;
+  padding: var(--space-8);
+  color: var(--color-text-secondary);
+}
+
+.emptyIcon {
+  color: var(--color-text-tertiary);
+}
+
+.emptyState h3 {
+  font-family: var(--font-serif);
+  font-size: var(--text-2xl);
+  font-weight: 500;
+  color: var(--color-text);
+  margin: 0;
+}
+
+.emptyState p {
+  font-size: var(--text-sm);
+  max-width: 400px;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.emptyState code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background-color: var(--color-bg-secondary);
+  padding: 4px 8px;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(0, 0, 0, 0.04);
+  color: var(--color-brand);
+}

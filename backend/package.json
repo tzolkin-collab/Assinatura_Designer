@@ -1,0 +1,52 @@
+{
+  "name": "assinatura-backend",
+  "version": "1.0.0",
+  "description": "Backend API for Assinatura Design Studio",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "lint": "eslint src/",
+    "db:status": "prisma migrate status",
+    "db:migrate": "prisma migrate deploy",
+    "db:generate": "prisma generate"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.96.0",
+    "@aws-sdk/client-s3": "^3.1045.0",
+    "@google/genai": "^1.50.1",
+    "@prisma/client": "^6.19.3",
+    "@types/ws": "^8.18.1",
+    "asana": "^3.1.11",
+    "bcrypt": "^6.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^5.1.0",
+    "googleapis": "^171.4.0",
+    "ioredis": "^5.10.1",
+    "jsonwebtoken": "^9.0.3",
+    "pg": "^8.20.0",
+    "playwright": "^1.61.0",
+    "sharp": "^0.34.5",
+    "ws": "^8.20.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.0.0",
+    "@types/bcrypt": "^6.0.0",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.2",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^22.13.14",
+    "@types/pg": "^8.20.0",
+    "@types/sharp": "^0.31.1",
+    "eslint": "^9.0.0",
+    "prisma": "^6.19.3",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2",
+    "typescript-eslint": "^8.0.0"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  }
+}
