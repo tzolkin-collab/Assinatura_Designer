@@ -4,6 +4,12 @@
 
 ---
 
+## 2026-06-30
+
+- **Fábrica IA** — Criados ADR-0032 a ADR-0037 mapeando as features cruciais do copiloto de IA (Fábrica) e interações generativas no editor.
+
+---
+
 ## 2026-06-27
 
 - **KB iniciada** — Primeira exploração completa do projeto designer (frontend + backend).

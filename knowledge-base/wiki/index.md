@@ -59,6 +59,17 @@
 | [ADR-0030](decisions/ADR-0030-sombra-inset-multipla.md) | Shadow Inset e Múltiplas Sombras | proposed |
 | [ADR-0031](decisions/ADR-0031-texto-background-gradiente.md) | Texto com Preenchimento em Gradiente | proposed |
 
+### 🟣 Inteligência Artificial & Fábrica
+
+| ADR | Título | Status |
+|---|---|---|
+| [ADR-0032](decisions/ADR-0032-edicao-ia-elementos-fabrica.md) | Edição de Elementos via IA na Fábrica | proposed |
+| [ADR-0033](decisions/ADR-0033-fabrica-history-undo.md) | Versionamento e Histórico (Undo/Redo) via IA | proposed |
+| [ADR-0034](decisions/ADR-0034-fabrica-brand-book-injection.md) | Injeção de Brand Book no Contexto | proposed |
+| [ADR-0035](decisions/ADR-0035-fabrica-auto-resize.md) | Auto-Resize Inteligente (ex: Feed p/ Story) | proposed |
+| [ADR-0036](decisions/ADR-0036-fabrica-copywriting-suggestions.md) | Refatoração e Sugestão de Copy | proposed |
+| [ADR-0037](decisions/ADR-0037-fabrica-component-extraction.md) | Extração e Reuso de Componentes | proposed |
+
 ---
 
 ## Dependências entre ADRs
