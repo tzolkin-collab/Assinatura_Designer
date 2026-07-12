@@ -117,7 +117,7 @@ export function useBrandPosts(slug: string) {
   const [error, setError] = useState('');
 
   const fetchPosts = useCallback(() => {
-    if (!slug) return;
+    if (!slug) { setLoading(false); return; }
     setLoading(true);
     api.get<Post[]>(`/brands/${slug}/posts`)
       .then(setPosts)
@@ -129,6 +129,18 @@ export function useBrandPosts(slug: string) {
     const id = requestAnimationFrame(fetchPosts);
     return () => cancelAnimationFrame(id);
   }, [fetchPosts]);
+
+  // Auto-refresh enquanto algum post estiver GENERATING (ex.: recém-criado na
+  // Fábrica) — antes só aparecia como READY após reload manual. Faz um fetch
+  // silencioso (sem mexer em loading/error) e para quando nenhum está gerando.
+  const hasGenerating = posts.some((p) => p.status === 'GENERATING');
+  useEffect(() => {
+    if (!slug || !hasGenerating) return;
+    const interval = setInterval(() => {
+      api.get<Post[]>(`/brands/${slug}/posts`).then(setPosts).catch(() => {});
+    }, 4000);
+    return () => clearInterval(interval);
+  }, [slug, hasGenerating]);
 
   return { posts, loading, error, mutate: fetchPosts };
 }

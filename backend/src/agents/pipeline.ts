@@ -407,9 +407,15 @@ export async function runPipeline(params: PipelineParams): Promise<void> {
         })),
     };
 
-    // Remove o array pesado de slides do JSON do post para usar a tabela slides
+    // Remove o array pesado de slides do JSON do post para usar a tabela slides.
+    // html-design guarda em `slides` (topo); ir-design em `ir.slides` — sem tirar
+    // este último o blob duplica o deck inteiro (a tabela relacional é a fonte).
     const contentToSave = { ...postContent } as any;
     delete contentToSave.slides;
+    if (contentToSave.kind === 'ir-design' && contentToSave.ir) {
+      contentToSave.ir = { ...contentToSave.ir };
+      delete contentToSave.ir.slides;
+    }
 
     await prisma.post.update({
       where: { id: postId },

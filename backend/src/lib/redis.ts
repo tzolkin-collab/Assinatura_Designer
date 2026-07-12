@@ -115,23 +115,57 @@ export async function getSession(sessionId: string): Promise<FabricaSession | nu
   return JSON.parse(raw) as FabricaSession;
 }
 
+// ── Lock por-sessão (serializa read-modify-write) ─────────────────────────────
+// O brain (handler WS) e o pipeline (worker) mutam a MESMA sessão em paralelo.
+// Sem serialização, dois get→merge→setex concorrentes se sobrescrevem (lost
+// update: uma mensagem ou o currentDesign somem). Este lock encadeia as escritas
+// por sessionId e cada uma relê o estado fresco dentro do lock.
+// NOTA: cobre o deploy single-process (RUN_WORKER_IN_PROCESS=true, o default).
+// Para workers em processos separados seria preciso um lock distribuído (Redis).
+const sessionChains = new Map<string, Promise<unknown>>();
+
+async function withSessionLock<T>(sessionId: string, fn: () => Promise<T>): Promise<T> {
+  const prev = sessionChains.get(sessionId) ?? Promise.resolve();
+  const run = prev.then(() => fn());
+  // Guarda para uma rejeição não envenenar quem estiver na fila atrás.
+  const guarded = run.then(() => undefined, () => undefined);
+  sessionChains.set(sessionId, guarded);
+  try {
+    return await run;
+  } finally {
+    // Solta a entrada quando ninguém mais está enfileirado (evita crescimento).
+    if (sessionChains.get(sessionId) === guarded) sessionChains.delete(sessionId);
+  }
+}
+
+async function persistSession(session: FabricaSession): Promise<void> {
+  const payload = JSON.stringify(session);
+  await redis.setex(sessionKey(session.id), SESSION_TTL, payload);
+  // Atualiza hot cache (últimas 2h para reabertura rápida de aba)
+  await redis.setex(recentKey(session.id), RECENT_TTL, payload);
+}
+
 export async function updateSession(
   sessionId: string,
   patch: Partial<FabricaSession>,
 ): Promise<void> {
-  const session = await getSession(sessionId);
-  if (!session) return;
-  const updated = { ...session, ...patch, updatedAt: Date.now() };
-  await redis.setex(sessionKey(sessionId), SESSION_TTL, JSON.stringify(updated));
-  // Atualiza hot cache (últimas 2h para reabertura rápida de aba)
-  await redis.setex(recentKey(sessionId), RECENT_TTL, JSON.stringify(updated));
+  await withSessionLock(sessionId, async () => {
+    const raw = await redis.get(sessionKey(sessionId));
+    if (!raw) return;
+    const session = JSON.parse(raw) as FabricaSession;
+    await persistSession({ ...session, ...patch, updatedAt: Date.now() });
+  });
 }
 
 export async function appendMessage(sessionId: string, msg: ChatMessage): Promise<void> {
-  const session = await getSession(sessionId);
-  if (!session) return;
-  session.messages.push(msg);
-  await updateSession(sessionId, { messages: session.messages });
+  await withSessionLock(sessionId, async () => {
+    const raw = await redis.get(sessionKey(sessionId));
+    if (!raw) return;
+    const session = JSON.parse(raw) as FabricaSession;
+    session.messages.push(msg);
+    session.updatedAt = Date.now();
+    await persistSession(session);
+  });
 }
 
 export async function getRecentSession(sessionId: string): Promise<FabricaSession | null> {

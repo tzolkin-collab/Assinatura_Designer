@@ -19,6 +19,12 @@ authRouter.post('/register', async (req: Request, res: Response, next: NextFunct
     if (!email || !password || !name) {
       throw createError(400, 'Email, password, and name are required');
     }
+    if (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      throw createError(400, 'Email inválido');
+    }
+    if (typeof password !== 'string' || password.length < 8) {
+      throw createError(400, 'A senha deve ter ao menos 8 caracteres');
+    }
 
     const exist = await prisma.user.findUnique({ where: { email } });
     if (exist) throw createError(409, 'Email already in use');

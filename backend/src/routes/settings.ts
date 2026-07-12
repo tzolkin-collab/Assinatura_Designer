@@ -20,6 +20,39 @@ const s3 = new S3Client({
   },
 });
 
+// Bloqueia SSRF: só permite http(s) para hosts públicos. Rejeita localhost,
+// ranges privados/CGNAT, link-local (inclui a metadata 169.254.169.254) e ULA
+// IPv6. Resíduo conhecido: DNS rebinding (hostname público resolvendo pra IP
+// privado) — mitigar exigiria resolver o DNS e checar o IP antes do fetch.
+function isPublicHttpUrl(raw: string): boolean {
+  let u: URL;
+  try { u = new URL(raw); } catch { return false; }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+  const host = u.hostname.toLowerCase();
+  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal')) return false;
+
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (v4) {
+    const o = v4.slice(1).map(Number);
+    if (o.some((n) => n > 255)) return false;
+    const [a, b] = o as [number, number, number, number];
+    if (a === 0 || a === 10 || a === 127) return false;
+    if (a === 169 && b === 254) return false;              // link-local + metadata
+    if (a === 172 && b >= 16 && b <= 31) return false;     // privado
+    if (a === 192 && b === 168) return false;              // privado
+    if (a === 100 && b >= 64 && b <= 127) return false;    // CGNAT
+    return true;
+  }
+  if (host.includes(':')) { // literal IPv6
+    if (host === '::' || host === '::1') return false;
+    if (host.startsWith('fe80')) return false;             // link-local
+    if (host.startsWith('fc') || host.startsWith('fd')) return false; // ULA
+    if (host.startsWith('::ffff:')) return false;          // IPv4-mapped
+    return true;
+  }
+  return true;
+}
+
 // Helper to find brand by slug and verify ownership
 const getBrandId = async (slug: string, userId?: string) => {
   const brand = await prisma.brand.findUnique({ where: { slug } });
@@ -94,6 +127,7 @@ settingsRouter.post('/:slug/referencias', async (req: AuthRequest, res: Response
 
     if (!name) throw createError(400, 'Reference name is required');
     if (!analysisUrl) throw createError(400, 'Reference URL is required for analysis');
+    if (!isPublicHttpUrl(analysisUrl)) throw createError(400, 'URL inválida ou não permitida (apenas http(s) público)');
 
     const validSourceType = sourceType === 'INSTAGRAM' ? 'INSTAGRAM' : 'WEBSITE';
 
@@ -150,6 +184,8 @@ async function captureWebsiteScreenshot(url: string): Promise<string | null> {
 
 async function fetchWebsiteHtml(url: string): Promise<string> {
   try {
+    // Defesa em profundidade: nunca faz fetch server-side de host não-público.
+    if (!isPublicHttpUrl(url)) return 'Não foi possível obter o conteúdo HTML.';
     const response = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' } });
     const text = await response.text();
     // Keep it reasonable in size by stripping out scripts and styles
