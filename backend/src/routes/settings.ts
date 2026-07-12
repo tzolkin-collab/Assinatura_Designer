@@ -282,10 +282,12 @@ Sua tarefa é analisar essa referência e retornar um JSON com os seguintes camp
 settingsRouter.post('/:slug/referencias/:id/screenshot', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const slug = req.params.slug as string;
-    await getBrandId(slug, req.user?.userId);
+    const brandId = await getBrandId(slug, req.user?.userId);
     const id = req.params.id as string;
 
-    const ref = await prisma.reference.findUnique({ where: { id } });
+    // Escopa a referência à marca — sem isto, o dono de uma marca poderia mexer
+    // em referências de marcas de OUTROS usuários passando um id qualquer.
+    const ref = await prisma.reference.findFirst({ where: { id, brandId } });
     if (!ref) throw createError(404, 'Reference not found');
     if (ref.sourceType !== 'WEBSITE' || !ref.analysisUrl) throw createError(400, 'Screenshot only available for WEBSITE references with a URL');
 
@@ -306,19 +308,14 @@ settingsRouter.post('/:slug/referencias/:id/screenshot', async (req: AuthRequest
 settingsRouter.delete('/:slug/referencias/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const slug = req.params.slug as string;
-    await getBrandId(slug, req.user?.userId); // Verify ownership
+    const brandId = await getBrandId(slug, req.user?.userId);
     const id = req.params.id as string;
-    await prisma.reference.delete({ where: { id } });
+    // Escopa a exclusão à marca do usuário — antes qualquer dono de marca podia
+    // deletar referências de marcas alheias passando só o id (cross-tenant).
+    const result = await prisma.reference.deleteMany({ where: { id, brandId } });
+    if (result.count === 0) throw createError(404, 'Reference not found');
     res.json({ message: 'Reference deleted' });
   } catch (error) {
-    const code =
-      error && typeof error === 'object' && 'code' in error
-        ? (error as { code?: unknown }).code
-        : undefined;
-    if (code === 'P2025') {
-      return next(createError(404, 'Reference not found'));
-    }
-    
     return next(error);
   }
 });

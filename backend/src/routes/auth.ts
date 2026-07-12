@@ -7,6 +7,11 @@ import { createError } from '../middleware/errorHandler.js';
 
 export const authRouter = Router();
 
+// Hash "descartável" para igualar o custo do bcrypt quando o email não existe —
+// sem ele, o login responde na hora para email inexistente e ~100ms para email
+// real (o compare roda), permitindo enumerar contas por tempo de resposta.
+const DUMMY_PASSWORD_HASH = bcrypt.hashSync('timing-equalizer-not-a-real-password', 10);
+
 authRouter.post('/register', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { email, password, name } = req.body;
@@ -74,7 +79,11 @@ authRouter.post('/login', async (req: Request, res: Response, next: NextFunction
     if (!email || !password) throw createError(400, 'Email and password required');
 
     const user = await prisma.user.findUnique({ where: { email } });
-    if (!user) throw createError(401, 'Invalid credentials');
+    if (!user) {
+      // Gasta o mesmo tempo de um compare real para não vazar a existência do email.
+      await bcrypt.compare(password, DUMMY_PASSWORD_HASH);
+      throw createError(401, 'Invalid credentials');
+    }
 
     const match = await bcrypt.compare(password, user.password);
     if (!match) throw createError(401, 'Invalid credentials');

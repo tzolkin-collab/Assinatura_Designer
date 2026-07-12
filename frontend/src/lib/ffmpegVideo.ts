@@ -44,6 +44,12 @@ export async function createVideoFromImage(imageDataUrl: string): Promise<string
 
   // Read the resulting file
   const data = await instance.readFile('output.mp4');
+
+  // Limpa o FS virtual do ffmpeg — sem isto, input/output acumulam na memória
+  // WASM a cada chamada.
+  await instance.deleteFile('input.png').catch(() => {});
+  await instance.deleteFile('output.mp4').catch(() => {});
+
   if (typeof data === 'string') {
     throw new Error('Falha ao gerar MP4');
   }
