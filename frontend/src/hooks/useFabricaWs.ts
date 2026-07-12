@@ -140,6 +140,36 @@ export function useFabricaWs(brandSlug: string, initialSessionId?: string | null
         break;
       }
 
+      // Delta de um slide (geração progressiva IR). Acumula sobre o envelope já
+      // recebido, reconstruindo o mesmo shape [envelope] que o design:update
+      // final entrega — sem receber o design inteiro a cada slide.
+      case 'design:slide': {
+        const { index, slide, envelope } = data as {
+          index: number;
+          slide: unknown;
+          envelope: { postId?: string; ir?: { slides?: unknown[] } } & Record<string, unknown>;
+        };
+        setDesign(prev => {
+          const prevEnv = (prev[0] as (Record<string, unknown> & { kind?: string; postId?: string; ir?: { slides?: unknown[] } }) | undefined);
+          const isIr = prevEnv?.kind === 'ir-design';
+          // Novo deck: se a arte anterior é de outra geração (postId diferente), NÃO
+          // herdamos os slides dela — senão sobra lixo do deck antigo quando o novo
+          // tem menos slides. Sem postId (backend antigo) mantém o acúmulo por isIr.
+          const incomingId = envelope.postId;
+          const isNewDeck = incomingId != null && prevEnv?.postId != null && incomingId !== prevEnv.postId;
+          const accumulate = isIr && !isNewDeck;
+          const baseSlides = accumulate && Array.isArray(prevEnv?.ir?.slides) ? prevEnv!.ir!.slides!.slice() : [];
+          baseSlides[index] = slide;
+          const merged = {
+            ...(accumulate ? prevEnv : envelope),
+            ...envelope,
+            ir: { ...(envelope.ir ?? {}), ...(accumulate ? prevEnv?.ir : {}), slides: baseSlides },
+          };
+          return [merged as unknown as DesignPage];
+        });
+        break;
+      }
+
       case 'job:progress': {
         setP((data.percent ?? 0) as number);
         setLabel((data.label ?? '') as string);
@@ -191,11 +221,13 @@ export function useFabricaWs(brandSlug: string, initialSessionId?: string | null
         if (d.length > 0) setDesign(d);
         if (rm) setRm(rm);
         setQuestion(question);
+        // IDs determinísticos por posição: o rehydrate reusa os mesmos IDs a cada
+        // session:state, então o React reconcilia (sem remontar/piscar/perder scroll).
         setMsgs(
           msgs
             .filter(m => m.role === 'user' || m.role === 'assistant')
-            .map(m => ({
-              id: crypto.randomUUID(),
+            .map((m, i) => ({
+              id: `srv-${i}`,
               role: m.role as 'user' | 'assistant',
               content: m.content,
               timestamp: m.timestamp,
@@ -338,6 +370,49 @@ export function useFabricaWs(brandSlug: string, initialSessionId?: string | null
     send('question:answer', payload as unknown as Record<string, unknown>);
   }, [send]);
 
+  // Inicia uma conversa do zero: derruba o socket atual, limpa a sessão
+  // persistida e o estado, e cria uma sessão nova (nova arte, novo histórico).
+  const resetSession = useCallback(() => {
+    const token = getToken();
+    if (!token) return;
+
+    if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+    sessionIdRef.current = null;
+    wsRef.current?.close();
+    wsRef.current = null;
+    streamingMsgIdRef.current = null;
+
+    if (typeof window !== 'undefined') {
+      sessionStorage.removeItem(`fabrica_session_${brandSlug}`);
+    }
+
+    setSessionId(null);
+    setMessages([]);
+    setCurrentDesign([]);
+    setPhase('listening');
+    setWorkerStatus('idle');
+    setProgress(0);
+    setProgressLabel('');
+    setActiveQuestion(null);
+    setNotification(null);
+    setIsStreaming(false);
+    setPostId(undefined);
+
+    fetch(`${API_BASE}/fabrica/sessions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ brandSlug }),
+    })
+      .then(r => r.json())
+      .then((d: { sessionId?: string }) => {
+        if (!d.sessionId) return;
+        sessionIdRef.current = d.sessionId;
+        setSessionId(d.sessionId);
+        connectWs(d.sessionId);
+      })
+      .catch(err => console.error('[useFabricaWs] reset session failed:', err));
+  }, [brandSlug, connectWs]);
+
   const approve = useCallback(() => send('review:approve'), [send]);
 
   const decline = useCallback(
@@ -369,6 +444,7 @@ export function useFabricaWs(brandSlug: string, initialSessionId?: string | null
     approve,
     decline,
     setReviewMode,
+    resetSession,
     clearNotification: () => setNotification(null),
   };
 }

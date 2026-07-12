@@ -161,7 +161,7 @@ Conteúdo REAL do roteiro — extraia com fidelidade. Nunca placeholder.`;
 
 export function buildLegacyTextBrief(plan: PlannerOutput, content: ContentOutput): string {
   return plan.slides
-    .map((slide) => {
+    .map((slide: any) => {
       const zones = content[slide.index] ?? {};
       const zoneLines = Object.entries(zones)
         .filter(([, value]) => typeof value === 'string' && value.trim().length > 0)

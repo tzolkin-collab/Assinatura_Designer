@@ -2,9 +2,10 @@
 
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowUp, Paperclip, Sparkles, Wifi, WifiOff, X, ChevronDown, ChevronRight } from 'lucide-react';
+import { ArrowUp, Paperclip, Sparkles, Wifi, WifiOff, X, ChevronDown, ChevronRight, MessageSquarePlus, Check, Loader2 } from 'lucide-react';
 import DesignRenderer from '@/components/Fabrica/DesignRenderer';
 import HtmlSlideRenderer from '@/components/DesignDocument/HtmlSlideRenderer';
+import IRSlideRenderer from '@/components/DesignDocument/IRSlideRenderer';
 import { type HtmlDesignPostContent } from '@/lib/designContent';
 import { AsanaPopup } from '@/components/Fabrica/AsanaPopup';
 import { NotificationCard } from '@/components/Fabrica/NotificationCard';
@@ -66,9 +67,14 @@ async function fileToBase64(file: File): Promise<Attachment> {
 export default function FabricaPage() {
   const { marca } = useParams() as { marca: string };
   const router = useRouter();
-  const initialSessionId = typeof window !== 'undefined'
-    ? (new URLSearchParams(window.location.search).get('sessionId') || sessionStorage.getItem(`fabrica_session_${marca}`))
-    : null;
+  // Capturado UMA vez (lazy): se lêssemos o sessionStorage a cada render, a
+  // gravação da sessão (effect abaixo) mudaria este valor e re-dispararia o
+  // effect de conexão — causando um ciclo conecta→fecha→reconecta no load.
+  const [initialSessionId] = useState<string | null>(() =>
+    typeof window !== 'undefined'
+      ? (new URLSearchParams(window.location.search).get('sessionId') || sessionStorage.getItem(`fabrica_session_${marca}`))
+      : null,
+  );
 
   const {
     phase,
@@ -89,6 +95,7 @@ export default function FabricaPage() {
     approve,
     decline,
     setReviewMode,
+    resetSession,
     clearNotification,
   } = useFabricaWs(marca, initialSessionId);
 
@@ -156,11 +163,6 @@ export default function FabricaPage() {
     const scrollHeight = el.scrollHeight;
     el.style.height = `${Math.min(scrollHeight, 160)}px`;
   }, [input]);
-
-  // Reset preview slide when design updates
-  useEffect(() => {
-    setPreviewSlide(0);
-  }, [currentDesign.length]);
 
   // ── Slash menu ──────────────────────────────────────────────────────────────
 
@@ -273,6 +275,21 @@ export default function FabricaPage() {
     e.target.value = '';
   };
 
+  const handleNewConversation = useCallback(() => {
+    if ((isStreaming || workerStatus === 'running')
+      && !window.confirm('Começar uma nova conversa? A geração atual continua no servidor, mas some daqui.')) {
+      return;
+    }
+    resetSession();
+    router.replace(`/${marca}/fabrica`);
+    setInput('');
+    setAttachment(null);
+    setBtwContext([]);
+    setAsanaContext([]);
+    setPreviewSlide(0);
+    setShowAsana(false);
+  }, [isStreaming, workerStatus, resetSession, router, marca]);
+
   const canSend = input.trim().length > 0;
 
   // ── Phase label ─────────────────────────────────────────────────────────────
@@ -291,6 +308,28 @@ export default function FabricaPage() {
   // ── Render ─────────────────────────────────────────────────────────────────
 
   const displayMessages = messages;
+
+  // ── Normaliza o formato do design pro preview (html-design, ir-design, legacy) ─
+  const designKind = (currentDesign[0] as { kind?: string } | undefined)?.kind;
+  const isHtmlDesign = designKind === 'html-design';
+  const isIrDesign = designKind === 'ir-design';
+  const slideCount = isHtmlDesign
+    ? ((currentDesign[0] as unknown as HtmlDesignPostContent).slides?.length ?? 0)
+    : isIrDesign
+    ? ((currentDesign[0] as { ir?: { slides?: unknown[] } }).ir?.slides?.length ?? 0)
+    : currentDesign.length;
+
+  // Índice clampeado (derivado): se um novo design tiver menos slides que o anterior,
+  // mantém o preview dentro do range sem precisar de setState em effect.
+  const safeSlide = Math.min(previewSlide, Math.max(0, slideCount - 1));
+
+  // Status de (pré-)salvamento: o pipeline persiste os slides de forma incremental
+  // no banco, então enquanto gera está "Salvando rascunho"; parado com arte = "Salvo".
+  const saveStatus: 'saving' | 'saved' | null =
+    currentDesign.length === 0 ? null
+    : workerStatus === 'running' ? 'saving'
+    : workerStatus === 'error' ? null
+    : 'saved';
 
   return (
     <div className={s.root}>
@@ -327,10 +366,24 @@ export default function FabricaPage() {
             <span className={s.chatTitle}>{brandName || marca}</span>
             <span className={s.chatPhase}>{phaseLabel[phase] ?? phase}</span>
           </div>
-          <div className={s.connectionBadge} title={connected ? 'Conectado' : 'Reconectando...'}>
-            <span className={`${s.connectionDot} ${connected ? s.connectionOnline : s.connectionOffline}`} />
-            {connected ? <Wifi size={13} /> : <WifiOff size={13} />}
-            <span className={s.connectionLabel}>{connected ? 'Online' : 'Reconectando'}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button
+              onClick={handleNewConversation}
+              title="Iniciar uma nova conversa"
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                fontSize: 12, fontWeight: 500, padding: '5px 10px', borderRadius: 8,
+                border: '1px solid rgba(0,0,0,0.08)', background: 'rgba(255,255,255,0.7)',
+                color: 'var(--color-text-secondary)', cursor: 'pointer', backdropFilter: 'blur(8px)',
+              }}
+            >
+              <MessageSquarePlus size={14} /> Nova
+            </button>
+            <div className={s.connectionBadge} title={connected ? 'Conectado' : 'Reconectando...'}>
+              <span className={`${s.connectionDot} ${connected ? s.connectionOnline : s.connectionOffline}`} />
+              {connected ? <Wifi size={13} /> : <WifiOff size={13} />}
+              <span className={s.connectionLabel}>{connected ? 'Online' : 'Reconectando'}</span>
+            </div>
           </div>
         </div>
 
@@ -681,17 +734,48 @@ export default function FabricaPage() {
               </div>
             )}
 
+            {/* Save status badge */}
+            {saveStatus && (
+              <div
+                style={{
+                  position: 'absolute', top: 12, right: 12, zIndex: 5,
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  fontSize: 11, fontWeight: 500, padding: '5px 10px', borderRadius: 20,
+                  background: 'rgba(255,255,255,0.85)', backdropFilter: 'blur(8px)',
+                  boxShadow: '0 2px 10px rgba(0,0,0,0.06)',
+                  color: saveStatus === 'saving' ? '#92400e' : '#166534',
+                }}
+              >
+                {saveStatus === 'saving' ? (
+                  <>
+                    <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} />
+                    Salvando rascunho…
+                  </>
+                ) : (
+                  <>
+                    <Check size={12} /> Salvo
+                  </>
+                )}
+              </div>
+            )}
+
             {/* Slide renderer */}
             <div className={s.slideWrap}>
-              {(currentDesign[0] as { kind?: string } | undefined)?.kind === 'html-design' ? (
+              {isHtmlDesign ? (
                 <HtmlSlideRenderer
                   content={currentDesign[0] as unknown as HtmlDesignPostContent}
-                  activeSlide={previewSlide}
+                  activeSlide={safeSlide}
+                  hideNav
+                />
+              ) : isIrDesign ? (
+                <IRSlideRenderer
+                  content={currentDesign[0]}
+                  activeSlide={safeSlide}
                   hideNav
                 />
               ) : (
                 <DesignRenderer
-                  pages={[currentDesign[previewSlide] ?? currentDesign[0]]}
+                  pages={[currentDesign[safeSlide] ?? currentDesign[0]]}
                   canvasWidth={1920}
                   canvasHeight={1080}
                   hideNav
@@ -700,38 +784,31 @@ export default function FabricaPage() {
             </div>
 
             {/* Slide navigation */}
-            {(() => {
-              const html = (currentDesign[0] as { kind?: string } | undefined)?.kind === 'html-design'
-                ? (currentDesign[0] as unknown as HtmlDesignPostContent)
-                : null;
-              const count = html ? html.slides.length : currentDesign.length;
-              if (count <= 1) return null;
-              return (
-                <div className={s.slideNav}>
-                  <button
-                    className={s.slideNavBtn}
-                    onClick={() => setPreviewSlide(i => Math.max(0, i - 1))}
-                    disabled={previewSlide === 0}
-                  >‹</button>
-                  <span className={s.slideNavLabel}>
-                    {previewSlide + 1} / {count}
-                  </span>
-                  <button
-                    className={s.slideNavBtn}
-                    onClick={() => setPreviewSlide(i => Math.min(count - 1, i + 1))}
-                    disabled={previewSlide >= count - 1}
-                  >›</button>
-                </div>
-              );
-            })()}
+            {slideCount > 1 && (
+              <div className={s.slideNav}>
+                <button
+                  className={s.slideNavBtn}
+                  onClick={() => setPreviewSlide(Math.max(0, safeSlide - 1))}
+                  disabled={safeSlide === 0}
+                >‹</button>
+                <span className={s.slideNavLabel}>
+                  {safeSlide + 1} / {slideCount}
+                </span>
+                <button
+                  className={s.slideNavBtn}
+                  onClick={() => setPreviewSlide(Math.min(slideCount - 1, safeSlide + 1))}
+                  disabled={safeSlide >= slideCount - 1}
+                >›</button>
+              </div>
+            )}
 
             {/* Thumbnail strip */}
-            {currentDesign.length > 1 && (
+            {slideCount > 1 && (
               <div className={s.thumbStrip}>
-                {currentDesign.map((_, i) => (
+                {Array.from({ length: slideCount }).map((_, i) => (
                   <button
                     key={i}
-                    className={`${s.thumb} ${i === previewSlide ? s.thumbActive : ''}`}
+                    className={`${s.thumb} ${i === safeSlide ? s.thumbActive : ''}`}
                     onClick={() => setPreviewSlide(i)}
                   >
                     {i + 1}

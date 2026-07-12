@@ -24,8 +24,13 @@ RUN npx prisma generate
 COPY . .
 RUN npm run build
 
-# 4) Chromium + libs de SO para o Playwright (usado em src/lib/htmlRaster.ts)
-RUN npx playwright install --with-deps chromium
+# 4) Chromium para o Puppeteer (src/lib/htmlRaster.ts usa puppeteer-cluster, NÃO
+#    playwright). Instalamos só as libs de SO do chromium via playwright
+#    (install-deps não baixa browser) e garantimos o browser do Puppeteer.
+#    `puppeteer browsers install chrome` é idempotente — no-op se o postinstall
+#    do `npm ci` já baixou o binário.
+RUN npx playwright install-deps chromium \
+    && npx puppeteer browsers install chrome
 
 EXPOSE 4000
 

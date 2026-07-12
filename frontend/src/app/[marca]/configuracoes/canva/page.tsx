@@ -1,19 +1,71 @@
 'use client';
 
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { ArrowLeft, CheckCircle, AlertCircle, ExternalLink, Info } from 'lucide-react';
+import { ArrowLeft, CheckCircle, AlertCircle, Info, Loader2 } from 'lucide-react';
 import PageHeader from '@/components/ui/PageHeader';
 import Card from '@/components/ui/Card';
 import styles from './canva.module.css';
+import { api } from '@/lib/api';
 
-const PENPOT_URL = process.env.NEXT_PUBLIC_PENPOT_URL?.replace(/\/$/, '') ?? '';
+interface CanvaStatus {
+  connected: boolean;
+  canvaUserId: string | null;
+  expiresAt: string | null;
+}
 
-export default function PenpotConfigPage() {
+export default function CanvaConfigPage() {
   const params = useParams();
   const slug = params.marca as string;
 
-  const isConfigured = !!PENPOT_URL;
+  const [status, setStatus] = useState<CanvaStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState(false);
+
+  const fetchStatus = async () => {
+    try {
+      setLoading(true);
+      const res = await api.get<CanvaStatus>(`/canva/${slug}/status`);
+      setStatus(res);
+    } catch (err) {
+      console.error('Failed to fetch Canva status:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (slug) fetchStatus();
+  }, [slug]);
+
+  const handleConnect = async () => {
+    try {
+      setActionLoading(true);
+      const res = await api.get<{ authUrl: string }>(`/canva/${slug}/auth-url`);
+      if (res.authUrl) {
+        window.location.href = res.authUrl;
+      }
+    } catch (err) {
+      console.error('Failed to start Canva OAuth:', err);
+      alert('Erro ao iniciar a integração com o Canva.');
+      setActionLoading(false);
+    }
+  };
+
+  const handleDisconnect = async () => {
+    if (!window.confirm('Tem certeza de que deseja desconectar sua conta do Canva?')) return;
+    try {
+      setActionLoading(true);
+      await api.delete(`/canva/${slug}/disconnect`);
+      await fetchStatus();
+    } catch (err) {
+      console.error('Failed to disconnect Canva:', err);
+      alert('Erro ao desconectar do Canva.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
   return (
     <div>
@@ -23,103 +75,88 @@ export default function PenpotConfigPage() {
       </Link>
 
       <PageHeader
-        title="Editor Penpot"
-        description="Penpot é um editor de design open source self-hosted — equivalente ao Figma/Canva, sem sair do app."
+        title="Integração Direta Canva"
+        description="Conecte seu perfil do Canva para exportar apresentações e designs prontos direto para sua conta do Canva."
       />
 
       <div className={styles.content}>
-        {/* Status */}
-        <Card padding="lg">
-          <div className={styles.statusHeader}>
-            <div className={isConfigured ? styles.statusIcon : styles.statusIconDisconnected}>
-              {isConfigured ? <CheckCircle size={28} /> : <AlertCircle size={28} />}
-            </div>
-            <div>
-              <h3 className={styles.statusTitle}>
-                {isConfigured ? 'Penpot configurado' : 'Penpot não configurado'}
-              </h3>
-              <p className={styles.statusDesc}>
-                {isConfigured
-                  ? `Instância ativa em ${PENPOT_URL}`
-                  : 'Adicione NEXT_PUBLIC_PENPOT_URL no .env.local para ativar o editor.'}
-              </p>
-            </div>
-          </div>
-
-          {isConfigured && (
-            <div className={styles.infoGrid}>
-              <div className={styles.infoItem}>
-                <span className={styles.infoLabel}>URL da instância</span>
-                <code className={styles.infoValue}>{PENPOT_URL}</code>
-              </div>
-              <div className={styles.infoItem}>
-                <span className={styles.infoLabel}>Status</span>
-                <span className={styles.infoValue} style={{ color: '#22c55e' }}>Ativo</span>
-              </div>
-            </div>
-          )}
-
-          {isConfigured && (
-            <div className={styles.actions}>
-              <a href={PENPOT_URL} target="_blank" rel="noopener noreferrer">
-                <button className={styles.btnSecondary}>
-                  <ExternalLink size={16} />
-                  Abrir Penpot
-                </button>
-              </a>
-              <Link href={`/${slug}/editor`}>
-                <button className={styles.btnPrimary}>
-                  Abrir no editor do app
-                </button>
-              </Link>
-            </div>
-          )}
-        </Card>
-
-        {/* Setup guide */}
-        {!isConfigured && (
+        {loading ? (
           <Card padding="lg">
-            <div className={styles.guideHeader}>
-              <Info size={18} />
-              <h4>Como configurar</h4>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, padding: '20px 0' }}>
+              <Loader2 className="animate-spin" size={24} style={{ animation: 'lyrFade 1s infinite' }} />
+              <span>Verificando integração...</span>
             </div>
-            <ol className={styles.steps}>
-              <li>
-                <strong>Instale o Penpot na VPS</strong> via Docker Compose:
-                <pre className={styles.code}>{`docker compose -f docker-compose.yaml up -d`}</pre>
-                <a
-                  href="https://help.penpot.app/technical-guide/getting-started/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className={styles.link}
-                >
-                  Guia oficial de instalação <ExternalLink size={12} />
-                </a>
-              </li>
-              <li>
-                <strong>Configure um subdomínio</strong>, ex: <code>penpot.seudominio.com</code>
-              </li>
-              <li>
-                <strong>Adicione ao <code>.env.local</code></strong> do frontend:
-                <pre className={styles.code}>{`NEXT_PUBLIC_PENPOT_URL=https://penpot.seudominio.com`}</pre>
-              </li>
-              <li>
-                <strong>Reinicie o servidor</strong> de desenvolvimento e volte aqui para confirmar.
-              </li>
-            </ol>
           </Card>
-        )}
+        ) : (
+          <>
+            {/* Status */}
+            <Card padding="lg">
+              <div className={styles.statusHeader}>
+                <div className={status?.connected ? styles.statusIcon : styles.statusIconDisconnected}>
+                  {status?.connected ? <CheckCircle size={28} /> : <AlertCircle size={28} />}
+                </div>
+                <div>
+                  <h3 className={styles.statusTitle}>
+                    {status?.connected ? 'Canva Conectado' : 'Canva Desconectado'}
+                  </h3>
+                  <p className={styles.statusDesc}>
+                    {status?.connected
+                      ? `Sua conta do Canva está conectada e pronta para exportações.`
+                      : 'Conecte sua conta do Canva para exportar seus slides como assets automaticamente.'}
+                  </p>
+                </div>
+              </div>
 
-        {/* RAM warning */}
-        <Card padding="md">
-          <div className={styles.warningRow}>
-            <AlertCircle size={16} style={{ color: '#f59e0b', flexShrink: 0 }} />
-            <p className={styles.warningText}>
-              O Penpot exige <strong>~1.5–2 GB de RAM livre</strong> na VPS (JVM + PostgreSQL + Redis + Exporter).
-              A VPS atual tem ~780 MB livres — um upgrade de RAM é necessário antes de instalar.
-            </p>
-          </div>
-        </Card>
+              {status?.connected && (
+                <div className={styles.infoGrid}>
+                  <div className={styles.infoItem}>
+                    <span className={styles.infoLabel}>ID do Usuário Canva</span>
+                    <code className={styles.infoValue}>{status.canvaUserId || 'Carregado'}</code>
+                  </div>
+                  <div className={styles.infoItem}>
+                    <span className={styles.infoLabel}>Expiração do Token</span>
+                    <span className={styles.infoValue}>
+                      {status.expiresAt ? new Date(status.expiresAt).toLocaleString() : 'Recorrente'}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              <div className={styles.actions}>
+                {status?.connected ? (
+                  <button className={styles.btnSecondary} onClick={handleDisconnect} disabled={actionLoading}>
+                    Desconectar Canva
+                  </button>
+                ) : (
+                  <button className={styles.btnPrimary} onClick={handleConnect} disabled={actionLoading} style={{ background: '#7c3aed' }}>
+                    {actionLoading ? 'Conectando...' : 'Conectar ao Canva'}
+                  </button>
+                )}
+              </div>
+            </Card>
+
+            {/* Guide */}
+            {!status?.connected && (
+              <Card padding="lg">
+                <div className={styles.guideHeader}>
+                  <Info size={18} />
+                  <h4>Benefícios da Integração</h4>
+                </div>
+                <ul className={styles.steps} style={{ listStyleType: 'disc', paddingLeft: 20 }}>
+                  <li>
+                    <strong>Exportação com 1 Clique:</strong> Não precisa baixar ZIP de imagens e subir manualmente.
+                  </li>
+                  <li>
+                    <strong>Direto na Galeria de Imagens:</strong> Os slides caem na sua aba de "Uploads" no Canva.
+                  </li>
+                  <li>
+                    <strong>Sincronização Segura:</strong> Integração via OAuth 2.0 PKCE segura oficial do Canva.
+                  </li>
+                </ul>
+              </Card>
+            )}
+          </>
+        )}
       </div>
     </div>
   );

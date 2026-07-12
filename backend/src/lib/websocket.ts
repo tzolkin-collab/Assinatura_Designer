@@ -12,6 +12,7 @@ export type WsEventType =
   | 'agent:tool_call'
   | 'agent:tool_result'
   | 'design:update'
+  | 'design:slide'
   | 'job:progress'
   | 'job:done'
   | 'job:error'
@@ -157,6 +158,14 @@ export const ws = {
 
   designUpdate: (sessionId: string, pages: DesignPage[]) =>
     broadcast(sessionId, { type: 'design:update', data: { pages } }),
+
+  // Delta de UM slide durante a geração progressiva. Evita o O(n²) de reenviar o
+  // design inteiro a cada slide: manda só o slide novo + o envelope leve (sem o
+  // array de slides). O front reconstrói o mesmo envelope acumulando os deltas.
+  designSlide: (
+    sessionId: string,
+    payload: { index: number; total: number; slide: unknown; envelope: unknown },
+  ) => broadcast(sessionId, { type: 'design:slide', data: payload }),
 
   progress: (sessionId: string, percent: number, label: string) =>
     broadcast(sessionId, { type: 'job:progress', data: { percent, label } }),

@@ -26,6 +26,7 @@ export default function HtmlEditor({ postId, content, onContentChange }: HtmlEdi
   const [instruction, setInstruction] = useState('');
   const [editing, setEditing] = useState(false);
   const [messages, setMessages] = useState<ChatMsg[]>([]);
+  const [isolateSlide, setIsolateSlide] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -42,8 +43,8 @@ export default function HtmlEditor({ postId, content, onContentChange }: HtmlEdi
     try {
       const resp = await api.post<
         { slideIndex: number; slide: { html: string; css?: string } },
-        { slideIndex: number; instruction: string }
-      >(`/posts/${postId}/edit-slide`, { slideIndex: slideAtSend, instruction: trimmed });
+        { slideIndex: number; instruction: string; isolate: boolean }
+      >(`/posts/${postId}/edit-slide`, { slideIndex: slideAtSend, instruction: trimmed, isolate: isolateSlide });
       const slides = content.slides.slice();
       slides[resp.slideIndex] = resp.slide;
       onContentChange({ ...content, slides });
@@ -61,6 +62,19 @@ export default function HtmlEditor({ postId, content, onContentChange }: HtmlEdi
       <div style={{ width: 340, flexShrink: 0, display: 'flex', flexDirection: 'column', border: '1px solid rgba(0,0,0,0.1)', borderRadius: 14, overflow: 'hidden', background: 'var(--color-bg-secondary, #fff)' }}>
         <div style={{ padding: '14px 16px', borderBottom: '1px solid rgba(0,0,0,0.08)', fontWeight: 600, fontSize: 14 }}>
           Editar com IA <span style={{ color: 'var(--color-text-tertiary, #999)', fontWeight: 400 }}>· slide {activeSlide + 1}</span>
+        </div>
+
+        <div style={{ padding: '8px 16px', borderBottom: '1px solid rgba(0,0,0,0.06)', display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(0,0,0,0.02)' }}>
+          <input
+            type="checkbox"
+            id="isolate-slide"
+            checked={isolateSlide}
+            onChange={(e) => setIsolateSlide(e.target.checked)}
+            style={{ cursor: 'pointer' }}
+          />
+          <label htmlFor="isolate-slide" style={{ cursor: 'pointer', userSelect: 'none', fontSize: 12, color: 'var(--color-text-secondary, #555)' }}>
+            Editar Slide Isolado (Seguro)
+          </label>
         </div>
 
         <div ref={scrollRef} style={{ flex: 1, overflowY: 'auto', padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>

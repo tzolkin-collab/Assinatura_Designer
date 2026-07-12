@@ -183,7 +183,7 @@ const HEADER_ROW: React.CSSProperties = {
 };
 const PILL: React.CSSProperties = {
   fontSize: 10, padding: '2px 8px', borderRadius: 20,
-  border: '1px solid rgba(0,0,0,0.08)', background: 'transparent',
+  borderWidth: '1px', borderStyle: 'solid', borderColor: 'rgba(0,0,0,0.08)', background: 'transparent',
   color: '#96948f', cursor: 'pointer', transition: 'all 0.15s',
 };
 const PILL_ON: React.CSSProperties = {

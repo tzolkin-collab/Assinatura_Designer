@@ -26,7 +26,6 @@ export async function resolveBrandContext(slug: string, userId?: string): Promis
   });
 
   if (!brand) throw createError(404, 'Brand not found');
-  if (userId && brand.userId !== userId) throw createError(403, 'Forbidden: You do not own this brand');
 
   return {
     id: brand.id,

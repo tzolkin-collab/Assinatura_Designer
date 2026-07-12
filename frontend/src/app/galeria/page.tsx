@@ -17,6 +17,11 @@ interface Brand {
   color?: string;
   updatedAt: string;
   _count?: { posts: number };
+  user?: {
+    id: string;
+    name: string;
+    email: string;
+  };
 }
 
 export default function GaleriaPage() {
@@ -52,6 +57,16 @@ export default function GaleriaPage() {
   const filtered = brands.filter((b) =>
     b.name.toLowerCase().includes(search.toLowerCase())
   );
+
+  // Agrupa as marcas pelo proprietário (owner)
+  const groups: { [ownerName: string]: Brand[] } = {};
+  filtered.forEach((brand) => {
+    const ownerName = brand.user?.name || 'Sem Proprietário';
+    if (!groups[ownerName]) {
+      groups[ownerName] = [];
+    }
+    groups[ownerName].push(brand);
+  });
 
   const handleCreateBrand = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -131,34 +146,46 @@ export default function GaleriaPage() {
         </div>
       ) : (
         <>
-          <div className={styles.grid}>
-            {filtered.map((brand) => (
-              <div key={brand.slug} className={styles.cardWrapper}>
-                <Link href={`/${brand.slug}/galeria`} className={styles.cardLink}>
-                  <Card hover padding="none">
-                    <div className={styles.cardBanner} style={{ backgroundColor: brand.color || '#171717' }}>
-                      <span className={styles.cardInitial}>{brand.name[0]}</span>
-                    </div>
-                    <div className={styles.cardBody}>
-                      <h3 className={styles.cardTitle}>{brand.name}</h3>
-                      <div className={styles.cardMeta}>
-                        <span>{brand._count?.posts || 0} posts</span>
-                        <span className={styles.dot}>·</span>
-                        <span>{new Date(brand.updatedAt).toLocaleDateString('pt-BR')}</span>
-                      </div>
-                    </div>
-                  </Card>
-                </Link>
-                <button
-                  className={styles.cardDeleteBtn}
-                  onClick={(e) => { e.preventDefault(); setDeleteTarget(brand); }}
-                  title="Apagar marca"
-                >
-                  <Trash2 size={13} />
-                </button>
+          {Object.entries(groups).map(([ownerName, ownerBrands]) => (
+            <div key={ownerName} style={{ marginBottom: '32px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--color-border, rgba(0,0,0,0.1))', paddingBottom: '8px', marginBottom: '16px' }}>
+                <h3 style={{ fontSize: '15px', fontWeight: 600, color: 'var(--color-text-secondary, #666)' }}>
+                  Proprietário: <span style={{ color: 'var(--color-text, #111)' }}>{ownerName}</span>
+                </h3>
+                <span style={{ fontSize: '12px', background: 'var(--color-surface, #f5f5f5)', padding: '2px 8px', borderRadius: '12px', fontWeight: 500 }}>
+                  {ownerBrands.length} {ownerBrands.length === 1 ? 'marca' : 'marcas'}
+                </span>
               </div>
-            ))}
-          </div>
+              <div className={styles.grid}>
+                {ownerBrands.map((brand) => (
+                  <div key={brand.slug} className={styles.cardWrapper}>
+                    <Link href={`/${brand.slug}/galeria`} className={styles.cardLink}>
+                      <Card hover padding="none">
+                        <div className={styles.cardBanner} style={{ backgroundColor: brand.color || '#171717' }}>
+                          <span className={styles.cardInitial}>{brand.name[0]}</span>
+                        </div>
+                        <div className={styles.cardBody}>
+                          <h3 className={styles.cardTitle}>{brand.name}</h3>
+                          <div className={styles.cardMeta}>
+                            <span>{brand._count?.posts || 0} posts</span>
+                            <span className={styles.dot}>·</span>
+                            <span>{new Date(brand.updatedAt).toLocaleDateString('pt-BR')}</span>
+                          </div>
+                        </div>
+                      </Card>
+                    </Link>
+                    <button
+                      className={styles.cardDeleteBtn}
+                      onClick={(e) => { e.preventDefault(); setDeleteTarget(brand); }}
+                      title="Apagar marca"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
 
           {filtered.length === 0 && (
             <div className={styles.empty}>

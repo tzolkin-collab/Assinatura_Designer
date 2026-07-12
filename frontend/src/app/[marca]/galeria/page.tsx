@@ -15,6 +15,7 @@ import { extractChatHistory, extractPreviewSource, extractSessionId, type Fabric
 import DesignRenderer, { type DesignPage } from '@/components/Fabrica/DesignRenderer';
 import DesignDocumentRenderer from '@/components/DesignDocument/DesignDocumentRenderer';
 import HtmlSlideRenderer from '@/components/DesignDocument/HtmlSlideRenderer';
+import IRSlideRenderer from '@/components/DesignDocument/IRSlideRenderer';
 
 function formatPostType(type: string) {
   switch (type) {
@@ -532,6 +533,7 @@ export default function BrandGaleriaPage() {
             const designPages = preview?.kind === 'design' ? preview.pages : null;
             const designDocument = preview?.kind === 'design' ? preview.document : undefined;
             const htmlContent = preview?.kind === 'html-design' ? preview.content : null;
+            const irContent = preview?.kind === 'ir-design' ? preview.content : null;
             const firstPage = designPages?.[0];
             const isHybridUncompiled = preview?.kind === 'hybrid-document';
             const chatHistory = extractChatHistory(post.content);
@@ -622,6 +624,11 @@ export default function BrandGaleriaPage() {
                         <HtmlSlideRenderer content={htmlContent} mode="cover" hideNav />
                         <span className={styles.slideCount}>{htmlContent.slides.length} slides — clique para abrir</span>
                       </div>
+                    ) : irContent ? (
+                      <div className={styles.thumbDesign}>
+                        <IRSlideRenderer content={irContent} mode="cover" hideNav />
+                        <span className={styles.slideCount}>{irContent.ir?.slides?.length ?? 0} slides</span>
+                      </div>
                     ) : designPages && firstPage ? (
                       <div
                         className={styles.thumbDesign}
@@ -689,6 +696,7 @@ export default function BrandGaleriaPage() {
             const designPages = preview?.kind === 'design' ? preview.pages : null;
             const designDocument = preview?.kind === 'design' ? preview.document : undefined;
             const htmlContent = preview?.kind === 'html-design' ? preview.content : null;
+            const irContent = preview?.kind === 'ir-design' ? preview.content : null;
             const firstPage = designPages?.[0];
             const isHybridUncompiled = preview?.kind === 'hybrid-document';
             const chatHistory = extractChatHistory(post.content);
@@ -721,6 +729,10 @@ export default function BrandGaleriaPage() {
                         onClick={(e) => { e.stopPropagation(); setPreviewHtml(htmlContent); }}
                       >
                         <HtmlSlideRenderer content={htmlContent} mode="cover" hideNav />
+                      </div>
+                    ) : irContent ? (
+                      <div className={styles.thumbDesign}>
+                        <IRSlideRenderer content={irContent} mode="cover" hideNav />
                       </div>
                     ) : designPages && firstPage ? (
                       <div

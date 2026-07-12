@@ -13,12 +13,13 @@ import {
 import type { FabricaQuestion, PresentationConfig, ReviewMode } from '../../lib/fabricaSession.js';
 import { ws, onWsMessage, type WsAttachment } from '../../lib/websocket.js';
 import { generateStreamWithRetry, generateWithRetry, humanizeGeminiError } from '../../lib/geminiRetry.js';
-import { runPipeline } from '../pipeline.js';
+import { enqueuePipeline } from '../../lib/queue.js';
 import { BRAIN_SYSTEM_PROMPT } from './prompts.js';
 import prisma from '../../lib/prisma.js';
 import { editHtmlSlide, type HtmlDesignContent } from '../../lib/htmlDesign.js';
 import { executeTool } from '../tools/index.js';
 import { resolveBrandContext } from '../../lib/brandContext.js';
+import { mergeSlidesIntoPost, syncPostSlides } from '../../lib/postHelper.js';
 import { extractJsonObject } from '../../lib/designDocument.js';
 
 const ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
@@ -198,7 +199,7 @@ export function initBrainHandlers(): void {
     const updated = await getSession(sessionId);
     if (updated) emitSessionState(sessionId, updated);
     ws.token(sessionId, '\n\nEntendido, vou corrigir. Um momento...');
-    await runPipeline({
+    await enqueuePipeline({
       sessionId,
       brief: reason ?? 'Refazer com melhorias gerais',
       format: 'presentation',
@@ -269,11 +270,12 @@ export async function reconnectSession(sessionId: string, userId?: string) {
             equals: sessionId
           }
         },
-        include: { brand: true }
+        include: { brand: true, slides: { orderBy: { position: 'asc' } } }
       });
       
       if (post && post.content) {
-        const content = post.content as any;
+        const postWithSlides = mergeSlidesIntoPost(post);
+        const content = postWithSlides.content as any;
         if (content.chatHistory) {
           // Recria a sessão no Redis a partir do histórico
           session = await createSession(sessionId, post.brand.slug, post.brand.userId);
@@ -450,10 +452,12 @@ async function detectAndDispatch(
     .map(m => m.content)
     .join('\n\n[Nova solicitação de edição]:\n');
 
-  // Roda pipeline em background (não bloqueia o stream)
-  runPipeline({ sessionId, brief: fullBrief, format }).catch(err => {
-    console.error('[Brain] Pipeline error:', err);
-    ws.error(sessionId, `Erro na geração: ${err instanceof Error ? err.message : String(err)}`);
+  // Enfileira a geração (durável, com retry) — não bloqueia o stream. O erro
+  // aqui é só de enfileiramento (ex.: Redis fora); falhas da geração em si são
+  // tratadas no worker (queue.ts) e notificadas via ws.
+  enqueuePipeline({ sessionId, brief: fullBrief, format }).catch(err => {
+    console.error('[Brain] Falha ao enfileirar pipeline:', err);
+    ws.error(sessionId, `Erro ao iniciar a geração: ${err instanceof Error ? err.message : String(err)}`);
   });
 }
 
@@ -537,9 +541,17 @@ async function applySlideEdits(
     if (post && post.content) {
       const content = post.content as Record<string, unknown>;
       content.slides = slides;
+
+      // Sincroniza os slides relacionais na tabela slides
+      await syncPostSlides(post.id, content);
+
+      // Remove os slides do blob para manter a tabela leve
+      const contentToSave = { ...content };
+      delete contentToSave.slides;
+
       await prisma.post.update({
         where: { id: post.id },
-        data: { content: content as import('@prisma/client').Prisma.InputJsonValue },
+        data: { content: contentToSave as import('@prisma/client').Prisma.InputJsonValue },
       });
     }
   } catch (err) {

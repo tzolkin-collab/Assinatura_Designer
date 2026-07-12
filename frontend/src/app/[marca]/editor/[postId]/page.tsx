@@ -26,8 +26,13 @@ import {
 } from 'lucide-react';
 import DesignRenderer, { type DesignPage, type Layer } from '@/components/Fabrica/DesignRenderer';
 import CanvasEditor, { type CanvasEditorHandle } from '@/components/Editor/CanvasEditor';
-import { extractEditablePages, isFabricaDesignContent, withUpdatedFabricaPages, type HybridDesignPostContent, type HtmlDesignPostContent } from '@/lib/designContent';
+import { extractEditablePages, isFabricaDesignContent, withUpdatedFabricaPages, type HybridDesignPostContent, type HtmlDesignPostContent, type IRDesignPostContent } from '@/lib/designContent';
 import HtmlSlideRenderer from '@/components/DesignDocument/HtmlSlideRenderer';
+import IRCanvasEditor, { type IRCanvasEditorHandle } from '@/components/Editor/IRCanvasEditor';
+import AIEditBar from '@/components/Editor/AIEditBar';
+import IRPropertiesPanel from '@/components/Editor/IRPropertiesPanel';
+import { type DesignIR, type IRPatch } from '@/lib/designIR/types';
+import { applyPatch } from '@/lib/designIR/patcher';
 import LayerPropertiesPanel from '@/components/Editor/LayerPropertiesPanel';
 import BackgroundPanel from '@/components/Editor/panels/BackgroundPanel';
 import MultiSelectPanel from '@/components/Editor/panels/MultiSelectPanel';
@@ -97,8 +102,9 @@ export default function DesignEditorPage() {
   const [canvasW, setCanvasW] = useState(1080);
   const [canvasH, setCanvasH] = useState(1080);
   const [loading, setLoading] = useState(true);
-  const [loadState, setLoadState] = useState<'ready' | 'hybrid-uncompiled' | 'html' | 'invalid'>('ready');
+  const [loadState, setLoadState] = useState<'ready' | 'hybrid-uncompiled' | 'html' | 'ir' | 'invalid'>('ready');
   const [htmlPostContent, setHtmlPostContent] = useState<HtmlDesignPostContent | null>(null);
+  const [irPostContent, setIrPostContent] = useState<IRDesignPostContent | null>(null);
   const [editInstruction, setEditInstruction] = useState('');
   const [editingSlide, setEditingSlide] = useState(false);
   const [editLog, setEditLog] = useState<string[]>([]);
@@ -108,6 +114,8 @@ export default function DesignEditorPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<Date | null>(null);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [isExportingCanva, setIsExportingCanva] = useState(false);
+  const [canvaProgress, setCanvaProgress] = useState<number | null>(null);
   const [viewMode, setViewMode] = useState<'single' | 'grid'>('single');
   const [snapEnabled, setSnapEnabled] = useState(true);
 
@@ -122,6 +130,7 @@ export default function DesignEditorPage() {
   const [previewKey, setPreviewKey] = useState(0);
 
   const canvasEditorRef = useRef<CanvasEditorHandle>(null);
+  const irCanvasEditorRef = useRef<IRCanvasEditorHandle>(null);
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -295,12 +304,23 @@ export default function DesignEditorPage() {
     redoStack.current = [];
     originalHybridContentRef.current = null;
     setHtmlPostContent(null);
+    setIrPostContent(null);
     api.get<Post>(`/posts/${postId}`)
       .then((post) => {
         if (!post) return;
         const editable = extractEditablePages(post.content);
         if (post.content && typeof post.content === 'object' && !Array.isArray(post.content) && (post.content as { kind?: unknown }).kind === 'hybrid-design') {
           originalHybridContentRef.current = post.content as HybridDesignPostContent;
+        }
+        if (editable.status === 'ir') {
+          setIrPostContent(editable.content);
+          setPages([]);
+          setLoadState('ir');
+          setPostType(post.type);
+          const irContent = editable.content.ir;
+          if (typeof irContent.width === 'number') setCanvasW(irContent.width);
+          if (typeof irContent.height === 'number') setCanvasH(irContent.height);
+          return;
         }
         if (editable.status === 'html') {
           setHtmlPostContent(editable.content);
@@ -369,6 +389,15 @@ export default function DesignEditorPage() {
       setEditingSlide(false);
     }
   }, [editInstruction, htmlPostContent, editingSlide, postId, activeSlide]);
+
+  const handleIRPatch = useCallback((patch: IRPatch) => {
+    setIrPostContent((prev) => {
+      if (!prev || !prev.ir) return prev;
+      const newIr = applyPatch(prev.ir as DesignIR, patch);
+      return { ...prev, ir: newIr };
+    });
+    setIsDirty(true);
+  }, []);
 
   const handleLayersChange = useCallback(
     (newLayers: Layer[]) =>
@@ -462,15 +491,20 @@ export default function DesignEditorPage() {
     if (!isDirtyRef.current || isSavingRef.current) return;
     setIsSaving(true);
     try {
-      const hybrid = originalHybridContentRef.current;
-      const currentContent = posts.find((post) => post.id === postIdRef.current)?.content;
-      const content = hybrid
-        ? { ...hybrid, pages: pagesRef.current }
-        : isFabricaDesignContent(currentContent)
-          ? withUpdatedFabricaPages(currentContent, pagesRef.current)
-          : pagesRef.current;
-      await api.put(`/posts/${postIdRef.current}`, { content });
-      if (hybrid) originalHybridContentRef.current = content as HybridDesignPostContent;
+      let contentToSave: any;
+      if (irPostContent) {
+        contentToSave = irPostContent;
+      } else {
+        const hybrid = originalHybridContentRef.current;
+        const currentContent = posts.find((post) => post.id === postIdRef.current)?.content;
+        contentToSave = hybrid
+          ? { ...hybrid, pages: pagesRef.current }
+          : isFabricaDesignContent(currentContent)
+            ? withUpdatedFabricaPages(currentContent, pagesRef.current)
+            : pagesRef.current;
+        if (hybrid) originalHybridContentRef.current = contentToSave as HybridDesignPostContent;
+      }
+      await api.put(`/posts/${postIdRef.current}`, { content: contentToSave });
       setIsDirty(false);
       setSavedAt(new Date());
     } catch (err) {
@@ -794,6 +828,58 @@ export default function DesignEditorPage() {
     URL.revokeObjectURL(url);
   };
 
+  const handleExportCanva = useCallback(async () => {
+    try {
+      const status = await api.get<{ connected: boolean }>(`/canva/${slug}/status`);
+      if (!status.connected) {
+        const { authUrl } = await api.get<{ authUrl: string }>(`/canva/${slug}/auth-url`);
+        // Open OAuth in a centered popup window
+        const width = 600;
+        const height = 700;
+        const left = window.screen.width / 2 - width / 2;
+        const top = window.screen.height / 2 - height / 2;
+        const popup = window.open(
+          authUrl,
+          'Conectar Canva',
+          `width=${width},height=${height},left=${left},top=${top}`
+        );
+
+        const interval = setInterval(async () => {
+          if (popup?.closed) {
+            clearInterval(interval);
+            const check = await api.get<{ connected: boolean }>(`/canva/${slug}/status`);
+            if (check.connected) {
+              alert('Canva conectado com sucesso! Clique em Exportar novamente.');
+            }
+          }
+        }, 1000);
+        return;
+      }
+
+      setIsExportingCanva(true);
+      setCanvaProgress(0);
+
+      const total = htmlPostContent?.slides?.length ?? pages.length ?? 0;
+      if (total === 0) {
+        alert('Nenhum slide disponível para exportar.');
+        return;
+      }
+
+      for (let i = 0; i < total; i++) {
+        await api.post(`/posts/${postId}/export-canva`, { slideIndex: i });
+        setCanvaProgress(Math.round(((i + 1) / total) * 100));
+      }
+
+      alert('Design exportado para o Canva com sucesso! Verifique a aba de uploads no Canva.');
+    } catch (err) {
+      console.error('[Canva Export Error]', err);
+      alert('Erro ao exportar para o Canva. Verifique as configurações e tente novamente.');
+    } finally {
+      setIsExportingCanva(false);
+      setCanvaProgress(null);
+    }
+  }, [slug, postId, htmlPostContent, pages]);
+
   // ── Derived state ────────────────────────────────────────────────────────────
 
   const currentPage = pages[activeSlide];
@@ -804,7 +890,10 @@ export default function DesignEditorPage() {
     ? currentPage?.layers?.find((l) => l.id === selectedLayerIds[0]) ?? null
     : null;
   const selectedLayersForPanel = (currentPage?.layers ?? []).filter(l => selectedLayerIds.includes(l.id));
-  const designPosts = posts.filter((p) => extractEditablePages(p.content).status === 'editable');
+  const designPosts = posts.filter((p) => {
+    const status = extractEditablePages(p.content).status;
+    return status === 'editable' || status === 'html';
+  });
   const allImageLayers = pages.flatMap((page, slideIdx) =>
     [...(page.layers ?? [])].filter(Boolean).filter((l) => l.type === 'image' && l.url).map((l) => ({ ...l, slideIdx }))
   );
@@ -814,6 +903,22 @@ export default function DesignEditorPage() {
 
   return (
     <div className={styles.editor}>
+      {isExportingCanva && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.6)', display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center', zIndex: 9999, color: '#fff'
+        }}>
+          <div style={{ background: '#fff', color: '#333', padding: 24, borderRadius: 16, width: 340, textAlign: 'center', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
+            <h3 style={{ marginBottom: 12, fontSize: 16, fontWeight: 600 }}>Exportando para o Canva</h3>
+            <div style={{ height: 10, background: '#f0f0f0', borderRadius: 999, overflow: 'hidden', marginBottom: 12 }}>
+              <div style={{ width: `${canvaProgress ?? 0}%`, height: '100%', background: '#7c3aed', transition: 'width 0.4s ease', borderRadius: 999 }}></div>
+            </div>
+            <p style={{ fontSize: 14, color: '#555', fontWeight: 500 }}>{canvaProgress ?? 0}% Concluído</p>
+            <p style={{ fontSize: 11, color: '#999', marginTop: 6 }}>Processando e enviando as páginas para sua biblioteca Canva...</p>
+          </div>
+        </div>
+      )}
       {showShortcuts && (
         <ShortcutsPanel
           shortcuts={shortcuts}
@@ -978,6 +1083,28 @@ export default function DesignEditorPage() {
             <Save size={13} />
             {isSaving ? 'Salvando...' : 'Salvar'}
           </Button>
+          <button
+            className={styles.exportBtn}
+            onClick={handleExportCanva}
+            title="Exportar para o Canva"
+            style={{
+              backgroundColor: '#7c3aed',
+              color: '#fff',
+              border: 'none',
+              padding: '0 12px',
+              borderRadius: 6,
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: 'pointer',
+              height: 32,
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginLeft: 4
+            }}
+          >
+            Canva
+          </button>
           <button className={styles.exportBtn} onClick={exportJson} title="Exportar JSON">
             <FileJson size={14} />
             JSON
@@ -1022,18 +1149,24 @@ export default function DesignEditorPage() {
               ) : (
                 designPosts.map((p) => {
                   const editable = extractEditablePages(p.content);
+                  const isHtml = editable.status === 'html';
                   const dp = editable.status === 'editable' ? editable.pages : [];
+                  const slideCount = isHtml ? editable.content.slides.length : dp.length;
                   const first = dp[0];
                   return (
                     <button key={p.id} className={`${styles.designItem} ${p.id === postId ? styles.designItemActive : ''}`} onClick={() => router.push(`/${slug}/editor/${p.id}`)}>
-                      {first && (
-                        <div className={styles.designThumb} style={{ backgroundColor: first.backgroundColor ?? '#111' }}>
+                      <div className={styles.designThumb} style={{ backgroundColor: isHtml ? '#1a1a1a' : (first?.backgroundColor ?? '#111') }}>
+                        {isHtml && p.previewUrl ? (
+                          <img src={p.previewUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                        ) : first ? (
                           <DesignRenderer pages={[first]} canvasWidth={first.width ?? 1080} canvasHeight={first.height ?? 1080} hideNav mode="cover" />
-                        </div>
-                      )}
+                        ) : (
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#666', fontSize: 10 }}>Sem Preview</div>
+                        )}
+                      </div>
                       <div className={styles.designMeta}>
                         <span className={styles.designType}>{formatPostType(p.type)}</span>
-                        <span className={styles.designSlides}>{dp.length} slides</span>
+                        <span className={styles.designSlides}>{slideCount} slides</span>
                       </div>
                     </button>
                   );
@@ -1154,6 +1287,81 @@ export default function DesignEditorPage() {
           )}
           {loading ? (
             <span className={styles.canvasMsg}>Carregando design...</span>
+          ) : loadState === 'ir' && irPostContent && irPostContent.ir ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16, width: '100%', maxWidth: 900, margin: '0 auto', height: '100%' }}>
+              {irPostContent.ir.slides.length > 1 && (
+                <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 8 }}>
+                  {irPostContent.ir.slides.map((s: any, idx: number) => (
+                    <button
+                      key={s.id}
+                      onClick={() => {
+                        setActiveSlide(idx);
+                        setSelectedLayerIds([]);
+                      }}
+                      style={{
+                        padding: '4px 12px',
+                        borderRadius: 20,
+                        background: activeSlide === idx ? '#4f46e5' : '#f3f4f6',
+                        color: activeSlide === idx ? '#fff' : '#4b5563',
+                        border: 'none',
+                        cursor: 'pointer',
+                        fontSize: 12,
+                        fontWeight: 500,
+                        flexShrink: 0
+                      }}
+                    >
+                      Slide {idx + 1}
+                    </button>
+                  ))}
+                </div>
+              )}
+              
+              <div style={{ display: 'flex', gap: 16, flex: 1, minHeight: 0 }}>
+                {/* Visual Canvas (Center) */}
+                <div style={{ flex: 1, position: 'relative', borderRadius: 12, overflow: 'hidden', border: '1px solid var(--color-border)' }}>
+                  <IRCanvasEditor
+                    ref={irCanvasEditorRef}
+                    ir={irPostContent.ir}
+                    activeSlideIndex={activeSlide}
+                    selectedElementIds={selectedLayerIds}
+                    onSelect={(id, multi) => {
+                      if (!id) {
+                        setSelectedLayerIds([]);
+                      } else if (multi) {
+                        setSelectedLayerIds(prev => prev.includes(id) ? prev.filter(p => p !== id) : [...prev, id]);
+                      } else {
+                        setSelectedLayerIds([id]);
+                      }
+                    }}
+                    onPatch={handleIRPatch}
+                  />
+                  
+                  {/* AI Edit Bar directly on canvas */}
+                  <AIEditBar
+                    ir={irPostContent.ir}
+                    activeSlide={irPostContent.ir.slides[activeSlide]}
+                    slideIndex={activeSlide}
+                    selectedElementIds={selectedLayerIds}
+                    slug={slug}
+                    postId={postId}
+                    onPatch={handleIRPatch}
+                  />
+                </div>
+
+                {/* Right Panel: Contextual Properties */}
+                <div style={{ width: 280, flexShrink: 0, background: '#fff', border: '1px solid var(--color-border)', borderRadius: 12, overflowY: 'auto' }}>
+                  <IRPropertiesPanel
+                    slide={irPostContent.ir.slides[activeSlide]}
+                    selectedElements={
+                      selectedLayerIds
+                        .map(id => irPostContent.ir?.slides[activeSlide]?.elements?.find((e: any) => e.id === id))
+                        .filter(Boolean)
+                    }
+                    onPatch={handleIRPatch}
+                  />
+                </div>
+              </div>
+            </div>
           ) : loadState === 'html' && htmlPostContent ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16, width: '100%', maxWidth: 900, margin: '0 auto' }}>
               <div className={styles.rendererWrapper} style={{ aspectRatio: `${canvasW} / ${canvasH}` }}>

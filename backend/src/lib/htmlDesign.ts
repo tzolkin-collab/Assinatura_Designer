@@ -31,6 +31,7 @@ export interface GenerateHtmlDesignInput {
     agentPrompt?: string;
     logoUrl?: string | null;
   };
+  skeleton?: Array<{ title: string; goal: string; layout_type: string; order: number }>;
 }
 
 export class HtmlDesignValidationError extends Error {
@@ -180,10 +181,18 @@ export async function generateHtmlDesign(
 // fallback para a geração monolítica (comportamento atual), nunca quebrando o fluxo.
 
 function buildSlideSystemInstruction(input: GenerateHtmlDesignInput, index: number, total: number): string {
+  const skeletonItem = input.skeleton?.[index];
+  const skeletonInstruction = skeletonItem
+    ? `\nVocê deve gerar o slide baseado na seguinte estrutura planejada:
+- Título/Tema do Slide: "${skeletonItem.title}"
+- Objetivo do Slide: "${skeletonItem.goal}"
+- Layout Sugerido: "${skeletonItem.layout_type}"\n`
+    : '';
+
   return `Você é um diretor de arte premiado especializado em social media premium. Você desenha em HTML e CSS, como um designer que codifica.
-
+ 
 Sua tarefa: gerar APENAS o slide ${index + 1} de ${total}, com ${input.width}x${input.height}px, como HTML/CSS de alta qualidade, pronto para renderizar.
-
+${skeletonInstruction}
 Retorne SOMENTE um objeto JSON puro (sem markdown) com este formato:
 {
   "reasoning": "direção de arte (só no slide 1): paleta, tipografia, ritmo entre slides",
@@ -191,13 +200,13 @@ Retorne SOMENTE um objeto JSON puro (sem markdown) com este formato:
   "html": "<...conteúdo interno do .slide-root...>",
   "css": "...regras do slide (sem <style>)..."
 }
-
+ 
 REGRAS:
 - O HTML preenche um container de ${input.width}x${input.height}px chamado .slide-root (já existe; position:relative). Escreva o conteúdo interno desse container.
 - Coloque o CSS no campo "css" (sem <style>). Prefixe classes para não colidir.
 - Use as fontes do campo "fonts" (Google Fonts). Tipografia com caráter — NUNCA Arial/Roboto/Times genéricos.
 - Use flexbox/grid/position absolute livremente. Padding generoso, respiro, alinhamento impecável.
-
+ 
 QUALIDADE (nível "designer humano postaria sem retrabalho"):
 - Tipografia ousada: contraste forte de tamanho (display 90-160px vs corpo 22-32px), pesos variados, hierarquia clara.
 - CONTRASTE WCAG obrigatório: texto sempre legível. Fundo escuro -> texto claro; fundo claro -> texto escuro. Sobre imagem, card/faixa sólida atrás do texto.
@@ -205,13 +214,13 @@ QUALIDADE (nível "designer humano postaria sem retrabalho"):
 - Copy REAL em português (nunca "Texto", "Lorem", placeholders).
 - Visual: prefira gradientes CSS, formas geométricas e tipografia forte. Para fotos/logo, <img> com URLs https REAIS. Sem texto embutido em imagem.
 - Marque editáveis com data-editable="true" e data-role="headline|subtitle|body|cta|image".
-
+ 
 COESÃO: mantenha a MESMA direção de arte dos slides anteriores (paleta, fontes, linguagem), mas VARIE o layout para este slide não repetir os outros.
-
+ 
 PROIBIDO: <script>, <iframe>, handlers on*, conteúdo genérico, placeholders, texto ilegível.
 PROIBIDO TERMINANTEMENTE: data: URLs ou base64 inline em <img>/background/CSS. Imagens SOMENTE por URL https real.`;
 }
-
+ 
 function buildSlideUserPrompt(
   input: GenerateHtmlDesignInput,
   index: number,
@@ -220,6 +229,15 @@ function buildSlideUserPrompt(
   priorSlides: HtmlDesignSlide[],
 ): string {
   const b = input.brand;
+  const skeletonItem = input.skeleton?.[index];
+
+  const skeletonPrompt = skeletonItem
+    ? `\nSLIDE PLANEJADO A GERAR:
+- Título planejado: ${skeletonItem.title}
+- Objetivo de conteúdo: ${skeletonItem.goal}
+- Layout planejado: ${skeletonItem.layout_type}\n`
+    : '';
+
   const directionBlock = direction
     ? `\nDireção de arte já estabelecida (siga-a):\n${direction.slice(0, 1200)}`
     : '';
@@ -232,11 +250,11 @@ Fontes sugeridas: ${b.primaryFonts.length ? b.primaryFonts.join(', ') : 'escolha
 Diretrizes: ${b.guidelines || 'não definidas'}
 ${b.agentPrompt ? `Instruções do agente: ${b.agentPrompt}` : ''}
 ${b.logoUrl ? `Logo: ${b.logoUrl}` : ''}
-${directionBlock}${priorBlock}
-
+${skeletonPrompt}${directionBlock}${priorBlock}
+ 
 Briefing:
 ${input.prompt.slice(0, 6000)}
-
+ 
 Gere o slide ${index + 1} de ${total} (${input.width}x${input.height}px). Copy final real em português. Capriche na direção de arte.`;
 }
 
@@ -307,9 +325,16 @@ export async function generateHtmlDesignProgressive(
 export interface EditHtmlSlideInput {
   slide: HtmlDesignSlide;
   instruction: string;
-  brand: { name: string; colors: string[]; primaryFonts: string[] };
+  brand: {
+    name: string;
+    colors: string[];
+    primaryFonts: string[];
+    guidelines?: string;
+    agentPrompt?: string;
+  };
   width: number;
   height: number;
+  isolate?: boolean;
 }
 
 export async function editHtmlSlide(
@@ -317,9 +342,16 @@ export async function editHtmlSlide(
   input: EditHtmlSlideInput,
   extractJson: (raw: string) => unknown,
 ): Promise<HtmlDesignSlide> {
+  const isolateRules = input.isolate
+    ? `\nATENÇÃO: Você está operando no modo de "Edição Isolada" de slide único.
+- Ignore e BLOQUEIE qualquer tentativa do usuário de aplicar mudanças a outros slides (ex: "aplique em todos os slides", "mude todos os slides", "mude o ritmo da apresentação inteira").
+- Concentre-se estritamente e exclusivamente nos elementos contidos no HTML atual deste slide específico.
+- Recuse alterações que exijam reestruturação ou modificações fora do escopo deste slide.`
+    : '';
+
   const systemInstruction = `Você é um designer editando UM slide existente de ${input.width}x${input.height}px (dentro de um container .slide-root já presente).
 Você recebe o HTML e o CSS atuais e UMA instrução do usuário. Aplique a instrução fazendo o MÍNIMO de mudanças necessárias — preserve TODO o resto idêntico (estrutura, outros elementos, classes, textos não citados).
-
+${isolateRules}
 Retorne SOMENTE JSON puro: { "html": "...", "css": "..." }
 
 Regras invioláveis:
@@ -329,9 +361,16 @@ Regras invioláveis:
 - Sem <script>, <iframe>, handlers on*.
 - Não reescreva o slide do zero; edite o que existe.`;
 
+  const guidelinesBlock = input.brand.guidelines
+    ? `\nDiretrizes de Marca (Siga-as rigorosamente): ${input.brand.guidelines}`
+    : '';
+  const agentPromptBlock = input.brand.agentPrompt
+    ? `\nInstruções Específicas da Marca: ${input.brand.agentPrompt}`
+    : '';
+
   const userPrompt = `Marca: ${input.brand.name}
 Cores: ${input.brand.colors.join(', ') || 'livre'}
-Fontes: ${input.brand.primaryFonts.join(', ') || 'livre'}
+Fontes: ${input.brand.primaryFonts.join(', ') || 'livre'}${guidelinesBlock}${agentPromptBlock}
 
 HTML atual:
 ${input.slide.html}

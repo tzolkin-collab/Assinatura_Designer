@@ -32,10 +32,19 @@ export type FabricaDesignPostContent = {
   chatHistory?: FabricaChatHistoryMessage[];
 };
 
+export type IRDesignPostContent = {
+  kind: 'ir-design';
+  version: 1;
+  ir: any; // Using any here to avoid cyclic dependency, but we will import it.
+  sessionId?: string;
+  chatHistory?: FabricaChatHistoryMessage[];
+};
+
 export type EditablePagesResult =
   | { status: 'editable'; pages: DesignPage[]; source: 'legacy-pages' | 'image-post' | 'hybrid-pages' | 'compiled-document'; warnings?: string[] }
   | { status: 'hybrid-uncompiled'; document: unknown }
   | { status: 'html'; content: HtmlDesignPostContent }
+  | { status: 'ir'; content: IRDesignPostContent }
   | { status: 'not-editable'; reason: 'empty' | 'invalid' | 'image-without-url' };
 
 export type PreviewSource =
@@ -43,6 +52,7 @@ export type PreviewSource =
   | { kind: 'design'; pages: DesignPage[]; width: number; height: number; source: 'legacy-pages' | 'hybrid-pages' | 'compiled-document'; document?: unknown }
   | { kind: 'hybrid-document'; document: unknown }
   | { kind: 'html-design'; content: HtmlDesignPostContent }
+  | { kind: 'ir-design'; content: IRDesignPostContent }
   | null;
 
 const DEFAULT_CANVAS_SIZE = 1080;
@@ -145,6 +155,11 @@ export function isHtmlDesignContent(content: unknown): content is HtmlDesignPost
     && typeof content.height === 'number';
 }
 
+export function isIRDesignContent(content: unknown): content is IRDesignPostContent {
+  if (!isRecord(content)) return false;
+  return content.kind === 'ir-design' && 'ir' in content;
+}
+
 export function isHybridDesignContent(content: unknown): content is HybridDesignPostContent {
   if (!isRecord(content)) return false;
   const chatHistory = content.chatHistory;
@@ -179,6 +194,10 @@ export function extractEditablePages(content: unknown): EditablePagesResult {
 
   if (isHtmlDesignContent(content)) {
     return { status: 'html', content };
+  }
+
+  if (isIRDesignContent(content)) {
+    return { status: 'ir', content };
   }
 
   if (isFabricaDesignContent(content)) {
@@ -220,6 +239,8 @@ export function extractPreviewSource(content: unknown, previewUrl?: string | nul
   if (imageUrl) return { kind: 'image', url: imageUrl };
 
   if (isHtmlDesignContent(content)) return { kind: 'html-design', content };
+
+  if (isIRDesignContent(content)) return { kind: 'ir-design', content };
 
   const editable = extractEditablePages(content);
   if (editable.status === 'editable' && editable.source !== 'image-post') {

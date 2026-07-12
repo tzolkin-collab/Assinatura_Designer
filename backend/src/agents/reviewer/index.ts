@@ -8,6 +8,8 @@ import { rasterizeSvgToBase64 } from '../../lib/raster.js';
 import { extractJsonObject, type DesignDocument } from '../../lib/designDocument.js';
 import { renderHtmlToBase64 } from '../../lib/htmlRaster.js';
 import { buildSlideDocument, type HtmlDesignContent } from '../../lib/htmlDesign.js';
+import type { DesignIR, SlideNode, ElementNode } from '../../lib/designIR/types.js';
+import { compileSlideToDocument } from '../../lib/designIR/compiler.js';
 
 const ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
 
@@ -232,6 +234,278 @@ Responda APENAS com JSON:
     ...llmResult,
     deviations: [...structuralDeviations, ...(llmResult.deviations ?? [])],
     approved: llmResult.approved && structuralDeviations.filter(d => d.severity === 'critical').length === 0,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Reviewer do caminho IR (DesignIR)
+//
+// A crítica VISUAL do IR depende de um compilador IR→HTML que ainda não existe no
+// backend (só há renderização React no frontend). Até ele existir, o reviewer do
+// IR é DETERMINÍSTICO (checagem estrutural sobre o JSON, sem alucinação, sem
+// custo) + uma passada semântica barata (flash) opcional. Quando o compilador
+// existir, dá pra plugar `critiqueRenderedSlides` aqui. Ver a nota em
+// postHelper.ts e a memória designer-generation-principles.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/** Achata os elementos de um slide, descendo em grupos. */
+function flattenElements(elements: ElementNode[] = []): ElementNode[] {
+  const out: ElementNode[] = [];
+  for (const el of elements) {
+    out.push(el);
+    if (el.type === 'group' && el.children) out.push(...flattenElements(el.children));
+  }
+  return out;
+}
+
+function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
+  const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return null;
+  let h = m[1]!;
+  if (h.length === 3) h = h.split('').map((c) => c + c).join('');
+  const int = parseInt(h, 16);
+  return { r: (int >> 16) & 255, g: (int >> 8) & 255, b: int & 255 };
+}
+
+function relLuminance({ r, g, b }: { r: number; g: number; b: number }): number {
+  const chan = (c: number) => {
+    const s = c / 255;
+    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126 * chan(r) + 0.7152 * chan(g) + 0.0722 * chan(b);
+}
+
+/** Razão de contraste WCAG entre duas cores hex. null se alguma não for hex. */
+function contrastRatio(fg: string, bg: string): number | null {
+  const a = hexToRgb(fg);
+  const b = hexToRgb(bg);
+  if (!a || !b) return null;
+  const la = relLuminance(a);
+  const lb = relLuminance(b);
+  const lighter = Math.max(la, lb);
+  const darker = Math.min(la, lb);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+/** Área de interseção entre dois retângulos (bounds). */
+function intersectionArea(a: ElementNode['bounds'], b: ElementNode['bounds']): number {
+  const x = Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x));
+  const y = Math.max(0, Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y));
+  return x * y;
+}
+
+const PLACEHOLDER_TEXT = /lorem ipsum|placeholder|texto aqui|seu texto|sample text|título aqui|insira/i;
+
+/** Checagem estrutural determinística de um DesignIR. Sem custo, sem alucinação. */
+export function checkIRStructural(ir: DesignIR): ReviewDeviation[] {
+  const deviations: ReviewDeviation[] = [];
+  const W = ir.width;
+  const H = ir.height;
+  const tolX = Math.round(W * 0.02);
+  const tolY = Math.round(H * 0.02);
+  const declaredFonts = new Set((ir.fonts ?? []).map((f) => f.toLowerCase()));
+
+  ir.slides.forEach((slide: SlideNode, i: number) => {
+    const els = flattenElements(slide.elements);
+    const bgSolid = slide.background?.type === 'solid' ? slide.background.color : undefined;
+
+    // Textos visíveis para checagem de sobreposição.
+    const textEls = els.filter((e) => e.type === 'text' && (e.content ?? '').trim().length > 0);
+
+    for (const el of els) {
+      const b = el.bounds;
+      if (!b) continue;
+
+      // 1. Dimensões inválidas
+      if (b.width <= 0 || b.height <= 0) {
+        deviations.push({ type: 'visual', severity: 'major', slideIndex: i, description: `Elemento "${el.id}" com dimensão inválida (${Math.round(b.width)}x${Math.round(b.height)})`, fix: 'Definir width/height positivos' });
+      }
+
+      // 2. Fora do canvas
+      const overLeft = b.x < -tolX;
+      const overTop = b.y < -tolY;
+      const overRight = b.x + b.width > W + tolX;
+      const overBottom = b.y + b.height > H + tolY;
+      if (overLeft || overTop || overRight || overBottom) {
+        const far = b.x + b.width > W * 1.1 || b.y + b.height > H * 1.1 || b.x < -W * 0.1 || b.y < -H * 0.1;
+        deviations.push({ type: 'overflow', severity: far ? 'major' : 'minor', slideIndex: i, description: `Elemento "${el.id}" (${el.type}) ultrapassa o canvas ${W}x${H} (x=${Math.round(b.x)} y=${Math.round(b.y)} w=${Math.round(b.width)} h=${Math.round(b.height)})`, fix: 'Reposicionar/redimensionar para caber no canvas' });
+      }
+
+      if (el.type === 'text') {
+        const content = (el.content ?? '').trim();
+        // 3. Texto vazio
+        if (content.length === 0) {
+          deviations.push({ type: 'content', severity: 'minor', slideIndex: i, description: `Texto "${el.id}" vazio`, fix: 'Preencher com copy real' });
+        } else if (PLACEHOLDER_TEXT.test(content)) {
+          // 4. Placeholder textual
+          deviations.push({ type: 'content', severity: 'major', slideIndex: i, description: `Texto "${el.id}" parece placeholder: "${content.slice(0, 40)}"`, fix: 'Substituir por copy final em português' });
+        }
+
+        // 5. Contraste WCAG (só quando fundo é cor sólida hex e texto é hex)
+        const fg = el.style?.color;
+        const bg = el.style?.backgroundColor ?? bgSolid;
+        if (fg && bg) {
+          const ratio = contrastRatio(fg, bg);
+          if (ratio !== null) {
+            const fontSize = el.style?.fontSize ?? 24;
+            const isLarge = fontSize >= 24 && (el.style?.fontWeight === 'bold' || Number(el.style?.fontWeight) >= 700) || fontSize >= 32;
+            const min = isLarge ? 3 : 4.5;
+            if (ratio < min) {
+              deviations.push({ type: 'visual', severity: ratio < min * 0.6 ? 'critical' : 'major', slideIndex: i, description: `Contraste insuficiente no texto "${el.id}": ${ratio.toFixed(2)}:1 (mín ${min}:1) — ${fg} sobre ${bg}`, fix: 'Ajustar cor do texto ou do fundo para contraste WCAG AA' });
+            }
+          }
+        }
+
+        // 6. Fonte fora das declaradas
+        const fam = el.style?.fontFamily;
+        if (fam && declaredFonts.size > 0 && !declaredFonts.has(fam.toLowerCase())) {
+          deviations.push({ type: 'brand', severity: 'minor', slideIndex: i, description: `Texto "${el.id}" usa fonte "${fam}" fora das declaradas (${ir.fonts.join(', ')})`, fix: 'Usar uma das fontes do design' });
+        }
+      }
+
+      // 7. Imagem sem src
+      if (el.type === 'image' && !(el.src ?? '').trim()) {
+        deviations.push({ type: 'missing-zone', severity: 'major', slideIndex: i, description: `Imagem "${el.id}" sem src`, fix: 'Definir uma URL/asset válido' });
+      }
+    }
+
+    // 8. Sobreposição forte entre dois textos (>40% do menor)
+    for (let a = 0; a < textEls.length; a++) {
+      for (let c = a + 1; c < textEls.length; c++) {
+        const ta = textEls[a]!;
+        const tb = textEls[c]!;
+        const inter = intersectionArea(ta.bounds, tb.bounds);
+        if (inter <= 0) continue;
+        const minArea = Math.min(ta.bounds.width * ta.bounds.height, tb.bounds.width * tb.bounds.height);
+        if (minArea > 0 && inter / minArea > 0.4) {
+          deviations.push({ type: 'visual', severity: 'major', slideIndex: i, description: `Textos "${ta.id}" e "${tb.id}" se sobrepõem (${Math.round((inter / minArea) * 100)}%)`, fix: 'Separar os blocos de texto para não colidirem' });
+        }
+      }
+    }
+  });
+
+  // Limita para não inundar o chat.
+  return deviations.slice(0, 40);
+}
+
+/** Rasteriza os slides do IR (via compilador) para PNGs base64 — para o crítico visual. */
+async function renderIRSlides(ir: DesignIR, maxSlides = 8): Promise<string[]> {
+  const slides = ir.slides.slice(0, maxSlides);
+  return Promise.all(
+    slides.map((s) =>
+      renderHtmlToBase64(compileSlideToDocument(s, ir.fonts, ir.width, ir.height), {
+        width: ir.width,
+        height: ir.height,
+        maxDim: 768,
+      }),
+    ),
+  );
+}
+
+/**
+ * Reviewer do caminho IR: estrutural determinístico (sempre) + crítica VISUAL
+ * (rasteriza no chromium e o modelo multimodal vê a arte). Se o visual estiver
+ * desligado (config.reviewerVisual=false) ou falhar, cai para a passada
+ * semântica barata (flash). A crítica visual usa o compilador IR→HTML.
+ */
+export async function runIRReviewer(params: {
+  ir: DesignIR;
+  brandContext: string;
+  objective: string;
+}): Promise<ReviewResult> {
+  const { ir, brandContext, objective } = params;
+
+  const structural = checkIRStructural(ir);
+  const criticalCount = structural.filter((d) => d.severity === 'critical').length;
+  const majorCount = structural.filter((d) => d.severity === 'major').length;
+  const minorCount = structural.filter((d) => d.severity === 'minor').length;
+  const structuralScore = Math.max(0, 100 - (criticalCount * 30 + majorCount * 12 + minorCount * 4));
+
+  // Camada de julgamento subjetivo: preferimos o crítico VISUAL (vê a arte);
+  // se desligado ou falho, caímos na passada semântica textual (flash).
+  let llm: ReviewResult | null = null;
+  if (config.reviewerVisual) {
+    try {
+      const images = await renderIRSlides(ir);
+      if (images.length > 0) llm = await critiqueRenderedSlides(images, brandContext, objective);
+    } catch (err) {
+      console.error('[Reviewer] Crítica visual do IR falhou, tentando semântica:', err);
+    }
+  }
+  if (!llm) {
+    try {
+      llm = await runIRSemanticPass(ir, brandContext, objective, structural);
+    } catch (err) {
+      console.error('[Reviewer] Passada semântica do IR falhou, usando só estrutural:', err);
+    }
+  }
+
+  const deviations = [...structural, ...(llm?.deviations ?? [])];
+  const score = llm ? Math.round((structuralScore + (typeof llm.score === 'number' ? llm.score : structuralScore)) / 2) : structuralScore;
+  // Aprova se não há crítico estrutural E (se o llm rodou) ele aprovou.
+  const approved = criticalCount === 0 && (llm ? llm.approved !== false : structuralScore >= 70);
+
+  const feedback = approved
+    ? (llm?.feedback ?? 'Revisão automática: sem problemas estruturais bloqueantes.')
+    : `Revisão encontrou ${structural.length} problema(s) estrutural(is)${llm ? ' + análise de conteúdo' : ''}.`;
+
+  return {
+    reasoning: llm?.reasoning,
+    approved,
+    score,
+    deviations,
+    feedback,
+    correctionInstructions: llm?.correctionInstructions,
+  };
+}
+
+async function runIRSemanticPass(ir: DesignIR, brandContext: string, objective: string, structural: ReviewDeviation[]): Promise<ReviewResult> {
+  const slideSummary = ir.slides.map((slide, i) => {
+    const els = flattenElements(slide.elements);
+    const texts = els.filter((e) => e.type === 'text').map((e) => `"${String(e.content ?? '').slice(0, 60)}"`);
+    const images = els.filter((e) => e.type === 'image').length;
+    return `Slide ${i}: bg=${slide.background?.type ?? '?'} | ${texts.length} textos: ${texts.slice(0, 4).join(' | ')} | ${images} imagens`;
+  }).join('\n');
+
+  const prompt = `Você é o Agente Revisor de conteúdo de um sistema de design com IA.
+Você NÃO vê a arte renderizada — avalie apenas CONTEÚDO, TOM e CONSISTÊNCIA textual contra a marca e o objetivo.
+
+## Contexto da marca
+${brandContext}
+
+## Objetivo da peça
+${objective}
+
+## Design gerado (${ir.slides.length} slides)
+${slideSummary}
+
+## Desvios estruturais já detectados (não repita)
+${structural.length ? structural.map((d) => `- [${d.severity}] Slide ${d.slideIndex}: ${d.description}`).join('\n') : 'Nenhum'}
+
+Responda APENAS com JSON:
+{
+  "reasoning": "...",
+  "approved": boolean,
+  "score": number (0-100),
+  "deviations": [ { "type": "content|brand", "severity": "minor|major|critical", "slideIndex": number, "description": "...", "fix": "..." } ],
+  "feedback": "mensagem curta ao usuário",
+  "correctionInstructions": "só se não aprovado"
+}`;
+
+  const response = await generateWithRetry(ai, {
+    model: 'gemini-2.5-flash',
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    config: { responseMimeType: 'application/json', temperature: 0.1 },
+  }, 'gemini-2.5-flash');
+
+  const result = extractJsonObject(response.text ?? '{}') as ReviewResult;
+  return {
+    reasoning: result.reasoning,
+    approved: result.approved ?? true,
+    score: typeof result.score === 'number' ? result.score : 70,
+    deviations: Array.isArray(result.deviations) ? result.deviations : [],
+    feedback: result.feedback ?? 'Revisão de conteúdo concluída',
+    correctionInstructions: result.correctionInstructions,
   };
 }
 

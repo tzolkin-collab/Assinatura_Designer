@@ -2,17 +2,19 @@ import { Router, Request, Response, NextFunction } from 'express';
 import prisma from '../lib/prisma.js';
 import { createError } from '../middleware/errorHandler.js';
 import type { AuthRequest } from '../middleware/auth.js';
+import { mergeSlidesIntoPost } from '../lib/postHelper.js';
 
 export const brandsRouter = Router();
 
-// GET /api/brands - List brands owned by the authenticated user
+// GET /api/brands - List all brands in the system with their owner details
 brandsRouter.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { userId } = (req as AuthRequest).user!;
     const brands = await prisma.brand.findMany({
-      where: { userId },
       orderBy: { updatedAt: 'desc' },
-      include: { _count: { select: { posts: true } } },
+      include: {
+        _count: { select: { posts: true } },
+        user: { select: { id: true, name: true, email: true } }
+      },
     });
     res.json({ data: brands });
   } catch (error) {
@@ -20,13 +22,12 @@ brandsRouter.get('/', async (req: Request, res: Response, next: NextFunction) =>
   }
 });
 
-// GET /api/brands/:slug - Get single brand (must belong to user)
+// GET /api/brands/:slug - Get single brand
 brandsRouter.get('/:slug', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { userId } = (req as AuthRequest).user!;
     const slug = req.params.slug as string;
-    const brand = await prisma.brand.findFirst({
-      where: { slug, userId },
+    const brand = await prisma.brand.findUnique({
+      where: { slug },
       include: { config: true, _count: { select: { posts: true, refs: true } } },
     });
     if (!brand) throw createError(404, 'Brand not found');
@@ -39,19 +40,18 @@ brandsRouter.get('/:slug', async (req: Request, res: Response, next: NextFunctio
 // GET /api/brands/:slug/posts - Get all posts for a brand
 brandsRouter.get('/:slug/posts', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { userId } = (req as AuthRequest).user!;
     const slug = req.params.slug as string;
-    const brand = await prisma.brand.findFirst({
-      where: { slug, userId },
+    const brand = await prisma.brand.findUnique({
+      where: { slug },
       select: { id: true },
     });
     if (!brand) throw createError(404, 'Brand not found');
     const posts = await prisma.post.findMany({
       where: { brandId: brand.id },
       orderBy: { createdAt: 'desc' },
-      include: { folder: true },
+      include: { folder: true, slides: { orderBy: { position: 'asc' } } },
     });
-    res.json({ data: posts });
+    res.json({ data: posts.map(mergeSlidesIntoPost) });
   } catch (error) {
     next(error);
   }

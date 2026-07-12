@@ -265,7 +265,7 @@ export function runDesign(params: {
 
     // Adiciona as formas decorativas geradas pela IA
     if (slide.decorativeShapes && Array.isArray(slide.decorativeShapes)) {
-      slide.decorativeShapes.forEach((shape, idx) => {
+      slide.decorativeShapes.forEach((shape: any, idx: number) => {
         layers.push({
           ...shape,
           id: `ai-shape-${randomUUID().slice(0, 8)}`,

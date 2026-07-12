@@ -15,7 +15,10 @@ export default function EditorIndexPage() {
   const slug = params.marca as string;
   const { posts, loading } = useBrandPosts(slug);
 
-  const designPosts = posts.filter((p) => extractEditablePages(p.content).status === 'editable');
+  const designPosts = posts.filter((p) => {
+    const status = extractEditablePages(p.content).status;
+    return status === 'editable' || status === 'html';
+  });
 
   return (
     <div>
@@ -41,7 +44,9 @@ export default function EditorIndexPage() {
         <div className={styles.grid}>
           {designPosts.map(post => {
             const editable = extractEditablePages(post.content);
+            const isHtml = editable.status === 'html';
             const dp = editable.status === 'editable' ? editable.pages : [];
+            const slideCount = isHtml ? editable.content.slides.length : dp.length;
             const first = dp[0];
             return (
               <button
@@ -51,9 +56,11 @@ export default function EditorIndexPage() {
               >
                 <div
                   className={styles.thumb}
-                  style={{ backgroundColor: first?.backgroundColor ?? '#111' }}
+                  style={{ backgroundColor: isHtml ? '#1a1a1a' : (first?.backgroundColor ?? '#111') }}
                 >
-                  {first && (
+                  {isHtml && post.previewUrl ? (
+                    <img src={post.previewUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  ) : first ? (
                     <DesignRenderer
                       pages={[first]}
                       canvasWidth={first.width ?? 1080}
@@ -61,11 +68,15 @@ export default function EditorIndexPage() {
                       hideNav
                       mode="cover"
                     />
+                  ) : (
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#999', fontSize: 12 }}>
+                      Sem Preview
+                    </div>
                   )}
                 </div>
                 <div className={styles.meta}>
                   <span className={styles.metaId}>{post.id.split('-')[0]}…</span>
-                  <span className={styles.metaSlides}>{dp.length} slides</span>
+                  <span className={styles.metaSlides}>{slideCount} slides</span>
                   <span className={styles.metaDate}>{new Date(post.createdAt).toLocaleDateString()}</span>
                 </div>
               </button>

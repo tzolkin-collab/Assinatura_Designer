@@ -4,7 +4,6 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 model User {
@@ -19,6 +18,8 @@ model User {
   googleAccessToken  String?
   googleRefreshToken String?
   googleTokenExpiry  DateTime?
+  canvaAccessToken   String?
+  canvaRefreshToken  String?
   brands             Brand[]
 }
 
@@ -26,7 +27,7 @@ model Brand {
   id               String            @id @default(uuid())
   slug             String            @unique
   name             String
-  color            String?           @default("#171717")
+  color            String?           @default("#f0bfbf")
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
   userId           String
@@ -99,6 +100,21 @@ model Post {
   canvaExportUrl String?
   brand          Brand      @relation(fields: [brandId], references: [id], onDelete: Cascade)
   folder         Folder?    @relation(fields: [folderId], references: [id])
+  slides         Slide[]
+}
+
+model Slide {
+  id          String   @id @default(uuid())
+  postId      String   @map("post_id")
+  post        Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  contentJson Json     @map("content_json")
+  htmlRender  String?  @map("html_render") @db.Text
+  position    Int
+  metadata    Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("slides")
 }
 
 model Folder {

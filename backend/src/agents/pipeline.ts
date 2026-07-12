@@ -4,13 +4,14 @@ import { getSession, updateSession, updateBrandMemory, type ChatAttachment, type
 import { ws } from '../lib/websocket.js';
 import { buildBrandContextSummary, resolveBrandContext } from '../lib/brandContext.js';
 import { executeTool } from './tools/index.js';
-import { runPlanner } from './planner/index.js';
+import { runPlanner, MAX_SLIDES } from './planner/index.js';
 import { runContent } from './content/index.js';
 import { runImage } from './image/index.js';
 import { runDesign } from './design/index.js';
-import { runReviewer, runHtmlReviewer } from './reviewer/index.js';
+import { runReviewer, runHtmlReviewer, runIRReviewer } from './reviewer/index.js';
 import type { ReviewResult } from './reviewer/index.js';
-import { generateHtmlDesignProgressive } from '../lib/htmlDesign.js';
+import { generateIRDesignProgressive } from '../lib/irDesign.js';
+import { syncPostSlides } from '../lib/postHelper.js';
 import {
   buildLegacyTextBrief,
   generateLegacyTextLayers,
@@ -51,6 +52,16 @@ function extractConversationAssets(messages: ChatMessage[]): ChatAttachment[] {
     .flatMap((message) => message.attachments ?? [])
     .filter((attachment) => attachment.mimeType.startsWith('image/'))
     .slice(-8);
+}
+
+// Extrai uma contagem de slides pedida no brief ("de 200 slides", "50 lâminas",
+// "30 páginas"). Clampa ao teto de sanidade. Retorna undefined se não citada.
+export function parseRequestedSlideCount(brief: string): number | undefined {
+  const m = brief.match(/(\d{1,4})\s*(slides?|l[aâ]minas?|p[aá]ginas?|telas?|cards?)/i);
+  if (!m) return undefined;
+  const n = parseInt(m[1]!, 10);
+  if (!Number.isFinite(n) || n < 1) return undefined;
+  return Math.min(n, MAX_SLIDES);
 }
 
 export interface PipelineParams {
@@ -100,12 +111,14 @@ export async function runPipeline(params: PipelineParams): Promise<void> {
   let researchedRefs: VisualRef[] = [];
   let researchSummary = '';
 
+  let postId = randomUUID();
+
   // Geração de passo único: gera → revisa → para. NÃO regeramos automaticamente
   // a apresentação inteira. A análise do revisor é mostrada ao usuário, que
   // decide se aceita o design ou pede ajustes/refação no chat.
   {
     // ── 1. Planner ────────────────────────────────────────────────────────────
-    ws.progress(sessionId, 10, 'Planejando estrutura...');
+    ws.progress(sessionId, 10, 'Planejando estrutura (Manager)...');
 
     const planBrief = brief;
 
@@ -122,22 +135,94 @@ export async function runPipeline(params: PipelineParams): Promise<void> {
         : '',
     ].filter(Boolean).join('\n\n');
 
+    // Contagem explícita pedida no brief (ex.: "apresentação de 200 slides").
+    // Sem ela, o planner escolhe dentro da faixa heurística.
+    const requestedCount = parseRequestedSlideCount(planBrief);
+
+    ws.progress(sessionId, 20, 'Planejando estrutura lógica...');
+    const skeleton = await runPlanner({
+      brief: planBrief,
+      brandContext: plannerBrandContext,
+      format,
+      targetSlideCount: requestedCount,
+    }).catch((err) => {
+      console.error('[Pipeline] Planner failed, using fallback slide count:', err);
+      const count = requestedCount ?? (format === 'presentation' ? 6 : 4);
+      return Array.from({ length: count }).map((_, i) => ({
+        title: `Slide ${i + 1}`,
+        goal: 'Apresentar conteúdo de marca',
+        layout_type: i === 0 ? 'title-hero' : i === count - 1 ? 'closing' : 'content-split',
+        order: i + 1,
+      }));
+    });
+
+    const slideCount = skeleton.length;
+    const width = format === 'presentation' ? 1920 : 1080;
+    const height = 1080;
+
+    ws.progress(sessionId, 25, 'Inicializando design no banco de dados...');
+    try {
+      await prisma.post.create({
+        data: {
+          id: postId,
+          brandId: brand.id,
+          type: format === 'presentation' ? 'PRESENTATION' : 'CAROUSEL',
+          status: 'GENERATING',
+          content: {
+            kind: 'ir-design',
+            version: 1,
+            width,
+            height,
+            fonts: ['Inter'],
+          } as any,
+          slides: {
+            create: skeleton.map((item) => ({
+              position: item.order - 1,
+              contentJson: {},
+              metadata: {
+                title: item.title,
+                goal: item.goal,
+                layout_type: item.layout_type,
+              } as any,
+            })),
+          },
+        },
+      });
+    } catch (dbErr) {
+      console.error('[Pipeline] Failed to pre-create Post/Slides in DB:', dbErr);
+    }
+
     // ── 2. Geração HTML/CSS (modo nativo do modelo) ───────────────────────────
     ws.progress(sessionId, 30, 'Gerando design...');
 
     try {
       const preferredModel = config.geminiDesignDocumentModel || 'gemini-3.1-pro-preview';
-      const slideCount = format === 'presentation' ? 6 : 4;
-      const width = format === 'presentation' ? 1920 : 1080;
-      const height = 1080;
 
-      const html = await generateHtmlDesignProgressive(
+      // Persistência do preview parcial no Redis, COM THROTTLE. O transporte ao
+      // vivo é por deltas WS (design:slide), mas quem sai e volta no meio da
+      // geração re-hidrata via session:state, que lê currentDesign do Redis.
+      // Gravamos no máximo ~1x/1.5s (e sempre no último slide) — restaura o
+      // preview no reconnect sem voltar ao O(n²) de gravar todo slide.
+      let lastCurrentDesignPersist = 0;
+
+      const ir = await generateIRDesignProgressive(
         async (systemInstruction, userPrompt) => {
           const response = await generateWithRetry(ai, {
             model: preferredModel,
             contents: userPrompt,
-            config: { systemInstruction, responseMimeType: 'application/json', maxOutputTokens: 32768 },
+            config: {
+              systemInstruction,
+              responseMimeType: 'application/json',
+              maxOutputTokens: 32768,
+              // Limita o thinking para não estourar o orçamento e truncar o JSON.
+              thinkingConfig: { thinkingBudget: config.geminiThinkingBudget },
+            },
           }, preferredModel);
+          // Diagnóstico: MAX_TOKENS => JSON truncado. Fica visível no log do worker.
+          const finish = response.candidates?.[0]?.finishReason;
+          if (finish && finish !== 'STOP') {
+            console.warn(`[Pipeline] geração terminou com finishReason=${finish} (texto ${response.text?.length ?? 0} chars) — pode truncar o JSON`);
+          }
           return response.text ?? '{}';
         },
         {
@@ -154,45 +239,99 @@ export async function runPipeline(params: PipelineParams): Promise<void> {
             agentPrompt: brand.agentPrompt,
             logoUrl: brand.logoUrl,
           },
+          skeleton,
         },
         extractJsonObject,
-        // A cada slide pronto: transmite o design parcial (preview ao vivo) e
-        // emite progresso granular "slide i de N" na faixa 30%→80%.
-        async (partial, index, totalSlides) => {
-          const partialContent = {
-            kind: 'html-design' as const,
+        // A cada slide pronto: transmite o delta (preview ao vivo) e emite
+        // progresso na faixa 30%→80%. Com lotes paralelos os slides chegam fora
+        // de ordem — por isso o progresso usa `completed` (monotônico), não index.
+        async (partial, index, totalSlides, completed) => {
+          const slide = partial.ir.slides[index];
+
+          // Envelope LEVE (sem o array de slides) — o front acumula os deltas e
+          // reconstrói o mesmo envelope. Antes reescrevíamos/transmitíamos o
+          // design inteiro a cada slide (O(n²) em Redis + WS); agora é O(1) por
+          // slide. A persistência incremental fica na tabela relacional `slides`
+          // (abaixo); o Redis currentDesign é gravado uma vez só, no fim.
+          const envelope = {
+            kind: 'ir-design' as const,
             version: 1 as const,
             source: 'codegen' as const,
+            // Identidade do deck: o front usa isto pra saber quando um novo deck
+            // começa e resetar o acúmulo de slides (evita misturar com o anterior).
+            postId,
             width: partial.width,
             height: partial.height,
             format: partial.format,
             fonts: partial.fonts,
-            slides: partial.slides,
             reasoning: partial.reasoning,
+            ir: {
+              version: 1 as const,
+              width: partial.ir.width,
+              height: partial.ir.height,
+              fonts: partial.ir.fonts,
+              tokens: partial.ir.tokens,
+              slides: [] as unknown[],
+            },
           };
-          currentPages = await executeTool('set_design', { pages: [partialContent] }, sessionId, currentPages);
+          ws.designSlide(sessionId, { index, total: totalSlides, slide, envelope });
+
+          // Persistência incremental: salva o slide individual na tabela relacional.
+          try {
+            const existingSlide = await prisma.slide.findFirst({
+              where: { postId, position: index },
+            });
+            if (existingSlide) {
+              await prisma.slide.update({
+                where: { id: existingSlide.id },
+                data: {
+                  contentJson: slide as any,
+                },
+              });
+            }
+          } catch (slideDbErr) {
+            console.error(`[Pipeline] Failed to save generated slide ${index + 1}:`, slideDbErr);
+          }
+
+          // Persiste o preview parcial no Redis (throttled) para o reconnect.
+          const now = Date.now();
+          if (now - lastCurrentDesignPersist > 1500 || completed === totalSlides) {
+            lastCurrentDesignPersist = now;
+            const liveEnvelope = {
+              ...envelope,
+              ir: { ...envelope.ir, slides: (partial.ir.slides as unknown[]).filter(Boolean) },
+            };
+            currentPages = [liveEnvelope] as unknown as typeof currentPages;
+            await updateSession(sessionId, { currentDesign: currentPages }).catch((e) =>
+              console.error('[Pipeline] Falha ao persistir preview parcial:', e),
+            );
+          }
+
           ws.progress(
             sessionId,
-            30 + Math.round(((index + 1) / totalSlides) * 50),
-            `Gerando slide ${index + 1} de ${totalSlides}...`,
+            30 + Math.round((completed / totalSlides) * 50),
+            `Gerando slide ${completed} de ${totalSlides}...`,
           );
         },
+        { concurrency: config.generationConcurrency },
       );
 
-      // Envelope de conteúdo (preview no front + persistência). kind html-design.
+      // Envelope de conteúdo (preview no front + persistência). kind ir-design.
       const content = {
-        kind: 'html-design' as const,
+        kind: 'ir-design' as const,
         version: 1 as const,
         source: 'codegen' as const,
-        width: html.width,
-        height: html.height,
-        format: html.format,
-        fonts: html.fonts,
-        slides: html.slides,
-        reasoning: html.reasoning,
+        postId,
+        width: ir.width,
+        height: ir.height,
+        format: ir.format,
+        fonts: ir.fonts,
+        ir: ir.ir,
+        reasoning: ir.reasoning,
       };
 
-      // Persiste no Redis + broadcast WS (o frontend renderiza html-design via iframe).
+      // Persiste no Redis + broadcast WS (design:update). O frontend renderiza o
+      // envelope ir-design via IRSlideRenderer (preview da Fábrica) / IRCanvasEditor.
       currentPages = await executeTool('set_design', { pages: [content] }, sessionId, currentPages);
 
       // ── 3. Reviewer (visão sobre render fiel em chromium) ─────────────────────
@@ -210,10 +349,21 @@ export async function runPipeline(params: PipelineParams): Promise<void> {
         });
       }
 
-      reviewResult = await runHtmlReviewer(html, brandContext, planBrief).catch(err => {
-        console.error('[Pipeline] Reviewer error:', err);
-        return { approved: true, score: 70, deviations: [], feedback: 'Revisão parcial', correctionInstructions: undefined };
-      });
+      // Reviewer do IR: estrutural determinístico (fora-do-canvas, sobreposição,
+      // contraste WCAG, texto vazio/placeholder, fonte fora da paleta) + passada
+      // semântica de conteúdo. A crítica VISUAL fica pendente do compilador
+      // IR→HTML. Fail-safe: se o reviewer estourar, aprova para não travar a entrega.
+      try {
+        reviewResult = await runIRReviewer({
+          ir: ir.ir,
+          brandContext,
+          objective: brief,
+        });
+      } catch (reviewErr) {
+        console.error('[Pipeline] Reviewer IR falhou, aprovando por segurança:', reviewErr);
+        reviewResult = { approved: true, score: 75, deviations: [], feedback: 'Revisão automática indisponível', correctionInstructions: undefined };
+      }
+
 
       // Sem auto-regeneração: se o revisor não aprovou, mantemos ESTE design e
       // mostramos a análise para o usuário decidir o próximo passo no chat.
@@ -229,13 +379,18 @@ export async function runPipeline(params: PipelineParams): Promise<void> {
 
     } catch (err) {
       console.error('[Pipeline] DesignDocument error:', err);
+      // Atualiza o status do post para FAILED no banco de dados
+      await prisma.post.update({
+        where: { id: postId },
+        data: { status: 'FAILED' },
+      }).catch(() => {});
+      
       ws.error(sessionId, `Não consegui gerar o design agora. ${humanizeGeminiError(err)}`);
       throw err;
     }
   }
 
   // ── Salvar post no banco ────────────────────────────────────────────────────
-  let postId: string | undefined;
   try {
     // currentPages[0] é o envelope html-design; persistimos ele + histórico de chat.
     const envelope = (currentPages[0] ?? {}) as unknown as Record<string, unknown>;
@@ -251,16 +406,21 @@ export async function runPipeline(params: PipelineParams): Promise<void> {
           attachments: m.attachments?.map((a) => ({ name: a.name, mimeType: a.mimeType, dataBase64: a.dataBase64 })),
         })),
     };
-    const post = await prisma.post.create({
+
+    // Remove o array pesado de slides do JSON do post para usar a tabela slides
+    const contentToSave = { ...postContent } as any;
+    delete contentToSave.slides;
+
+    await prisma.post.update({
+      where: { id: postId },
       data: {
-        id: randomUUID(),
-        brandId: brand.id,
-        type: format === 'presentation' ? 'PRESENTATION' : 'CAROUSEL',
         status: 'READY',
-        content: postContent as unknown as import('@prisma/client').Prisma.InputJsonValue,
+        content: contentToSave as unknown as import('@prisma/client').Prisma.InputJsonValue,
       },
     });
-    postId = post.id;
+
+    // Sincroniza os slides gerados com a tabela slides relacional
+    await syncPostSlides(postId, postContent);
 
     // Atualiza memória de longo prazo da marca
     const mem = await import('../lib/redis.js').then(m => m.getBrandMemory(session.brandSlug));

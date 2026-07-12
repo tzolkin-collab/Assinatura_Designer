@@ -1,11 +1,17 @@
 import { GoogleGenAI } from '@google/genai';
 import { config } from '../../config.js';
-import { getTemplatesByCategory } from '../../lib/templates/index.js';
 import { generateWithRetry } from '../../lib/geminiRetry.js';
 
 const ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
 
 // ── Types ─────────────────────────────────────────────────────────────────────
+
+export interface SlideSkeletonItem {
+  title: string;
+  goal: string;
+  layout_type: string;
+  order: number;
+}
 
 export interface SlidePlan {
   index: number;
@@ -30,90 +36,165 @@ export interface PlannerOutput {
   qualityCriteria: string[];
 }
 
-// ── Planner ───────────────────────────────────────────────────────────────────
+// ── Planner (Manager) ──────────────────────────────────────────────────────────
+
+// Teto de sanidade para o número de slides (evita abuso/custo descontrolado).
+export const MAX_SLIDES = 300;
+// Acima disso, planejamos em pedaços — um único call de flash trunca o JSON de
+// dezenas/centenas de itens (maxOutputTokens). Cada chunk mantém a continuidade
+// do arco recebendo os títulos já planejados.
+const PLAN_CHUNK = 20;
+
+function parseSkeletonArray(raw: string): SlideSkeletonItem[] {
+  let clean = (raw ?? '[]').trim();
+  if (clean.startsWith('```')) {
+    clean = clean.replace(/^```json\s*/, '').replace(/```$/, '').trim();
+  }
+  const parsed = JSON.parse(clean);
+  return Array.isArray(parsed) ? (parsed as SlideSkeletonItem[]) : [];
+}
+
+// Garante os "bookends" estruturais que os prompts prometem: primeiro slide é
+// capa, último é encerramento — independente do que o modelo devolveu.
+function enforceBookends(items: SlideSkeletonItem[]): SlideSkeletonItem[] {
+  if (items.length === 0) return items;
+  items[0] = { ...items[0]!, layout_type: 'title-hero' };
+  const last = items.length - 1;
+  if (last > 0) items[last] = { ...items[last]!, layout_type: 'closing' };
+  return items;
+}
+
+function coerceItem(item: Partial<SlideSkeletonItem>, order: number, isFirst: boolean, isLast: boolean): SlideSkeletonItem {
+  return {
+    title: typeof item?.title === 'string' && item.title.trim() ? item.title : `Slide ${order}`,
+    goal: typeof item?.goal === 'string' && item.goal.trim() ? item.goal : 'Apresentar conteúdo de marca',
+    layout_type: typeof item?.layout_type === 'string' && item.layout_type.trim()
+      ? item.layout_type
+      : (isFirst ? 'title-hero' : isLast ? 'closing' : 'content-split'),
+    order,
+  };
+}
 
 export async function runPlanner(params: {
   brief: string;
   brandContext: string;
   format: 'presentation' | 'carousel';
-}): Promise<PlannerOutput> {
-  const templates = getTemplatesByCategory(params.format);
-  const templateList = templates.map(t => `- ${t.id}: ${t.label}`).join('\n');
-  const dims = params.format === 'presentation'
-    ? { width: 1920, height: 1080 }
-    : { width: 1080, height: 1080 };
+  // Contagem alvo explícita (ex.: extraída do brief). Sem ela, o modelo escolhe
+  // dentro da faixa heurística (comportamento antigo).
+  targetSlideCount?: number;
+}): Promise<SlideSkeletonItem[]> {
+  const target = params.targetSlideCount
+    ? Math.max(1, Math.min(MAX_SLIDES, Math.floor(params.targetSlideCount)))
+    : undefined;
 
-  const prompt = `Você é o Agente Planejador de um sistema de design com IA.
+  // Decks grandes: planeja em chunks para não truncar o JSON.
+  if (target && target > PLAN_CHUNK) {
+    return runPlannerChunked(params, target);
+  }
 
-## Brief do usuário
+  const countRule = target
+    ? `Gere EXATAMENTE ${target} slides (order de 1 a ${target}).`
+    : `Para o formato carrossel, planeje de 4 a 6 slides. Para apresentações, de 6 a 10 slides.`;
+
+  const prompt = `Você é o Agente Manager (Gerente Planejador) de um sistema de design de apresentações com IA.
+Sua tarefa é planejar a estrutura lógica (esqueleto) de uma apresentação/carrossel do tipo "${params.format}" baseando-se no briefing e no contexto da marca fornecidos.
+
+Retorne estritamente um array JSON de slides seguindo exatamente este schema:
+Array<{
+  title: string;       // título sugerido/tema do slide
+  goal: string;        // objetivo de conteúdo do slide (o que o slide deve transmitir de forma textual)
+  layout_type: string; // sugestão de layout (ex: title-hero, content-split, metrics, quote, closing)
+  order: number;       // índice sequencial do slide, começando do 1
+}>
+
+Regras Importantes:
+1. O primeiro slide (order = 1) deve ser sempre uma capa (ex: title-hero).
+2. O último slide deve ser sempre um encerramento ou chamada de ação (ex: closing).
+3. Distribua os tipos de slides (layout_type) para criar um ritmo visual dinâmico.
+4. ${countRule}
+5. Retorne APENAS o array JSON limpo, sem marcações de código markdown (como \`\`\`json).
+
+## Briefing do usuário:
 ${params.brief}
 
-## Contexto da marca
+## Contexto da marca:
 ${params.brandContext}
 
-## Templates disponíveis (${params.format})
-${templateList}
-
-## Sua tarefa
-Monte o plano criativo completo. Para cada slide, escolha o templateId mais adequado da lista acima.
-
-Regras:
-- O primeiro slide deve ser sempre uma capa (title-hero ou carousel-cover)
-- O último slide deve ser sempre encerramento (closing ou carousel-closing)
-- Distribua os tipos de slide para criar variedade visual
-- Slides com dados/métricas devem usar data-chart ou carousel-data
-- Slides com citações devem usar quote ou carousel-quote
-- **MUITO IMPORTANTE:** Crie um design RICO EM FOTOS. Inclua SEMPRE um \`imageHint\` descritivo em pelo menos metade dos slides (especialmente capa, encerramento e templates que aceitam imagens) para que o Agente de Imagens possa gerar fotografias reais. NÃO gere uma apresentação inteira só com textos.
-- **REGRA GLOBAL SOBRE FOTOS E TEXTO:** NUNCA coloque texto embutido na imagem. O seu \`imageHint\` deve ser PURAMENTE visual e descritivo (ex: 'Foto de montanhas com céu azul'). Se houver necessidade de escrita, ela será tratada nas zonas de texto do slide. Portanto, não inclua overlays, letreiros, placas ou citações embutidas no pedido da foto.
-- **CORES E LEITURA:** Ouse na paleta para capas e encerramentos, mas para slides de CONTEÚDO (texto longo, citações, dados), opte SEMPRE por fundo branco (\`#FFFFFF\`) e textos em preto (\`#000000\`) para máxima legibilidade.
-- **LIBERDADE CRIATIVA NOS FUNDOS E ENFEITES:** Você tem TOTAL LIBERDADE para usar e abusar de \`decorativeShapes\` para criar fundos com cortes diagonais (ex: usando triângulos/polígonos), efeitos visuais complexos, overlays fotográficos, linhas divisórias finas (ex: \`height: 2\`, \`width: 200\`) ou caixas de destaque. Aja como um Diretor de Arte: não deixe o design vazio.
-
-Responda APENAS com JSON válido:
-{
-  "reasoning": "sua pausa de raciocínio avaliando o contexto e decidindo a melhor abordagem",
-  "objective": "objetivo claro em 1 frase",
-  "narrativeArc": "como a história se desenvolve",
-  "visualDirection": "direção visual específica",
-  "toneAndVoice": "tom e voz",
-  "format": "${params.format}",
-  "dimensions": { "width": ${dims.width}, "height": ${dims.height} },
-  "colors": ["#hex-background-1", "#hex-background-2"],
-  "fonts": ["FontName1", "FontName2"],
-  "slides": [
-    {
-      "index": 0,
-      "templateId": "template-id",
-      "purpose": "papel na narrativa",
-      "keyMessage": "mensagem central",
-      "imageHint": "descrição visual detalhada para gerar a imagem (ex: 'Foto profissional de mulher em escritório iluminado'). Deixe nulo apenas se não quiser imagem.",
-      "decorativeShapes": [
-        {
-          "type": "shape",
-          "shapeType": "rectangle|triangle|polygon|star|line",
-          "color": "#hex",
-          "opacity": 0.5,
-          "width": 100,
-          "height": 100,
-          "x": 50,
-          "y": 50,
-          "rotation": 45,
-          "borderRadius": 50,
-          "gradientType": "linear|radial|none",
-          "gradientColor2": "#hex2",
-          "zIndex": 0
-        }
-      ]
-    }
-  ],
-  "qualityCriteria": ["critério 1", "critério 2"]
-}`;
+## Sua resposta (array JSON puro):`;
 
   const response = await generateWithRetry(ai, {
     model: 'gemini-2.5-flash',
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
-    config: { responseMimeType: 'application/json', temperature: 0.4 },
+    config: { responseMimeType: 'application/json', temperature: 0.4, maxOutputTokens: 16384 },
   }, 'gemini-2.5-flash');
 
-  const raw = response.text ?? '{}';
-  return JSON.parse(raw) as PlannerOutput;
+  const items = parseSkeletonArray(response.text ?? '[]');
+
+  // Se pediram uma contagem exata, normaliza (o modelo às vezes erra por 1-2).
+  if (target) return enforceBookends(normalizeToCount(items, target));
+  return enforceBookends(items.map((it, i) => coerceItem(it, i + 1, i === 0, i === items.length - 1)));
+}
+
+// Garante exatamente `target` itens: apara excesso e completa faltantes.
+function normalizeToCount(items: SlideSkeletonItem[], target: number): SlideSkeletonItem[] {
+  const out: SlideSkeletonItem[] = [];
+  for (let i = 0; i < target; i++) {
+    out.push(coerceItem(items[i] ?? {}, i + 1, i === 0, i === target - 1));
+  }
+  return out;
+}
+
+// ── Planejamento em chunks (decks grandes) ──────────────────────────────────────
+async function runPlannerChunked(
+  params: { brief: string; brandContext: string; format: 'presentation' | 'carousel' },
+  target: number,
+): Promise<SlideSkeletonItem[]> {
+  const items: SlideSkeletonItem[] = [];
+
+  for (let start = 0; start < target; start += PLAN_CHUNK) {
+    const end = Math.min(start + PLAN_CHUNK, target);
+    // Janela de continuidade: últimos títulos já planejados.
+    const priorTitles = items.slice(-24).map((it) => `${it.order}. ${it.title}`).join('\n');
+
+    const prompt = `Você é o Agente Manager planejando uma apresentação GRANDE de ${target} slides no total (tipo "${params.format}").
+Gere APENAS os slides de ${start + 1} a ${end} (${end - start} itens), continuando o arco narrativo de forma coesa e sem repetir o que já foi planejado.
+
+Schema de cada item (array JSON puro, sem markdown):
+{ "title": string, "goal": string, "layout_type": string, "order": number }
+
+Regras:
+1. order deve ir de ${start + 1} a ${end}, em sequência.
+${start === 0 ? '2. O slide 1 é a capa (title-hero).' : '2. NÃO é o início — dê continuidade ao que já existe.'}
+${end === target ? `3. O slide ${target} é o encerramento/CTA (closing).` : '3. NÃO é o final — deixe gancho para os próximos.'}
+4. Varie os layout_type para ritmo visual.
+5. Retorne SÓ o array JSON dos ${end - start} itens.
+
+## Briefing do usuário:
+${params.brief.slice(0, 4000)}
+
+## Contexto da marca:
+${params.brandContext.slice(0, 1500)}
+${priorTitles ? `\n## Slides já planejados (continue a partir daqui):\n${priorTitles}` : ''}
+
+## Sua resposta (array JSON dos slides ${start + 1} a ${end}):`;
+
+    let chunk: SlideSkeletonItem[] = [];
+    try {
+      const response = await generateWithRetry(ai, {
+        model: 'gemini-2.5-flash',
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        config: { responseMimeType: 'application/json', temperature: 0.4, maxOutputTokens: 8192 },
+      }, 'gemini-2.5-flash');
+      chunk = parseSkeletonArray(response.text ?? '[]');
+    } catch (err) {
+      console.error(`[Planner] chunk ${start + 1}-${end} falhou, preenchendo com fallback:`, err);
+    }
+
+    for (let k = 0; k < end - start; k++) {
+      const order = start + k + 1;
+      items.push(coerceItem(chunk[k] ?? {}, order, order === 1, order === target));
+    }
+  }
+
+  return enforceBookends(items.slice(0, target));
 }
