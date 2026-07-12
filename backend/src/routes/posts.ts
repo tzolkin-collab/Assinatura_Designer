@@ -5,6 +5,7 @@ import { createError } from '../middleware/errorHandler.js';
 import { AuthRequest } from '../middleware/auth.js';
 import { renderHtmlToPng } from '../lib/htmlRaster.js';
 import { buildSlideDocument, editHtmlSlide } from '../lib/htmlDesign.js';
+import { compileSlideToDocument } from '../lib/designIR/compiler.js';
 import { GoogleGenAI } from '@google/genai';
 import { config } from '../config.js';
 import { generateWithRetry } from '../lib/geminiRetry.js';
@@ -61,6 +62,47 @@ function sanitizeIRPatch(
   }
 
   return { ops };
+}
+
+// Normaliza um post (html-design OU ir-design) para um "deck renderizável": um
+// jeito único de obter width/height/fonts e o documento HTML completo de cada
+// slide (compilando o IR quando necessário). É o que destrava export/Canva para
+// ir-design, o formato principal gerado hoje.
+interface RenderableDeck {
+  width: number;
+  height: number;
+  count: number;
+  docAt: (idx: number) => string;
+}
+
+function resolveRenderableDeck(content: unknown): RenderableDeck | null {
+  if (!content || typeof content !== 'object') return null;
+  const c = content as {
+    kind?: string;
+    width?: number;
+    height?: number;
+    fonts?: string[];
+    slides?: Array<{ html: string; css?: string }>;
+    ir?: { width?: number; height?: number; fonts?: string[]; slides?: unknown[] };
+  };
+
+  if (c.kind === 'html-design' && Array.isArray(c.slides) && c.slides.length > 0) {
+    const width = typeof c.width === 'number' ? c.width : 1080;
+    const height = typeof c.height === 'number' ? c.height : 1080;
+    const fonts = Array.isArray(c.fonts) ? c.fonts : ['Inter'];
+    const slides = c.slides;
+    return { width, height, count: slides.length, docAt: (i) => buildSlideDocument(slides[i]!, fonts, width, height) };
+  }
+
+  if (c.kind === 'ir-design' && c.ir && Array.isArray(c.ir.slides) && c.ir.slides.length > 0) {
+    const width = typeof c.ir.width === 'number' ? c.ir.width : (typeof c.width === 'number' ? c.width : 1080);
+    const height = typeof c.ir.height === 'number' ? c.ir.height : (typeof c.height === 'number' ? c.height : 1080);
+    const fonts = Array.isArray(c.ir.fonts) ? c.ir.fonts : (Array.isArray(c.fonts) ? c.fonts : ['Inter']);
+    const slides = c.ir.slides;
+    return { width, height, count: slides.length, docAt: (i) => compileSlideToDocument(slides[i] as IRSlideNode, fonts, width, height) };
+  }
+
+  return null;
 }
 
 // POST /api/posts/render-batch - renderiza múltiplos slides HTML/CSS em paralelo e envia para o R2
@@ -278,24 +320,16 @@ postsRouter.get('/:id/export', async (req: AuthRequest, res: Response, next: Nex
     if (!post) throw createError(404, 'Post not found');
 
     const postWithSlides = mergeSlidesIntoPost(post);
-    const content = postWithSlides.content as unknown as {
-      kind?: string;
-      width?: number;
-      height?: number;
-      fonts?: string[];
-      slides?: Array<{ html: string; css?: string }>;
-    };
-    if (!content || content.kind !== 'html-design' || !Array.isArray(content.slides) || content.slides.length === 0) {
-      throw createError(400, 'Export disponível apenas para posts html-design');
+    const deck = resolveRenderableDeck(postWithSlides.content);
+    if (!deck) {
+      throw createError(400, 'Export disponível apenas para designs html-design ou ir-design');
     }
 
-    const width = typeof content.width === 'number' ? content.width : 1080;
-    const height = typeof content.height === 'number' ? content.height : 1080;
     const requested = Number(req.query.slide ?? 0) || 0;
-    const slideIdx = Math.max(0, Math.min(requested, content.slides.length - 1));
+    const slideIdx = Math.max(0, Math.min(requested, deck.count - 1));
 
-    const doc = buildSlideDocument(content.slides[slideIdx], content.fonts ?? [], width, height);
-    const png = await renderHtmlToPng(doc, { width, height, maxDim: 0 }); // full-res
+    const doc = deck.docAt(slideIdx);
+    const png = await renderHtmlToPng(doc, { width: deck.width, height: deck.height, maxDim: 0 }); // full-res
 
     res.setHeader('Content-Type', 'image/png');
     res.setHeader('Content-Disposition', `attachment; filename="post-${id.slice(0, 8)}-slide-${slideIdx + 1}.png"`);
@@ -466,25 +500,14 @@ postsRouter.post('/:id/export-canva', async (req: AuthRequest, res: Response, ne
     }
 
     const postWithSlides = mergeSlidesIntoPost(post);
-    const content = postWithSlides.content as unknown as {
-      kind?: string;
-      width?: number;
-      height?: number;
-      fonts?: string[];
-      slides?: Array<{ html: string; css?: string }>;
-    };
-
-    if (!content || content.kind !== 'html-design' || !Array.isArray(content.slides) || content.slides.length === 0) {
-      throw createError(400, 'Export Canva disponível apenas para designs tipo html-design');
+    const deck = resolveRenderableDeck(postWithSlides.content);
+    if (!deck) {
+      throw createError(400, 'Export Canva disponível apenas para designs html-design ou ir-design');
     }
 
-    const width = typeof content.width === 'number' ? content.width : 1080;
-    const height = typeof content.height === 'number' ? content.height : 1080;
-
     const uploadSingleSlide = async (idx: number) => {
-      const slide = content.slides![idx];
-      const doc = buildSlideDocument(slide, content.fonts ?? [], width, height);
-      const pngBuffer = await renderHtmlToPng(doc, { width, height, maxDim: 0 });
+      const doc = deck.docAt(idx);
+      const pngBuffer = await renderHtmlToPng(doc, { width: deck.width, height: deck.height, maxDim: 0 });
 
       const name = `post-${id.slice(0, 8)}-slide-${idx + 1}.png`;
       const canvaResult = await uploadAsset(brand.id, pngBuffer, name, 'image/png');
@@ -492,7 +515,7 @@ postsRouter.post('/:id/export-canva', async (req: AuthRequest, res: Response, ne
     };
 
     if (typeof slideIndex === 'number') {
-      if (slideIndex < 0 || slideIndex >= content.slides.length) {
+      if (slideIndex < 0 || slideIndex >= deck.count) {
         throw createError(400, 'slideIndex fora do limite');
       }
       const result = await uploadSingleSlide(slideIndex);
@@ -501,7 +524,7 @@ postsRouter.post('/:id/export-canva', async (req: AuthRequest, res: Response, ne
 
     // Exporta todos sequencialmente se slideIndex não for fornecido
     const results = [];
-    for (let i = 0; i < content.slides.length; i++) {
+    for (let i = 0; i < deck.count; i++) {
       const result = await uploadSingleSlide(i);
       results.push(result);
     }

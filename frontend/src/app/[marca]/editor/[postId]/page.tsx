@@ -142,9 +142,12 @@ export default function DesignEditorPage() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [insertMenuOpen]);
 
-  // History
+  // History (legacy DesignPage pages)
   const undoStack = useRef<DesignPage[][]>([]);
   const redoStack = useRef<DesignPage[][]>([]);
+  // History do editor IR (o ir-design não usa `pages`; guarda snapshots do IR).
+  const irUndoStack = useRef<DesignIR[]>([]);
+  const irRedoStack = useRef<DesignIR[]>([]);
 
   // Always-fresh refs for use inside stable callbacks
   const pagesRef = useRef(pages);
@@ -160,6 +163,8 @@ export default function DesignEditorPage() {
   isSavingRef.current = isSaving;
   const postIdRef = useRef(postId);
   postIdRef.current = postId;
+  const loadStateRef = useRef(loadState);
+  loadStateRef.current = loadState;
 
   // ── Core mutation ────────────────────────────────────────────────────────────
 
@@ -201,6 +206,17 @@ export default function DesignEditorPage() {
   }, [pages, activeSlide, applyChange]);
 
   const undo = useCallback(() => {
+    if (loadStateRef.current === 'ir') {
+      const snapshot = irUndoStack.current.pop();
+      if (!snapshot) return;
+      setIrPostContent((prev) => {
+        if (!prev || !prev.ir) return prev;
+        irRedoStack.current.push(prev.ir as DesignIR);
+        return { ...prev, ir: snapshot };
+      });
+      setIsDirty(true);
+      return;
+    }
     const snapshot = undoStack.current.pop();
     if (!snapshot) return;
     redoStack.current.push(pagesRef.current);
@@ -209,6 +225,17 @@ export default function DesignEditorPage() {
   }, []);
 
   const redo = useCallback(() => {
+    if (loadStateRef.current === 'ir') {
+      const snapshot = irRedoStack.current.pop();
+      if (!snapshot) return;
+      setIrPostContent((prev) => {
+        if (!prev || !prev.ir) return prev;
+        irUndoStack.current.push(prev.ir as DesignIR);
+        return { ...prev, ir: snapshot };
+      });
+      setIsDirty(true);
+      return;
+    }
     const snapshot = redoStack.current.pop();
     if (!snapshot) return;
     undoStack.current.push(pagesRef.current);
@@ -302,6 +329,8 @@ export default function DesignEditorPage() {
     setCompileWarnings([]);
     undoStack.current = [];
     redoStack.current = [];
+    irUndoStack.current = [];
+    irRedoStack.current = [];
     originalHybridContentRef.current = null;
     setHtmlPostContent(null);
     setIrPostContent(null);
@@ -393,6 +422,10 @@ export default function DesignEditorPage() {
   const handleIRPatch = useCallback((patch: IRPatch) => {
     setIrPostContent((prev) => {
       if (!prev || !prev.ir) return prev;
+      // Empilha o IR anterior para o undo (teto de 60, como o histórico legado).
+      irUndoStack.current.push(prev.ir as DesignIR);
+      if (irUndoStack.current.length > 60) irUndoStack.current.shift();
+      irRedoStack.current = [];
       const newIr = applyPatch(prev.ir as DesignIR, patch);
       return { ...prev, ir: newIr };
     });

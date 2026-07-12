@@ -6,10 +6,12 @@ import { mergeSlidesIntoPost } from '../lib/postHelper.js';
 
 export const brandsRouter = Router();
 
-// GET /api/brands - List all brands in the system with their owner details
+// GET /api/brands - List the authenticated user's brands
 brandsRouter.get('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
+    const { userId } = (req as AuthRequest).user!;
     const brands = await prisma.brand.findMany({
+      where: { userId },
       orderBy: { updatedAt: 'desc' },
       include: {
         _count: { select: { posts: true } },
@@ -22,12 +24,13 @@ brandsRouter.get('/', async (req: Request, res: Response, next: NextFunction) =>
   }
 });
 
-// GET /api/brands/:slug - Get single brand
+// GET /api/brands/:slug - Get single brand (must belong to user)
 brandsRouter.get('/:slug', async (req: Request, res: Response, next: NextFunction) => {
   try {
+    const { userId } = (req as AuthRequest).user!;
     const slug = req.params.slug as string;
-    const brand = await prisma.brand.findUnique({
-      where: { slug },
+    const brand = await prisma.brand.findFirst({
+      where: { slug, userId },
       include: { config: true, _count: { select: { posts: true, refs: true } } },
     });
     if (!brand) throw createError(404, 'Brand not found');
@@ -37,12 +40,13 @@ brandsRouter.get('/:slug', async (req: Request, res: Response, next: NextFunctio
   }
 });
 
-// GET /api/brands/:slug/posts - Get all posts for a brand
+// GET /api/brands/:slug/posts - Get all posts for a brand (must belong to user)
 brandsRouter.get('/:slug/posts', async (req: Request, res: Response, next: NextFunction) => {
   try {
+    const { userId } = (req as AuthRequest).user!;
     const slug = req.params.slug as string;
-    const brand = await prisma.brand.findUnique({
-      where: { slug },
+    const brand = await prisma.brand.findFirst({
+      where: { slug, userId },
       select: { id: true },
     });
     if (!brand) throw createError(404, 'Brand not found');

@@ -587,6 +587,15 @@ export default function BrandGaleriaPage() {
                           <Download size={14} />
                         </button>
                       )}
+                      {irContent && (irContent.ir?.slides?.length ?? 0) > 0 && (
+                        <button
+                          className={styles.actionBtn}
+                          onClick={(e) => handleDownloadHtml(e, post.id, irContent.ir.slides.length)}
+                          title="Baixar PNGs"
+                        >
+                          <Download size={14} />
+                        </button>
+                      )}
                       {(chatHistory.length > 0 || sessionId) && (
                         <button
                           className={styles.actionBtn}
