@@ -46,7 +46,7 @@ function normalizeUiMessage(message: string): string {
 }
 
 export function useFabricaWs(brandSlug: string, initialSessionId?: string | null) {
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(initialSessionId ?? null);
   const [phase, setPhase] = useState<SessionPhase>('listening');
   const [messages, setMessages] = useState<FabricaMessage[]>([]);
   const [currentDesign, setCurrentDesign] = useState<DesignPage[]>([]);
@@ -64,6 +64,9 @@ export function useFabricaWs(brandSlug: string, initialSessionId?: string | null
   const streamingMsgIdRef = useRef<string | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sessionIdRef = useRef<string | null>(null);
+  // Ref para o próprio connectWs — o reconnect no onclose o chama sem referenciar
+  // a const antes de ela ser atribuída (evita o warning e a captura de stale).
+  const connectWsRef = useRef<((sid: string, rehydrate?: boolean) => void) | null>(null);
 
   // Put all setters into a ref so connectWs (useCallback with [] deps) always
   // reaches the latest dispatch functions without capturing a stale closure.
@@ -258,8 +261,10 @@ export function useFabricaWs(brandSlug: string, initialSessionId?: string | null
 
     wsRef.current?.close();
 
-    const url = `${WS_BASE}/ws?token=${encodeURIComponent(token)}&sessionId=${encodeURIComponent(sid)}`;
-    const socket = new WebSocket(url);
+    // Token vai no subprotocolo (não no query string). O JWT é base64url + '.',
+    // todos caracteres válidos de subprotocolo; o servidor lê do header.
+    const url = `${WS_BASE}/ws?sessionId=${encodeURIComponent(sid)}`;
+    const socket = new WebSocket(url, ['bearer', token]);
 
     socket.onopen = () => {
       setConnected(true);
@@ -276,7 +281,7 @@ export function useFabricaWs(brandSlug: string, initialSessionId?: string | null
       actionsRef.current.setIsStreaming(false);
       if (sessionIdRef.current) {
         reconnectTimeoutRef.current = setTimeout(() => {
-          if (sessionIdRef.current) connectWs(sessionIdRef.current);
+          if (sessionIdRef.current) connectWsRef.current?.(sessionIdRef.current);
         }, 2000);
       }
     };
@@ -296,6 +301,12 @@ export function useFabricaWs(brandSlug: string, initialSessionId?: string | null
     wsRef.current = socket;
   }, [handleWsEvent]);
 
+  // Mantém o ref apontando para o connectWs atual (usado pelo reconnect no
+  // onclose). Em effect para não escrever o ref durante o render.
+  useEffect(() => {
+    connectWsRef.current = connectWs;
+  }, [connectWs]);
+
   useEffect(() => {
     const token = getToken();
     if (!token) return;
@@ -303,8 +314,8 @@ export function useFabricaWs(brandSlug: string, initialSessionId?: string | null
     let cancelled = false;
 
     if (initialSessionId) {
+      // sessionId já foi inicializado com initialSessionId (evita setState síncrono aqui).
       sessionIdRef.current = initialSessionId;
-      setSessionId(initialSessionId);
       connectWs(initialSessionId, true);
       return () => {
         cancelled = true;

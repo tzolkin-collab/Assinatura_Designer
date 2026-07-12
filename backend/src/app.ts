@@ -18,6 +18,10 @@ import { asanaRouter } from './routes/asana.js';
 
 const app = express();
 
+// Confia em 1 hop de reverse proxy (Vercel/Render/etc.) para que `req.ip`
+// reflita o cliente real — necessário para o rate limiting por IP.
+app.set('trust proxy', 1);
+
 // ── Global Middleware ──
 app.use(cors({ origin: config.corsOrigin, credentials: true }));
 app.use(express.json({ limit: '25mb' }));

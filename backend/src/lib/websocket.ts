@@ -86,12 +86,22 @@ export function onWsMessage(type: WsInboundType, handler: MessageHandler) {
 // ── Init ──────────────────────────────────────────────────────────────────────
 
 export function initWebSocket(server: Server): WebSocketServer {
-  const wss = new WebSocketServer({ server, path: '/ws' });
+  const wss = new WebSocketServer({
+    server,
+    path: '/ws',
+    // Aceita o subprotocolo "bearer" (o token vem junto no header). Selecionar um
+    // protocolo faz o handshake devolver o header e o cliente ficar satisfeito.
+    handleProtocols: (protocols) => (protocols.has('bearer') ? 'bearer' : false),
+  });
 
   wss.on('connection', (ws: WebSocket, req) => {
     const url = new URL(req.url ?? '/', `http://localhost`);
-    const token = url.searchParams.get('token');
     const sessionId = url.searchParams.get('sessionId');
+
+    // Token via Sec-WebSocket-Protocol ("bearer, <jwt>") em vez do query string,
+    // que pode acabar em logs de proxy/servidor.
+    const protoHeader = (req.headers['sec-websocket-protocol'] ?? '') as string;
+    const token = protoHeader.split(',').map((s) => s.trim()).find((p) => p && p !== 'bearer') ?? null;
 
     if (!token || !sessionId) {
       ws.close(1008, 'Missing token or sessionId');

@@ -1,4 +1,5 @@
 import { Router, Response, NextFunction } from 'express';
+import dns from 'dns/promises';
 import { GoogleGenAI, Type, Schema } from '@google/genai';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import crypto from 'crypto';
@@ -20,17 +21,10 @@ const s3 = new S3Client({
   },
 });
 
-// Bloqueia SSRF: só permite http(s) para hosts públicos. Rejeita localhost,
-// ranges privados/CGNAT, link-local (inclui a metadata 169.254.169.254) e ULA
-// IPv6. Resíduo conhecido: DNS rebinding (hostname público resolvendo pra IP
-// privado) — mitigar exigiria resolver o DNS e checar o IP antes do fetch.
-function isPublicHttpUrl(raw: string): boolean {
-  let u: URL;
-  try { u = new URL(raw); } catch { return false; }
-  if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
-  const host = u.hostname.toLowerCase();
-  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal')) return false;
-
+// Um IP (v4 ou v6 literal) é público? Bloqueia loopback, privado, CGNAT e
+// link-local (inclui a metadata 169.254.169.254) e ULA/link-local IPv6.
+function isPublicIp(ip: string): boolean {
+  const host = ip.toLowerCase();
   const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
   if (v4) {
     const o = v4.slice(1).map(Number);
@@ -43,14 +37,47 @@ function isPublicHttpUrl(raw: string): boolean {
     if (a === 100 && b >= 64 && b <= 127) return false;    // CGNAT
     return true;
   }
-  if (host.includes(':')) { // literal IPv6
+  if (host.includes(':')) { // IPv6
     if (host === '::' || host === '::1') return false;
     if (host.startsWith('fe80')) return false;             // link-local
     if (host.startsWith('fc') || host.startsWith('fd')) return false; // ULA
-    if (host.startsWith('::ffff:')) return false;          // IPv4-mapped
+    if (host.startsWith('::ffff:')) {                      // IPv4-mapped → valida o v4 embutido
+      return isPublicIp(host.slice('::ffff:'.length));
+    }
     return true;
   }
   return true;
+}
+
+// Guard SSRF síncrono (protocolo + host). Rejeita localhost e IPs privados
+// literais. Usado na validação de entrada; o fetch real usa a variante que
+// também resolve o DNS (contra rebinding).
+function isPublicHttpUrl(raw: string): boolean {
+  let u: URL;
+  try { u = new URL(raw); } catch { return false; }
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+  const host = u.hostname.toLowerCase();
+  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal')) return false;
+  const isLiteral = /^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.includes(':');
+  if (isLiteral) return isPublicIp(host);
+  return true;
+}
+
+// Variante para o momento do fetch: além do guard síncrono, resolve o hostname e
+// exige que TODOS os IPs resolvidos sejam públicos — fecha o DNS rebinding
+// (hostname público apontando para IP interno). Resíduo: janela TOCTOU entre a
+// resolução e a conexão (mitigável só com pinning do IP na conexão).
+async function isPublicHttpUrlResolved(raw: string): Promise<boolean> {
+  if (!isPublicHttpUrl(raw)) return false;
+  let host: string;
+  try { host = new URL(raw).hostname.toLowerCase(); } catch { return false; }
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host) || host.includes(':')) return true; // literal já validado
+  try {
+    const results = await dns.lookup(host, { all: true });
+    return results.length > 0 && results.every((r) => isPublicIp(r.address));
+  } catch {
+    return false;
+  }
 }
 
 // Helper to find brand by slug and verify ownership
@@ -184,8 +211,9 @@ async function captureWebsiteScreenshot(url: string): Promise<string | null> {
 
 async function fetchWebsiteHtml(url: string): Promise<string> {
   try {
-    // Defesa em profundidade: nunca faz fetch server-side de host não-público.
-    if (!isPublicHttpUrl(url)) return 'Não foi possível obter o conteúdo HTML.';
+    // Defesa em profundidade: nunca faz fetch server-side de host não-público
+    // (resolve o DNS também, contra rebinding).
+    if (!(await isPublicHttpUrlResolved(url))) return 'Não foi possível obter o conteúdo HTML.';
     const response = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' } });
     const text = await response.text();
     // Keep it reasonable in size by stripping out scripts and styles

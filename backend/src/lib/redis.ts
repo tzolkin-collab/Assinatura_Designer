@@ -1,4 +1,5 @@
 import Redis from 'ioredis';
+import { randomUUID } from 'crypto';
 import { config } from '../config.js';
 import type { DesignPage } from './designTypes.js';
 import type { FabricaQuestion, ReviewMode, SessionPhase, WorkerStatus } from './fabricaSession.js';
@@ -118,15 +119,46 @@ export async function getSession(sessionId: string): Promise<FabricaSession | nu
 // ── Lock por-sessão (serializa read-modify-write) ─────────────────────────────
 // O brain (handler WS) e o pipeline (worker) mutam a MESMA sessão em paralelo.
 // Sem serialização, dois get→merge→setex concorrentes se sobrescrevem (lost
-// update: uma mensagem ou o currentDesign somem). Este lock encadeia as escritas
-// por sessionId e cada uma relê o estado fresco dentro do lock.
-// NOTA: cobre o deploy single-process (RUN_WORKER_IN_PROCESS=true, o default).
-// Para workers em processos separados seria preciso um lock distribuído (Redis).
+// update: uma mensagem ou o currentDesign somem). Duas camadas:
+//  1. cadeia in-process por sessionId (barato, evita contenção no mesmo processo);
+//  2. lock distribuído no Redis (cobre worker em processo separado).
+// O lock Redis é FAIL-OPEN: se o Redis não coopera, seguimos sem ele em vez de
+// travar o app; TTL curto evita deadlock se um processo morrer segurando o lock.
 const sessionChains = new Map<string, Promise<unknown>>();
+
+const LOCK_TTL_MS = 5000;
+const LOCK_WAIT_MS = 3000;
+const RELEASE_LUA = "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end";
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+async function acquireRedisLock(key: string, token: string): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start < LOCK_WAIT_MS) {
+    const ok = await redis.set(key, token, 'PX', LOCK_TTL_MS, 'NX');
+    if (ok === 'OK') return true;
+    await sleep(15 + Math.floor(Math.random() * 25));
+  }
+  return false;
+}
 
 async function withSessionLock<T>(sessionId: string, fn: () => Promise<T>): Promise<T> {
   const prev = sessionChains.get(sessionId) ?? Promise.resolve();
-  const run = prev.then(() => fn());
+  const run = prev.then(async () => {
+    const lockKey = `lock:fabrica:session:${sessionId}`;
+    const token = randomUUID();
+    let locked = false;
+    try { locked = await acquireRedisLock(lockKey, token); } catch { locked = false; }
+    try {
+      return await fn();
+    } finally {
+      if (locked) {
+        try { await redis.eval(RELEASE_LUA, 1, lockKey, token); } catch { /* TTL expira sozinho */ }
+      }
+    }
+  });
   // Guarda para uma rejeição não envenenar quem estiver na fila atrás.
   const guarded = run.then(() => undefined, () => undefined);
   sessionChains.set(sessionId, guarded);

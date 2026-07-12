@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import prisma from '../lib/prisma.js';
 import { config } from '../config.js';
 import { createError } from '../middleware/errorHandler.js';
+import { rateLimit } from '../middleware/rateLimit.js';
 
 export const authRouter = Router();
 
@@ -12,7 +13,7 @@ export const authRouter = Router();
 // real (o compare roda), permitindo enumerar contas por tempo de resposta.
 const DUMMY_PASSWORD_HASH = bcrypt.hashSync('timing-equalizer-not-a-real-password', 10);
 
-authRouter.post('/register', async (req: Request, res: Response, next: NextFunction) => {
+authRouter.post('/register', rateLimit({ windowSec: 3600, max: 5, keyPrefix: 'register' }), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { email, password, name } = req.body;
 
@@ -79,7 +80,7 @@ authRouter.delete('/connections/asana', requireAuth, async (req: AuthRequest, re
   }
 });
 
-authRouter.post('/login', async (req: Request, res: Response, next: NextFunction) => {
+authRouter.post('/login', rateLimit({ windowSec: 900, max: 10, keyPrefix: 'login' }), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) throw createError(400, 'Email and password required');
