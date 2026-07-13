@@ -107,8 +107,8 @@ export function clampTextToSafeArea(document: DesignDocument): void {
       if (node.type !== 'text') continue;
       const L = node.layout;
       if (!L || !isNum(L.x) || !isNum(L.y) || !isNum(L.width) || !isNum(L.height)) continue;
-      let w = Math.min(L.width as number, maxX - minX);
-      let h = Math.min(L.height as number, maxY - minY);
+      const w = Math.min(L.width as number, maxX - minX);
+      const h = Math.min(L.height as number, maxY - minY);
       const x = Math.min(Math.max(L.x as number, minX), maxX - w);
       const y = Math.min(Math.max(L.y as number, minY), maxY - h);
       node.layout = { ...L, x, y, width: w, height: h };

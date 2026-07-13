@@ -1,39 +1,76 @@
+import type { Prisma } from '@prisma/client';
 import prisma from './prisma.js';
-import { buildSlideDocument } from './htmlDesign.js';
+import { buildSlideDocument, type HtmlDesignSlide } from './htmlDesign.js';
 import { compileSlideToDocument } from './designIR/compiler.js';
+import type { SlideNode } from './designIR/types.js';
+
+/** Linha da tabela relacional `slides` (a fonte de verdade de cada slide). */
+interface SlideRow {
+  id: string;
+  position: number;
+  contentJson: unknown;
+  metadata?: unknown;
+}
+
+/** Post com a relação `slides` incluída. `content` fica `unknown`: o formato varia
+ *  por `kind` (ir-design, html-design, ...) e quem lê já estreita o tipo. */
+export interface PostWithSlides {
+  content: unknown;
+  slides?: SlideRow[];
+  [key: string]: unknown;
+}
+
+/** Conteúdo do post, visto de dentro deste módulo. */
+interface PostContent {
+  kind?: string;
+  slides?: unknown[];
+  ir?: { slides?: unknown[]; [key: string]: unknown };
+  width?: unknown;
+  height?: unknown;
+  fonts?: unknown;
+  [key: string]: unknown;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
 
 /**
  * Rebuilds the unified post.content.slides array from individual rows in the relational Slide table.
  * This guarantees 100% backward compatibility with the frontend and the rest of the application
  * that expects a single consolidated Post object.
  */
-export function mergeSlidesIntoPost(post: any): any {
+// Sobrecarga: post não-nulo entra, post não-nulo sai. Sem isto, todo chamador que já
+// checou o 404 antes teria de repetir a checagem de null.
+export function mergeSlidesIntoPost(post: PostWithSlides): PostWithSlides;
+export function mergeSlidesIntoPost(post: PostWithSlides | null): PostWithSlides | null;
+export function mergeSlidesIntoPost(post: PostWithSlides | null): PostWithSlides | null {
   if (!post) return null;
 
   // Deep clone to avoid mutating Prisma objects or cache
-  const cloned = JSON.parse(JSON.stringify(post));
+  const cloned = JSON.parse(JSON.stringify(post)) as PostWithSlides;
+  const content = cloned.content;
 
-  if (cloned.content && typeof cloned.content === 'object') {
-    const slidesRelation = cloned.slides || [];
-    
+  if (isRecord(content)) {
+    const slidesRelation = (cloned.slides ?? []) as SlideRow[];
+
     // Sort slides by their position/index
-    slidesRelation.sort((a: any, b: any) => a.position - b.position);
+    slidesRelation.sort((a, b) => a.position - b.position);
 
-    if (cloned.content.kind === 'ir-design' && cloned.content.ir) {
-      cloned.content.ir.slides = slidesRelation.map((s: any) => {
-        const slideContent = s.contentJson && typeof s.contentJson === 'object' ? s.contentJson : {};
-        return slideContent;
-      });
+    const typedContent = content as PostContent;
+
+    if (typedContent.kind === 'ir-design') {
+      if (!isRecord(typedContent.ir)) typedContent.ir = {};
+      typedContent.ir.slides = slidesRelation.map((s) =>
+        isRecord(s.contentJson) ? s.contentJson : {},
+      );
     } else {
       // Map database fields to the format expected by the frontend
-      cloned.content.slides = slidesRelation.map((s: any) => {
-        const slideContent = s.contentJson && typeof s.contentJson === 'object' ? s.contentJson : {};
-        return {
-          ...slideContent,
-          id: s.id,
-          metadata: s.metadata || undefined,
-        };
-      });
+      typedContent.slides = slidesRelation.map((s) => ({
+        ...(isRecord(s.contentJson) ? s.contentJson : {}),
+        id: s.id,
+        metadata: s.metadata || undefined,
+      }));
     }
   }
 
@@ -44,18 +81,21 @@ export function mergeSlidesIntoPost(post: any): any {
  * Synchronizes the slides array inside a Post's content object back into individual
  * rows in the relational Slide table. Performs update-in-place to minimize database churn.
  */
-export async function syncPostSlides(postId: string, content: any): Promise<void> {
-  const isHtml = content?.kind === 'html-design' && Array.isArray(content.slides);
-  const isIr = content?.kind === 'ir-design' && content.ir && Array.isArray(content.ir.slides);
-  
+export async function syncPostSlides(postId: string, content: unknown): Promise<void> {
+  if (!isRecord(content)) return;
+  const typed = content as PostContent;
+
+  const isHtml = typed.kind === 'html-design' && Array.isArray(typed.slides);
+  const isIr = typed.kind === 'ir-design' && isRecord(typed.ir) && Array.isArray(typed.ir.slides);
+
   if (!isHtml && !isIr) {
     return;
   }
 
-  const width = Number(content.width) || 1080;
-  const height = Number(content.height) || 1080;
-  const fonts = Array.isArray(content.fonts) ? content.fonts : ['Inter'];
-  const slides = isIr ? content.ir.slides : content.slides;
+  const width = Number(typed.width) || 1080;
+  const height = Number(typed.height) || 1080;
+  const fonts = (Array.isArray(typed.fonts) ? typed.fonts : ['Inter']) as string[];
+  const slides = (isIr ? typed.ir!.slides! : typed.slides!) as Record<string, unknown>[];
 
   // Fetch currently saved slides
   const existingSlides = await prisma.slide.findMany({
@@ -73,9 +113,11 @@ export async function syncPostSlides(postId: string, content: any): Promise<void
     let htmlDoc = '';
 
     try {
+      // O slide vem do JSON do post, então só sabemos a forma pelo `kind` do content.
+      // O compilador valida/normaliza o que receber, e a falha cai no catch abaixo.
       htmlDoc = isIr
-        ? compileSlideToDocument(slideContent, fonts, width, height)
-        : buildSlideDocument(slideContent, fonts, width, height);
+        ? compileSlideToDocument(slideContent as unknown as SlideNode, fonts, width, height)
+        : buildSlideDocument(slideContent as unknown as HtmlDesignSlide, fonts, width, height);
     } catch (e) {
       console.error(`Falha ao compilar slide ${i} para cache de render`, e);
     }
@@ -88,10 +130,10 @@ export async function syncPostSlides(postId: string, content: any): Promise<void
       await prisma.slide.update({
         where: { id: existing.id },
         data: {
-          contentJson: slideContent as any,
+          contentJson: slideContent as Prisma.InputJsonValue,
           htmlRender: htmlRenderValue,
           // Merge metadata if present in the slide content
-          metadata: slideContent.metadata !== undefined ? slideContent.metadata : existing.metadata,
+          metadata: (slideContent.metadata !== undefined ? slideContent.metadata : existing.metadata) as Prisma.InputJsonValue,
         },
       });
     } else {
@@ -100,9 +142,9 @@ export async function syncPostSlides(postId: string, content: any): Promise<void
         data: {
           postId,
           position: i,
-          contentJson: slideContent as any,
+          contentJson: slideContent as Prisma.InputJsonValue,
           htmlRender: htmlRenderValue,
-          metadata: slideContent.metadata || {},
+          metadata: (slideContent.metadata ?? {}) as Prisma.InputJsonValue,
         },
       });
     }

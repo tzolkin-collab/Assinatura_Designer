@@ -33,8 +33,28 @@ export interface ReviewResult {
   correctionInstructions?: string;
 }
 
+/** Layer de uma página no formato legado (nanoBanana). Campos opcionais porque a
+ *  página vem do JSON do post, sem garantia de schema. */
+interface ReviewLayer {
+  type?: string;
+  id?: string;
+  zIndex?: number;
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  content?: string;
+  url?: string;
+}
+
+interface ReviewPage {
+  kind?: string;
+  layers?: ReviewLayer[];
+  [key: string]: unknown;
+}
+
 export async function runReviewer(params: {
-  pages: any[];
+  pages: ReviewPage[];
   plan: PlannerOutput;
   brandContext: string;
 }): Promise<ReviewResult> {
@@ -174,10 +194,10 @@ async function runLegacyReviewer(
   const structuralDeviations = checkStructural(pages, plan);
   const slideSummary = pages.map((page, i) => {
     const slide = plan.slides[i];
-    const textLayers = page.layers?.filter((l: any) => l.type === 'text') ?? [];
-    const imageLayers = page.layers?.filter((l: any) => l.type === 'image') ?? [];
-    const sortedLayers = [...(page.layers ?? [])].sort((a: any, b: any) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
-    const compositionSignals = sortedLayers.slice(0, 8).map((layer: any) => {
+    const textLayers = page.layers?.filter((l) => l.type === 'text') ?? [];
+    const imageLayers = page.layers?.filter((l) => l.type === 'image') ?? [];
+    const sortedLayers = [...(page.layers ?? [])].sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
+    const compositionSignals = sortedLayers.slice(0, 8).map((layer) => {
       const base = `${layer.type}#${layer.id} z=${layer.zIndex ?? 0} x=${Math.round(layer.x ?? 0)} y=${Math.round(layer.y ?? 0)} w=${Math.round(layer.width ?? 0)} h=${Math.round(layer.height ?? 0)}`;
       if (layer.type === 'text') return `${base} text="${String(layer.content ?? '').slice(0, 60)}"`;
       if (layer.type === 'image') return `${base} image=${layer.url ? 'ok' : 'missing'}`;
@@ -187,7 +207,7 @@ async function runLegacyReviewer(
     - Image Hint Planejado: ${slide?.imageHint ?? 'Nenhum'}
     - ${textLayers.length} layers de texto
     - ${imageLayers.length} layers de imagem
-    - Conteúdo dos textos: ${textLayers.slice(0, 3).map((l: any) => `"${String(l.content ?? '').slice(0, 60)}"`).join(' | ')}
+    - Conteúdo dos textos: ${textLayers.slice(0, 3).map((l) => `"${String(l.content ?? '').slice(0, 60)}"`).join(' | ')}
     - Composição: ${compositionSignals}`;
   }).join('\n');
 

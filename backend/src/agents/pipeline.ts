@@ -1,59 +1,23 @@
 import { randomUUID } from 'crypto';
+import type { Prisma } from '@prisma/client';
 import prisma from '../lib/prisma.js';
-import { getSession, updateSession, updateBrandMemory, type ChatAttachment, type ChatMessage } from '../lib/redis.js';
+import { getSession, updateSession, updateBrandMemory } from '../lib/redis.js';
 import { ws } from '../lib/websocket.js';
 import { buildBrandContextSummary, resolveBrandContext } from '../lib/brandContext.js';
 import { executeTool } from './tools/index.js';
 import { runPlanner, MAX_SLIDES } from './planner/index.js';
-import { runContent } from './content/index.js';
-import { runImage } from './image/index.js';
-import { runDesign } from './design/index.js';
-import { runReviewer, runHtmlReviewer, runIRReviewer } from './reviewer/index.js';
+import { runIRReviewer } from './reviewer/index.js';
 import type { ReviewResult } from './reviewer/index.js';
 import { generateIRDesignProgressive } from '../lib/irDesign.js';
 import { syncPostSlides } from '../lib/postHelper.js';
-import {
-  buildLegacyTextBrief,
-  generateLegacyTextLayers,
-  researchBrand,
-  type VisualRef,
-} from '../lib/fabricaLegacy.js';
+import { researchBrand, type VisualRef } from '../lib/fabricaLegacy.js';
 import { humanizeGeminiError } from '../lib/geminiRetry.js';
-import { generateDesignDocument, extractJsonObject } from '../lib/designDocument.js';
+import { extractJsonObject } from '../lib/designDocument.js';
 import { GoogleGenAI } from '@google/genai';
 import { config } from '../config.js';
 import { generateWithRetry } from '../lib/geminiRetry.js';
 
 const ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
-
-function buildPostContent(pages: unknown, sessionId: string, messages: ChatMessage[]) {
-  return {
-    kind: 'fabrica-design',
-    version: 1,
-    sessionId,
-    pages,
-    chatHistory: messages
-      .filter((message) => message.role === 'user' || message.role === 'assistant' || message.role === 'system')
-      .map((message) => ({
-        role: message.role,
-        content: message.content,
-        timestamp: message.timestamp,
-        attachments: message.attachments?.map((attachment) => ({
-          name: attachment.name,
-          mimeType: attachment.mimeType,
-          dataBase64: attachment.dataBase64,
-        })),
-      })),
-  };
-}
-
-function extractConversationAssets(messages: ChatMessage[]): ChatAttachment[] {
-  return messages
-    .flatMap((message) => message.attachments ?? [])
-    .filter((attachment) => attachment.mimeType.startsWith('image/'))
-    .slice(-8);
-}
-
 // Extrai uma contagem de slides pedida no brief ("de 200 slides", "50 lâminas",
 // "30 páginas"). Clampa ao teto de sanidade. Retorna undefined se não citada.
 export function parseRequestedSlideCount(brief: string): number | undefined {
@@ -79,7 +43,7 @@ export async function runPipeline(params: PipelineParams): Promise<void> {
   // ── Carregar contexto canônico da marca ─────────────────────────────────────
   let brand;
   try {
-    brand = await resolveBrandContext(session.brandSlug, session.userId);
+    brand = await resolveBrandContext(session.brandSlug);
   } catch (error) {
     ws.error(sessionId, error instanceof Error ? error.message : 'Marca não encontrada');
     await updateSession(sessionId, { phase: 'error', workerStatus: 'error' });
@@ -87,12 +51,6 @@ export async function runPipeline(params: PipelineParams): Promise<void> {
   }
 
   const brandContext = buildBrandContextSummary(brand);
-
-  const brandRefs = {
-    refs: brand.references.map((reference) => ({ insightsText: reference.insightsText ?? null, palette: reference.palette })),
-    uploadedAssets: [],
-  };
-  const conversationAssets = extractConversationAssets(session.messages);
 
   await updateSession(sessionId, { phase: 'running', workerStatus: 'running' });
   const runningSession = await getSession(sessionId);
@@ -111,7 +69,7 @@ export async function runPipeline(params: PipelineParams): Promise<void> {
   let researchedRefs: VisualRef[] = [];
   let researchSummary = '';
 
-  let postId = randomUUID();
+  const postId = randomUUID();
 
   // Geração de passo único: gera → revisa → para. NÃO regeramos automaticamente
   // a apresentação inteira. A análise do revisor é mostrada ao usuário, que
@@ -174,7 +132,7 @@ export async function runPipeline(params: PipelineParams): Promise<void> {
             width,
             height,
             fonts: ['Inter'],
-          } as any,
+          } satisfies Prisma.InputJsonValue,
           slides: {
             create: skeleton.map((item) => ({
               position: item.order - 1,
@@ -183,7 +141,7 @@ export async function runPipeline(params: PipelineParams): Promise<void> {
                 title: item.title,
                 goal: item.goal,
                 layout_type: item.layout_type,
-              } as any,
+              } satisfies Prisma.InputJsonValue,
             })),
           },
         },
@@ -285,7 +243,7 @@ export async function runPipeline(params: PipelineParams): Promise<void> {
               await prisma.slide.update({
                 where: { id: existingSlide.id },
                 data: {
-                  contentJson: slide as any,
+                  contentJson: slide as unknown as Prisma.InputJsonValue,
                 },
               });
             }
@@ -410,18 +368,19 @@ export async function runPipeline(params: PipelineParams): Promise<void> {
     // Remove o array pesado de slides do JSON do post para usar a tabela slides.
     // html-design guarda em `slides` (topo); ir-design em `ir.slides` — sem tirar
     // este último o blob duplica o deck inteiro (a tabela relacional é a fonte).
-    const contentToSave = { ...postContent } as any;
+    const contentToSave: Record<string, unknown> = { ...postContent };
     delete contentToSave.slides;
     if (contentToSave.kind === 'ir-design' && contentToSave.ir) {
-      contentToSave.ir = { ...contentToSave.ir };
-      delete contentToSave.ir.slides;
+      const ir = { ...(contentToSave.ir as Record<string, unknown>) };
+      delete ir.slides;
+      contentToSave.ir = ir;
     }
 
     await prisma.post.update({
       where: { id: postId },
       data: {
         status: 'READY',
-        content: contentToSave as unknown as import('@prisma/client').Prisma.InputJsonValue,
+        content: contentToSave as Prisma.InputJsonValue,
       },
     });
 

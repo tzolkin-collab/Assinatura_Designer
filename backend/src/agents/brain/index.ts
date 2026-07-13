@@ -9,6 +9,8 @@ import {
   touchRecentBrand,
   createSession,
   type ChatAttachment,
+  type ChatMessage,
+  type FabricaSession,
 } from '../../lib/redis.js';
 import type { FabricaQuestion, PresentationConfig, ReviewMode } from '../../lib/fabricaSession.js';
 import { ws, onWsMessage, type WsAttachment } from '../../lib/websocket.js';
@@ -275,10 +277,14 @@ export async function reconnectSession(sessionId: string, userId?: string) {
       
       if (post && post.content) {
         const postWithSlides = mergeSlidesIntoPost(post);
-        const content = postWithSlides.content as any;
+        const content = (postWithSlides?.content ?? {}) as {
+          chatHistory?: ChatMessage[];
+          pages?: FabricaSession['currentDesign'];
+        };
         if (content.chatHistory) {
           // Recria a sessão no Redis a partir do histórico
-          session = await createSession(sessionId, post.brand.slug, post.brand.userId);
+          // Dono da sessão é quem criou o post — não "o dono da marca" (campo legacy removido).
+          session = await createSession(sessionId, post.brand.slug, post.createdById ?? undefined);
           session.messages = content.chatHistory;
           session.phase = 'done';
           if (content.pages) {
@@ -424,7 +430,7 @@ async function detectAndDispatch(
   sessionId: string,
   session: Awaited<ReturnType<typeof getSession>>,
   response: string,
-  userMessage: string,
+  _userMessage: string,
 ): Promise<void> {
   if (!session) return;
 
@@ -486,7 +492,7 @@ async function applySlideEdits(
 
   let brand;
   try {
-    brand = await resolveBrandContext(session.brandSlug, session.userId);
+    brand = await resolveBrandContext(session.brandSlug);
   } catch {
     return false;
   }

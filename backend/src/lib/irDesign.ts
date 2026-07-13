@@ -1,4 +1,4 @@
-import { type DesignIR, type SlideNode, type ElementNode, type BackgroundDef } from './designIR/types.js';
+import { type DesignIR, type SlideNode, type ElementNode } from './designIR/types.js';
 import type { GenerateHtmlDesignInput } from './htmlDesign.js';
 import { validateAndFixSlideAssets } from './assetValidator.js';
 

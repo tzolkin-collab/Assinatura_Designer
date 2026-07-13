@@ -3,7 +3,7 @@ import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import crypto from 'crypto';
 import { config } from '../config.js';
 import { createError } from '../middleware/errorHandler.js';
-import { AuthRequest } from '../middleware/auth.js';
+import { AuthRequest, requireAuth } from '../middleware/auth.js';
 import {
   normalizeImage,
   isSupportedMimeType,
@@ -53,6 +53,31 @@ function parseBase64Image(data: string) {
 
   return buffer;
 }
+
+import multer from 'multer';
+import { uploadFileToR2 } from '../lib/r2.js';
+
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+
+// POST /api/upload - Rota genérica para uploads avulsos (ex: pelo Editor no Frontend)
+uploadRouter.post('/', requireAuth, upload.single('file'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    assertR2Configured();
+    const file = req.file;
+    if (!file) throw createError(400, 'Nenhum arquivo enviado.');
+
+    const url = await uploadFileToR2(
+      file.buffer,
+      file.originalname,
+      file.mimetype,
+      `uploads/general` // Pasta genérica
+    );
+
+    res.status(201).json({ data: { url } });
+  } catch (error) {
+    next(error);
+  }
+});
 
 uploadRouter.post('/logo', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {

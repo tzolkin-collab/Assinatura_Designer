@@ -49,7 +49,7 @@ async function getCluster(): Promise<Cluster<TaskData, Buffer>> {
 
         // Espera as webfonts carregarem para não rasterizar com fonte de fallback.
         await page.evaluate(() => {
-          const d = (globalThis as any).document;
+          const d = (globalThis as unknown as { document?: { fonts?: { ready?: Promise<unknown> } } }).document;
           return d?.fonts?.ready ?? null;
         }).catch(() => {});
 

@@ -13,13 +13,28 @@ export interface SlideSkeletonItem {
   order: number;
 }
 
+/** Shape decorativo proposto pelo modelo. Campos opcionais: vêm de JSON do LLM,
+ *  sem garantia de schema — quem consome trata a ausência. */
+export interface DecorativeShape {
+  type?: string;
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  color?: string;
+  opacity?: number;
+  rotation?: number;
+  zIndex?: number;
+  [key: string]: unknown;
+}
+
 export interface SlidePlan {
   index: number;
   templateId: string;
   purpose: string;
   keyMessage: string;
   imageHint?: string;       // descrição visual para o Image Agent
-  decorativeShapes?: any[]; // Array de shapes CSS/SVG gerados pela IA
+  decorativeShapes?: DecorativeShape[]; // shapes CSS/SVG gerados pela IA
 }
 
 export interface PlannerOutput {

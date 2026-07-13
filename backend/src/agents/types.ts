@@ -1,5 +1,5 @@
 import type { DesignFormat, DesignTokens } from '../lib/designDocument.js';
-import type { SessionPhase, WorkerStatus } from '../lib/fabricaSession.js';
+import type { WorkerStatus } from '../lib/fabricaSession.js';
 
 // ── Protocolo de comunicação Cérebro ↔ Worker ─────────────────────────────────
 

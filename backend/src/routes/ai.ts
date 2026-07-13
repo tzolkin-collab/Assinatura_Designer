@@ -13,8 +13,16 @@ import { normalizeImage, isSupportedMimeType } from '../lib/imageNormalizer.js';
 import { generateWithRetry, generateStreamWithRetry } from '../lib/geminiRetry.js';
 import { DesignDocumentValidationError, generateDesignDocument, reviewDesignDocument, type DesignFormat, type HybridDesignPostContent, type HybridDesignChatMessage } from '../lib/designDocument.js';
 import { buildBrandAssistantInstruction, buildBrandContextSummary, resolveBrandContext, type ResolvedBrandContext } from '../lib/brandContext.js';
+import { requireBrandRole, EDITORS, type BrandRequest } from '../middleware/brandAccess.js';
 
 export const aiRouter = Router();
+
+// Toda rota com :slug exige vínculo de edição com a marca (todas aqui geram ou editam
+// design). Ficando no `param`, uma rota nova com :slug já nasce protegida — antes o
+// slug era resolvido direto no handler e qualquer usuário logado gerava em qualquer marca.
+aiRouter.param('slug', (req, res, next) =>
+  requireBrandRole(EDITORS)(req as BrandRequest, res as Response, next as NextFunction),
+);
 
 // ── In-memory job store for background generation resilience ──────────────────
 type GenerationJobStatus = 'pending' | 'running' | 'done' | 'error';
@@ -377,12 +385,12 @@ function normalizeStringArray(value: unknown, limit = 12): string[] {
     : [];
 }
 
-async function getDesignDocumentBrandContext(slug: string, userId?: string): Promise<ResolvedBrandContext> {
-  return resolveBrandContext(slug, userId);
+async function getDesignDocumentBrandContext(slug: string): Promise<ResolvedBrandContext> {
+  return resolveBrandContext(slug);
 }
 
-async function getBrandContext(brandSlug: string, userId?: string) {
-  const brand = await resolveBrandContext(brandSlug, userId);
+async function getBrandContext(brandSlug: string) {
+  const brand = await resolveBrandContext(brandSlug);
   return buildBrandAssistantInstruction(brand);
 }
 
@@ -395,7 +403,7 @@ aiRouter.post('/:slug/chat', async (req: AuthRequest, res: Response, next: NextF
     if (!message || typeof message !== 'string') throw createError(400, 'Message is required and must be a string');
     if (!config.geminiApiKey) throw createError(500, 'Gemini API Key is not configured');
 
-    const systemInstruction = await getBrandContext(slug, req.user?.userId);
+    const systemInstruction = await getBrandContext(slug);
 
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
@@ -441,7 +449,7 @@ aiRouter.post('/:slug/analyze-benchmark', async (req: AuthRequest, res: Response
 
     if (!content) throw createError(400, 'Content is required for analysis');
 
-    const brandContext = await getBrandContext(slug, req.user?.userId);
+    const brandContext = await getBrandContext(slug);
 
     const prompt = `
 Contexto da Marca Atual:
@@ -479,7 +487,6 @@ aiRouter.post('/:slug/generate-briefing', async (req: AuthRequest, res: Response
 
     const brand = await prisma.brand.findUnique({ where: { slug } });
     if (!brand) throw createError(404, 'Brand not found');
-    if (req.user?.userId && brand.userId !== req.user.userId) throw createError(403, 'Forbidden: You do not own this brand');
 
     const prompt = `
 Como um Diretor de Arte Especialista em IA, crie as diretrizes de marca (Brand Guidelines) e as instruções do Agente de IA para a marca "${brand.name}".
@@ -537,7 +544,7 @@ aiRouter.post('/:slug/generate-design-document', async (req: AuthRequest, res: R
     const normalizedWidth = normalizeDesignDimension(width, normalizedFormat === 'story' ? 1080 : 1920);
     const normalizedHeight = normalizeDesignDimension(height, normalizedFormat === 'story' ? 1920 : 1080);
     const normalizedSlideCount = normalizeSlideCount(slideCount, normalizedFormat);
-    const brand = await getDesignDocumentBrandContext(slug, req.user?.userId);
+    const brand = await getDesignDocumentBrandContext(slug);
     const preferredModel = config.geminiDesignDocumentModel || DESIGN_DOCUMENT_DEFAULT_MODEL;
 
     const content = await generateDesignDocument(
@@ -615,7 +622,6 @@ aiRouter.post('/:slug/generate-design', async (req: AuthRequest, res: Response, 
     return next(e);
   }
   if (!brand) return next(createError(404, 'Brand not found'));
-  if (req.user?.userId && brand.userId !== req.user.userId) return next(createError(403, 'Forbidden'));
 
   // From here: SSE — errors go through the stream
   res.setHeader('Content-Type', 'text/event-stream');
@@ -785,16 +791,18 @@ Garanta COERÊNCIA visual entre slides (mesma paleta, linguagem visual consisten
 
     const postType = normalizedFormat === 'carousel' ? 'CAROUSEL' : normalizedFormat === 'story' ? 'ANIMATION' : 'SINGLE_IMAGE';
 
+    const job = jobStore.get(jobId);
+
     const post = await prisma.post.create({
       data: {
         brandId: brand.id,
+        createdById: job?.userId || undefined,
         type: postType,
         status: 'DRAFT',
         content: pages as unknown as Prisma.InputJsonValue,
       },
     });
 
-    const job = jobStore.get(jobId);
     if (job) {
       job.status = 'done';
       job.postId = post.id;
@@ -829,7 +837,6 @@ aiRouter.post('/:slug/extract-from-logo', async (req: AuthRequest, res: Response
 
     const brand = await prisma.brand.findUnique({ where: { slug } });
     if (!brand) throw createError(404, 'Brand not found');
-    if (req.user?.userId && brand.userId !== req.user.userId) throw createError(403, 'Forbidden');
 
     // Normaliza para formato aceito pelo Gemini (SVG → PNG, HEIC → JPEG, etc.)
     const inputBuffer = Buffer.from(logoData, 'base64');
@@ -892,7 +899,6 @@ aiRouter.post('/:slug/generate-image', async (req: AuthRequest, res: Response, n
       include: { config: true },
     });
     if (!brand) throw createError(404, 'Brand not found');
-    if (req.user?.userId && brand.userId !== req.user.userId) throw createError(403, 'Forbidden: You do not own this brand');
 
     const normalizedWidth =
       typeof width === 'number' && Number.isFinite(width) ? Math.max(256, Math.min(4096, Math.floor(width))) : 1080;
@@ -1008,7 +1014,20 @@ REGRAS DE QUALIDADE:
 
         dataUrl = extractGeneratedImageDataUrl(response);
         if (!dataUrl) throw new Error(`Modelo ${model} não retornou imagem`);
-        break;
+        
+        const post = await prisma.post.create({
+          data: {
+            brandId: brand.id,
+            createdById: req.user?.userId || undefined,
+            type: 'SINGLE_IMAGE',
+            status: 'READY',
+            content: { type: 'image', dataUrl, prompt: creativePrompt, referencesUsed: refs } as Prisma.InputJsonValue,
+            previewUrl: dataUrl,
+          },
+        });
+
+        res.status(201).json({ data: { ...post, dataUrl } });
+        return;
       } catch (error) {
         lastImageError = error;
         console.warn(`[generate-image] ${model} failed:`, error);
@@ -1373,6 +1392,7 @@ async function createHybridDesign(
     generateImages,
     sessionId,
     chatHistory,
+    userId,
     send,
   }: {
     message: string;
@@ -1386,6 +1406,7 @@ async function createHybridDesign(
     generateImages?: boolean;
     sessionId?: string;
     chatHistory?: HybridDesignChatMessage[];
+    userId?: string;
     send: (e: CreateEvent) => void;
   },
 ): Promise<{ postId: string; content: HybridDesignPostContent }> {
@@ -1461,6 +1482,7 @@ async function createHybridDesign(
   const post = await prisma.post.create({
     data: {
       brandId: brand.id,
+      createdById: userId || undefined,
       type: slideCount > 1 ? 'CAROUSEL' : 'SINGLE_IMAGE',
       status: 'DRAFT',
       content: content as unknown as Prisma.InputJsonValue,
@@ -1742,7 +1764,7 @@ function normalizeHybridChatHistory(value: unknown): HybridDesignChatMessage[] |
   return messages.length > 0 ? messages : undefined;
 }
 
-async function resolveCreatePayload(body: CreateRequestBody, slug: string, userId?: string) {
+async function resolveCreatePayload(body: CreateRequestBody, slug: string) {
   const { message, answers, slideCount = 6, width = 1920, height = 1080, projectAssets, referenceAsset, generateImages, mode, sessionId, chatHistory } = body;
   const prompt = typeof message === 'string' ? message : '';
 
@@ -1752,9 +1774,8 @@ async function resolveCreatePayload(body: CreateRequestBody, slug: string, userI
 
   const brand = await prisma.brand.findUnique({ where: { slug }, include: { config: true } });
   if (!brand) throw createError(404, 'Brand not found');
-  if (userId && brand.userId !== userId) throw createError(403, 'Forbidden');
 
-  const resolvedBrand = await resolveBrandContext(slug, userId);
+  const resolvedBrand = await resolveBrandContext(slug);
   const brandCtx = buildBrandContextSummary(resolvedBrand);
 
   const validProjectAssets = Array.isArray(projectAssets)
@@ -1800,7 +1821,7 @@ async function resolveCreatePayload(body: CreateRequestBody, slug: string, userI
 aiRouter.post('/:slug/create-job', async (req: AuthRequest, res: Response, next: NextFunction) => {
   const slug = req.params.slug as string;
   try {
-    const payload = await resolveCreatePayload(req.body as CreateRequestBody, slug, req.user?.userId);
+    const payload = await resolveCreatePayload(req.body as CreateRequestBody, slug);
     const { message, answers, slideCount, width, height, generateImages, mode, brand, brandCtx, validProjectAssets, validReferenceAsset, sessionId, chatHistory } = payload;
     const prompt = typeof message === 'string' ? message : '';
     const job = createGenerationJob(slug, req.user?.userId);
@@ -1839,6 +1860,7 @@ aiRouter.post('/:slug/create-job', async (req: AuthRequest, res: Response, next:
                 generateImages: generateImages === true,
                 sessionId,
                 chatHistory,
+                userId: job.userId,
                 send,
               });
               job.postId = result.postId;
@@ -1895,7 +1917,7 @@ aiRouter.post('/:slug/create', async (req: AuthRequest, res: Response, next: Nex
 
   let payload: Awaited<ReturnType<typeof resolveCreatePayload>>;
   try {
-    payload = await resolveCreatePayload({ message, answers, slideCount, width, height, projectAssets, referenceAsset, generateImages }, slug, req.user?.userId);
+    payload = await resolveCreatePayload({ message, answers, slideCount, width, height, projectAssets, referenceAsset, generateImages }, slug);
   } catch (e) {
     return next(e);
   }
@@ -1957,6 +1979,7 @@ aiRouter.post('/:slug/create', async (req: AuthRequest, res: Response, next: Nex
         generateImages: generateImages === true,
         sessionId: payload.sessionId,
         chatHistory: payload.chatHistory,
+        userId: req.user?.userId,
         send,
       });
     } catch (hybridError) {
@@ -1992,7 +2015,6 @@ aiRouter.post('/:slug/search-design-references', async (req: AuthRequest, res: R
 
     const brand = await prisma.brand.findUnique({ where: { slug }, include: { config: true } });
     if (!brand) throw createError(404, 'Brand not found');
-    if (req.user?.userId && brand.userId !== req.user.userId) throw createError(403, 'Forbidden');
 
     const brandColors = (brand.config?.colors ?? []).join(', ') || 'não definidas';
     const briefStr = typeof brief === 'string' ? brief.slice(0, 300) : '';
@@ -2084,7 +2106,6 @@ aiRouter.post('/:slug/patch-design', async (req: AuthRequest, res: Response, nex
     brand = await prisma.brand.findUnique({ where: { slug }, include: { config: true } });
   } catch (e) { return next(e); }
   if (!brand) return next(createError(404, 'Brand not found'));
-  if (req.user?.userId && brand.userId !== req.user.userId) return next(createError(403, 'Forbidden'));
 
   const sc = typeof slideCount === 'number' && slideCount > 0 ? slideCount : currentPages.length;
   const w  = typeof width === 'number' && width > 0 ? width : 1920;
@@ -2288,7 +2309,6 @@ aiRouter.post('/:slug/fix-design-job', async (req: AuthRequest, res: Response, n
     const slug = req.params.slug as string;
     const brand = await prisma.brand.findUnique({ where: { slug } });
     if (!brand) throw createError(404, 'Brand not found');
-    if (req.user?.userId && brand.userId !== req.user.userId) throw createError(403, 'Forbidden');
 
     const { currentPages, selectedFixes, planOnly, request } = req.body as {
       currentPages?: unknown;
@@ -2361,7 +2381,6 @@ aiRouter.post('/:slug/fix-design', async (req: AuthRequest, res: Response, next:
 
     const brand = await prisma.brand.findUnique({ where: { slug }, include: { config: true } });
     if (!brand) throw createError(404, 'Brand not found');
-    if (req.user?.userId && brand.userId !== req.user.userId) throw createError(403, 'Forbidden');
 
     const brandColors: string[] = brand.config?.colors ?? [];
     const brandContext = await getBrandContext(slug);

@@ -265,10 +265,18 @@ export function runDesign(params: {
 
     // Adiciona as formas decorativas geradas pela IA
     if (slide.decorativeShapes && Array.isArray(slide.decorativeShapes)) {
-      slide.decorativeShapes.forEach((shape: any, idx: number) => {
+      slide.decorativeShapes.forEach((shape, idx: number) => {
+        // O shape vem do JSON do modelo, sem garantia de campos. O `any` anterior
+        // escondia isto: um shape sem x/y/width/height ou com `type` inválido entrava
+        // como layer mesmo assim. Preenchemos os obrigatórios e forçamos type='shape'.
         layers.push({
           ...shape,
           id: `ai-shape-${randomUUID().slice(0, 8)}`,
+          type: 'shape',
+          x: shape.x ?? 0,
+          y: shape.y ?? 0,
+          width: shape.width ?? 0,
+          height: shape.height ?? 0,
           zIndex: shape.zIndex ?? idx, // Pode ficar atrás ou na frente
         });
       });

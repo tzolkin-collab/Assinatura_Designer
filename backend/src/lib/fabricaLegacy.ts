@@ -102,7 +102,6 @@ export async function generateLegacyTextLayers(
   const padY = Math.round(h * 0.08);
   const safeX2 = w - padX;
   const safeY2 = h - padY;
-  const maxTextW = Math.round(w * 0.75);
 
   const systemInstruction = `Você é um diretor de arte tipográfico. Posiciona texto com precisão pixel-perfect em designs profissionais para ${slideCount} slides.
 
@@ -161,7 +160,7 @@ Conteúdo REAL do roteiro — extraia com fidelidade. Nunca placeholder.`;
 
 export function buildLegacyTextBrief(plan: PlannerOutput, content: ContentOutput): string {
   return plan.slides
-    .map((slide: any) => {
+    .map((slide) => {
       const zones = content[slide.index] ?? {};
       const zoneLines = Object.entries(zones)
         .filter(([, value]) => typeof value === 'string' && value.trim().length > 0)

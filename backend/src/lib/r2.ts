@@ -29,21 +29,33 @@ export function assertR2Configured(): void {
 }
 
 /**
- * Uploads a PNG Buffer to Cloudflare R2 and returns its public URL.
+ * Uploads a file Buffer to Cloudflare R2 and returns its public URL.
  */
-export async function uploadPngToR2(buffer: Buffer): Promise<string> {
+export async function uploadFileToR2(
+  buffer: Buffer,
+  fileName: string,
+  mimeType: string,
+  folder: string = 'assets'
+): Promise<string> {
   assertR2Configured();
 
-  const key = `renders/${crypto.randomUUID()}.png`;
+  // Garante um nome de arquivo único para não sobrescrever
+  const uniqueId = crypto.randomUUID();
+  const safeName = fileName.replace(/[^a-zA-Z0-9.-]/g, '_');
+  const key = `${folder}/${uniqueId}-${safeName}`;
 
   await s3.send(
     new PutObjectCommand({
       Bucket: config.r2BucketName,
       Key: key,
       Body: buffer,
-      ContentType: 'image/png',
+      ContentType: mimeType,
     })
   );
 
   return `${config.r2PublicUrl}/${key}`;
+}
+
+export async function uploadPngToR2(buffer: Buffer): Promise<string> {
+  return uploadFileToR2(buffer, 'render.png', 'image/png', 'renders');
 }

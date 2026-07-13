@@ -262,7 +262,6 @@ const FORBIDDEN_KEYS = new Set([
 
 const ALLOWED_NODE_TYPES = new Set(['container', 'text', 'image', 'shape']);
 const ALLOWED_FORMATS = new Set(['single', 'carousel', 'story']);
-const TEXT_ROLES = new Set(['eyebrow', 'headline', 'subtitle', 'body', 'caption', 'cta', 'title', 'quote', 'author', 'brand', 'contact', 'swipe-indicator', 'col-title', 'col-body', 'section-number', 'event-date', 'event-title', 'event-body']);
 
 type GeometryViolationCode =
   | 'missing-text-zone'
