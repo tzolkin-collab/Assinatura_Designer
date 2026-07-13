@@ -16,6 +16,8 @@ import { extractJsonObject } from '../lib/designDocument.js';
 import { GoogleGenAI } from '@google/genai';
 import { config } from '../config.js';
 import { generateWithRetry } from '../lib/geminiRetry.js';
+import { runWithAiContext } from '../lib/aiContext.js';
+import { logger } from '../lib/logger.js';
 
 const ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
 // Extrai uma contagem de slides pedida no brief ("de 200 slides", "50 lâminas",
@@ -35,10 +37,27 @@ export interface PipelineParams {
 }
 
 export async function runPipeline(params: PipelineParams): Promise<void> {
-  const { sessionId, brief, format } = params;
+  const { sessionId } = params;
 
   const session = await getSession(sessionId);
-  if (!session) { console.error('[Pipeline] Session not found:', sessionId); return; }
+  if (!session) {
+    logger.error('Sessão não encontrada', { sessionId, feature: 'pipeline' });
+    return;
+  }
+
+  // Abre o contexto: daqui para baixo, todo log e toda chamada de IA (planner,
+  // lotes, reviewer) sabem de que marca e de que sessão são, sem receber parâmetro.
+  return runWithAiContext(
+    { sessionId, brandSlug: session.brandSlug, feature: 'pipeline', requestId: sessionId },
+    () => runPipelineInner(params, session),
+  );
+}
+
+async function runPipelineInner(
+  params: PipelineParams,
+  session: NonNullable<Awaited<ReturnType<typeof getSession>>>,
+): Promise<void> {
+  const { sessionId, brief, format } = params;
 
   // ── Carregar contexto canônico da marca ─────────────────────────────────────
   let brand;
@@ -104,7 +123,7 @@ export async function runPipeline(params: PipelineParams): Promise<void> {
       format,
       targetSlideCount: requestedCount,
     }).catch((err) => {
-      console.error('[Pipeline] Planner failed, using fallback slide count:', err);
+      logger.error('Planner falhou; caindo na contagem de slides de fallback', { error: (err as Error).message });
       const count = requestedCount ?? (format === 'presentation' ? 6 : 4);
       return Array.from({ length: count }).map((_, i) => ({
         title: `Slide ${i + 1}`,
@@ -147,7 +166,7 @@ export async function runPipeline(params: PipelineParams): Promise<void> {
         },
       });
     } catch (dbErr) {
-      console.error('[Pipeline] Failed to pre-create Post/Slides in DB:', dbErr);
+      logger.error('Falha ao pré-criar Post/Slides no banco', { error: (dbErr as Error).message });
     }
 
     // ── 2. Geração HTML/CSS (modo nativo do modelo) ───────────────────────────
@@ -179,7 +198,7 @@ export async function runPipeline(params: PipelineParams): Promise<void> {
           // Diagnóstico: MAX_TOKENS => JSON truncado. Fica visível no log do worker.
           const finish = response.candidates?.[0]?.finishReason;
           if (finish && finish !== 'STOP') {
-            console.warn(`[Pipeline] geração terminou com finishReason=${finish} (texto ${response.text?.length ?? 0} chars) — pode truncar o JSON`);
+            logger.warn('Geração terminou sem STOP — o JSON pode vir truncado', { finishReason: finish, textLength: response.text?.length ?? 0 });
           }
           return response.text ?? '{}';
         },
@@ -248,7 +267,7 @@ export async function runPipeline(params: PipelineParams): Promise<void> {
               });
             }
           } catch (slideDbErr) {
-            console.error(`[Pipeline] Failed to save generated slide ${index + 1}:`, slideDbErr);
+            logger.error('Falha ao salvar slide gerado', { slide: index + 1, error: (slideDbErr as Error).message });
           }
 
           // Persiste o preview parcial no Redis (throttled) para o reconnect.
@@ -261,7 +280,7 @@ export async function runPipeline(params: PipelineParams): Promise<void> {
             };
             currentPages = [liveEnvelope] as unknown as typeof currentPages;
             await updateSession(sessionId, { currentDesign: currentPages }).catch((e) =>
-              console.error('[Pipeline] Falha ao persistir preview parcial:', e),
+              logger.error('Falha ao persistir preview parcial', { error: (e as Error).message }),
             );
           }
 
@@ -318,7 +337,7 @@ export async function runPipeline(params: PipelineParams): Promise<void> {
           objective: brief,
         });
       } catch (reviewErr) {
-        console.error('[Pipeline] Reviewer IR falhou, aprovando por segurança:', reviewErr);
+        logger.error('Reviewer IR falhou; aprovando por segurança (fail-safe)', { error: (reviewErr as Error).message });
         reviewResult = { approved: true, score: 75, deviations: [], feedback: 'Revisão automática indisponível', correctionInstructions: undefined };
       }
 
@@ -336,7 +355,7 @@ export async function runPipeline(params: PipelineParams): Promise<void> {
       }
 
     } catch (err) {
-      console.error('[Pipeline] DesignDocument error:', err);
+      logger.error('Erro no DesignDocument', { error: (err as Error).message });
       // Atualiza o status do post para FAILED no banco de dados
       await prisma.post.update({
         where: { id: postId },
@@ -396,7 +415,7 @@ export async function runPipeline(params: PipelineParams): Promise<void> {
       ].slice(-20),
     });
   } catch (err) {
-    console.error('[Pipeline] Failed to save post:', err);
+    logger.error('Falha ao salvar o post', { error: (err as Error).message });
   }
 
   // ── Finalizar ──────────────────────────────────────────────────────────────

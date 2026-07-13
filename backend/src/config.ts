@@ -16,6 +16,15 @@ export const config = {
   // orçamento para o output. -1 = dinâmico/ilimitado, 0 = sem thinking.
   geminiThinkingBudget: parseInt(process.env.GEMINI_THINKING_BUDGET || '12288', 10),
   nanoBananaApiKey: process.env.NANO_BANANA_API_KEY || '',
+  // ── Teto de gasto de IA (por dia, em tokens) ──
+  // Não existia teto nenhum: um deck grande dispara dezenas de chamadas simultâneas
+  // ao Gemini, e um brief mal formado queimava caixa sem ninguém ver. Contamos em
+  // tokens (exatos, vêm do provedor) e não em reais (tabela de preço envelhece calada).
+  // 0 = sem limite.
+  aiDailyTokenBudget: parseInt(process.env.AI_DAILY_TOKEN_BUDGET || '20000000', 10),
+  aiBrandDailyTokenBudget: parseInt(process.env.AI_BRAND_DAILY_TOKEN_BUDGET || '5000000', 10),
+  // Só para estimar o custo no log. 0 = não estima (default: não chutamos preço).
+  aiUsdPerMillionTokens: parseFloat(process.env.AI_USD_PER_MILLION_TOKENS || '0'),
   nodeEnv: process.env.NODE_ENV || 'development',
   isDev: process.env.NODE_ENV !== 'production',
   // ── Cloudflare R2 ──
@@ -43,6 +52,10 @@ export const config = {
   // vê a arte. É a QA mais forte, mas adiciona render + 1 chamada pro por geração.
   // Desligue (=false) para cair só no reviewer estrutural + semântico (flash).
   reviewerVisual: process.env.REVIEWER_VISUAL !== 'false',
+  // Quantos slides o crítico visual vê. A amostra é ESPALHADA pelo deck (capa,
+  // encerramento e o meio distribuído), não os N primeiros. Subir custa render +
+  // tokens de imagem por geração.
+  reviewerSampleSize: parseInt(process.env.REVIEWER_SAMPLE_SIZE || '8', 10),
   // ── Canva Connect API ──
   canvaClientId: process.env.CANVA_CLIENT_ID || '',
   canvaClientSecret: process.env.CANVA_CLIENT_SECRET || '',

@@ -1,4 +1,5 @@
 import { GoogleGenAI } from '@google/genai';
+import { assertWithinBudget, recordUsage } from './aiBudget.js';
 
 // Modelos de fallback — se o primário falhar (503/429/rede), tenta o próximo.
 // Modernizados: modelos capazes que produzem JSON confiável. Os antigos
@@ -84,6 +85,11 @@ export async function generateWithRetry(
     ? [preferredModel, ...MODEL_FALLBACK_CHAIN.filter((m) => m !== preferredModel)]
     : [...MODEL_FALLBACK_CHAIN];
 
+  // Todo gasto de IA passa por aqui: é o único ponto onde dá para cortar antes de
+  // cobrar. Fora do try: estourar o teto NÃO é retentável — retentar seria insistir
+  // em gastar o que já acabou.
+  await assertWithinBudget();
+
   let lastError: unknown;
 
   for (let modelIndex = 0; modelIndex < modelsToTry.length; modelIndex++) {
@@ -91,6 +97,7 @@ export async function generateWithRetry(
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       try {
         const result = await ai.models.generateContent({ ...params, model });
+        await recordUsage(model, result.usageMetadata);
         return result;
       } catch (err) {
         lastError = err;
@@ -121,15 +128,33 @@ export async function generateWithRetry(
 /**
  * Versão para streaming (generateContentStream).
  */
+type StreamResult = Awaited<ReturnType<InstanceType<typeof GoogleGenAI>['models']['generateContentStream']>>;
+
+/**
+ * O consumo de um stream só aparece no último chunk. Sem envolver o iterador, todo
+ * o gasto do chat ficaria fora da conta — e o teto seria furado pelo caminho mais
+ * usado do produto.
+ */
+async function* meterStream(stream: StreamResult, model: string): StreamResult {
+  let ultimoUso: unknown;
+  for await (const chunk of stream) {
+    if (chunk.usageMetadata) ultimoUso = chunk.usageMetadata;
+    yield chunk;
+  }
+  await recordUsage(model, ultimoUso as Parameters<typeof recordUsage>[1]);
+}
+
 export async function generateStreamWithRetry(
   ai: GoogleGenAI,
   params: GenerateContentParams,
   preferredModel?: string,
   hooks?: GeminiRetryHooks,
-): Promise<ReturnType<InstanceType<typeof GoogleGenAI>['models']['generateContentStream']>> {
+): Promise<StreamResult> {
   const modelsToTry = preferredModel
     ? [preferredModel, ...MODEL_FALLBACK_CHAIN.filter((m) => m !== preferredModel)]
     : [...MODEL_FALLBACK_CHAIN];
+
+  await assertWithinBudget();
 
   let lastError: unknown;
 
@@ -138,7 +163,7 @@ export async function generateStreamWithRetry(
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       try {
         const result = await ai.models.generateContentStream({ ...params, model });
-        return result;
+        return meterStream(result, model);
       } catch (err) {
         lastError = err;
         if (!isRetryable(err)) throw err;

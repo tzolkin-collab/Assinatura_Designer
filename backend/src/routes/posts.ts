@@ -14,6 +14,7 @@ import { resolveBrandContext } from '../lib/brandContext.js';
 import { uploadPngToR2 } from '../lib/r2.js';
 import { mergeSlidesIntoPost, syncPostSlides } from '../lib/postHelper.js';
 import { snapshotPost, restorePostVersion } from '../lib/postVersions.js';
+import { enrichAiContext } from '../lib/aiContext.js';
 import { enqueueCanvaExport, canvaExportQueue } from '../lib/queue.js';
 import { resolveRenderableDeck } from '../lib/renderableDeck.js';
 import type { SlideNode as IRSlideNode } from '../lib/designIR/types.js';
@@ -134,6 +135,10 @@ postsRouter.post('/:id/edit-slide', async (req: AuthRequest, res: Response, next
 
     const idx = Math.max(0, Math.min(Number(slideIndex) || 0, content.slides.length - 1));
 
+    // A rota não passa por requireBrandRole (a marca vem pelo post): sem isto o
+    // gasto desta edição não cairia no teto diário da marca.
+    enrichAiContext({ brandSlug: post.brand.slug, postId: post.id, feature: 'edit-slide' });
+
     // O estado de antes da IA vira versão. É o único jeito de o usuário voltar:
     // a edição escreve direto na tabela de slides.
     await snapshotPost(post.id, {
@@ -227,6 +232,8 @@ postsRouter.post('/:id/ai-patch', async (req: AuthRequest, res: Response, next: 
 
     const slides = content.ir!.slides;
     const idx = Math.max(0, Math.min(Number(slideIndex) || 0, slides.length - 1));
+
+    enrichAiContext({ brandSlug: post.brand.slug, postId: post.id, feature: 'ai-patch' });
 
     // O patch é aplicado no editor e só depois salvo, mas o banco AGORA ainda tem o
     // estado pré-IA: é aqui que ele tem de ser congelado. Esperar o PUT não serve —

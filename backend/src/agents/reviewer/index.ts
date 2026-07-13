@@ -10,6 +10,7 @@ import { renderHtmlToBase64 } from '../../lib/htmlRaster.js';
 import { buildSlideDocument, type HtmlDesignContent } from '../../lib/htmlDesign.js';
 import type { DesignIR, SlideNode, ElementNode } from '../../lib/designIR/types.js';
 import { compileSlideToDocument } from '../../lib/designIR/compiler.js';
+import { logger } from '../../lib/logger.js';
 
 const ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
 
@@ -159,7 +160,7 @@ Responda APENAS com JSON:
       correctionInstructions: result.correctionInstructions,
     };
   } catch (err) {
-    console.error('[Reviewer] Visual review failed, aprovando por segurança:', err);
+    logger.error('Revisão visual falhou; aprovando por segurança', { error: (err as Error).message });
     return { approved: true, score: 70, deviations: [], feedback: 'Revisão visual parcial', correctionInstructions: undefined };
   }
 }
@@ -179,7 +180,7 @@ export async function runHtmlReviewer(content: HtmlDesignContent, brandContext: 
       ),
     );
   } catch (err) {
-    console.error('[Reviewer] HTML render failed, aprovando por segurança:', err);
+    logger.error('Render HTML da revisão falhou; aprovando por segurança', { error: (err as Error).message });
     return { approved: true, score: 70, deviations: [], feedback: 'Revisão visual indisponível', correctionInstructions: undefined };
   }
   return critiqueRenderedSlides(images, brandContext, objective);
@@ -409,11 +410,37 @@ export function checkIRStructural(ir: DesignIR): ReviewDeviation[] {
 }
 
 /** Rasteriza os slides do IR (via compilador) para PNGs base64 — para o crítico visual. */
-async function renderIRSlides(ir: DesignIR, maxSlides = 8): Promise<string[]> {
-  const slides = ir.slides.slice(0, maxSlides);
+/**
+ * Escolhe QUAIS slides o crítico visual vai ver.
+ *
+ * Antes era `slice(0, 8)`: num deck de 200 slides o revisor via só os 8 primeiros
+ * — 4% da arte, e sempre o mesmo começo. Um erro do slide 90 nunca era visto, e a
+ * amostra nem sequer representava o deck. Agora a amostra é espalhada: capa,
+ * encerramento e o resto distribuído por igual. Continua barato (mesmo número de
+ * renders e de imagens no prompt), mas passa a olhar o deck todo.
+ */
+export function sampleSlideIndexes(total: number, max: number): number[] {
+  if (total <= 0 || max <= 0) return [];
+  if (total <= max) return Array.from({ length: total }, (_, i) => i);
+
+  const escolhidos = new Set<number>([0, total - 1]); // capa e encerramento sempre
+  const restantes = max - escolhidos.size;
+
+  for (let i = 1; i <= restantes; i++) {
+    escolhidos.add(Math.round((i * (total - 1)) / (restantes + 1)));
+  }
+
+  // O arredondamento pode colidir com um índice já escolhido e devolver menos que
+  // `max`; completa com os vizinhos ainda livres para não desperdiçar amostra.
+  for (let i = 1; i < total - 1 && escolhidos.size < max; i++) escolhidos.add(i);
+
+  return [...escolhidos].sort((a, b) => a - b).slice(0, max);
+}
+
+async function renderIRSlides(ir: DesignIR, indexes: number[]): Promise<string[]> {
   return Promise.all(
-    slides.map((s) =>
-      renderHtmlToBase64(compileSlideToDocument(s, ir.fonts, ir.width, ir.height), {
+    indexes.map((i) =>
+      renderHtmlToBase64(compileSlideToDocument(ir.slides[i]!, ir.fonts, ir.width, ir.height), {
         width: ir.width,
         height: ir.height,
         maxDim: 768,
@@ -446,17 +473,36 @@ export async function runIRReviewer(params: {
   let llm: ReviewResult | null = null;
   if (config.reviewerVisual) {
     try {
-      const images = await renderIRSlides(ir);
-      if (images.length > 0) llm = await critiqueRenderedSlides(images, brandContext, objective);
+      const amostra = sampleSlideIndexes(ir.slides.length, config.reviewerSampleSize);
+      const images = await renderIRSlides(ir, amostra);
+      if (images.length > 0) {
+        logger.info('Crítica visual do deck', {
+          slides: ir.slides.length,
+          amostrados: amostra.length,
+          indices: amostra,
+        });
+        llm = await critiqueRenderedSlides(images, brandContext, objective);
+
+        // O modelo numera os slides pela ORDEM DAS IMAGENS que recebeu. Com amostra
+        // salteada isso não é o índice real: sem remapear, o feedback culparia o
+        // slide errado (e a correção iria para o slide errado).
+        llm = {
+          ...llm,
+          deviations: (llm.deviations ?? []).map((d) => ({
+            ...d,
+            slideIndex: amostra[d.slideIndex] ?? d.slideIndex,
+          })),
+        };
+      }
     } catch (err) {
-      console.error('[Reviewer] Crítica visual do IR falhou, tentando semântica:', err);
+      logger.error('Crítica visual do IR falhou; tentando a semântica', { error: (err as Error).message });
     }
   }
   if (!llm) {
     try {
       llm = await runIRSemanticPass(ir, brandContext, objective, structural);
     } catch (err) {
-      console.error('[Reviewer] Passada semântica do IR falhou, usando só estrutural:', err);
+      logger.error('Passada semântica do IR falhou; usando só a estrutural', { error: (err as Error).message });
     }
   }
 

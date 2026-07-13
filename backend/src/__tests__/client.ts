@@ -19,6 +19,16 @@ vi.mock('../lib/redis', () => {
       set: vi.fn(async () => 'OK'),
       del: vi.fn(async () => 1),
       quit: vi.fn(async () => 'OK'),
+      incrby: vi.fn(async () => 1),
+      // Contadores do teto de IA usam multi(): o mock encadeia e não fala com Redis.
+      multi: vi.fn(() => {
+        const chain = {
+          incrby: vi.fn(() => chain),
+          expire: vi.fn(() => chain),
+          exec: vi.fn(async () => []),
+        };
+        return chain;
+      }),
     },
     createSession: vi.fn(),
     getSession: vi.fn(async () => null),

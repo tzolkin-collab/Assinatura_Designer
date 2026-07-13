@@ -3,7 +3,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import { config } from './config.js';
 import { errorHandler } from './middleware/errorHandler.js';
-import { requestLogger } from './middleware/requestLogger.js';
+import { requestContext } from './middleware/requestContext.js';
 import { requireAuth } from './middleware/auth.js';
 import { healthRouter } from './routes/health.js';
 import { brandsRouter } from './routes/brands.js';
@@ -41,7 +41,7 @@ app.use(
 app.use(cors({ origin: config.corsOrigin, credentials: true }));
 app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ extended: true }));
-app.use(requestLogger);
+app.use(requestContext);
 
 // ── Routes ──
 app.use('/api/health', healthRouter);

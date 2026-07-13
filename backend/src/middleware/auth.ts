@@ -2,6 +2,7 @@ import type { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { config } from '../config.js';
 import { createError } from './errorHandler.js';
+import { enrichAiContext } from '../lib/aiContext.js';
 
 export interface AuthRequest extends Request {
   user?: {
@@ -21,6 +22,7 @@ export const requireAuth = (req: AuthRequest, res: Response, next: NextFunction)
     const decoded = jwt.verify(token, config.jwtSecret) as { userId: string; role: string };
 
     req.user = decoded;
+    enrichAiContext({ userId: decoded.userId }); // log e teto de IA sabem de quem é
     next();
   } catch (error) {
     if (error instanceof jwt.JsonWebTokenError) {

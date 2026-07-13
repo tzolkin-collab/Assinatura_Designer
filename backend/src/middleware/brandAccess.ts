@@ -3,6 +3,7 @@ import type { BrandRole } from '@prisma/client';
 import prisma from '../lib/prisma.js';
 import { createError } from './errorHandler.js';
 import type { AuthRequest } from './auth.js';
+import { enrichAiContext } from '../lib/aiContext.js';
 
 /**
  * Autorização por marca (RBAC), única fonte de verdade.
@@ -59,6 +60,7 @@ export function requireBrandRole(allowed: BrandRole[]) {
 
       req.brand = brand;
       req.brandRole = membership.role;
+      enrichAiContext({ brandSlug: brand.slug }); // gasto de IA cai na conta da marca certa
       next();
     } catch (error) {
       next(error);

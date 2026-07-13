@@ -4,7 +4,21 @@ import { createError } from '../middleware/errorHandler.js';
 import type { AuthRequest } from '../middleware/auth.js';
 import { mergeSlidesIntoPost } from '../lib/postHelper.js';
 import { deleteFromR2 } from '../lib/r2.js';
+import { requireBrandRole, ANY_MEMBER, type BrandRequest } from '../middleware/brandAccess.js';
+import { getUsage } from '../lib/aiBudget.js';
+
 export const brandsRouter = Router();
+
+// GET /api/brands/:slug/ai-usage - quanto de IA esta marca já gastou hoje.
+// Sem isto o teto é invisível: só se descobre que existe quando ele corta.
+brandsRouter.get('/:slug/ai-usage', requireBrandRole(ANY_MEMBER), async (req: BrandRequest, res: Response, next: NextFunction) => {
+  try {
+    const usage = await getUsage(req.brand!.slug);
+    res.json({ data: usage });
+  } catch (error) {
+    next(error);
+  }
+});
 
 // GET /api/brands - List the authenticated user's brands
 brandsRouter.get('/', async (req: Request, res: Response, next: NextFunction) => {

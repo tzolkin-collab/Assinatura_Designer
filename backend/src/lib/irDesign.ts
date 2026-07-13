@@ -1,6 +1,7 @@
 import { type DesignIR, type SlideNode, type ElementNode } from './designIR/types.js';
 import type { GenerateHtmlDesignInput } from './htmlDesign.js';
 import { validateAndFixSlideAssets } from './assetValidator.js';
+import { logger } from './logger.js';
 
 export interface IRDesignPostContent {
   kind: 'ir-design';
@@ -272,7 +273,7 @@ export async function generateIRDesignProgressive(
       } catch (e) {
         lastErr = e;
         const msg = e instanceof Error ? e.message : String(e);
-        console.error(`[irDesign] lote ${startIndex + 1} tentativa ${attempt}/${MAX_BATCH_RETRIES} falhou: ${msg}`);
+        logger.warn('Lote falhou; vai retentar', { batchStart: startIndex + 1, attempt, maxAttempts: MAX_BATCH_RETRIES, error: msg });
         if (attempt < MAX_BATCH_RETRIES) await new Promise((r) => setTimeout(r, 800 * attempt));
       }
     }
@@ -334,7 +335,7 @@ export async function generateIRDesignProgressive(
     await processBatch(0, firstRec.slides as unknown[]);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    console.error(`[irDesign] lote 1 falhou após retries (${msg}) — degradando para fallback e seguindo com a base da marca`);
+    logger.error('Lote 1 falhou após os retries; degradando para fallback e seguindo com a base da marca', { error: msg });
     await processFallbackBatch(0);
   }
 
@@ -355,7 +356,7 @@ export async function generateIRDesignProgressive(
       // fallback em vez de derrubar a apresentação inteira. O reviewer estrutural
       // sinaliza esses slides (título simples) para o usuário refazê-los pontualmente.
       const msg = e instanceof Error ? e.message : String(e);
-      console.error(`[irDesign] lote ${startIndex + 1} falhou após retries (${msg}) — usando slides de fallback`);
+      logger.error('Lote falhou após os retries; usando slides de fallback', { batchStart: startIndex + 1, error: msg });
       await processFallbackBatch(startIndex);
     }
   });

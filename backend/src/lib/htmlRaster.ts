@@ -5,6 +5,7 @@
 import { Cluster } from 'puppeteer-cluster';
 import sharp from 'sharp';
 import os from 'os';
+import { logger } from './logger.js';
 
 export interface HtmlRasterOptions {
   width: number;
@@ -20,19 +21,62 @@ interface TaskData {
 
 let clusterPromise: Promise<Cluster<TaskData, Buffer>> | null = null;
 
+/** ~350MB por contexto de render, com folga para o Node e o Postgres client. */
+const MB_POR_TAREFA = 350;
+
+/**
+ * Quantas rasterizações simultâneas a máquina aguenta. `RASTER_CONCURRENCY` manda;
+ * sem ele, o limite sai da memória livre (não da CPU) porque é RAM que falta primeiro.
+ */
+function resolveRasterConcurrency(): number {
+  const configurado = parseInt(process.env.RASTER_CONCURRENCY || '0', 10);
+  if (Number.isFinite(configurado) && configurado > 0) return configurado;
+
+  const memoriaMb = os.totalmem() / 1024 / 1024;
+  const porMemoria = Math.floor((memoriaMb * 0.5) / MB_POR_TAREFA); // metade da RAM, no máximo
+  const porCpu = Math.max(1, os.cpus().length);
+
+  return Math.max(1, Math.min(4, porCpu, porMemoria));
+}
+
 async function getCluster(): Promise<Cluster<TaskData, Buffer>> {
   if (!clusterPromise) {
     clusterPromise = (async () => {
-      // Determina a concorrência ideal baseada no número de cores de CPU
-      const maxConcurrency = Math.max(1, os.cpus().length);
+      // Antes: CONCURRENCY_BROWSER com um chromium por core de CPU. Num deck grande
+      // isso é um browser inteiro (centenas de MB) por core, TODOS vivos ao mesmo
+      // tempo, competindo com o Node e com os workers da fila — a receita do OOM que
+      // derrubava o processo. Agora:
+      //
+      // - CONCURRENCY_CONTEXT: um browser só, um contexto isolado por tarefa. O
+      //   isolamento que importa aqui (páginas não compartilham estado) continua, mas
+      //   o custo de memória fica na casa de dezenas de MB por tarefa, não centenas.
+      // - Concorrência limitada e configurável, decidida pela MEMÓRIA da máquina e não
+      //   só pela CPU: rasterizar é gasto de RAM, não de cálculo.
+      const maxConcurrency = resolveRasterConcurrency();
+
+      logger.info('Subindo o cluster de rasterização', {
+        maxConcurrency,
+        cpus: os.cpus().length,
+        totalMemMb: Math.round(os.totalmem() / 1024 / 1024),
+      });
 
       const c = await Cluster.launch({
-        concurrency: Cluster.CONCURRENCY_BROWSER, // Isolamento total de recursos
+        concurrency: Cluster.CONCURRENCY_CONTEXT,
         maxConcurrency,
         retryLimit: 3,
+        // Uma página travada segurava um slot para sempre; com timeout ela morre e o
+        // slot volta. O render de um slide não passa de poucos segundos.
+        timeout: 60_000,
         puppeteerOptions: {
           headless: true,
-          args: ['--no-sandbox', '--disable-dev-shm-usage', '--disable-setuid-sandbox'],
+          args: [
+            '--no-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-setuid-sandbox',
+            '--disable-gpu',
+            // Sem isto o chromium mantém vivas as abas em segundo plano de decks longos.
+            '--js-flags=--max-old-space-size=512',
+          ],
         },
       });
 
@@ -91,10 +135,10 @@ export async function closeBrowser(): Promise<void> {
 
 // Garante limpeza de processos ao encerrar o servidor
 process.on('SIGTERM', () => {
-  closeBrowser().catch((err) => console.error('Erro ao fechar cluster Puppeteer no SIGTERM:', err));
+  closeBrowser().catch((err) => logger.error('Erro ao fechar o cluster Puppeteer no SIGTERM', { error: (err as Error).message }));
 });
 process.on('SIGINT', () => {
-  closeBrowser().catch((err) => console.error('Erro ao fechar cluster Puppeteer no SIGINT:', err));
+  closeBrowser().catch((err) => logger.error('Erro ao fechar o cluster Puppeteer no SIGINT', { error: (err as Error).message }));
 });
 
 /**

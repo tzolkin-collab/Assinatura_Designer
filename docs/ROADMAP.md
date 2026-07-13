@@ -129,15 +129,24 @@ avulsa na biblioteca do Canva. Para "arte pronta pra postar":
 
 ## Fase 3 — Robustez e escala
 
-- **Guardrails de custo de IA** — não há teto de gasto. Um deck de 200 slides dispara
-  `pipelineConcurrency × generationConcurrency` chamadas simultâneas ao Gemini. (Sem billing, isso é
-  proteção de caixa, não feature de produto.)
-- **Observabilidade** — só `console.log`; depurar falha de geração em produção é chute.
-- **Risco de OOM** no cluster Puppeteer com decks grandes (agrava com o export síncrono — ver 1.1).
-- **Reviewer visual amostra 8 slides** — 4% de cobertura num deck de 200.
-- **Sessão Redis numa única key** — contenção em decks longos.
-- **Limpar o legado** — `agents/design`, `agents/content`, `agents/image` e `fabricaLegacy` convivem com o
-  caminho IR ativo. Dois caminhos de código = bug corrigido só num deles.
+- ✅ **Guardrails de custo de IA.** Teto diário em TOKENS (global e por marca), contado no Redis e cortado
+  em `generateWithRetry` — o gargalo por onde passa toda chamada, streaming incluído. A conta é em token
+  (exato, vem do provedor) e não em reais: tabela de preço envelhece calada e passaria a mentir. `USD` só
+  como estimativa opcional de log. Consumo visível em `GET /brands/:slug/ai-usage`.
+- ✅ **Observabilidade.** `lib/logger.ts` (JSON em produção, legível em dev) + `requestId` por requisição e
+  contexto (marca/sessão/feature) propagado por `AsyncLocalStorage` — sem passar parâmetro por dez camadas.
+  Caminho de geração, fila e revisor migrados de `console.*`.
+- ✅ **OOM do Puppeteer.** Era `CONCURRENCY_BROWSER` com **um chromium por core de CPU**. Agora
+  `CONCURRENCY_CONTEXT` (um browser, contexto isolado por tarefa), concorrência decidida pela MEMÓRIA
+  (`RASTER_CONCURRENCY` manda) e timeout por página para o slot não ficar preso.
+- ✅ **Reviewer visual.** A amostra deixou de ser `slice(0, 8)` (os 8 primeiros, 4% de um deck de 200, sempre
+  o mesmo começo) e passou a ser espalhada pelo deck (capa + encerramento + meio distribuído), com o
+  `slideIndex` das críticas remapeado para o índice real. Tamanho em `REVIEWER_SAMPLE_SIZE`.
+- ✅ **Legado removido.** `agents/design`, `agents/image` e `agents/worker` deletados (ninguém importava).
+  `agents/content` fica: o `fabricaLegacy` (vivo, `researchBrand` no pipeline) usa o tipo dele.
+- 🔴 **Sessão Redis numa única key** — contenção em decks longos. Único item da Fase 3 ainda aberto.
+- 🟡 A cadeia de fallback começa em `gemini-3.5-flash` e, num teste real, caiu para `gemini-2.5-flash`.
+  Se o primário estiver indisponível, toda chamada paga retries à toa — vale conferir.
 
 ---
 

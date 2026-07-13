@@ -23,7 +23,9 @@ import { executeTool } from '../tools/index.js';
 import { resolveBrandContext } from '../../lib/brandContext.js';
 import { mergeSlidesIntoPost, syncPostSlides } from '../../lib/postHelper.js';
 import { snapshotPost } from '../../lib/postVersions.js';
+import { runWithAiContext, enrichAiContext } from '../../lib/aiContext.js';
 import { extractJsonObject } from '../../lib/designDocument.js';
+import { logger } from '../../lib/logger.js';
 
 const ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
 
@@ -292,11 +294,11 @@ export async function reconnectSession(sessionId: string, userId?: string) {
             session.currentDesign = content.pages;
           }
           await updateSession(sessionId, session);
-          console.log(`[Brain] Sessão ${sessionId} recuperada do Post ${post.id}`);
+          logger.info('Sessão recuperada a partir do Post', { sessionId, postId: post.id });
         }
       }
     } catch (err) {
-      console.error('[Brain] Erro ao recuperar sessão do DB:', err);
+      logger.error('Erro ao recuperar sessão do banco', { error: (err as Error).message });
     }
   }
 
@@ -321,6 +323,19 @@ async function handleUserMessage(
   userMessage: string,
   attachments?: ChatAttachment[],
 ): Promise<void> {
+  // O chat é o caminho mais usado do produto: sem o contexto aqui, o gasto de IA
+  // dele ficaria sem marca e o teto por marca seria furado justamente por ele.
+  return runWithAiContext({ sessionId, userId, feature: 'chat', requestId: sessionId }, () =>
+    handleUserMessageInner(sessionId, userId, userMessage, attachments),
+  );
+}
+
+async function handleUserMessageInner(
+  sessionId: string,
+  userId: string | undefined,
+  userMessage: string,
+  attachments?: ChatAttachment[],
+): Promise<void> {
   // Retry curto para absorver gap de reconexão Redis pós-ECONNRESET
   let session = await getSession(sessionId);
   if (!session) {
@@ -333,6 +348,10 @@ async function handleUserMessage(
   }
 
   if (userId && session.userId && session.userId !== userId) return;
+
+  // A marca só se conhece depois de carregar a sessão; sem isto o gasto do chat
+  // não cairia no teto da marca.
+  enrichAiContext({ brandSlug: session.brandSlug });
 
   // Persiste mensagem do usuário
   await appendMessage(sessionId, {
@@ -463,7 +482,7 @@ async function detectAndDispatch(
   // aqui é só de enfileiramento (ex.: Redis fora); falhas da geração em si são
   // tratadas no worker (queue.ts) e notificadas via ws.
   enqueuePipeline({ sessionId, brief: fullBrief, format }).catch(err => {
-    console.error('[Brain] Falha ao enfileirar pipeline:', err);
+    logger.error('Falha ao enfileirar o pipeline', { error: (err as Error).message });
     ws.error(sessionId, `Erro ao iniciar a geração: ${err instanceof Error ? err.message : String(err)}`);
   });
 }
@@ -522,7 +541,7 @@ async function applySlideEdits(
     }
   } catch (err) {
     // Não derruba a edição por causa do histórico, mas o usuário perde o ponto de volta.
-    console.error('[Brain] Falha ao versionar o design antes da edição por IA:', err);
+    logger.error('Falha ao versionar o design antes da edição por IA', { error: (err as Error).message });
   }
 
   await updateSession(sessionId, { phase: 'revising', workerStatus: 'running', activeQuestion: null });
@@ -554,7 +573,7 @@ async function applySlideEdits(
       );
       changed++;
     } catch (err) {
-      console.error('[Brain] editHtmlSlide falhou no slide', idx, err);
+      logger.error('editHtmlSlide falhou', { slide: idx, error: (err as Error).message });
     }
   }
 
@@ -584,7 +603,7 @@ async function applySlideEdits(
       });
     }
   } catch (err) {
-    console.error('[Brain] Falha ao persistir edição no Post:', err);
+    logger.error('Falha ao persistir a edição no Post', { error: (err as Error).message });
   }
 
   await updateSession(sessionId, { phase: 'done', workerStatus: 'done' });

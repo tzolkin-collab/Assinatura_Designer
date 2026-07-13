@@ -12,6 +12,7 @@ import { config } from '../config.js';
 import { ws } from './websocket.js';
 import { runPipeline, type PipelineParams } from '../agents/pipeline.js';
 import { runCanvaExport, type CanvaExportParams } from './canvaExport.js';
+import { logger } from './logger.js';
 
 const QUEUE_NAME = 'pipeline';
 
@@ -23,7 +24,7 @@ function makeConnection(): IORedis {
     maxRetriesPerRequest: null,
     enableReadyCheck: false,
   });
-  conn.on('error', (err) => console.error('[Queue][Redis]', err.message));
+  conn.on('error', (err) => logger.error('Redis da fila com erro', { error: err.message }));
   return conn;
 }
 
@@ -38,7 +39,7 @@ export const pipelineQueue = new Queue<PipelineParams>(QUEUE_NAME, {
   },
 });
 
-pipelineQueue.on('error', (err) => console.error('[Queue] pipelineQueue error:', err.message));
+pipelineQueue.on('error', (err) => logger.error('Fila de pipeline com erro', { error: err.message }));
 
 /**
  * Enfileira uma geração de design. Substitui o antigo `runPipeline(...).catch()`.
@@ -70,7 +71,7 @@ export const canvaExportQueue = new Queue<CanvaExportParams>(EXPORT_QUEUE_NAME, 
   },
 });
 
-canvaExportQueue.on('error', (err) => console.error('[Queue] canvaExportQueue error:', err.message));
+canvaExportQueue.on('error', (err) => logger.error('Fila de export do Canva com erro', { error: err.message }));
 
 export async function enqueueCanvaExport(params: CanvaExportParams): Promise<string> {
   const job = await canvaExportQueue.add('export', params);
@@ -100,9 +101,9 @@ export function startCanvaExportWorker(): Worker<CanvaExportParams> {
   );
 
   exportWorker.on('failed', (job, err) => {
-    console.error(`[Queue] export ${job?.id} falhou:`, err.message);
+    logger.error('Job de export do Canva falhou', { jobId: job?.id, error: err.message });
   });
-  exportWorker.on('error', (err) => console.error('[Queue] export worker error:', err.message));
+  exportWorker.on('error', (err) => logger.error('Worker de export com erro', { error: err.message }));
 
   console.log(`  ├─ Worker:       fila "${EXPORT_QUEUE_NAME}" (concorrência 1)`);
   return exportWorker;
@@ -132,14 +133,14 @@ export function startPipelineWorker(): Worker<PipelineParams> {
     const attempts = job?.opts.attempts ?? 1;
     const made = job?.attemptsMade ?? 0;
     const isFinal = made >= attempts;
-    console.error(`[Queue] job ${job?.id} falhou (tentativa ${made}/${attempts}):`, err.message);
+    logger.error('Job de pipeline falhou', { jobId: job?.id, attempt: made, maxAttempts: attempts, error: err.message });
     // Só avisa o usuário quando esgotaram as tentativas — evita ruído em retries.
     if (isFinal && job?.data.sessionId) {
       ws.error(job.data.sessionId, `Erro na geração: ${err.message}`);
     }
   });
 
-  worker.on('error', (err) => console.error('[Queue] worker error:', err.message));
+  worker.on('error', (err) => logger.error('Worker de pipeline com erro', { error: err.message }));
 
   console.log(`  ├─ Worker:       fila "${QUEUE_NAME}" (concorrência ${config.pipelineConcurrency})`);
   return worker;
