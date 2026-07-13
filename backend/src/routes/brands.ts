@@ -11,14 +11,43 @@ brandsRouter.get('/', async (req: Request, res: Response, next: NextFunction) =>
   try {
     const { userId } = (req as AuthRequest).user!;
     const brands = await prisma.brand.findMany({
-      where: { userId },
+      where: { members: { some: { userId } } },
       orderBy: { updatedAt: 'desc' },
       include: {
         _count: { select: { posts: true } },
-        user: { select: { id: true, name: true, email: true } }
+        members: { include: { user: { select: { id: true, name: true, email: true } } } }
       },
     });
-    res.json({ data: brands });
+    const mapped = brands.map(b => ({
+      ...b,
+      myRole: b.members.find(m => m.userId === userId)?.role,
+      user: b.members.find(m => m.role === 'OWNER')?.user
+    }));
+    res.json({ data: mapped });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/brands/discover - List all brands the user is NOT a member of
+brandsRouter.get('/discover', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { userId } = (req as AuthRequest).user!;
+    const brands = await prisma.brand.findMany({
+      where: { NOT: { members: { some: { userId } } } },
+      orderBy: { updatedAt: 'desc' },
+      include: {
+        _count: { select: { posts: true } },
+        members: { include: { user: { select: { id: true, name: true, email: true } } } },
+        accessRequests: { where: { userId, status: 'PENDING' } }
+      },
+    });
+    const mapped = brands.map(b => ({
+      ...b,
+      user: b.members.find(m => m.role === 'OWNER')?.user,
+      pendingRequest: b.accessRequests.length > 0
+    }));
+    res.json({ data: mapped });
   } catch (error) {
     next(error);
   }
@@ -30,11 +59,18 @@ brandsRouter.get('/:slug', async (req: Request, res: Response, next: NextFunctio
     const { userId } = (req as AuthRequest).user!;
     const slug = req.params.slug as string;
     const brand = await prisma.brand.findFirst({
-      where: { slug, userId },
-      include: { config: true, _count: { select: { posts: true, refs: true } } },
+      where: { slug, members: { some: { userId } } },
+      include: { 
+        config: true, 
+        _count: { select: { posts: true, refs: true } },
+        members: { include: { user: { select: { id: true, name: true, email: true } } } }
+      },
     });
     if (!brand) throw createError(404, 'Brand not found');
-    res.json({ data: brand });
+    
+    // Inject current user role
+    const myMembership = brand.members.find(m => m.userId === userId);
+    res.json({ data: { ...brand, myRole: myMembership?.role } });
   } catch (error) {
     next(error);
   }
@@ -46,14 +82,18 @@ brandsRouter.get('/:slug/posts', async (req: Request, res: Response, next: NextF
     const { userId } = (req as AuthRequest).user!;
     const slug = req.params.slug as string;
     const brand = await prisma.brand.findFirst({
-      where: { slug, userId },
+      where: { slug, members: { some: { userId } } },
       select: { id: true },
     });
     if (!brand) throw createError(404, 'Brand not found');
     const posts = await prisma.post.findMany({
       where: { brandId: brand.id },
       orderBy: { createdAt: 'desc' },
-      include: { folder: true, slides: { orderBy: { position: 'asc' } } },
+      include: { 
+        folder: true, 
+        slides: { orderBy: { position: 'asc' } },
+        createdBy: { select: { id: true, name: true, email: true } }
+      },
     });
     res.json({ data: posts.map(mergeSlidesIntoPost) });
   } catch (error) {
@@ -73,7 +113,14 @@ brandsRouter.post('/', async (req: Request, res: Response, next: NextFunction) =
     if (exist) throw createError(409, 'Brand with this name already exists');
 
     const brand = await prisma.brand.create({
-      data: { name, slug, color: color || '#171717', userId },
+      data: { 
+        name, 
+        slug, 
+        color: color || '#171717',
+        members: {
+          create: { user: { connect: { id: userId } }, role: 'OWNER' }
+        }
+      },
     });
     res.status(201).json({ data: brand });
   } catch (error) {
@@ -87,7 +134,7 @@ brandsRouter.put('/:slug', async (req: Request, res: Response, next: NextFunctio
     const { userId } = (req as AuthRequest).user!;
     const slug = req.params.slug as string;
     const { name, color } = req.body;
-    const existing = await prisma.brand.findFirst({ where: { slug, userId } });
+    const existing = await prisma.brand.findFirst({ where: { slug, members: { some: { userId, role: { in: ['OWNER', 'ADMIN'] } } } } });
     if (!existing) throw createError(404, 'Brand not found');
     const brand = await prisma.brand.update({ where: { slug }, data: { name, color } });
     res.json({ data: brand });
@@ -110,7 +157,7 @@ brandsRouter.get('/:slug/logo-asset', async (req: Request, res: Response, next: 
     const { userId } = (req as AuthRequest).user!;
     const slug = req.params.slug as string;
     const brand = await prisma.brand.findFirst({
-      where: { slug, userId },
+      where: { slug, members: { some: { userId } } },
       include: { config: true },
     });
     if (!brand) throw createError(404, 'Brand not found');
@@ -139,7 +186,7 @@ brandsRouter.delete('/:slug', async (req: Request, res: Response, next: NextFunc
   try {
     const { userId } = (req as AuthRequest).user!;
     const slug = req.params.slug as string;
-    const existing = await prisma.brand.findFirst({ where: { slug, userId } });
+    const existing = await prisma.brand.findFirst({ where: { slug, members: { some: { userId, role: 'OWNER' } } } });
     if (!existing) throw createError(404, 'Brand not found');
     await prisma.brand.delete({ where: { slug } });
     res.json({ message: 'Brand deleted successfully' });
@@ -153,5 +200,110 @@ brandsRouter.delete('/:slug', async (req: Request, res: Response, next: NextFunc
     }
     
     return next(error);
+  }
+});
+
+// POST /api/brands/:slug/request-access - Request access to a brand
+brandsRouter.post('/:slug/request-access', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { userId } = (req as AuthRequest).user!;
+    const slug = req.params.slug as string;
+    
+    const brand = await prisma.brand.findUnique({
+      where: { slug },
+      include: { members: { where: { role: 'OWNER' } } }
+    });
+    
+    if (!brand) throw createError(404, 'Brand not found');
+    
+    const isMember = await prisma.brandMember.findUnique({
+      where: { userId_brandId: { userId, brandId: brand.id } }
+    });
+    
+    if (isMember) throw createError(400, 'You are already a member');
+    
+    const existingReq = await prisma.accessRequest.findUnique({
+      where: { userId_brandId: { userId, brandId: brand.id } }
+    });
+    
+    if (existingReq && existingReq.status === 'PENDING') {
+      throw createError(400, 'Request already pending');
+    }
+    
+    let request;
+    if (existingReq) {
+      request = await prisma.accessRequest.update({
+        where: { id: existingReq.id },
+        data: { status: 'PENDING', updatedAt: new Date() }
+      });
+    } else {
+      request = await prisma.accessRequest.create({
+        data: { userId, brandId: brand.id, status: 'PENDING' }
+      });
+    }
+    
+    // Notify Owner
+    const owner = brand.members[0];
+    if (owner) {
+      const requester = await prisma.user.findUnique({ where: { id: userId } });
+      await prisma.notification.create({
+        data: {
+          userId: owner.userId,
+          title: 'Solicitação de Acesso',
+          message: `${requester?.name || 'Um usuário'} solicitou acesso ao projeto ${brand.name}.`,
+          type: 'INFO',
+          link: `/${brand.slug}/configuracoes/equipe`
+        }
+      });
+    }
+    
+    res.json({ data: request });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/brands/:slug/requests/:requestId/approve - Approve access request
+brandsRouter.post('/:slug/requests/:requestId/approve', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { userId } = (req as AuthRequest).user!;
+    const slug = req.params.slug as string;
+    const requestId = req.params.requestId as string;
+    const { role = 'VIEWER' } = req.body;
+    
+    const brand = await prisma.brand.findFirst({
+      where: { slug, members: { some: { userId, role: { in: ['OWNER', 'ADMIN'] } } } }
+    });
+    
+    if (!brand) throw createError(403, 'Not authorized');
+    
+    const request = await prisma.accessRequest.findUnique({ where: { id: requestId } });
+    if (!request || request.brandId !== brand.id) throw createError(404, 'Request not found');
+    
+    await prisma.accessRequest.update({
+      where: { id: requestId },
+      data: { status: 'APPROVED' }
+    });
+    
+    const member = await prisma.brandMember.upsert({
+      where: { userId_brandId: { userId: request.userId, brandId: brand.id } },
+      create: { userId: request.userId, brandId: brand.id, role },
+      update: { role }
+    });
+    
+    // Notify requester
+    await prisma.notification.create({
+      data: {
+        userId: request.userId,
+        title: 'Acesso Aprovado',
+        message: `Seu acesso ao projeto ${brand.name} foi aprovado!`,
+        type: 'SUCCESS',
+        link: `/${brand.slug}/galeria`
+      }
+    });
+    
+    res.json({ data: member });
+  } catch (error) {
+    next(error);
   }
 });

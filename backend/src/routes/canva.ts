@@ -1,8 +1,10 @@
 import { Router, Response, NextFunction } from 'express';
+import type { BrandRole } from '@prisma/client';
 import { config } from '../config.js';
 import prisma from '../lib/prisma.js';
 import { createError } from '../middleware/errorHandler.js';
 import { AuthRequest } from '../middleware/auth.js';
+import { assertBrandAccess, ANY_MEMBER, EDITORS, ADMINS } from '../middleware/brandAccess.js';
 import {
   generateCodeVerifier,
   generateCodeChallenge,
@@ -16,15 +18,18 @@ import {
 
 export const canvaRouter = Router();
 
-// ── Helper: get brand and verify ownership ──
+// ── Helper: get brand, exigindo vínculo do usuário (BrandMember) ──
+// Antes comparava `brand.userId` (só o dono legacy). Como a entrega do produto passa
+// pelo Canva, isso trancava a equipe fora do caminho de export.
 
-async function getBrandBySlug(slug: string, userId?: string) {
+async function getBrandBySlug(slug: string, userId?: string, roles: BrandRole[] = EDITORS) {
+  await assertBrandAccess(slug, userId, roles);
+
   const brand = await prisma.brand.findUnique({
     where: { slug },
     include: { canvaIntegration: true },
   });
   if (!brand) throw createError(404, 'Brand not found');
-  if (userId && brand.userId !== userId) throw createError(403, 'Forbidden: You do not own this brand');
   return brand;
 }
 
@@ -33,12 +38,14 @@ async function getBrandBySlug(slug: string, userId?: string) {
 
 canvaRouter.get('/:slug/auth-url', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
+    // Autoriza antes de qualquer coisa: quem não é membro não deve nem descobrir
+    // se a integração está configurada.
+    const slug = req.params.slug as string;
+    const brand = await getBrandBySlug(slug, req.user?.userId, ADMINS);
+
     if (!config.canvaClientId || !config.canvaClientSecret) {
       throw createError(500, 'Canva API credentials are not configured');
     }
-
-    const slug = req.params.slug as string;
-    const brand = await getBrandBySlug(slug, req.user?.userId);
 
     // Generate PKCE values
     const codeVerifier = generateCodeVerifier();
@@ -143,7 +150,7 @@ canvaRouter.get('/callback', async (req: AuthRequest, res: Response, next: NextF
 canvaRouter.get('/:slug/status', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const slug = req.params.slug as string;
-    const brand = await getBrandBySlug(slug, req.user?.userId);
+    const brand = await getBrandBySlug(slug, req.user?.userId, ANY_MEMBER);
 
     const integration = brand.canvaIntegration;
     const isConnected = !!(
@@ -171,7 +178,7 @@ canvaRouter.get('/:slug/status', async (req: AuthRequest, res: Response, next: N
 canvaRouter.delete('/:slug/disconnect', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const slug = req.params.slug as string;
-    const brand = await getBrandBySlug(slug, req.user?.userId);
+    const brand = await getBrandBySlug(slug, req.user?.userId, ADMINS);
 
     if (brand.canvaIntegration) {
       await prisma.canvaIntegration.delete({

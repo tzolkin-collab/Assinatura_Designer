@@ -1,0 +1,73 @@
+import { prisma } from '../lib/prisma';
+import { beforeEach, vi } from 'vitest';
+
+// Sem isto, os testes falam com o Redis REAL do .env: o rate limiter de verdade
+// contava as requisições dos testes e, depois de algumas rodadas, começava a
+// devolver 429 — teste dependendo de (e sujando) infraestrutura de produção.
+// Contador em memória, zerado a cada processo de teste.
+vi.mock('../lib/redis', () => {
+  const contadores = new Map<string, number>();
+  return {
+    redis: {
+      incr: vi.fn(async (key: string) => {
+        const n = (contadores.get(key) ?? 0) + 1;
+        contadores.set(key, n);
+        return n;
+      }),
+      expire: vi.fn(async () => 1),
+      get: vi.fn(async () => null),
+      set: vi.fn(async () => 'OK'),
+      del: vi.fn(async () => 1),
+      quit: vi.fn(async () => 'OK'),
+    },
+    createSession: vi.fn(),
+    getSession: vi.fn(async () => null),
+    updateSession: vi.fn(),
+    appendMessage: vi.fn(),
+    getRecentSession: vi.fn(async () => null),
+    getBrandMemory: vi.fn(async () => ({})),
+    updateBrandMemory: vi.fn(),
+    getUserMemory: vi.fn(async () => ({})),
+    updateUserMemory: vi.fn(),
+    touchRecentBrand: vi.fn(),
+  };
+});
+
+vi.mock('../lib/prisma', () => {
+  const prismaMock: Record<string, unknown> = {
+    brand: { findUnique: vi.fn() },
+    invite: { create: vi.fn(), findUnique: vi.fn(), updateMany: vi.fn() },
+    brandMember: {
+      findUnique: vi.fn(),
+      findMany: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+    },
+    user: { findUnique: vi.fn(), create: vi.fn() },
+    notification: { create: vi.fn() },
+    asset: { findMany: vi.fn(), create: vi.fn(), deleteMany: vi.fn() },
+    folder: { findMany: vi.fn(), findFirst: vi.fn(), create: vi.fn(), delete: vi.fn() },
+    brandConfig: { findUnique: vi.fn(), upsert: vi.fn() },
+    canvaIntegration: { upsert: vi.fn(), delete: vi.fn() },
+    post: { findFirst: vi.fn(), findMany: vi.fn() },
+  };
+
+  // O aceite de convite roda numa transação. Executamos o callback com o próprio mock,
+  // então as asserções sobre user.create/brandMember.create seguem valendo dentro dela.
+  prismaMock.$transaction = vi.fn((fn: (tx: unknown) => unknown) =>
+    typeof fn === 'function' ? fn(prismaMock) : Promise.resolve(fn),
+  );
+
+  return {
+    __esModule: true,
+    prisma: prismaMock,
+    default: prismaMock,
+  };
+});
+
+export const prismaMock = prisma as unknown as Record<string, Record<string, ReturnType<typeof vi.fn>>>;
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});

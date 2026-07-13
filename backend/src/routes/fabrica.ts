@@ -5,6 +5,7 @@ import { createError } from '../middleware/errorHandler.js';
 import { getSession } from '../lib/redis.js';
 import { createBrainSession, initBrainHandlers, reconnectSession } from '../agents/brain/index.js';
 import { buildBrandContextSummary, resolveBrandContext } from '../lib/brandContext.js';
+import { assertBrandAccess, EDITORS } from '../middleware/brandAccess.js';
 
 export const fabricaRouter = Router();
 
@@ -19,7 +20,12 @@ fabricaRouter.post('/sessions', async (req: AuthRequest, res, next) => {
     if (!brandSlug) return next(createError(400, 'brandSlug obrigatório'));
 
     const userId = req.user?.userId;
-    const brand = await resolveBrandContext(brandSlug, userId).catch((error) => {
+
+    // O slug vem no body, então não há :slug pro middleware pegar — checagem explícita.
+    // `resolveBrandContext` recebe userId mas não autoriza nada.
+    await assertBrandAccess(brandSlug, userId, EDITORS);
+
+    const brand = await resolveBrandContext(brandSlug).catch((error) => {
       throw error;
     });
 

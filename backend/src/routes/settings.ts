@@ -4,8 +4,9 @@ import { GoogleGenAI, Type, Schema } from '@google/genai';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import crypto from 'crypto';
 import { generateWithRetry } from '../lib/geminiRetry.js';
-import type { Prisma } from '@prisma/client';
+import type { Prisma, BrandRole } from '@prisma/client';
 import prisma from '../lib/prisma.js';
+import { assertBrandAccess, ANY_MEMBER, EDITORS } from '../middleware/brandAccess.js';
 import { createError } from '../middleware/errorHandler.js';
 import { config as appConfig } from '../config.js';
 import { AuthRequest } from '../middleware/auth.js';
@@ -80,11 +81,10 @@ async function isPublicHttpUrlResolved(raw: string): Promise<boolean> {
   }
 }
 
-// Helper to find brand by slug and verify ownership
-const getBrandId = async (slug: string, userId?: string) => {
-  const brand = await prisma.brand.findUnique({ where: { slug } });
-  if (!brand) throw createError(404, 'Brand not found');
-  if (userId && brand.userId !== userId) throw createError(403, 'Forbidden: You do not own this brand');
+// Resolve a marca pelo slug exigindo vínculo do usuário (BrandMember).
+// Antes isso comparava `brand.userId`, o que trancava a equipe inteira fora das configurações.
+const getBrandId = async (slug: string, userId?: string, roles: BrandRole[] = EDITORS) => {
+  const brand = await assertBrandAccess(slug, userId, roles);
   return brand.id;
 };
 
@@ -92,7 +92,7 @@ const getBrandId = async (slug: string, userId?: string) => {
 
 settingsRouter.get('/:slug/config', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const brandId = await getBrandId(req.params.slug as string, req.user?.userId);
+    const brandId = await getBrandId(req.params.slug as string, req.user?.userId, ANY_MEMBER);
     const config = await prisma.brandConfig.findUnique({ where: { brandId } });
 
     res.json({ data: config });
@@ -135,7 +135,7 @@ settingsRouter.put('/:slug/config', async (req: AuthRequest, res: Response, next
 
 settingsRouter.get('/:slug/referencias', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const brandId = await getBrandId(req.params.slug as string, req.user?.userId);
+    const brandId = await getBrandId(req.params.slug as string, req.user?.userId, ANY_MEMBER);
     const refs = await prisma.reference.findMany({
       where: { brandId },
       orderBy: { updatedAt: 'desc' },

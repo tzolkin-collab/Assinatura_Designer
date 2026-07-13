@@ -12,7 +12,15 @@ function normalizePresentationConfig(value: unknown): PresentationConfig | undef
   return value as PresentationConfig;
 }
 
-export async function resolveBrandContext(slug: string, userId?: string): Promise<ResolvedBrandContext> {
+/**
+ * Carrega o contexto da marca. **Não autoriza nada** — quem chama já deve ter passado
+ * pelo `brandAccess` (middleware `requireBrandRole` ou `assertBrandAccess`).
+ *
+ * Antes esta função recebia um `userId` que era simplesmente ignorado, e o nome deu a
+ * entender que havia checagem de acesso: rotas inteiras (ai, fabrica) ficaram abertas
+ * por causa disso. O parâmetro foi removido para que a assinatura não volte a mentir.
+ */
+export async function resolveBrandContext(slug: string): Promise<ResolvedBrandContext> {
   const brand = await prisma.brand.findUnique({
     where: { slug },
     include: {

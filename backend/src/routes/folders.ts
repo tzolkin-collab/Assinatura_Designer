@@ -2,20 +2,20 @@ import { Router, Response, NextFunction } from 'express';
 import prisma from '../lib/prisma.js';
 import { createError } from '../middleware/errorHandler.js';
 import { AuthRequest } from '../middleware/auth.js';
+import {
+  requireBrandRole,
+  brandMemberFilter,
+  ANY_MEMBER,
+  EDITORS,
+  type BrandRequest,
+} from '../middleware/brandAccess.js';
 
 export const foldersRouter = Router();
 
 // GET /api/folders/:brandSlug
-foldersRouter.get('/:slug', async (req: AuthRequest, res: Response, next: NextFunction) => {
+foldersRouter.get('/:slug', requireBrandRole(ANY_MEMBER), async (req: BrandRequest, res: Response, next: NextFunction) => {
   try {
-    const slug = req.params.slug as string;
-    const brand = await prisma.brand.findFirst({
-      where: {
-        slug,
-        userId: req.user?.userId
-      }
-    });
-    if (!brand) throw createError(404, 'Brand not found');
+    const brand = req.brand!;
 
     const folders = await prisma.folder.findMany({
       where: { brandId: brand.id },
@@ -29,20 +29,13 @@ foldersRouter.get('/:slug', async (req: AuthRequest, res: Response, next: NextFu
 });
 
 // POST /api/folders/:brandSlug
-foldersRouter.post('/:slug', async (req: AuthRequest, res: Response, next: NextFunction) => {
+foldersRouter.post('/:slug', requireBrandRole(EDITORS), async (req: BrandRequest, res: Response, next: NextFunction) => {
   try {
-    const slug = req.params.slug as string;
     const { name } = req.body;
-    
+
     if (!name) throw createError(400, 'Folder name is required');
 
-    const brand = await prisma.brand.findFirst({
-      where: {
-        slug,
-        userId: req.user?.userId
-      }
-    });
-    if (!brand) throw createError(404, 'Brand not found');
+    const brand = req.brand!;
 
     const folder = await prisma.folder.create({
       data: {
@@ -64,7 +57,7 @@ foldersRouter.delete('/:id', async (req: AuthRequest, res: Response, next: NextF
     const folder = await prisma.folder.findFirst({
       where: {
         id,
-        brand: { userId: req.user?.userId }
+        brand: brandMemberFilter(req.user?.userId, EDITORS)
       },
       select: { id: true }
     });

@@ -3,6 +3,7 @@ import type { Prisma } from '@prisma/client';
 import prisma from '../lib/prisma.js';
 import { createError } from '../middleware/errorHandler.js';
 import { AuthRequest } from '../middleware/auth.js';
+import { brandMemberFilter, ANY_MEMBER, EDITORS } from '../middleware/brandAccess.js';
 import { renderHtmlToPng } from '../lib/htmlRaster.js';
 import { buildSlideDocument, editHtmlSlide } from '../lib/htmlDesign.js';
 import { compileSlideToDocument } from '../lib/designIR/compiler.js';
@@ -153,7 +154,7 @@ postsRouter.post('/:id/edit-slide', async (req: AuthRequest, res: Response, next
     if (typeof instruction !== 'string' || !instruction.trim()) throw createError(400, 'instruction é obrigatória');
 
     const post = await prisma.post.findFirst({
-      where: { id, brand: { userId: req.user?.userId } },
+      where: { id, brand: brandMemberFilter(req.user?.userId, EDITORS) },
       include: { brand: true, slides: { orderBy: { position: 'asc' } } },
     });
     if (!post) throw createError(404, 'Post not found');
@@ -171,7 +172,7 @@ postsRouter.post('/:id/edit-slide', async (req: AuthRequest, res: Response, next
     }
 
     const idx = Math.max(0, Math.min(Number(slideIndex) || 0, content.slides.length - 1));
-    const brand = await resolveBrandContext(post.brand.slug, req.user?.userId);
+    const brand = await resolveBrandContext(post.brand.slug);
     const model = config.geminiDesignDocumentModel || 'gemini-3.1-pro-preview';
 
     const edited = await editHtmlSlide(
@@ -199,12 +200,12 @@ postsRouter.post('/:id/edit-slide', async (req: AuthRequest, res: Response, next
     );
 
     // Atualiza individualmente o registro do slide no banco
-    const existingSlide = post.slides.find((s: any) => s.position === idx);
+    const existingSlide = post.slides.find((s) => s.position === idx);
     if (existingSlide) {
       await prisma.slide.update({
         where: { id: existingSlide.id },
         data: {
-          contentJson: edited as any,
+          contentJson: edited as unknown as Prisma.InputJsonValue,
           htmlRender: buildSlideDocument(edited, content.fonts ?? ['Inter'], content.width ?? 1080, content.height ?? 1080),
         },
       });
@@ -238,7 +239,7 @@ postsRouter.post('/:id/ai-patch', async (req: AuthRequest, res: Response, next: 
     if (!instruction?.trim()) throw createError(400, 'instruction é obrigatória');
 
     const post = await prisma.post.findFirst({
-      where: { id, brand: { userId: req.user?.userId } },
+      where: { id, brand: brandMemberFilter(req.user?.userId, EDITORS) },
       include: { brand: true, slides: { orderBy: { position: 'asc' } } },
     });
     if (!post) throw createError(404, 'Post não encontrado');
@@ -314,7 +315,7 @@ postsRouter.get('/:id/export', async (req: AuthRequest, res: Response, next: Nex
   try {
     const id = req.params.id as string;
     const post = await prisma.post.findFirst({
-      where: { id, brand: { userId: req.user?.userId } },
+      where: { id, brand: brandMemberFilter(req.user?.userId, ANY_MEMBER) },
       include: { slides: { orderBy: { position: 'asc' } } },
     });
     if (!post) throw createError(404, 'Post not found');
@@ -346,7 +347,7 @@ postsRouter.get('/:id', async (req: AuthRequest, res: Response, next: NextFuncti
     const post = await prisma.post.findFirst({
       where: {
         id,
-        brand: { userId: req.user?.userId }
+        brand: brandMemberFilter(req.user?.userId, ANY_MEMBER)
       },
       include: {
         brand: true,
@@ -365,12 +366,12 @@ postsRouter.get('/:id', async (req: AuthRequest, res: Response, next: NextFuncti
 postsRouter.put('/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const id = req.params.id as string;
-    const { content, status, folderId } = req.body;
+    const { content, status, folderId, name } = req.body;
 
     const post = await prisma.post.findFirst({
       where: {
         id,
-        brand: { userId: req.user?.userId }
+        brand: brandMemberFilter(req.user?.userId, EDITORS)
       },
       select: { id: true, brandId: true }
     });
@@ -378,6 +379,10 @@ postsRouter.put('/:id', async (req: AuthRequest, res: Response, next: NextFuncti
     if (!post) throw createError(404, 'Post not found');
 
     const dataToUpdate: Prisma.PostUncheckedUpdateInput = {};
+    if (name !== undefined) {
+      dataToUpdate.name = name;
+    }
+
     if (content !== undefined) {
       if (content && content.kind === 'html-design' && Array.isArray(content.slides)) {
         // Sincroniza os slides relacionais primeiro
@@ -421,7 +426,7 @@ postsRouter.put('/:id', async (req: AuthRequest, res: Response, next: NextFuncti
           where: {
             id: folderId,
             brandId: post.brandId,
-            brand: { userId: req.user?.userId }
+            brand: brandMemberFilter(req.user?.userId, EDITORS)
           },
           select: { id: true }
         });
@@ -454,7 +459,7 @@ postsRouter.delete('/:id', async (req: AuthRequest, res: Response, next: NextFun
     const post = await prisma.post.findFirst({
       where: {
         id,
-        brand: { userId: req.user?.userId }
+        brand: brandMemberFilter(req.user?.userId, EDITORS)
       },
       select: { id: true }
     });
@@ -478,7 +483,7 @@ postsRouter.post('/:id/export-canva', async (req: AuthRequest, res: Response, ne
 
     // Busca o post com a marca e a integração do Canva inclusas
     const post = await prisma.post.findFirst({
-      where: { id, brand: { userId: req.user?.userId } },
+      where: { id, brand: brandMemberFilter(req.user?.userId, EDITORS) },
       include: {
         brand: {
           include: { canvaIntegration: true }
