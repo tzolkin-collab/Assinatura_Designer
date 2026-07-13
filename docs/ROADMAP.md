@@ -152,7 +152,14 @@ avulsa na biblioteca do Canva. Para "arte pronta pra postar":
   breaker com janela de 5 min (2 falhas → 3 min de cooldown): contar falhas *consecutivas* não abria o
   circuito num modelo intermitente, porque o acerto ocasional zerava a conta. Medido de ponta a ponta:
   70s → 26s no pior caso e ~1s quando o circuito já está aberto.
-- 🔴 **Sessão Redis numa única key** — contenção em decks longos. Único item da Fase 3 ainda aberto.
+- ✅ **Sessão Redis fatiada.** Era UMA key com metadados + histórico (anexos base64 juntos) + `currentDesign`
+  inteiro: cada mensagem de chat fazia GET+SETEX do blob todo, **duas vezes** (o "recent" era cópia integral),
+  sob lock. Agora são três keys — `:meta` (HASH), `:messages` (LIST, RPUSH O(1)) e `:design` (STRING, só
+  reescrito quando o design muda) — e o `recent` virou bandeira com TTL. Medido com deck de 200 slides
+  (design de 448KB): 20 mensagens custam **12KB** de escrita, contra ~18MB no desenho antigo. `appendMessage`
+  é um Lua de um round-trip (checa a sessão e escreve junto: um EXISTS separado dobraria a latência e abriria
+  janela para lista órfã sem TTL). Prefixo `v2` nas keys: as sessões antigas têm tipo incompatível com HASH
+  e expiram sozinhas.
 
 ---
 

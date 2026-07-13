@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto';
 import { config } from '../config.js';
 import type { DesignPage } from './designTypes.js';
 import type { FabricaQuestion, ReviewMode, SessionPhase, WorkerStatus } from './fabricaSession.js';
+import { logger } from './logger.js';
 
 export const redis = new Redis(config.redisUrl, {
   lazyConnect: true,
@@ -22,19 +23,37 @@ export const redis = new Redis(config.redisUrl, {
   },
 });
 
-redis.on('error', (err) => console.error('[Redis]', err.message));
-redis.on('reconnecting', () => console.log('[Redis] Reconectando...'));
-redis.on('connect', () => console.log('[Redis] Conectado'));
+redis.on('error', (err) => logger.error('Redis com erro', { error: err.message }));
+redis.on('reconnecting', () => logger.warn('Redis reconectando'));
+redis.on('connect', () => logger.info('Redis conectado'));
 
 // ── TTLs ──────────────────────────────────────────────────────────────────────
 const SESSION_TTL = 60 * 60 * 24;      // 24h
 const RECENT_TTL  = 60 * 60 * 2;       // 2h  (hot cache para reabertura rápida)
 
 // ── Keys ──────────────────────────────────────────────────────────────────────
-const sessionKey  = (id: string) => `fabrica:session:${id}`;
+//
+// A sessão vivia numa ÚNICA key: um JSON com metadados + histórico de mensagens
+// (com anexos em base64) + o currentDesign inteiro. Num deck de 200 slides o design
+// passa de 2MB, e CADA mensagem de chat fazia GET+SETEX do blob todo — duas vezes,
+// porque o "recent" era uma cópia integral. Ou seja, ~5MB de tráfego e re-serialização
+// para gravar uma frase, tudo serializado por um lock: era esse o gargalo em decks
+// longos.
+//
+// Agora a sessão são três keys, e cada escrita toca só o que mudou:
+//   :meta     HASH   — campos escalares (fase, status, pergunta ativa...). Bytes.
+//   :messages LIST   — RPUSH por mensagem: O(1) e não reescreve o histórico.
+//   :design   STRING — o design, gravado só quando o design muda.
+//
+// O sufixo v2 é de propósito: as sessões antigas (JSON string na key antiga) têm tipo
+// incompatível com HASH e dariam WRONGTYPE. Assim elas simplesmente expiram sozinhas.
+const sessionMetaKey = (id: string) => `fabrica:session:v2:${id}:meta`;
+const sessionMsgsKey = (id: string) => `fabrica:session:v2:${id}:messages`;
+const sessionDesignKey = (id: string) => `fabrica:session:v2:${id}:design`;
 const memBrandKey = (slug: string) => `fabrica:memory:brand:${slug}`;
 const memUserKey  = (uid: string)  => `fabrica:memory:user:${uid}`;
-const recentKey   = (id: string)   => `fabrica:recent:${id}`;
+/** Marcador de "esteve ativa" — não é mais uma CÓPIA da sessão, só uma bandeira. */
+const recentKey   = (id: string)   => `fabrica:recent:v2:${id}`;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -85,6 +104,32 @@ export interface UserMemory {
 
 // ── Session ───────────────────────────────────────────────────────────────────
 
+/** Campos escalares da sessão (tudo menos `messages` e `currentDesign`). */
+type SessionMeta = Omit<FabricaSession, 'messages' | 'currentDesign'>;
+
+/** Serializa os escalares para o HASH. `undefined` não vai (Redis não tem nulo). */
+function metaToHash(meta: Partial<SessionMeta>): Record<string, string> {
+  const hash: Record<string, string> = {};
+  for (const [campo, valor] of Object.entries(meta)) {
+    if (valor === undefined) continue;
+    // Objetos (activeQuestion) e escalares viram JSON: a volta é um JSON.parse só.
+    hash[campo] = JSON.stringify(valor);
+  }
+  return hash;
+}
+
+function hashToMeta(hash: Record<string, string>): SessionMeta {
+  const meta: Record<string, unknown> = {};
+  for (const [campo, valor] of Object.entries(hash)) {
+    try {
+      meta[campo] = JSON.parse(valor);
+    } catch {
+      meta[campo] = valor; // não deveria acontecer; melhor devolver cru do que quebrar
+    }
+  }
+  return meta as SessionMeta;
+}
+
 export async function createSession(
   sessionId: string,
   brandSlug: string,
@@ -105,15 +150,48 @@ export async function createSession(
     createdAt: now,
     updatedAt: now,
   };
-  await redis.setex(sessionKey(sessionId), SESSION_TTL, JSON.stringify(session));
+
+  const { messages: _m, currentDesign: _d, ...meta } = session;
+
+  await redis
+    .multi()
+    .del(sessionMsgsKey(sessionId), sessionDesignKey(sessionId)) // sessão nova nasce limpa
+    .hset(sessionMetaKey(sessionId), metaToHash(meta))
+    .expire(sessionMetaKey(sessionId), SESSION_TTL)
+    .setex(recentKey(sessionId), RECENT_TTL, '1')
+    .exec();
+
   return session;
 }
 
 export async function getSession(sessionId: string): Promise<FabricaSession | null> {
-  const raw = await redis.get(sessionKey(sessionId));
-  if (!raw) return null;
-  await redis.expire(sessionKey(sessionId), SESSION_TTL);
-  return JSON.parse(raw) as FabricaSession;
+  // UMA ida ao Redis: lê as três partes e já renova os TTLs no mesmo pacote. O Redis
+  // costuma ser remoto (~120ms de ida e volta), então round-trip é o custo dominante —
+  // ler e depois renovar em chamadas separadas dobrava a latência de cada leitura.
+  const resultados = await redis
+    .multi()
+    .hgetall(sessionMetaKey(sessionId))
+    .lrange(sessionMsgsKey(sessionId), 0, -1)
+    .get(sessionDesignKey(sessionId))
+    .expire(sessionMetaKey(sessionId), SESSION_TTL)
+    .expire(sessionMsgsKey(sessionId), SESSION_TTL)
+    .expire(sessionDesignKey(sessionId), SESSION_TTL)
+    .setex(recentKey(sessionId), RECENT_TTL, '1')
+    .exec();
+
+  if (!resultados) return null;
+
+  const hash = (resultados[0]?.[1] ?? {}) as Record<string, string>;
+  if (Object.keys(hash).length === 0) return null; // sessão não existe (ou expirou)
+
+  const mensagensCruas = (resultados[1]?.[1] ?? []) as string[];
+  const designCru = resultados[2]?.[1] as string | null;
+
+  return {
+    ...hashToMeta(hash),
+    messages: mensagensCruas.map((raw) => JSON.parse(raw) as ChatMessage),
+    currentDesign: designCru ? (JSON.parse(designCru) as DesignPage[]) : [],
+  };
 }
 
 // ── Lock por-sessão (serializa read-modify-write) ─────────────────────────────
@@ -170,40 +248,97 @@ async function withSessionLock<T>(sessionId: string, fn: () => Promise<T>): Prom
   }
 }
 
-async function persistSession(session: FabricaSession): Promise<void> {
-  const payload = JSON.stringify(session);
-  await redis.setex(sessionKey(session.id), SESSION_TTL, payload);
-  // Atualiza hot cache (últimas 2h para reabertura rápida de aba)
-  await redis.setex(recentKey(session.id), RECENT_TTL, payload);
-}
-
+/**
+ * Aplica só o que veio no patch, na key certa.
+ *
+ * Continua sob o lock, mas por um motivo diferente do de antes: as escritas em si
+ * já não são mais read-modify-write (HSET troca campo, SET troca o design), então o
+ * lost update daquele desenho sumiu. O lock permanece porque um patch de sessão
+ * INTEIRA (o brain, ao recuperar uma sessão do Post) reescreve as três keys, e isso
+ * não pode entrelaçar com um append de mensagem no meio.
+ */
 export async function updateSession(
   sessionId: string,
   patch: Partial<FabricaSession>,
 ): Promise<void> {
   await withSessionLock(sessionId, async () => {
-    const raw = await redis.get(sessionKey(sessionId));
-    if (!raw) return;
-    const session = JSON.parse(raw) as FabricaSession;
-    await persistSession({ ...session, ...patch, updatedAt: Date.now() });
+    const existe = await redis.exists(sessionMetaKey(sessionId));
+    if (!existe) return; // não ressuscita sessão expirada com um patch parcial
+
+    const { messages, currentDesign, ...meta } = patch;
+    const tx = redis.multi();
+
+    tx.hset(sessionMetaKey(sessionId), metaToHash({ ...meta, updatedAt: Date.now() }));
+
+    // O design só é reescrito quando o design muda — antes ele era re-serializado a
+    // cada troca de fase, a cada mensagem, a cada tudo.
+    if (currentDesign !== undefined) {
+      tx.setex(sessionDesignKey(sessionId), SESSION_TTL, JSON.stringify(currentDesign));
+    }
+
+    // Patch com o histórico inteiro só acontece na recuperação de sessão a partir do
+    // Post; aí sim a lista é trocada por completo.
+    if (messages !== undefined) {
+      tx.del(sessionMsgsKey(sessionId));
+      if (messages.length > 0) {
+        tx.rpush(sessionMsgsKey(sessionId), ...messages.map((m) => JSON.stringify(m)));
+      }
+    }
+
+    tx.expire(sessionMetaKey(sessionId), SESSION_TTL);
+    tx.expire(sessionMsgsKey(sessionId), SESSION_TTL);
+    tx.expire(sessionDesignKey(sessionId), SESSION_TTL);
+    tx.setex(recentKey(sessionId), RECENT_TTL, '1');
+
+    await tx.exec();
   });
 }
+
+/**
+ * Append da mensagem em UMA ida ao Redis, via Lua.
+ *
+ * Antes: lia a sessão inteira (design de MBs junto), dava push no array em memória e
+ * reescrevia tudo — duas vezes, por causa do "recent". Uma frase no chat custava
+ * megabytes. Agora é um RPUSH O(1) que não toca no histórico nem no design.
+ *
+ * O Lua serve para checar a existência da sessão e escrever no MESMO round-trip: um
+ * `EXISTS` antes dobraria a latência (o Redis é remoto) e ainda deixaria uma janela em
+ * que a sessão expira entre a checagem e a escrita — o RPUSH recriaria a lista órfã,
+ * sem meta e sem TTL, e ela viveria para sempre.
+ */
+const APPEND_MESSAGE_LUA = `
+if redis.call('exists', KEYS[1]) == 0 then return 0 end
+redis.call('rpush', KEYS[2], ARGV[1])
+redis.call('hset', KEYS[1], 'updatedAt', ARGV[2])
+redis.call('expire', KEYS[1], ARGV[3])
+redis.call('expire', KEYS[2], ARGV[3])
+redis.call('setex', KEYS[3], ARGV[4], '1')
+return 1
+`;
 
 export async function appendMessage(sessionId: string, msg: ChatMessage): Promise<void> {
-  await withSessionLock(sessionId, async () => {
-    const raw = await redis.get(sessionKey(sessionId));
-    if (!raw) return;
-    const session = JSON.parse(raw) as FabricaSession;
-    session.messages.push(msg);
-    session.updatedAt = Date.now();
-    await persistSession(session);
-  });
+  await redis.eval(
+    APPEND_MESSAGE_LUA,
+    3,
+    sessionMetaKey(sessionId),
+    sessionMsgsKey(sessionId),
+    recentKey(sessionId),
+    JSON.stringify(msg),
+    JSON.stringify(Date.now()), // o meta guarda JSON; number cru quebraria o parse na volta
+    String(SESSION_TTL),
+    String(RECENT_TTL),
+  );
 }
 
+/**
+ * "Esteve ativa nas últimas 2h?" O `recent` era uma CÓPIA integral da sessão (o dobro
+ * de escrita a cada update, design junto). Agora é só uma bandeira com TTL; os dados
+ * vêm da própria sessão.
+ */
 export async function getRecentSession(sessionId: string): Promise<FabricaSession | null> {
-  const raw = await redis.get(recentKey(sessionId));
-  if (!raw) return null;
-  return JSON.parse(raw) as FabricaSession;
+  const recente = await redis.exists(recentKey(sessionId));
+  if (!recente) return null;
+  return getSession(sessionId);
 }
 
 // ── Brand Memory ──────────────────────────────────────────────────────────────
