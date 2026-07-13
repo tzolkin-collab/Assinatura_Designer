@@ -1,7 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import './client';
 import type { GoogleGenAI } from '@google/genai';
-import { generateWithRetry, resetModelBreakers } from '../lib/geminiRetry';
+import { generateWithRetry, resetModelBreakers, timeoutForModel } from '../lib/geminiRetry';
+import { config } from '../config';
+
+/** O que o SDK lança quando o AbortSignal.timeout dispara. */
+function timeoutDoAbort() {
+  return Object.assign(new Error('The operation was aborted due to timeout'), { name: 'TimeoutError' });
+}
 
 /** Erro de sobrecarga, como o provedor devolve quando o modelo está lotado. */
 function sobrecarga() {
@@ -102,17 +108,105 @@ describe('Retry, fallback e circuit breaker do Gemini', () => {
     expect(generateContent.mock.calls.length).toBeGreaterThan(0); // tentou mesmo assim
   });
 
-  it('sucesso fecha o circuito (modelo que voltou não fica marcado para sempre)', async () => {
-    let lotado = true;
+  describe('timeout por tentativa', () => {
+    it('o corte é pelo peso do MODELO, não pela feature', () => {
+      // Editar um slide parece leve, mas roda no pro e legitimamente passa de 25s.
+      expect(timeoutForModel('gemini-3.1-pro-preview')).toBe(config.aiTimeoutHeavyMs);
+      expect(timeoutForModel('gemini-2.5-pro')).toBe(config.aiTimeoutHeavyMs);
+      // Já um flash que demora está doente: 70s para responder "oi".
+      expect(timeoutForModel('gemini-3.5-flash')).toBe(config.aiTimeoutLightMs);
+      expect(timeoutForModel('gemini-2.5-flash')).toBe(config.aiTimeoutLightMs);
+    });
+
+    it('cada tentativa vai com um abortSignal (senão o modelo lento nunca é cortado)', async () => {
+      const { ai, generateContent } = fakeAi(async () => resposta);
+
+      await generateWithRetry(ai, { model: 'x', contents: 'oi' }, 'gemini-2.5-flash');
+
+      const params = generateContent.mock.calls[0]![0] as { config?: { abortSignal?: AbortSignal } };
+      expect(params.config?.abortSignal).toBeInstanceOf(AbortSignal);
+    });
+
+    it('respeita o abortSignal que o chamador já passou (não cancela por baixo dele)', async () => {
+      const { ai, generateContent } = fakeAi(async () => resposta);
+      const meuSinal = new AbortController().signal;
+
+      await generateWithRetry(
+        ai,
+        { model: 'x', contents: 'oi', config: { abortSignal: meuSinal } },
+        'gemini-2.5-flash',
+      );
+
+      const params = generateContent.mock.calls[0]![0] as { config?: { abortSignal?: AbortSignal } };
+      expect(params.config?.abortSignal).toBe(meuSinal);
+    });
+
+    it('modelo lento: aborta, NÃO insiste e cai para o próximo', async () => {
+      const { ai, generateContent } = fakeAi(async (model) => {
+        if (model === 'gemini-3.5-flash') throw timeoutDoAbort();
+        return resposta;
+      });
+
+      const res = await generateWithRetry(ai, { model: 'x', contents: 'oi' });
+
+      expect(res).toBe(resposta);
+      const tentativasNoLento = generateContent.mock.calls.filter(
+        (c) => (c[0] as { model: string }).model === 'gemini-3.5-flash',
+      );
+      expect(tentativasNoLento).toHaveLength(1); // uma e vai embora
+    });
+
+    it('modelo lento repetido entra no breaker e some das chamadas seguintes', async () => {
+      const { ai, generateContent } = fakeAi(async (model) => {
+        if (model === 'gemini-3.5-flash') throw timeoutDoAbort();
+        return resposta;
+      });
+
+      await generateWithRetry(ai, { model: 'x', contents: 'oi' });
+      await generateWithRetry(ai, { model: 'x', contents: 'oi' });
+      generateContent.mockClear();
+
+      await generateWithRetry(ai, { model: 'x', contents: 'oi' });
+
+      const modelos = generateContent.mock.calls.map((c) => (c[0] as { model: string }).model);
+      expect(modelos).toEqual(['gemini-2.5-flash']); // nem tenta o lento
+    });
+  });
+
+  it('modelo INTERMITENTE também é pulado: um acerto no meio não apaga as falhas', async () => {
+    // O caso real, medido: o modelo estourou o tempo, respondeu (o que zerava a conta
+    // na versão antiga do breaker) e estourou de novo — e a chamada seguinte pagava a
+    // espera outra vez, porque o circuito nunca abria. As falhas contam por JANELA.
+    let vez = 0;
     const { ai, generateContent } = fakeAi(async (model) => {
-      if (model === 'gemini-3.5-flash' && lotado) throw sobrecarga();
+      if (model !== 'gemini-3.5-flash') return resposta;
+      vez++;
+      if (vez === 2) return resposta; // acerta na segunda
+      throw sobrecarga();
+    });
+
+    await generateWithRetry(ai, { model: 'x', contents: 'oi' }); // falha -> fallback
+    await generateWithRetry(ai, { model: 'x', contents: 'oi' }); // ACERTA
+    await generateWithRetry(ai, { model: 'x', contents: 'oi' }); // falha de novo -> abre
+    generateContent.mockClear();
+
+    await generateWithRetry(ai, { model: 'x', contents: 'oi' });
+
+    const modelos = generateContent.mock.calls.map((c) => (c[0] as { model: string }).model);
+    expect(modelos).toEqual(['gemini-2.5-flash']); // nem tenta o intermitente
+  });
+
+  it('depois do cooldown o modelo volta a ser tentado (não fica banido para sempre)', async () => {
+    let ruim = true;
+    const { ai, generateContent } = fakeAi(async (model) => {
+      if (model === 'gemini-3.5-flash' && ruim) throw sobrecarga();
       return resposta;
     });
 
     await generateWithRetry(ai, { model: 'x', contents: 'oi' });
     await generateWithRetry(ai, { model: 'x', contents: 'oi' }); // abre o circuito
 
-    lotado = false;
+    ruim = false;
     resetModelBreakers(); // simula o fim do cooldown
     generateContent.mockClear();
 

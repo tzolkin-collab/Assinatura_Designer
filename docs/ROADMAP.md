@@ -144,9 +144,15 @@ avulsa na biblioteca do Canva. Para "arte pronta pra postar":
   `slideIndex` das críticas remapeado para o índice real. Tamanho em `REVIEWER_SAMPLE_SIZE`.
 - ✅ **Legado removido.** `agents/design`, `agents/image` e `agents/worker` deletados (ninguém importava).
   `agents/content` fica: o `fabricaLegacy` (vivo, `researchBrand` no pipeline) usa o tipo dele.
+- ✅ **Modelo lotado/lento não trava mais a fila.** Conferido: o `gemini-3.5-flash` EXISTE (não foi
+  descontinuado), mas tem dois modos ruins — 503 "high demand" e, pior, *responder devagar* (medido: 70s para
+  dizer "oi", porque ele "pensa" por padrão; o 2.5-flash faz o mesmo em 0,8s). Sobrecarga e timeout agora têm
+  UMA tentativa e caem para o próximo modelo; timeout por tentativa é 25s (flash) / 150s (pro), decidido pelo
+  peso do MODELO — por feature cortaria a edição de slide, que roda no pro e legitimamente demora. Circuit
+  breaker com janela de 5 min (2 falhas → 3 min de cooldown): contar falhas *consecutivas* não abria o
+  circuito num modelo intermitente, porque o acerto ocasional zerava a conta. Medido de ponta a ponta:
+  70s → 26s no pior caso e ~1s quando o circuito já está aberto.
 - 🔴 **Sessão Redis numa única key** — contenção em decks longos. Único item da Fase 3 ainda aberto.
-- 🟡 A cadeia de fallback começa em `gemini-3.5-flash` e, num teste real, caiu para `gemini-2.5-flash`.
-  Se o primário estiver indisponível, toda chamada paga retries à toa — vale conferir.
 
 ---
 

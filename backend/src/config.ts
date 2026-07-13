@@ -25,6 +25,17 @@ export const config = {
   aiBrandDailyTokenBudget: parseInt(process.env.AI_BRAND_DAILY_TOKEN_BUDGET || '5000000', 10),
   // Só para estimar o custo no log. 0 = não estima (default: não chutamos preço).
   aiUsdPerMillionTokens: parseFloat(process.env.AI_USD_PER_MILLION_TOKENS || '0'),
+  // ── Timeout por tentativa ──
+  // Um modelo lento é pior que um modelo fora do ar: ele não dá erro, então o retry
+  // e o circuit breaker nunca entram, e a chamada só… demora. Medido: o
+  // gemini-3.5-flash levou 70s para responder "oi" (ele "pensa" por padrão), enquanto
+  // o 2.5-flash responde o mesmo em 0,8s. Estourado o tempo, cai para o próximo modelo.
+  //
+  // O corte é por PESO DO MODELO, não por feature: a edição de um slide é "leve" como
+  // fluxo, mas roda no pro e legitimamente passa de 25s. Modelo pro = geração pesada
+  // (40-75s é normal num lote de slides); flash = chamada que deveria ser rápida.
+  aiTimeoutLightMs: parseInt(process.env.AI_TIMEOUT_LIGHT_MS || '25000', 10),
+  aiTimeoutHeavyMs: parseInt(process.env.AI_TIMEOUT_HEAVY_MS || '150000', 10),
   nodeEnv: process.env.NODE_ENV || 'development',
   isDev: process.env.NODE_ENV !== 'production',
   // ── Cloudflare R2 ──
