@@ -4,12 +4,12 @@ import { useParams } from 'next/navigation';
 import PageHeader from '@/components/ui/PageHeader';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
-import { ArrowLeft, Download, Maximize2, X, Folder, Plus, Trash2, LayoutGrid, List, Sparkles, MessageSquareText, ExternalLink, Edit3 } from 'lucide-react';
+import { ArrowLeft, Download, Maximize2, X, Folder, FolderPlus, ChevronRight, ChevronDown, Plus, Trash2, LayoutGrid, List, Sparkles, MessageSquareText, ExternalLink, Edit3 } from 'lucide-react';
 import Link from 'next/link';
 import Image from 'next/image';
 import styles from './brand-galeria.module.css';
 import { useBrandPosts, useBrand, type Post } from '@/lib/hooks';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { api, API_BASE } from '@/lib/api';
 import { useBrandPermissions } from '@/hooks/useBrandPermissions';
 import { extractChatHistory, extractPreviewSource, extractSessionId, type FabricaChatHistoryMessage, type HtmlDesignPostContent } from '@/lib/designContent';
@@ -42,6 +42,37 @@ function formatAttachmentLabel(name: string, mimeType: string) {
   return name;
 }
 
+type FolderNode = { id: string; name: string; parentId: string | null };
+
+/** Agrupa as pastas por pai. O backend devolve lista plana; a árvore é montada aqui. */
+function groupByParent(folders: FolderNode[]): Map<string | null, FolderNode[]> {
+  const byParent = new Map<string | null, FolderNode[]>();
+  // Um pai que não está na lista (não deveria acontecer) viraria uma pasta órfã e
+  // invisível; tratamos como raiz para nunca sumir com a pasta do usuário.
+  const ids = new Set(folders.map(f => f.id));
+  for (const folder of folders) {
+    const parent = folder.parentId && ids.has(folder.parentId) ? folder.parentId : null;
+    const siblings = byParent.get(parent) ?? [];
+    siblings.push(folder);
+    byParent.set(parent, siblings);
+  }
+  return byParent;
+}
+
+/** Ids da subárvore de `folderId`, incluindo ela mesma: destinos proibidos ao mover. */
+function collectSubtree(folderId: string, byParent: Map<string | null, FolderNode[]>): Set<string> {
+  const blocked = new Set<string>([folderId]);
+  const queue = [folderId];
+  while (queue.length) {
+    const current = queue.shift()!;
+    for (const child of byParent.get(current) ?? []) {
+      blocked.add(child.id);
+      queue.push(child.id);
+    }
+  }
+  return blocked;
+}
+
 export default function BrandGaleriaPage() {
   const params = useParams();
   const slug = params.marca as string;
@@ -54,10 +85,13 @@ export default function BrandGaleriaPage() {
   const [previewIr, setPreviewIr] = useState<any | null>(null);
   const [chatHistoryPreview, setChatHistoryPreview] = useState<{ sessionId: string | null; messages: FabricaChatHistoryMessage[]; postLabel: string } | null>(null);
 
-  const [folders, setFolders] = useState<{id: string, name: string}[]>([]);
+  const [folders, setFolders] = useState<FolderNode[]>([]);
   const [activeFolder, setActiveFolder] = useState<string | null>(null);
   const [newFolderName, setNewFolderName] = useState('');
   const [creatingFolder, setCreatingFolder] = useState(false);
+  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+  // Pasta que vai receber a nova subpasta (null = criar na raiz).
+  const [newFolderParentId, setNewFolderParentId] = useState<string | null>(null);
 
   const { can, hint } = useBrandPermissions();
   const canEdit = can('edit-design');
@@ -84,34 +118,69 @@ export default function BrandGaleriaPage() {
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   
   const [draggedPostId, setDraggedPostId] = useState<string | null>(null);
+  const [draggedFolderId, setDraggedFolderId] = useState<string | null>(null);
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
-  
+
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+
+  const foldersByParent = useMemo(() => groupByParent(folders), [folders]);
 
   useEffect(() => {
     if (!slug) return;
     // Fetch folders
-    api.get<{id: string, name: string}[]>(`/folders/${slug}`).then(data => {
+    api.get<FolderNode[]>(`/folders/${slug}`).then(data => {
       if (data) setFolders(data);
     }).catch(err => console.warn('Falha ao carregar pastas:', err.message));
   }, [slug]);
 
+  const openFolderModal = (parentId: string | null, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setNewFolderParentId(parentId);
+    setShowFolderModal(true);
+  };
+
+  const toggleFolder = (folderId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setExpandedFolders(prev => {
+      const next = new Set(prev);
+      if (next.has(folderId)) next.delete(folderId);
+      else next.add(folderId);
+      return next;
+    });
+  };
+
   const handleCreateFolder = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newFolderName.trim() || creatingFolder) return;
-    
+
     setCreatingFolder(true);
     try {
-      const data = await api.post<{id: string, name: string}>(`/folders/${slug}`, { name: newFolderName });
+      const parentId = newFolderParentId;
+      const data = await api.post<FolderNode>(`/folders/${slug}`, { name: newFolderName, parentId });
       if (data) {
         setFolders(prev => [data, ...prev]);
+        // Sem isto a subpasta nasce escondida dentro de um pai colapsado.
+        if (parentId) setExpandedFolders(prev => new Set(prev).add(parentId));
         setNewFolderName('');
+        setNewFolderParentId(null);
         setShowFolderModal(false);
       }
     } catch (err) {
       console.error('Failed to create folder:', err);
     } finally {
       setCreatingFolder(false);
+    }
+  };
+
+  const handleMoveFolder = async (folderId: string, parentId: string | null) => {
+    const previous = folders;
+    setFolders(prev => prev.map(f => (f.id === folderId ? { ...f, parentId } : f)));
+    if (parentId) setExpandedFolders(prev => new Set(prev).add(parentId));
+    try {
+      await api.patch<FolderNode>(`/folders/${folderId}`, { parentId });
+    } catch (err) {
+      console.error('Failed to move folder:', err);
+      setFolders(previous); // o servidor recusou (ciclo, outra marca): desfaz o otimismo
     }
   };
 
@@ -141,14 +210,40 @@ export default function BrandGaleriaPage() {
     setDraggedPostId(postId);
   };
 
+  const handleFolderDragStart = (folderId: string, e: React.DragEvent) => {
+    e.stopPropagation();
+    setDraggedFolderId(folderId);
+  };
+
   const handleDragOver = (e: React.DragEvent, targetFolderId: string | null) => {
+    // Arrastando uma PASTA: o alvo vira o novo pai ('root' = tirar do aninhamento).
+    if (draggedFolderId) {
+      const dragged = folders.find(f => f.id === draggedFolderId);
+      if (!dragged) return;
+
+      if (targetFolderId === 'unassigned') return; // "Sem Pasta" só vale para posts
+
+      if (targetFolderId === 'root') {
+        if (!dragged.parentId) return; // já está na raiz
+      } else if (targetFolderId) {
+        // Soltar uma pasta dentro dela mesma ou de uma descendente destrói a árvore:
+        // o ramo perde a raiz e some da tela. O backend também recusa.
+        if (collectSubtree(dragged.id, foldersByParent).has(targetFolderId)) return;
+        if (dragged.parentId === targetFolderId) return; // já é o pai
+      }
+
+      e.preventDefault();
+      setDragOverFolderId(targetFolderId);
+      return;
+    }
+
     if (!draggedPostId) return;
-    
+
     const post = posts.find(p => p.id === draggedPostId);
     if (!post) return;
 
-    // Todas as Artes (all) não deve aceitar drop, pois é apenas um filtro de visualização
-    if (targetFolderId === 'all') return;
+    // Todas as Artes (root) não deve aceitar drop de post, pois é apenas um filtro de visualização
+    if (targetFolderId === 'root') return;
 
     // Não permitir drop em "Sem Pasta" se o post já estiver sem pasta
     if (targetFolderId === 'unassigned' && !post.folderId) return;
@@ -162,23 +257,99 @@ export default function BrandGaleriaPage() {
 
   const handleDrop = async (e: React.DragEvent, folderId: string | null) => {
     e.preventDefault();
-    if (draggedPostId) {
+    if (draggedFolderId) {
+      await handleMoveFolder(draggedFolderId, folderId === 'root' ? null : folderId);
+    } else if (draggedPostId) {
       await handleMoveToFolder(draggedPostId, folderId === 'unassigned' ? null : folderId);
     }
     setDraggedPostId(null);
+    setDraggedFolderId(null);
     setDragOverFolderId(null);
   };
 
   const handleDeleteFolder = async (folderId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!confirm('Deseja excluir esta pasta? Os itens não serão deletados, apenas movidos para a galeria geral.')) return;
+
+    const removed = collectSubtree(folderId, foldersByParent);
+    const subfolderCount = removed.size - 1;
+    const message = subfolderCount > 0
+      ? `Deseja excluir esta pasta e suas ${subfolderCount} subpasta(s)? As artes não serão deletadas, apenas movidas para a galeria geral.`
+      : 'Deseja excluir esta pasta? Os itens não serão deletados, apenas movidos para a galeria geral.';
+    if (!confirm(message)) return;
+
     try {
       await api.delete(`/folders/${folderId}`);
-      setFolders(prev => prev.filter(f => f.id !== folderId));
-      if (activeFolder === folderId) setActiveFolder(null);
+      // O banco apaga a subárvore em cascata; a tela precisa refletir o mesmo.
+      setFolders(prev => prev.filter(f => !removed.has(f.id)));
+      if (activeFolder && removed.has(activeFolder)) setActiveFolder(null);
+      if (mutate) mutate(); // os posts das pastas removidas voltaram para "Sem Pasta"
     } catch (err) {
       console.error('Failed to delete folder:', err);
     }
+  };
+
+  /** Desenha a subárvore de `parentId`. A indentação é a única pista de profundidade. */
+  const renderFolderTree = (parentId: string | null, depth: number): React.ReactNode => {
+    const children = foldersByParent.get(parentId) ?? [];
+
+    return children.map(folder => {
+      const subfolders = foldersByParent.get(folder.id) ?? [];
+      const hasChildren = subfolders.length > 0;
+      const isExpanded = expandedFolders.has(folder.id);
+
+      return (
+        <div key={folder.id}>
+          <div
+            className={`${styles.folderRow} ${activeFolder === folder.id ? styles.folderCardActive : ''} ${dragOverFolderId === folder.id ? styles.folderCardDragOver : ''}`}
+            style={{ marginLeft: `calc(${depth} * var(--space-6))` }}
+            onClick={() => setActiveFolder(folder.id)}
+            draggable={canEdit}
+            onDragStart={(e) => handleFolderDragStart(folder.id, e)}
+            onDragEnd={() => { setDraggedFolderId(null); setDragOverFolderId(null); }}
+            onDragOver={(e) => handleDragOver(e, folder.id)}
+            onDragLeave={() => setDragOverFolderId(null)}
+            onDrop={(e) => handleDrop(e, folder.id)}
+          >
+            <button
+              type="button"
+              className={styles.folderChevron}
+              onClick={(e) => toggleFolder(folder.id, e)}
+              disabled={!hasChildren}
+              aria-label={isExpanded ? 'Recolher subpastas' : 'Expandir subpastas'}
+              aria-expanded={hasChildren ? isExpanded : undefined}
+            >
+              {hasChildren
+                ? (isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />)
+                : <span className={styles.chevronPlaceholder} />}
+            </button>
+
+            <Folder size={16} />
+            <span className={styles.folderName}>{folder.name}</span>
+
+            {canEdit && (
+              <>
+                <button
+                  className={styles.closeBtn}
+                  onClick={(e) => openFolderModal(folder.id, e)}
+                  title="Criar subpasta"
+                >
+                  <FolderPlus size={12} />
+                </button>
+                <button
+                  className={styles.closeBtn}
+                  onClick={(e) => handleDeleteFolder(folder.id, e)}
+                  title="Excluir Pasta"
+                >
+                  <Trash2 size={12} />
+                </button>
+              </>
+            )}
+          </div>
+
+          {hasChildren && isExpanded && renderFolderTree(folder.id, depth + 1)}
+        </div>
+      );
+    });
   };
 
   const filteredPosts = posts.filter(post => {
@@ -240,16 +411,20 @@ export default function BrandGaleriaPage() {
         <div className={styles.modalOverlay} onClick={() => setShowFolderModal(false)}>
           <div className={styles.modalContent} onClick={(e) => e.stopPropagation()}>
             <div className={styles.modalHeader}>
-              <h3 className={styles.modalTitle}>Criar Pasta</h3>
+              <h3 className={styles.modalTitle}>
+                {newFolderParentId
+                  ? `Nova subpasta em "${folders.find(f => f.id === newFolderParentId)?.name ?? ''}"`
+                  : 'Criar Pasta'}
+              </h3>
               <button className={styles.closeBtn} onClick={() => setShowFolderModal(false)}>
                 <X size={20} />
               </button>
             </div>
 
             <form onSubmit={handleCreateFolder} className={styles.folderForm} style={{ marginBottom: 0 }}>
-              <input 
-                type="text" 
-                placeholder="Ex: Conteúdo orgânico" 
+              <input
+                type="text"
+                placeholder="Ex: Conteúdo orgânico"
                 value={newFolderName}
                 onChange={e => setNewFolderName(e.target.value)}
                 className={styles.folderInput}
@@ -530,21 +705,25 @@ export default function BrandGaleriaPage() {
               Analisar com IA
             </button>
           </div>
-          <Button size="sm" onClick={() => setShowFolderModal(true)} disabled={!canEdit} title={canEdit ? undefined : hint}>
+          <Button size="sm" onClick={() => openFolderModal(null)} disabled={!canEdit} title={canEdit ? undefined : hint}>
             <Plus size={14} />
             Criar Pasta
           </Button>
         </div>
-        
+
         <div className={styles.foldersGrid}>
-          <div 
-            className={`${styles.folderCard} ${activeFolder === null ? styles.folderCardActive : ''}`}
+          <div
+            className={`${styles.folderCard} ${activeFolder === null ? styles.folderCardActive : ''} ${dragOverFolderId === 'root' ? styles.folderCardDragOver : ''}`}
             onClick={() => setActiveFolder(null)}
+            onDragOver={(e) => handleDragOver(e, 'root')}
+            onDragLeave={() => setDragOverFolderId(null)}
+            onDrop={(e) => handleDrop(e, 'root')}
+            title="Arraste uma pasta para cá para tirá-la de dentro de outra"
           >
             <Folder size={16} />
             <span className={styles.folderName}>Todas as Artes</span>
           </div>
-          <div 
+          <div
             className={`${styles.folderCard} ${activeFolder === 'unassigned' ? styles.folderCardActive : ''} ${dragOverFolderId === 'unassigned' ? styles.folderCardDragOver : ''}`}
             onClick={() => setActiveFolder('unassigned')}
             onDragOver={(e) => handleDragOver(e, 'unassigned')}
@@ -554,29 +733,10 @@ export default function BrandGaleriaPage() {
             <Folder size={16} />
             <span className={styles.folderName}>Sem Pasta</span>
           </div>
-          
-          {folders.map(folder => (
-            <div 
-              key={folder.id}
-              className={`${styles.folderCard} ${activeFolder === folder.id ? styles.folderCardActive : ''} ${dragOverFolderId === folder.id ? styles.folderCardDragOver : ''}`}
-              onClick={() => setActiveFolder(folder.id)}
-              onDragOver={(e) => handleDragOver(e, folder.id)}
-              onDragLeave={() => setDragOverFolderId(null)}
-              onDrop={(e) => handleDrop(e, folder.id)}
-            >
-              <Folder size={16} />
-              <span className={styles.folderName}>{folder.name}</span>
-              {canEdit && (
-                <button 
-                  className={styles.closeBtn} 
-                  onClick={(e) => handleDeleteFolder(folder.id, e)}
-                  title="Excluir Pasta"
-                >
-                  <Trash2 size={12} />
-                </button>
-              )}
-            </div>
-          ))}
+        </div>
+
+        <div className={styles.folderTree}>
+          {renderFolderTree(null, 0)}
         </div>
       </div>
 

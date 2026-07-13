@@ -7,13 +7,13 @@ datasource db {
 }
 
 model User {
-  id                 String    @id @default(uuid())
-  email              String    @unique
+  id                 String          @id @default(uuid())
+  email              String          @unique
   password           String
   name               String
-  role               Role      @default(DESIGNER)
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
+  role               Role            @default(DESIGNER)
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
   asanaToken         String?
   googleAccessToken  String?
   googleRefreshToken String?
@@ -21,7 +21,7 @@ model User {
   canvaAccessToken   String?
   canvaRefreshToken  String?
   brandMemberships   BrandMember[]
-  invitesSent        Invite[]     @relation("InvitesSent")
+  invitesSent        Invite[]        @relation("InvitesSent")
   assets             Asset[]
   notifications      Notification[]
   createdPosts       Post[]
@@ -36,36 +36,36 @@ enum BrandRole {
 }
 
 model BrandMember {
-  id        String       @id @default(uuid())
-  role      BrandRole    @default(EDITOR)
-  createdAt DateTime     @default(now())
-  
-  userId    String
-  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  brandId   String
-  brand     Brand        @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  id        String    @id @default(uuid())
+  role      BrandRole @default(EDITOR)
+  createdAt DateTime  @default(now())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  brandId String
+  brand   Brand  @relation(fields: [brandId], references: [id], onDelete: Cascade)
 
   @@unique([userId, brandId])
   @@index([brandId])
 }
 
 model Asset {
-  id           String     @id @default(uuid())
-  name         String
-  url          String
-  fileType     String
-  sizeBytes    Int
-  width        Int?
-  height       Int?
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
-  
-  brandId      String
-  brand        Brand      @relation(fields: [brandId], references: [id], onDelete: Cascade)
-  
-  uploadedBy   String?
-  user         User?      @relation(fields: [uploadedBy], references: [id], onDelete: SetNull)
+  id        String   @id @default(uuid())
+  name      String
+  url       String
+  fileType  String
+  sizeBytes Int
+  width     Int?
+  height    Int?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  brandId String
+  brand   Brand  @relation(fields: [brandId], references: [id], onDelete: Cascade)
+
+  uploadedBy String?
+  user       User?   @relation(fields: [uploadedBy], references: [id], onDelete: SetNull)
 
   @@index([brandId])
 }
@@ -80,7 +80,7 @@ model Notification {
   type      String   @default("INFO")
   link      String?
   createdAt DateTime @default(now())
-  
+
   @@index([userId])
 }
 
@@ -198,6 +198,10 @@ model Folder {
   brand     Brand    @relation(fields: [brandId], references: [id], onDelete: Cascade)
   posts     Post[]
 
+  parentId  String?
+  parent    Folder?  @relation("FolderHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children  Folder[] @relation("FolderHierarchy")
+
   @@index([brandId])
 }
 
@@ -255,38 +259,38 @@ enum PostStatus {
 /// uma única vez, no link entregue a quem convida. Vazamento do banco não vira
 /// tomada de conta, mesma lógica de hashear senha.
 model Invite {
-  id          String    @id @default(uuid())
-  tokenHash   String    @unique
-  email       String
-  role        BrandRole @default(EDITOR)
+  id        String    @id @default(uuid())
+  tokenHash String    @unique
+  email     String
+  role      BrandRole @default(EDITOR)
 
-  brandId     String
-  brand       Brand     @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  brandId String
+  brand   Brand  @relation(fields: [brandId], references: [id], onDelete: Cascade)
 
   invitedById String?
-  invitedBy   User?     @relation("InvitesSent", fields: [invitedById], references: [id], onDelete: SetNull)
+  invitedBy   User?   @relation("InvitesSent", fields: [invitedById], references: [id], onDelete: SetNull)
 
-  expiresAt   DateTime
-  acceptedAt  DateTime?
-  createdAt   DateTime  @default(now())
+  expiresAt  DateTime
+  acceptedAt DateTime?
+  createdAt  DateTime  @default(now())
 
   @@index([brandId])
   @@index([email])
 }
 
 model AccessRequest {
-  id        String   @id @default(uuid())
-  status    String   @default("PENDING") // PENDING, APPROVED, REJECTED
-  
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  brandId   String
-  brand     Brand    @relation(fields: [brandId], references: [id], onDelete: Cascade)
-  
+  id     String @id @default(uuid())
+  status String @default("PENDING") // PENDING, APPROVED, REJECTED
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  brandId String
+  brand   Brand  @relation(fields: [brandId], references: [id], onDelete: Cascade)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  
+
   @@unique([userId, brandId])
   @@index([brandId])
   @@index([userId])
