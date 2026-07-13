@@ -7,7 +7,8 @@ import { ArrowLeft, CheckCircle, AlertCircle, Info, Loader2 } from 'lucide-react
 import PageHeader from '@/components/ui/PageHeader';
 import Card from '@/components/ui/Card';
 import styles from './canva.module.css';
-import { api } from '@/lib/api';
+import { api, getApiErrorMessage } from '@/lib/api';
+import { useBrandPermissions } from '@/hooks/useBrandPermissions';
 
 interface CanvaStatus {
   connected: boolean;
@@ -22,6 +23,10 @@ export default function CanvaConfigPage() {
   const [status, setStatus] = useState<CanvaStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
+  const [erro, setErro] = useState('');
+
+  const { can, hint } = useBrandPermissions();
+  const canManage = can('manage-integrations');
 
   const fetchStatus = async () => {
     try {
@@ -40,6 +45,7 @@ export default function CanvaConfigPage() {
   }, [slug]);
 
   const handleConnect = async () => {
+    setErro('');
     try {
       setActionLoading(true);
       const res = await api.get<{ authUrl: string }>(`/canva/${slug}/auth-url`);
@@ -47,21 +53,20 @@ export default function CanvaConfigPage() {
         window.location.href = res.authUrl;
       }
     } catch (err) {
-      console.error('Failed to start Canva OAuth:', err);
-      alert('Erro ao iniciar a integração com o Canva.');
+      setErro(getApiErrorMessage(err, 'Erro ao iniciar a integração com o Canva.'));
       setActionLoading(false);
     }
   };
 
   const handleDisconnect = async () => {
     if (!window.confirm('Tem certeza de que deseja desconectar sua conta do Canva?')) return;
+    setErro('');
     try {
       setActionLoading(true);
       await api.delete(`/canva/${slug}/disconnect`);
       await fetchStatus();
     } catch (err) {
-      console.error('Failed to disconnect Canva:', err);
-      alert('Erro ao desconectar do Canva.');
+      setErro(getApiErrorMessage(err, 'Erro ao desconectar do Canva.'));
     } finally {
       setActionLoading(false);
     }
@@ -122,13 +127,25 @@ export default function CanvaConfigPage() {
                 </div>
               )}
 
+              {erro && (
+                <p style={{ fontSize: '13px', color: '#ef4444', marginTop: '12px' }} role="alert">
+                  {erro}
+                </p>
+              )}
+
+              {!canManage && (
+                <p style={{ fontSize: '13px', color: 'var(--color-text-dim)', marginTop: '12px' }}>
+                  {hint} Conectar ou desconectar o Canva é uma ação de administrador.
+                </p>
+              )}
+
               <div className={styles.actions}>
                 {status?.connected ? (
-                  <button className={styles.btnSecondary} onClick={handleDisconnect} disabled={actionLoading}>
+                  <button className={styles.btnSecondary} onClick={handleDisconnect} disabled={actionLoading || !canManage} title={canManage ? undefined : hint}>
                     Desconectar Canva
                   </button>
                 ) : (
-                  <button className={styles.btnPrimary} onClick={handleConnect} disabled={actionLoading} style={{ background: '#7c3aed' }}>
+                  <button className={styles.btnPrimary} onClick={handleConnect} disabled={actionLoading || !canManage} title={canManage ? undefined : hint} style={{ background: '#7c3aed', opacity: canManage ? 1 : 0.5 }}>
                     {actionLoading ? 'Conectando...' : 'Conectar ao Canva'}
                   </button>
                 )}

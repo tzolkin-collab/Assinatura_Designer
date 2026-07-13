@@ -6,12 +6,15 @@ export type Brand = {
   id: string;
   slug: string;
   name?: string;
+  myRole?: 'OWNER' | 'ADMIN' | 'EDITOR' | 'VIEWER';
+  members?: Array<{ role: string; user: { id: string; name: string; email: string } }>;
 } & Record<string, unknown>;
 
 export type BrandConfig = Record<string, unknown>;
 
 export type Post = {
   id: string;
+  name: string | null;
   type: string;
   status?: string;
   content?: unknown;
@@ -20,6 +23,7 @@ export type Post = {
   createdAt: string;
   updatedAt?: string;
   brandId?: string;
+  createdBy?: { id: string; name: string; email: string } | null;
 };
 
 export type UserConnection = {

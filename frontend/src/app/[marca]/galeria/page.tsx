@@ -4,13 +4,14 @@ import { useParams } from 'next/navigation';
 import PageHeader from '@/components/ui/PageHeader';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
-import { ArrowLeft, Download, Maximize2, X, Folder, Plus, Trash2, LayoutGrid, List, Sparkles, MessageSquareText, ExternalLink } from 'lucide-react';
+import { ArrowLeft, Download, Maximize2, X, Folder, Plus, Trash2, LayoutGrid, List, Sparkles, MessageSquareText, ExternalLink, Edit3 } from 'lucide-react';
 import Link from 'next/link';
 import Image from 'next/image';
 import styles from './brand-galeria.module.css';
-import { useBrandPosts, type Post } from '@/lib/hooks';
+import { useBrandPosts, useBrand, type Post } from '@/lib/hooks';
 import { useState, useEffect } from 'react';
 import { api, API_BASE } from '@/lib/api';
+import { useBrandPermissions } from '@/hooks/useBrandPermissions';
 import { extractChatHistory, extractPreviewSource, extractSessionId, type FabricaChatHistoryMessage, type HtmlDesignPostContent } from '@/lib/designContent';
 import DesignRenderer, { type DesignPage } from '@/components/Fabrica/DesignRenderer';
 import DesignDocumentRenderer from '@/components/DesignDocument/DesignDocumentRenderer';
@@ -46,15 +47,38 @@ export default function BrandGaleriaPage() {
   const slug = params.marca as string;
   const marca = decodeURIComponent(slug);
   const { posts, loading, error, mutate } = useBrandPosts(slug);
+  const { brand } = useBrand(slug);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [previewDesign, setPreviewDesign] = useState<{ pages: DesignPage[]; width: number; height: number; document?: unknown } | null>(null);
   const [previewHtml, setPreviewHtml] = useState<HtmlDesignPostContent | null>(null);
+  const [previewIr, setPreviewIr] = useState<any | null>(null);
   const [chatHistoryPreview, setChatHistoryPreview] = useState<{ sessionId: string | null; messages: FabricaChatHistoryMessage[]; postLabel: string } | null>(null);
 
   const [folders, setFolders] = useState<{id: string, name: string}[]>([]);
   const [activeFolder, setActiveFolder] = useState<string | null>(null);
   const [newFolderName, setNewFolderName] = useState('');
   const [creatingFolder, setCreatingFolder] = useState(false);
+
+  const { can, hint } = useBrandPermissions();
+  const canEdit = can('edit-design');
+  
+  // Renomear post
+  const [renamingPostId, setRenamingPostId] = useState<string | null>(null);
+  const [newPostName, setNewPostName] = useState('');
+
+  const handleRenamePost = async (e: React.FormEvent, postId: string) => {
+    e.preventDefault();
+    if (!newPostName.trim()) return;
+    try {
+      await api.put(`/posts/${postId}`, { name: newPostName });
+      setRenamingPostId(null);
+      setNewPostName('');
+      if (mutate) mutate();
+    } catch (err) {
+      console.error('Failed to rename post', err);
+    }
+  };
+
   const [showFolderModal, setShowFolderModal] = useState(false);
   const [showAiReportModal, setShowAiReportModal] = useState(false);
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
@@ -270,7 +294,12 @@ export default function BrandGaleriaPage() {
                   <option key={f.id} value={f.id}>{f.name}</option>
                 ))}
               </select>
-              <Button variant="secondary" onClick={(e) => previewPost && handleDeletePost(previewPost.id, e)}>
+              <Button
+                variant="secondary"
+                onClick={(e) => previewPost && handleDeletePost(previewPost.id, e)}
+                disabled={!canEdit}
+                title={canEdit ? undefined : hint}
+              >
                 <Trash2 size={16} />
                 Excluir
               </Button>
@@ -294,6 +323,22 @@ export default function BrandGaleriaPage() {
             </div>
             <div className={styles.designModalBody}>
               <HtmlSlideRenderer content={previewHtml} mode="contain" />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {previewIr && (
+        <div className={styles.modalOverlay} onClick={() => setPreviewIr(null)}>
+          <div className={styles.designModal} onClick={(e) => e.stopPropagation()}>
+            <div className={styles.modalHeader}>
+              <h3 className={styles.modalTitle}>Apresentação — {previewIr.ir?.slides?.length ?? 0} slides</h3>
+              <button className={styles.closeBtn} onClick={() => setPreviewIr(null)}>
+                <X size={20} />
+              </button>
+            </div>
+            <div className={styles.designModalBody}>
+              <IRSlideRenderer content={previewIr} mode="contain" />
             </div>
           </div>
         </div>
@@ -439,6 +484,22 @@ export default function BrandGaleriaPage() {
         />
         
         <div className={styles.viewToggle}>
+          {brand?.members && (
+            <div className={styles.teamAvatars}>
+              {brand.members.slice(0, 3).map(m => (
+                <div key={m.user.id} className={styles.avatar} title={`${m.user.name} (${m.role})`}>
+                  {m.user.name.charAt(0).toUpperCase()}
+                </div>
+              ))}
+              {brand.members.length > 3 && (
+                <div className={styles.avatarMore}>+{brand.members.length - 3}</div>
+              )}
+              <Link href={`/${slug}/configuracoes/equipe`} className={styles.inviteBtn} title="Convidar para a Equipe">
+                <Plus size={14} />
+              </Link>
+            </div>
+          )}
+          
           <button 
             className={`${styles.toggleBtn} ${viewMode === 'list' ? styles.toggleBtnActive : ''}`}
             onClick={() => setViewMode('list')}
@@ -469,7 +530,7 @@ export default function BrandGaleriaPage() {
               Analisar com IA
             </button>
           </div>
-          <Button size="sm" onClick={() => setShowFolderModal(true)}>
+          <Button size="sm" onClick={() => setShowFolderModal(true)} disabled={!canEdit} title={canEdit ? undefined : hint}>
             <Plus size={14} />
             Criar Pasta
           </Button>
@@ -505,13 +566,15 @@ export default function BrandGaleriaPage() {
             >
               <Folder size={16} />
               <span className={styles.folderName}>{folder.name}</span>
-              <button 
-                className={styles.closeBtn} 
-                onClick={(e) => handleDeleteFolder(folder.id, e)}
-                title="Excluir Pasta"
-              >
-                <Trash2 size={12} />
-              </button>
+              {canEdit && (
+                <button 
+                  className={styles.closeBtn} 
+                  onClick={(e) => handleDeleteFolder(folder.id, e)}
+                  title="Excluir Pasta"
+                >
+                  <Trash2 size={12} />
+                </button>
+              )}
             </div>
           ))}
         </div>
@@ -531,7 +594,7 @@ export default function BrandGaleriaPage() {
             const preview = extractPreviewSource(post.content, post.previewUrl);
             const imageUrl = preview?.kind === 'image' ? preview.url : null;
             const designPages = preview?.kind === 'design' ? preview.pages : null;
-            const designDocument = preview?.kind === 'design' ? preview.document : undefined;
+            const designDocument = (preview?.kind === 'design' || preview?.kind === 'hybrid-document') ? preview.document : undefined;
             const htmlContent = preview?.kind === 'html-design' ? preview.content : null;
             const irContent = preview?.kind === 'ir-design' ? preview.content : null;
             const firstPage = designPages?.[0];
@@ -552,14 +615,16 @@ export default function BrandGaleriaPage() {
                     <span className={styles.postType}>{formatPostType(post.type)}</span>
 
                     <div className={styles.postActions}>
-                      <button
-                        className={styles.actionBtn}
-                        onClick={(e) => handleDeletePost(post.id, e)}
-                        title="Excluir Arte"
-                        style={{ color: 'rgb(220, 38, 38)' }}
-                      >
-                        <Trash2 size={14} />
-                      </button>
+                      {canEdit && (
+                        <button
+                          className={styles.actionBtn}
+                          onClick={(e) => handleDeletePost(post.id, e)}
+                          title="Excluir Arte"
+                          style={{ color: 'rgb(220, 38, 38)' }}
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      )}
                       {imageUrl && (
                         <>
                           <button
@@ -634,19 +699,31 @@ export default function BrandGaleriaPage() {
                         <span className={styles.slideCount}>{htmlContent.slides.length} slides — clique para abrir</span>
                       </div>
                     ) : irContent ? (
-                      <div className={styles.thumbDesign}>
+                      <div 
+                        className={styles.thumbDesign}
+                        style={{ cursor: 'pointer' }}
+                        onClick={(e) => { e.stopPropagation(); setPreviewIr(irContent); }}
+                      >
                         <IRSlideRenderer content={irContent} mode="cover" hideNav />
-                        <span className={styles.slideCount}>{irContent.ir?.slides?.length ?? 0} slides</span>
+                        <span className={styles.slideCount}>{irContent.ir?.slides?.length ?? 0} slides — clique para abrir</span>
                       </div>
-                    ) : designPages && firstPage ? (
+                    ) : (designPages && firstPage) || isHybridUncompiled ? (
                       <div
                         className={styles.thumbDesign}
-                        style={{ backgroundColor: firstPage.backgroundColor ?? '#111', cursor: 'pointer' }}
-                        onClick={(e) => { e.stopPropagation(); setPreviewDesign({ pages: designPages, width: firstPage.width ?? 1080, height: firstPage.height ?? 1080, document: designDocument }); }}
+                        style={{ backgroundColor: firstPage?.backgroundColor ?? '#111', cursor: 'pointer' }}
+                        onClick={(e) => { 
+                          e.stopPropagation(); 
+                          setPreviewDesign({ 
+                            pages: designPages ?? [], 
+                            width: firstPage?.width ?? 1080, 
+                            height: firstPage?.height ?? 1080, 
+                            document: designDocument 
+                          }); 
+                        }}
                       >
                         {designDocument ? (
                           <DesignDocumentRenderer document={designDocument} mode="cover" hideNav />
-                        ) : (
+                        ) : designPages && firstPage ? (
                           <DesignRenderer
                             pages={[firstPage]}
                             canvasWidth={firstPage.width ?? 1080}
@@ -654,15 +731,15 @@ export default function BrandGaleriaPage() {
                             hideNav
                             mode="cover"
                           />
+                        ) : (
+                          <div className={styles.thumbEmpty}>
+                            <Sparkles size={24} style={{ color: 'var(--color-brand)', marginBottom: 8 }} />
+                            <span style={{ color: 'var(--color-text-secondary)', fontSize: '12px', textAlign: 'center', padding: '0 12px' }}>
+                              Preview não compilado
+                            </span>
+                          </div>
                         )}
-                        <span className={styles.slideCount}>{designPages.length} slides — clique para abrir</span>
-                      </div>
-                    ) : isHybridUncompiled ? (
-                      <div className={styles.thumbEmpty}>
-                        <Sparkles size={24} style={{ color: 'var(--color-brand)', marginBottom: 8 }} />
-                        <span style={{ color: 'var(--color-text-secondary)', fontSize: '12px', textAlign: 'center', padding: '0 12px' }}>
-                          Preview pendente (DesignDocument)
-                        </span>
+                        <span className={styles.slideCount}>{designPages?.length ?? 1} slides — clique para abrir</span>
                       </div>
                     ) : (
                       <div className={styles.thumbEmpty}>
@@ -671,9 +748,38 @@ export default function BrandGaleriaPage() {
                     )}
                   </div>
                   <div className={styles.postBody}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                      {renamingPostId === post.id ? (
+                        <form onSubmit={(e) => handleRenamePost(e, post.id)} style={{ flex: 1, display: 'flex', gap: '4px' }}>
+                          <input 
+                            type="text" 
+                            value={newPostName} 
+                            onChange={(e) => setNewPostName(e.target.value)} 
+                            autoFocus 
+                            style={{ flex: 1, padding: '4px', fontSize: '14px', borderRadius: '4px', border: '1px solid var(--color-border)' }}
+                            onBlur={() => setRenamingPostId(null)}
+                          />
+                        </form>
+                      ) : (
+                        <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 600, color: 'var(--color-text)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          {post.name || `Arte ${post.id.split('-')[0]}`}
+                          <button onClick={(e) => { e.stopPropagation(); setRenamingPostId(post.id); setNewPostName(post.name || ''); }} style={{ background: 'none', border: 'none', color: 'var(--color-text-secondary)', cursor: 'pointer', padding: 0 }}>
+                            <Edit3 size={14} />
+                          </button>
+                        </h4>
+                      )}
+                    </div>
+                    
                     <div className={styles.postMetaGroup}>
-                      <span className={styles.postId}>{post.id.split('-')[0]}</span>
                       <span className={styles.postDate}>{new Date(post.createdAt).toLocaleDateString()}</span>
+                      <span style={{ fontSize: '12px', background: 'var(--color-bg-secondary)', padding: '2px 6px', borderRadius: '4px', color: 'var(--color-text-secondary)' }}>
+                        {formatPostType(post.type)}
+                      </span>
+                      {post.createdBy && (
+                        <span className={styles.postCreator} title={post.createdBy.email}>
+                          👤 {post.createdBy.name.split(' ')[0]}
+                        </span>
+                      )}
                     </div>
                     {(chatHistory.length > 0 || sessionId) && (
                       <button
@@ -740,7 +846,11 @@ export default function BrandGaleriaPage() {
                         <HtmlSlideRenderer content={htmlContent} mode="cover" hideNav />
                       </div>
                     ) : irContent ? (
-                      <div className={styles.thumbDesign}>
+                      <div 
+                        className={styles.thumbDesign}
+                        style={{ cursor: 'pointer' }}
+                        onClick={(e) => { e.stopPropagation(); setPreviewIr(irContent); }}
+                      >
                         <IRSlideRenderer content={irContent} mode="cover" hideNav />
                       </div>
                     ) : designPages && firstPage ? (
@@ -772,17 +882,43 @@ export default function BrandGaleriaPage() {
                     )}
                   </div>
                   <div className={styles.listDetails}>
-                    <span className={styles.listTitle}>Arte {post.id.split('-')[0]}</span>
-                    <div className={styles.listMeta}>
-                      <span>{formatPostType(post.type)}</span>
-                      <span>•</span>
-                      <span>{new Date(post.createdAt).toLocaleDateString()}</span>
-                      {designPages && (
-                        <>
-                          <span>•</span>
-                          <span>{designPages.length} slides</span>
-                        </>
+                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                      {renamingPostId === post.id ? (
+                        <form onSubmit={(e) => handleRenamePost(e, post.id)}>
+                          <input 
+                            type="text" 
+                            value={newPostName} 
+                            onChange={(e) => setNewPostName(e.target.value)} 
+                            autoFocus 
+                            style={{ padding: '4px', fontSize: '14px', borderRadius: '4px', border: '1px solid var(--color-border)' }}
+                            onBlur={() => setRenamingPostId(null)}
+                          />
+                        </form>
+                      ) : (
+                        <span style={{ fontWeight: 500, color: 'var(--color-text)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          {post.name || `Arte ${post.id.split('-')[0]}`}
+                          <button onClick={(e) => { e.stopPropagation(); setRenamingPostId(post.id); setNewPostName(post.name || ''); }} style={{ background: 'none', border: 'none', color: 'var(--color-text-secondary)', cursor: 'pointer', padding: 0 }}>
+                            <Edit3 size={14} />
+                          </button>
+                        </span>
                       )}
+                      <div className={styles.listMeta}>
+                        <span>{formatPostType(post.type)}</span>
+                        <span>•</span>
+                        <span>{new Date(post.createdAt).toLocaleDateString()}</span>
+                        {post.createdBy && (
+                          <>
+                            <span>•</span>
+                            <span title={post.createdBy.email}>👤 {post.createdBy.name.split(' ')[0]}</span>
+                          </>
+                        )}
+                        {designPages && (
+                          <>
+                            <span>•</span>
+                            <span>{designPages.length} slides</span>
+                          </>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>

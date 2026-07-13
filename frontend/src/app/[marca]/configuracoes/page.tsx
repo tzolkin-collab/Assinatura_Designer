@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Bot, Palette, Eye, PlugZap, ChevronRight, Trash2, X } from 'lucide-react';
+import { ArrowLeft, Bot, Palette, Eye, PlugZap, ChevronRight, Trash2, X, Users, Image as ImageIcon } from 'lucide-react';
 import PageHeader from '@/components/ui/PageHeader';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
@@ -34,6 +34,18 @@ const CONFIG_SECTIONS = [
     label: 'Editor Penpot',
     description: 'Configure a instância self-hosted do Penpot para editar designs sem sair do app.',
     icon: <PlugZap size={20} />,
+  },
+  {
+    key: 'equipe',
+    label: 'Equipe e Permissões',
+    description: 'Convide clientes e designers e defina quem pode editar ou apenas visualizar.',
+    icon: <Users size={20} />,
+  },
+  {
+    key: 'midia',
+    label: 'Biblioteca de Mídia',
+    description: 'Gerencie os uploads (imagens e fontes) compartilhados por esta marca.',
+    icon: <ImageIcon size={20} />,
   },
 ];
 

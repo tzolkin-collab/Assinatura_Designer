@@ -18,8 +18,10 @@ import {
   X,
   LogOut,
   Users,
+  Globe,
 } from 'lucide-react';
 import styles from './Sidebar.module.css';
+import NotificationBell from '../Notification/NotificationBell';
 
 interface NavItem {
   label: string;
@@ -30,7 +32,7 @@ interface NavItem {
 
 const mainNav: NavItem[] = [
   { label: 'Minhas Marcas', href: '/galeria', icon: <LayoutGrid size={18} /> },
-  { label: 'Equipe & Conexões', href: '/equipe', icon: <Users size={18} /> },
+  { label: 'Projetos da Equipe', href: '/projetos', icon: <Globe size={18} /> },
 ];
 
 const extrasNav: NavItem[] = [
@@ -169,6 +171,7 @@ export default function Sidebar() {
               <span className={styles.userName}>Usuário</span>
               <span className={styles.userRole}>Designer</span>
             </div>
+            <NotificationBell />
             <button
               className={styles.logoutBtn}
               title="Sair"

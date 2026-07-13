@@ -1,5 +1,5 @@
 import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
-import { type DesignIR, type IRPatch } from '../../lib/designIR/types';
+import { type DesignIR, type IRPatch, type IRPatchOp } from '../../lib/designIR/types';
 
 export interface IRCanvasEditorHandle {
   undo: () => void;
@@ -21,6 +21,7 @@ const IRCanvasEditor = forwardRef<IRCanvasEditorHandle, IRCanvasEditorProps>(({
   activeSlideIndex,
   selectedElementIds,
   onSelect,
+  onPatch,
 }, ref) => {
   const slide = ir.slides[activeSlideIndex];
 
@@ -52,6 +53,9 @@ const IRCanvasEditor = forwardRef<IRCanvasEditorHandle, IRCanvasEditorProps>(({
   return (
     <div
       ref={containerRef}
+      tabIndex={0}
+      role="application"
+      aria-label="Canvas de Edição"
       style={{
         width: '100%',
         height: '100%',
@@ -61,6 +65,50 @@ const IRCanvasEditor = forwardRef<IRCanvasEditorHandle, IRCanvasEditorProps>(({
       }}
       onClick={(e) => {
         if (e.target === e.currentTarget) onSelect(null, false);
+      }}
+      onKeyDown={(e) => {
+        if (selectedElementIds.length === 0 || !slide) return;
+
+        const moveAmount = e.shiftKey ? 10 : 1;
+        let dx = 0;
+        let dy = 0;
+
+        switch (e.key) {
+          case 'ArrowLeft': dx = -moveAmount; break;
+          case 'ArrowRight': dx = moveAmount; break;
+          case 'ArrowUp': dy = -moveAmount; break;
+          case 'ArrowDown': dy = moveAmount; break;
+          case 'Delete':
+          case 'Backspace':
+            onPatch({
+              ops: selectedElementIds.map(id => ({
+                op: 'remove-element',
+                slideId: slide.id,
+                elementId: id,
+              }))
+            });
+            onSelect(null, false);
+            return;
+          default:
+            return;
+        }
+
+        if (dx !== 0 || dy !== 0) {
+          e.preventDefault();
+          const ops: IRPatchOp[] = selectedElementIds.map(id => {
+            const el = slide.elements.find(e => e.id === id);
+            return el ? {
+              op: 'update-bounds',
+              slideId: slide.id,
+              elementId: id,
+              bounds: { x: el.bounds.x + dx, y: el.bounds.y + dy }
+            } : null;
+          }).filter(Boolean) as IRPatchOp[];
+
+          if (ops.length > 0) {
+            onPatch({ ops });
+          }
+        }
       }}
     >
       {!slide ? (
@@ -83,6 +131,8 @@ const IRCanvasEditor = forwardRef<IRCanvasEditorHandle, IRCanvasEditorProps>(({
             return (
               <div
                 key={el.id}
+                role="button"
+                aria-label={`Elemento ${el.type}: ${el.name || el.content || 'sem nome'}`}
                 onClick={(e) => {
                   e.stopPropagation();
                   onSelect(el.id, e.shiftKey);

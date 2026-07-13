@@ -11,6 +11,7 @@ import { AsanaPopup } from '@/components/Fabrica/AsanaPopup';
 import { NotificationCard } from '@/components/Fabrica/NotificationCard';
 import { useFabricaWs } from '@/hooks/useFabricaWs';
 import { API_BASE } from '@/lib/api';
+import { useBrandPermissions } from '@/hooks/useBrandPermissions';
 import s from './fabrica.module.css';
 
 // ── Components ────────────────────────────────────────────────────────────────
@@ -290,7 +291,11 @@ export default function FabricaPage() {
     setShowAsana(false);
   }, [isStreaming, workerStatus, resetSession, router, marca]);
 
-  const canSend = input.trim().length > 0;
+  const { can, hint: permHint } = useBrandPermissions();
+  // Gerar design consome cota do Gemini e cria post: exige papel de edição. Sem isto,
+  // um VIEWER dispararia a geração e só descobriria o 403 depois da fila rodar.
+  const canGenerate = can('generate');
+  const canSend = input.trim().length > 0 && canGenerate;
 
   // ── Phase label ─────────────────────────────────────────────────────────────
 
@@ -681,13 +686,18 @@ export default function FabricaPage() {
                 className={`${s.sendBtn} ${canSend ? s.sendActive : ''}`}
                 onClick={handleSend}
                 disabled={!canSend}
+                title={canGenerate ? undefined : permHint}
               >
                 <ArrowUp size={15} />
               </button>
             </div>
           </div>
 
-          <p className={s.inputHint}>Enter envia · Shift+Enter nova linha · / para comandos</p>
+          <p className={s.inputHint}>
+            {canGenerate
+              ? 'Enter envia · Shift+Enter nova linha · / para comandos'
+              : permHint}
+          </p>
         </div>
       </aside>
 

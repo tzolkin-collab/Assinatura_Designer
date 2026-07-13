@@ -22,6 +22,7 @@ interface Brand {
     name: string;
     email: string;
   };
+  myRole?: string;
 }
 
 export default function GaleriaPage() {
@@ -174,13 +175,15 @@ export default function GaleriaPage() {
                         </div>
                       </Card>
                     </Link>
-                    <button
-                      className={styles.cardDeleteBtn}
-                      onClick={(e) => { e.preventDefault(); setDeleteTarget(brand); }}
-                      title="Apagar marca"
-                    >
-                      <Trash2 size={13} />
-                    </button>
+                    {brand.myRole === 'OWNER' && (
+                      <button
+                        className={styles.cardDeleteBtn}
+                        onClick={(e) => { e.preventDefault(); setDeleteTarget(brand); }}
+                        title="Apagar marca"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>

@@ -1,0 +1,135 @@
+.container {
+  position: relative;
+}
+
+.bellBtn {
+  background: transparent;
+  border: none;
+  color: var(--color-text-dim);
+  cursor: pointer;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  transition: all 0.2s;
+}
+
+.bellBtn:hover {
+  background: var(--color-bg-elevated);
+  color: var(--color-text);
+}
+
+.badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  background: #ef4444;
+  color: white;
+  font-size: 10px;
+  font-weight: bold;
+  width: 14px;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+}
+
+.popover {
+  position: absolute;
+  bottom: 40px;
+  right: 0;
+  width: 300px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  z-index: 1000;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  padding: 12px;
+  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.header h4 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.markAll {
+  background: transparent;
+  border: none;
+  color: var(--color-accent);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.list {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--color-text-dim);
+  font-size: 13px;
+}
+
+.item {
+  padding: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  border-bottom: 1px solid var(--color-border);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.item.read {
+  background: transparent;
+  opacity: 0.6;
+}
+
+.content strong {
+  display: block;
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+
+.content p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-text-dim);
+  line-height: 1.4;
+}
+
+.time {
+  display: block;
+  font-size: 10px;
+  color: var(--color-text-dim);
+  margin-top: 6px;
+}
+
+.readBtn {
+  background: transparent;
+  border: none;
+  color: var(--color-text-dim);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+}
+
+.readBtn:hover {
+  background: var(--color-bg-elevated);
+  color: var(--color-accent);
+}

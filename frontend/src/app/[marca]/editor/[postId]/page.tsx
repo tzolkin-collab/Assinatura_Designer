@@ -15,6 +15,7 @@ import {
   Check,
   SlidersHorizontal,
   Keyboard,
+  Eye,
   Type,
   Square,
   Circle,
@@ -22,7 +23,9 @@ import {
   Pentagon,
   Minus,
   Plus,
-  Wand2
+  Wand2,
+  Undo2,
+  Redo2
 } from 'lucide-react';
 import DesignRenderer, { type DesignPage, type Layer } from '@/components/Fabrica/DesignRenderer';
 import CanvasEditor, { type CanvasEditorHandle } from '@/components/Editor/CanvasEditor';
@@ -43,7 +46,8 @@ import LayerListPanel from '@/components/Editor/LayerListPanel';
 import { useShortcutHandler } from '@/hooks/useShortcutHandler';
 import { useDesignFixer } from '@/hooks/useDesignFixer';
 import { copyLayers, pasteLayers, getClipboardCount } from '@/lib/clipboardStore';
-import { api } from '@/lib/api';
+import { api, getApiErrorMessage } from '@/lib/api';
+import { useBrandPermissions } from '@/hooks/useBrandPermissions';
 import { useBrandPosts, type Post } from '@/lib/hooks';
 import Button from '@/components/ui/Button';
 import styles from './editor.module.css';
@@ -165,6 +169,14 @@ export default function DesignEditorPage() {
   postIdRef.current = postId;
   const loadStateRef = useRef(loadState);
   loadStateRef.current = loadState;
+
+  // ── Permissões da marca ──────────────────────────────────────────────────────
+  const { can, readOnly, hint: permHint } = useBrandPermissions();
+  const canEdit = can('edit-design');
+  const canExport = can('export');
+  const canEditRef = useRef(canEdit);
+  canEditRef.current = canEdit;
+  const [saveError, setSaveError] = useState('');
 
   // ── Core mutation ────────────────────────────────────────────────────────────
 
@@ -522,6 +534,9 @@ export default function DesignEditorPage() {
 
   const handleSave = useCallback(async () => {
     if (!isDirtyRef.current || isSavingRef.current) return;
+    // Guard central: o botão já vem desabilitado, mas o save também é disparado por
+    // atalho de teclado. Sem isto, um VIEWER apertaria Ctrl+S e tomaria 403 silencioso.
+    if (!canEditRef.current) return;
     setIsSaving(true);
     try {
       let contentToSave: any;
@@ -540,8 +555,10 @@ export default function DesignEditorPage() {
       await api.put(`/posts/${postIdRef.current}`, { content: contentToSave });
       setIsDirty(false);
       setSavedAt(new Date());
+      setSaveError('');
     } catch (err) {
-      console.error('Failed to save:', err);
+      // Antes o erro só ia pro console: o usuário achava que tinha salvo.
+      setSaveError(getApiErrorMessage(err, 'Não foi possível salvar.'));
     } finally {
       setIsSaving(false);
     }
@@ -1069,6 +1086,23 @@ export default function DesignEditorPage() {
         )}
 
         <div className={styles.headerActions}>
+          <div style={{ display: 'flex', gap: '4px', marginRight: '8px' }}>
+            <button
+              className={styles.toolbarBtn}
+              onClick={undo}
+              title="Desfazer (Ctrl+Z)"
+            >
+              <Undo2 size={16} />
+            </button>
+            <button
+              className={styles.toolbarBtn}
+              onClick={redo}
+              title="Refazer (Ctrl+Y)"
+            >
+              <Redo2 size={16} />
+            </button>
+          </div>
+
           {pages.length > 0 && (
             <button
               className={styles.toolbarBtn}
@@ -1106,29 +1140,48 @@ export default function DesignEditorPage() {
           >
             <Keyboard size={13} />
           </button>
-          {savedAt && !isDirty && (
+          {savedAt && !isDirty && !saveError && (
             <span className={styles.saveStatus}>
               <Check size={11} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 3 }} />
               Salvo
             </span>
           )}
-          <Button size="sm" variant={isDirty ? 'primary' : 'secondary'} onClick={handleSave} disabled={!isDirty || isSaving}>
+          {saveError && (
+            <span className={styles.saveStatus} style={{ color: '#ef4444' }} role="alert" title={saveError}>
+              {saveError}
+            </span>
+          )}
+          {readOnly && (
+            <span className={styles.saveStatus} title={permHint}>
+              <Eye size={11} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 3 }} />
+              Somente leitura
+            </span>
+          )}
+          <Button
+            size="sm"
+            variant={isDirty ? 'primary' : 'secondary'}
+            onClick={handleSave}
+            disabled={!isDirty || isSaving || !canEdit}
+            title={canEdit ? undefined : permHint}
+          >
             <Save size={13} />
             {isSaving ? 'Salvando...' : 'Salvar'}
           </Button>
           <button
             className={styles.exportBtn}
             onClick={handleExportCanva}
-            title="Exportar para o Canva"
+            disabled={!canExport}
+            title={canExport ? 'Exportar para o Canva' : permHint}
             style={{
-              backgroundColor: '#7c3aed',
+              backgroundColor: canExport ? '#7c3aed' : 'var(--color-bg-elevated)',
               color: '#fff',
               border: 'none',
               padding: '0 12px',
               borderRadius: 6,
               fontSize: 12,
               fontWeight: 600,
-              cursor: 'pointer',
+              cursor: canExport ? 'pointer' : 'not-allowed',
+              opacity: canExport ? 1 : 0.5,
               height: 32,
               display: 'inline-flex',
               alignItems: 'center',
