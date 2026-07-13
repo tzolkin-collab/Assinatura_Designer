@@ -254,6 +254,104 @@ export async function uploadAsset(
   return response.json();
 }
 
+// ── Upload de asset: é um JOB assíncrono ──────────────────────────────────────
+// POST /asset-uploads devolve um job, não o asset. O `asset.id` só existe quando
+// o job conclui — e é ele que o createDesign precisa. Antes ninguém esperava:
+// o backend disparava os uploads e devolvia os jobs crus pro frontend.
+
+interface CanvaAssetUploadJob {
+  job?: { id?: string; status?: string; asset?: { id?: string }; error?: { message?: string } };
+}
+
+export async function getAssetUploadJob(brandId: string, jobId: string): Promise<CanvaAssetUploadJob> {
+  const response = await canvaFetch(brandId, `/asset-uploads/${jobId}`);
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Canva get asset upload failed (${response.status}): ${text}`);
+  }
+  return response.json() as Promise<CanvaAssetUploadJob>;
+}
+
+/** Sobe o buffer e espera o job de upload concluir. Devolve o assetId. */
+export async function uploadAssetAndWait(
+  brandId: string,
+  buffer: Buffer,
+  name: string,
+  mimeType: string,
+  { timeoutMs = 120_000, intervalMs = 1500 }: { timeoutMs?: number; intervalMs?: number } = {},
+): Promise<string> {
+  const created = (await uploadAsset(brandId, buffer, name, mimeType)) as CanvaAssetUploadJob;
+
+  // Alguns retornos já vêm com o asset pronto; nesse caso não há o que esperar.
+  const immediate = created.job?.asset?.id;
+  if (immediate) return immediate;
+
+  const jobId = created.job?.id;
+  if (!jobId) throw new Error('Canva não retornou job de upload do asset');
+
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const current = await getAssetUploadJob(brandId, jobId);
+    const status = current.job?.status;
+
+    if (status === 'success') {
+      const assetId = current.job?.asset?.id;
+      if (!assetId) throw new Error('Upload concluiu sem asset id');
+      return assetId;
+    }
+    if (status === 'failed') {
+      throw new Error(`Upload do asset falhou: ${current.job?.error?.message ?? 'motivo desconhecido'}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  throw new Error('Upload do asset para o Canva excedeu o tempo limite');
+}
+
+/** Extrai o id/url do design, tolerando as duas formas de resposta da API. */
+export function parseDesignResponse(raw: unknown): { id: string; url?: string } {
+  const data = (raw ?? {}) as {
+    id?: string;
+    url?: string;
+    design?: { id?: string; url?: string; urls?: { edit_url?: string; view_url?: string } };
+  };
+  const design = data.design ?? data;
+  const id = design.id;
+  if (!id) throw new Error('Canva não retornou o id do design');
+  const url =
+    (design as { urls?: { edit_url?: string; view_url?: string } }).urls?.edit_url ??
+    (design as { urls?: { view_url?: string } }).urls?.view_url ??
+    (design as { url?: string }).url;
+  return { id, url };
+}
+
+// ── Merge: junta N designs de 1 página num único design multipágina ───────────
+// É o que permite entregar um deck inteiro como UM design no Canva. Sem isto, um
+// carrossel de 10 slides viraria 10 designs soltos.
+
+export async function createDesignMerge(
+  brandId: string,
+  sourceDesignIds: string[],
+  title: string,
+) {
+  const response = await canvaFetch(brandId, '/merges', {
+    method: 'POST',
+    body: JSON.stringify({
+      type: 'create_new_design',
+      title: title.slice(0, 255),
+      operations: sourceDesignIds.map((designId) => ({
+        type: 'insert_pages',
+        source: { type: 'design', design_id: designId },
+      })),
+    }),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Canva merge failed (${response.status}): ${text}`);
+  }
+  return response.json();
+}
+
 export async function exportDesign(
   brandId: string,
   designId: string,

@@ -48,6 +48,7 @@ import { useDesignFixer } from '@/hooks/useDesignFixer';
 import { copyLayers, pasteLayers, getClipboardCount } from '@/lib/clipboardStore';
 import { api, getApiErrorMessage } from '@/lib/api';
 import { useBrandPermissions } from '@/hooks/useBrandPermissions';
+import { acompanharExport } from '@/lib/canvaExport';
 import { useBrandPosts, type Post } from '@/lib/hooks';
 import Button from '@/components/ui/Button';
 import styles from './editor.module.css';
@@ -177,6 +178,7 @@ export default function DesignEditorPage() {
   const canEditRef = useRef(canEdit);
   canEditRef.current = canEdit;
   const [saveError, setSaveError] = useState('');
+  const [exportAviso, setExportAviso] = useState('');
 
   // ── Core mutation ────────────────────────────────────────────────────────────
 
@@ -909,26 +911,35 @@ export default function DesignEditorPage() {
       setIsExportingCanva(true);
       setCanvaProgress(0);
 
-      const total = htmlPostContent?.slides?.length ?? pages.length ?? 0;
-      if (total === 0) {
-        alert('Nenhum slide disponível para exportar.');
-        return;
+      // Uma requisição só: o backend enfileira e devolve o jobId na hora. Antes o
+      // navegador fazia um POST por slide, em série, cada um segurando um render
+      // full-res no servidor — um deck grande estourava o timeout.
+      const { jobId } = await api.post<{ jobId: string; total: number }>(
+        `/posts/${postId}/export-canva`,
+        {},
+      );
+
+      const resultado = await acompanharExport(postId, jobId, (done, total) => {
+        setCanvaProgress(total > 0 ? Math.round((done / total) * 100) : 0);
+      });
+
+      if (resultado.designUrl) {
+        window.open(resultado.designUrl, '_blank', 'noopener');
       }
 
-      for (let i = 0; i < total; i++) {
-        await api.post(`/posts/${postId}/export-canva`, { slideIndex: i });
-        setCanvaProgress(Math.round(((i + 1) / total) * 100));
-      }
-
-      alert('Design exportado para o Canva com sucesso! Verifique a aba de uploads no Canva.');
+      setSaveError('');
+      setExportAviso(
+        resultado.mergeFallback
+          ? `Exportado: ${resultado.slides} design(s) criados no Canva (não foi possível juntá-los num só).`
+          : `Exportado para o Canva: ${resultado.slides} página(s) num design.`,
+      );
     } catch (err) {
-      console.error('[Canva Export Error]', err);
-      alert('Erro ao exportar para o Canva. Verifique as configurações e tente novamente.');
+      setSaveError(getApiErrorMessage(err, 'Erro ao exportar para o Canva.'));
     } finally {
       setIsExportingCanva(false);
       setCanvaProgress(null);
     }
-  }, [slug, postId, htmlPostContent, pages]);
+  }, [slug, postId]);
 
   // ── Derived state ────────────────────────────────────────────────────────────
 
@@ -1149,6 +1160,11 @@ export default function DesignEditorPage() {
           {saveError && (
             <span className={styles.saveStatus} style={{ color: '#ef4444' }} role="alert" title={saveError}>
               {saveError}
+            </span>
+          )}
+          {exportAviso && !saveError && (
+            <span className={styles.saveStatus} style={{ color: '#22c55e' }} title={exportAviso}>
+              {exportAviso}
             </span>
           )}
           {readOnly && (

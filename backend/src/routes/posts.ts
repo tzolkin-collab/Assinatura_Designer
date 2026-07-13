@@ -6,7 +6,6 @@ import { AuthRequest } from '../middleware/auth.js';
 import { brandMemberFilter, ANY_MEMBER, EDITORS } from '../middleware/brandAccess.js';
 import { renderHtmlToPng } from '../lib/htmlRaster.js';
 import { buildSlideDocument, editHtmlSlide } from '../lib/htmlDesign.js';
-import { compileSlideToDocument } from '../lib/designIR/compiler.js';
 import { GoogleGenAI } from '@google/genai';
 import { config } from '../config.js';
 import { generateWithRetry } from '../lib/geminiRetry.js';
@@ -14,7 +13,8 @@ import { extractJsonObject } from '../lib/designDocument.js';
 import { resolveBrandContext } from '../lib/brandContext.js';
 import { uploadPngToR2 } from '../lib/r2.js';
 import { mergeSlidesIntoPost, syncPostSlides } from '../lib/postHelper.js';
-import { uploadAsset } from '../lib/canvaClient.js';
+import { enqueueCanvaExport, canvaExportQueue } from '../lib/queue.js';
+import { resolveRenderableDeck } from '../lib/renderableDeck.js';
 import type { SlideNode as IRSlideNode } from '../lib/designIR/types.js';
 
 const ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
@@ -65,46 +65,6 @@ function sanitizeIRPatch(
   return { ops };
 }
 
-// Normaliza um post (html-design OU ir-design) para um "deck renderizável": um
-// jeito único de obter width/height/fonts e o documento HTML completo de cada
-// slide (compilando o IR quando necessário). É o que destrava export/Canva para
-// ir-design, o formato principal gerado hoje.
-interface RenderableDeck {
-  width: number;
-  height: number;
-  count: number;
-  docAt: (idx: number) => string;
-}
-
-function resolveRenderableDeck(content: unknown): RenderableDeck | null {
-  if (!content || typeof content !== 'object') return null;
-  const c = content as {
-    kind?: string;
-    width?: number;
-    height?: number;
-    fonts?: string[];
-    slides?: Array<{ html: string; css?: string }>;
-    ir?: { width?: number; height?: number; fonts?: string[]; slides?: unknown[] };
-  };
-
-  if (c.kind === 'html-design' && Array.isArray(c.slides) && c.slides.length > 0) {
-    const width = typeof c.width === 'number' ? c.width : 1080;
-    const height = typeof c.height === 'number' ? c.height : 1080;
-    const fonts = Array.isArray(c.fonts) ? c.fonts : ['Inter'];
-    const slides = c.slides;
-    return { width, height, count: slides.length, docAt: (i) => buildSlideDocument(slides[i]!, fonts, width, height) };
-  }
-
-  if (c.kind === 'ir-design' && c.ir && Array.isArray(c.ir.slides) && c.ir.slides.length > 0) {
-    const width = typeof c.ir.width === 'number' ? c.ir.width : (typeof c.width === 'number' ? c.width : 1080);
-    const height = typeof c.ir.height === 'number' ? c.ir.height : (typeof c.height === 'number' ? c.height : 1080);
-    const fonts = Array.isArray(c.ir.fonts) ? c.ir.fonts : (Array.isArray(c.fonts) ? c.fonts : ['Inter']);
-    const slides = c.ir.slides;
-    return { width, height, count: slides.length, docAt: (i) => compileSlideToDocument(slides[i] as IRSlideNode, fonts, width, height) };
-  }
-
-  return null;
-}
 
 // POST /api/posts/render-batch - renderiza múltiplos slides HTML/CSS em paralelo e envia para o R2
 postsRouter.post('/render-batch', async (req: AuthRequest, res: Response, next: NextFunction) => {
@@ -475,66 +435,81 @@ postsRouter.delete('/:id', async (req: AuthRequest, res: Response, next: NextFun
   }
 });
 
-// POST /api/posts/:id/export-canva - Renderiza e faz o upload de slides para o Canva Connect
+// POST /api/posts/:id/export-canva — ENFILEIRA o export e devolve o jobId.
+//
+// Antes esta rota renderizava e subia os slides dentro da requisição, e o
+// frontend a chamava num laço, uma vez por slide. Um deck de 200 slides eram 200
+// requisições, cada uma com um render full-res no chromium: timeout na certa e
+// risco de OOM. Agora a resposta é imediata e o trabalho roda na fila.
 postsRouter.post('/:id/export-canva', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const id = req.params.id as string;
     const { slideIndex } = (req.body ?? {}) as { slideIndex?: number };
+    const userId = req.user?.userId;
 
-    // Busca o post com a marca e a integração do Canva inclusas
+    // Valida tudo o que dá pra validar de forma barata ANTES de enfileirar: um job
+    // que morre no worker por marca sem Canva é péssima experiência.
     const post = await prisma.post.findFirst({
-      where: { id, brand: brandMemberFilter(req.user?.userId, EDITORS) },
+      where: { id, brand: brandMemberFilter(userId, EDITORS) },
       include: {
-        brand: {
-          include: { canvaIntegration: true }
-        },
-        slides: { orderBy: { position: 'asc' } }
-      }
+        brand: { include: { canvaIntegration: true } },
+        slides: { orderBy: { position: 'asc' } },
+      },
     });
 
     if (!post) throw createError(404, 'Post não encontrado');
 
-    const brand = post.brand;
-    if (!brand.canvaIntegration || !brand.canvaIntegration.canvaAccessToken) {
+    if (!post.brand.canvaIntegration?.canvaAccessToken) {
       return res.status(401).json({
-        error: {
-          code: 'CANVA_NOT_CONNECTED',
-          message: 'Canva não conectado para esta marca'
-        }
+        error: { code: 'CANVA_NOT_CONNECTED', message: 'Canva não conectado para esta marca' },
       });
     }
 
-    const postWithSlides = mergeSlidesIntoPost(post);
-    const deck = resolveRenderableDeck(postWithSlides.content);
+    const deck = resolveRenderableDeck(mergeSlidesIntoPost(post).content);
     if (!deck) {
       throw createError(400, 'Export Canva disponível apenas para designs html-design ou ir-design');
     }
 
-    const uploadSingleSlide = async (idx: number) => {
-      const doc = deck.docAt(idx);
-      const pngBuffer = await renderHtmlToPng(doc, { width: deck.width, height: deck.height, maxDim: 0 });
-
-      const name = `post-${id.slice(0, 8)}-slide-${idx + 1}.png`;
-      const canvaResult = await uploadAsset(brand.id, pngBuffer, name, 'image/png');
-      return { index: idx, canvaResult };
-    };
-
-    if (typeof slideIndex === 'number') {
-      if (slideIndex < 0 || slideIndex >= deck.count) {
-        throw createError(400, 'slideIndex fora do limite');
-      }
-      const result = await uploadSingleSlide(slideIndex);
-      return res.json({ data: result });
+    if (typeof slideIndex === 'number' && (slideIndex < 0 || slideIndex >= deck.count)) {
+      throw createError(400, 'slideIndex fora do limite');
     }
 
-    // Exporta todos sequencialmente se slideIndex não for fornecido
-    const results = [];
-    for (let i = 0; i < deck.count; i++) {
-      const result = await uploadSingleSlide(i);
-      results.push(result);
+    const jobId = await enqueueCanvaExport({ postId: id, userId: userId!, slideIndex });
+
+    res.status(202).json({
+      data: { jobId, total: typeof slideIndex === 'number' ? 1 : deck.count },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/posts/:id/export-canva/:jobId — progresso do export.
+postsRouter.get('/:id/export-canva/:jobId', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const jobId = req.params.jobId as string;
+    const job = await canvaExportQueue.getJob(jobId);
+    if (!job) throw createError(404, 'Job de export não encontrado');
+
+    // O job carrega o userId de quem pediu: sem esta checagem, qualquer usuário
+    // logado leria o progresso (e o link do design) de um export alheio.
+    if (job.data.userId !== req.user?.userId || job.data.postId !== req.params.id) {
+      throw createError(403, 'Este export não pertence a você.');
     }
 
-    res.json({ data: results });
+    const state = await job.getState();
+    const progress = (job.progress ?? {}) as { done?: number; total?: number };
+
+    res.json({
+      data: {
+        jobId,
+        status: state, // waiting | active | completed | failed
+        done: progress.done ?? 0,
+        total: progress.total ?? 0,
+        result: state === 'completed' ? (job.returnvalue as unknown) : undefined,
+        error: state === 'failed' ? job.failedReason : undefined,
+      },
+    });
   } catch (error) {
     next(error);
   }

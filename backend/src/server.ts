@@ -3,7 +3,7 @@ import { app } from './app.js';
 import { config, validateConfig } from './config.js';
 import { redis } from './lib/redis.js';
 import { initWebSocket } from './lib/websocket.js';
-import { startPipelineWorker, closeQueue } from './lib/queue.js';
+import { startPipelineWorker, startCanvaExportWorker, closeQueue } from './lib/queue.js';
 
 const start = async () => {
   // Valida segredos/env obrigatórios antes de tudo — aborta em produção se faltar.
@@ -34,6 +34,7 @@ const start = async () => {
   // desligue com RUN_WORKER_IN_PROCESS=false na API e rode `node dist/worker.js`.
   if (config.runWorkerInProcess) {
     startPipelineWorker();
+    startCanvaExportWorker();
   }
 
   server.listen(config.port, () => {

@@ -11,6 +11,7 @@ import IORedis from 'ioredis';
 import { config } from '../config.js';
 import { ws } from './websocket.js';
 import { runPipeline, type PipelineParams } from '../agents/pipeline.js';
+import { runCanvaExport, type CanvaExportParams } from './canvaExport.js';
 
 const QUEUE_NAME = 'pipeline';
 
@@ -52,6 +53,61 @@ export async function enqueuePipeline(params: PipelineParams): Promise<void> {
   });
 }
 
+// ── Fila de export para o Canva ───────────────────────────────────────────────
+// Export era feito dentro da requisição HTTP, um slide por request. Aqui vira job:
+// a resposta volta na hora com o jobId e o cliente acompanha o progresso.
+
+const EXPORT_QUEUE_NAME = 'canva-export';
+
+export const canvaExportQueue = new Queue<CanvaExportParams>(EXPORT_QUEUE_NAME, {
+  connection: makeConnection(),
+  defaultJobOptions: {
+    // Só 1 tentativa: um retry re-renderiza e re-sobe tudo, criando designs
+    // duplicados no Canva do usuário. Falhou, o usuário reexporta.
+    attempts: 1,
+    removeOnComplete: { count: 100, age: 24 * 3600 },
+    removeOnFail: { count: 200, age: 24 * 3600 },
+  },
+});
+
+canvaExportQueue.on('error', (err) => console.error('[Queue] canvaExportQueue error:', err.message));
+
+export async function enqueueCanvaExport(params: CanvaExportParams): Promise<string> {
+  const job = await canvaExportQueue.add('export', params);
+  return job.id!;
+}
+
+let exportWorker: Worker<CanvaExportParams> | null = null;
+
+export function startCanvaExportWorker(): Worker<CanvaExportParams> {
+  if (exportWorker) return exportWorker;
+
+  exportWorker = new Worker<CanvaExportParams>(
+    EXPORT_QUEUE_NAME,
+    async (job: Job<CanvaExportParams>) => {
+      return runCanvaExport(job.data, async (done, total) => {
+        // O progresso vive no próprio job: o cliente lê via GET do status, sem
+        // precisar de sessão de WebSocket (o editor não tem uma).
+        await job.updateProgress({ done, total });
+      });
+    },
+    {
+      connection: makeConnection(),
+      // Cada slide é um render full-res no chromium. Concorrência 1 por processo
+      // mantém o uso de memória previsível — o gargalo real é o chromium, não o IO.
+      concurrency: 1,
+    },
+  );
+
+  exportWorker.on('failed', (job, err) => {
+    console.error(`[Queue] export ${job?.id} falhou:`, err.message);
+  });
+  exportWorker.on('error', (err) => console.error('[Queue] export worker error:', err.message));
+
+  console.log(`  ├─ Worker:       fila "${EXPORT_QUEUE_NAME}" (concorrência 1)`);
+  return exportWorker;
+}
+
 let worker: Worker<PipelineParams> | null = null;
 
 /**
@@ -89,8 +145,10 @@ export function startPipelineWorker(): Worker<PipelineParams> {
   return worker;
 }
 
-/** Fecha fila e worker de forma limpa (shutdown). */
+/** Fecha filas e workers de forma limpa (shutdown). */
 export async function closeQueue(): Promise<void> {
   await worker?.close();
+  await exportWorker?.close();
   await pipelineQueue.close();
+  await canvaExportQueue.close();
 }
