@@ -20,7 +20,68 @@ model User {
   googleTokenExpiry  DateTime?
   canvaAccessToken   String?
   canvaRefreshToken  String?
-  brands             Brand[]
+  brandMemberships   BrandMember[]
+  invitesSent        Invite[]     @relation("InvitesSent")
+  assets             Asset[]
+  notifications      Notification[]
+  createdPosts       Post[]
+  accessRequests     AccessRequest[]
+}
+
+enum BrandRole {
+  OWNER
+  ADMIN
+  EDITOR
+  VIEWER
+}
+
+model BrandMember {
+  id        String       @id @default(uuid())
+  role      BrandRole    @default(EDITOR)
+  createdAt DateTime     @default(now())
+  
+  userId    String
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  brandId   String
+  brand     Brand        @relation(fields: [brandId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, brandId])
+  @@index([brandId])
+}
+
+model Asset {
+  id           String     @id @default(uuid())
+  name         String
+  url          String
+  fileType     String
+  sizeBytes    Int
+  width        Int?
+  height       Int?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  
+  brandId      String
+  brand        Brand      @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  
+  uploadedBy   String?
+  user         User?      @relation(fields: [uploadedBy], references: [id], onDelete: SetNull)
+
+  @@index([brandId])
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  message   String
+  read      Boolean  @default(false)
+  type      String   @default("INFO")
+  link      String?
+  createdAt DateTime @default(now())
+  
+  @@index([userId])
 }
 
 model Brand {
@@ -30,13 +91,15 @@ model Brand {
   color            String?           @default("#f0bfbf")
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
-  userId           String
-  user             User              @relation(fields: [userId], references: [id])
   config           BrandConfig?
   canvaIntegration CanvaIntegration?
   folders          Folder[]
   posts            Post[]
   refs             Reference[]
+  members          BrandMember[]
+  assets           Asset[]
+  accessRequests   AccessRequest[]
+  invites          Invite[]
 }
 
 model BrandConfig {
@@ -84,10 +147,13 @@ model Reference {
   sourceType   SourceType @default(WEBSITE)
   toneOfVoice  String?
   brand        Brand      @relation(fields: [brandId], references: [id], onDelete: Cascade)
+
+  @@index([brandId])
 }
 
 model Post {
   id             String     @id @default(uuid())
+  name           String?    @db.VarChar(255)
   type           PostType
   status         PostStatus @default(DRAFT)
   content        Json?
@@ -96,11 +162,16 @@ model Post {
   updatedAt      DateTime   @updatedAt
   brandId        String
   folderId       String?
+  createdById    String?
   canvaDesignId  String?
   canvaExportUrl String?
   brand          Brand      @relation(fields: [brandId], references: [id], onDelete: Cascade)
   folder         Folder?    @relation(fields: [folderId], references: [id])
+  createdBy      User?      @relation(fields: [createdById], references: [id], onDelete: SetNull)
   slides         Slide[]
+
+  @@index([brandId])
+  @@index([folderId])
 }
 
 model Slide {
@@ -114,6 +185,7 @@ model Slide {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  @@index([postId])
   @@map("slides")
 }
 
@@ -125,6 +197,8 @@ model Folder {
   brandId   String
   brand     Brand    @relation(fields: [brandId], references: [id], onDelete: Cascade)
   posts     Post[]
+
+  @@index([brandId])
 }
 
 model data_deletion_requests {
@@ -175,4 +249,45 @@ enum PostStatus {
   GENERATING
   READY
   FAILED
+}
+
+/// Convite de equipe. Guarda só o HASH do token (SHA-256) — o token cru existe
+/// uma única vez, no link entregue a quem convida. Vazamento do banco não vira
+/// tomada de conta, mesma lógica de hashear senha.
+model Invite {
+  id          String    @id @default(uuid())
+  tokenHash   String    @unique
+  email       String
+  role        BrandRole @default(EDITOR)
+
+  brandId     String
+  brand       Brand     @relation(fields: [brandId], references: [id], onDelete: Cascade)
+
+  invitedById String?
+  invitedBy   User?     @relation("InvitesSent", fields: [invitedById], references: [id], onDelete: SetNull)
+
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([brandId])
+  @@index([email])
+}
+
+model AccessRequest {
+  id        String   @id @default(uuid())
+  status    String   @default("PENDING") // PENDING, APPROVED, REJECTED
+  
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  brandId   String
+  brand     Brand    @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  @@unique([userId, brandId])
+  @@index([brandId])
+  @@index([userId])
 }
