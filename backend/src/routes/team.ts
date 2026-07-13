@@ -52,43 +52,32 @@ teamRouter.post('/invite', requireBrandRole(ADMINS), async (req: BrandRequest, r
       throw createError(400, `Role inválida. Use uma de: ${INVITABLE_ROLES.join(', ')}.`);
     }
 
-    const user = await prisma.user.findUnique({ where: { email }, select: { id: true } });
-
-    // Usuário já existe: vincula direto, sem convite pendente.
-    if (user) {
-      const existing = await prisma.brandMember.findUnique({
-        where: { userId_brandId: { userId: user.id, brandId } },
-        select: { id: true },
-      });
-      if (existing) throw createError(409, 'Usuário já está na equipe.');
-
-      const member = await prisma.brandMember.create({
-        data: { userId: user.id, brandId, role },
-        include: { user: { select: { id: true, name: true, email: true } } },
-      });
-
-      await prisma.notification.create({
-        data: {
-          userId: user.id,
-          title: 'Convite de Equipe',
-          message: `Você foi adicionado a ${brand.slug} como ${role}.`,
-          type: 'INVITE',
-          link: `/${brand.slug}`,
-        },
-      });
-
-      return res.status(201).json({ data: { member, invite: null } });
+    const brandRole = req.brandRole!;
+    if (brandRole === 'ADMIN' && role === 'OWNER') {
+      throw createError(403, 'Apenas proprietários podem convidar ou promover outros proprietários.');
     }
 
-    // Usuário não existe: emite convite com token de uso único. NÃO criamos mais a
-    // conta aqui — antes ela nascia com a senha literal 'invite-placeholder', que nem
-    // é hash bcrypt válido: o convidado nunca conseguia logar e o email ficava preso.
+    const user = await prisma.user.findUnique({ where: { email }, select: { id: true } });
+
+    // Emite convite com token de uso único (em vez de vincular automaticamente, respeitando o consentimento).
     const { token, tokenHash } = generateInviteToken();
 
     const invite = await prisma.invite.create({
       data: { tokenHash, email, role, brandId, invitedById, expiresAt: inviteExpiry() },
       select: { id: true, email: true, role: true, expiresAt: true },
     });
+
+    if (user) {
+      await prisma.notification.create({
+        data: {
+          userId: user.id,
+          title: 'Convite de Equipe',
+          message: `Você foi convidado para participar de ${brand.slug} como ${role}.`,
+          type: 'INVITE',
+          link: `/convite/${token}`,
+        },
+      });
+    }
 
     // Não há serviço de email no projeto — o link volta para quem convidou repassar.
     res.status(201).json({
@@ -112,6 +101,26 @@ teamRouter.patch('/:targetUserId', requireBrandRole(ADMINS), async (req: Request
 
     const targetUserId = req.params.targetUserId as string;
     const { role } = req.body;
+    
+    // Verificação de hierarquia do requerente
+    const requesterRole = (req as any).brandRole || 'ADMIN';
+    if (requesterRole === 'ADMIN' && role === 'OWNER') {
+      throw createError(403, 'Apenas proprietários podem promover outros proprietários.');
+    }
+
+    if (role !== 'OWNER') {
+      const currentMembership = await prisma.brandMember.findUnique({
+        where: { userId_brandId: { userId: targetUserId, brandId } }
+      });
+      if (currentMembership?.role === 'OWNER') {
+        const ownerCount = await prisma.brandMember.count({
+          where: { brandId, role: 'OWNER' }
+        });
+        if (ownerCount <= 1) {
+          throw createError(400, 'Não é possível rebaixar o único proprietário da marca.');
+        }
+      }
+    }
 
     const membership = await prisma.brandMember.update({
       where: { userId_brandId: { userId: targetUserId, brandId } },
@@ -134,6 +143,18 @@ teamRouter.delete('/:targetUserId', requireBrandRole(ADMINS), async (req: Reques
     const brandId = brand.id;
 
     const targetUserId = req.params.targetUserId as string;
+
+    const currentMembership = await prisma.brandMember.findUnique({
+      where: { userId_brandId: { userId: targetUserId, brandId } }
+    });
+    if (currentMembership?.role === 'OWNER') {
+      const ownerCount = await prisma.brandMember.count({
+        where: { brandId, role: 'OWNER' }
+      });
+      if (ownerCount <= 1) {
+        throw createError(400, 'Não é possível remover o único proprietário da marca.');
+      }
+    }
 
     await prisma.brandMember.delete({
       where: { userId_brandId: { userId: targetUserId, brandId } }

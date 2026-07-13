@@ -3,7 +3,7 @@ import prisma from '../lib/prisma.js';
 import { createError } from '../middleware/errorHandler.js';
 import type { AuthRequest } from '../middleware/auth.js';
 import { mergeSlidesIntoPost } from '../lib/postHelper.js';
-
+import { deleteFromR2 } from '../lib/r2.js';
 export const brandsRouter = Router();
 
 // GET /api/brands - List the authenticated user's brands
@@ -188,7 +188,18 @@ brandsRouter.delete('/:slug', async (req: Request, res: Response, next: NextFunc
     const slug = req.params.slug as string;
     const existing = await prisma.brand.findFirst({ where: { slug, members: { some: { userId, role: 'OWNER' } } } });
     if (!existing) throw createError(404, 'Brand not found');
+
+    const assets = await prisma.asset.findMany({
+      where: { brandId: existing.id },
+      select: { url: true }
+    });
+
     await prisma.brand.delete({ where: { slug } });
+
+    if (assets.length > 0) {
+      Promise.allSettled(assets.map(asset => deleteFromR2(asset.url))).catch(console.error);
+    }
+
     res.json({ message: 'Brand deleted successfully' });
   } catch (error) {
     const code =

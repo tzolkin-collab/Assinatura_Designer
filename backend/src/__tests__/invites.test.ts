@@ -64,12 +64,9 @@ describe('Convite de equipe', () => {
       expect(res.status).toBe(400);
     });
 
-    it('vincula direto quando o usuário já existe (sem convite pendente)', async () => {
+    it('emite convite mesmo quando o usuário já existe (sem convite pendente)', async () => {
       prismaMock.user.findUnique.mockResolvedValue({ id: 'user-9' });
-      prismaMock.brandMember.findUnique
-        .mockResolvedValueOnce({ role: 'ADMIN' }) // guard
-        .mockResolvedValueOnce(null);             // ainda não é membro
-      prismaMock.brandMember.create.mockResolvedValue({ role: 'EDITOR' });
+      prismaMock.invite.create.mockResolvedValue({ role: 'EDITOR', email: 'ja@test.com' });
       prismaMock.notification.create.mockResolvedValue({});
 
       const res = await auth(
@@ -77,8 +74,9 @@ describe('Convite de equipe', () => {
       );
 
       expect(res.status).toBe(201);
-      expect(res.body.data.invite).toBeNull();
-      expect(prismaMock.invite.create).not.toHaveBeenCalled();
+      expect(res.body.data.invite).toBeDefined();
+      expect(res.body.data.invite.role).toBe('EDITOR');
+      expect(prismaMock.invite.create).toHaveBeenCalled();
     });
   });
 

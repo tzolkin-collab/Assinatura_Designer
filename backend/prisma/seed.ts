@@ -1,7 +1,5 @@
-import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcrypt';
-
-const prisma = new PrismaClient();
+import prisma from '../src/lib/prisma.js';
 
 async function main() {
   const adminPassword = await bcrypt.hash('admin123', 10);
@@ -39,7 +37,9 @@ async function main() {
       slug: 'marca-exemplo',
       name: 'Marca de Exemplo',
       color: '#171717',
-      userId: designer.id,
+      members: {
+        create: { user: { connect: { id: designer.id } }, role: 'OWNER' }
+      },
       config: {
         create: {
           agentPrompt: 'Você é um assistente de design para a Marca de Exemplo...',

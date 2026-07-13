@@ -72,17 +72,13 @@ describe('Team API (Role Guards)', () => {
       updatedAt: new Date(),
     });
 
-    // 3. O convidado já tem conta -> vincula direto (o caso de email sem conta,
-    //    que emite convite com token, está coberto em invites.test.ts).
+    // 3. O convidado já tem conta -> ainda assim cria o convite pendente
     prismaMock.user.findUnique.mockResolvedValueOnce({ id: 'new-user', email: 'newbie@test.com' });
 
-    // 4. Mock the existing membership check in the controller
-    prismaMock.brandMember.findUnique.mockResolvedValueOnce(null);
+    // 4. Mock the creation of the invite
+    prismaMock.invite.create.mockResolvedValueOnce({ role: 'EDITOR', email: 'newbie@test.com' });
 
-    // 5. Mock the creation of the membership
-    prismaMock.brandMember.create.mockResolvedValueOnce({ role: 'EDITOR' });
-
-    // 6. Mock notification creation
+    // 5. Mock notification creation
     prismaMock.notification.create.mockResolvedValueOnce({});
 
     const res = await request(app)
@@ -91,9 +87,10 @@ describe('Team API (Role Guards)', () => {
       .send({ email: 'newbie@test.com', role: 'EDITOR' });
 
     expect(res.status).toBe(201);
-    // A rota passou a devolver { member, invite }: `invite` só vem quando o email
-    // ainda não tem conta. Aqui o usuário existe, então vincula direto.
-    expect(res.body.data.member.role).toBe('EDITOR');
-    expect(res.body.data.invite).toBeNull();
+    
+    // A rota devolve { member: null, invite: {...} } sempre, para que o convite
+    // possa ser aceito ativamente pelo usuário.
+    expect(res.body.data.member).toBeNull();
+    expect(res.body.data.invite.role).toBe('EDITOR');
   });
 });
