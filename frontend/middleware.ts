@@ -1,7 +1,11 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-const PUBLIC_ROUTES = ['/login'];
+// /convite/:token é público de propósito: quem aceita um convite ainda não tem conta.
+// A prova de acesso é o token do link. Repare que ele NÃO entra em
+// RESERVED_TOP_LEVEL_ROUTES — aquela lista redireciona /x/y para /x, o que jogaria o
+// token fora.
+const PUBLIC_ROUTES = ['/login', '/convite'];
 const RESERVED_TOP_LEVEL_ROUTES = new Set(['equipe', 'extras', 'galeria', 'login', 'onboarding']);
 
 export function middleware(request: NextRequest) {

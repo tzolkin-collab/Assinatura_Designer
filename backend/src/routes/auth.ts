@@ -5,6 +5,7 @@ import prisma from '../lib/prisma.js';
 import { config } from '../config.js';
 import { createError } from '../middleware/errorHandler.js';
 import { rateLimit } from '../middleware/rateLimit.js';
+import { hashInviteToken } from '../lib/invites.js';
 
 export const authRouter = Router();
 
@@ -75,6 +76,94 @@ authRouter.delete('/connections/asana', requireAuth, async (req: AuthRequest, re
     });
 
     res.json({ message: 'Asana token removed successfully' });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── Convites de equipe ───────────────────────────────────────────────────────
+// Rotas públicas: quem aceita o convite ainda não tem conta. A prova de acesso é o
+// token do link (256 bits), cujo hash está no banco.
+
+/** Busca o convite pelo token cru, validando expiração e uso. */
+async function findUsableInvite(rawToken: string) {
+  const invite = await prisma.invite.findUnique({
+    where: { tokenHash: hashInviteToken(rawToken) },
+    include: { brand: { select: { name: true, slug: true } } },
+  });
+
+  if (!invite) throw createError(404, 'Convite inválido.');
+  if (invite.acceptedAt) throw createError(410, 'Este convite já foi usado.');
+  if (invite.expiresAt.getTime() < Date.now()) throw createError(410, 'Este convite expirou.');
+
+  return invite;
+}
+
+// GET /api/auth/invite/:token — dados para a tela de aceite (email, marca, role)
+authRouter.get('/invite/:token', rateLimit({ windowSec: 900, max: 30, keyPrefix: 'invite-peek' }), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const invite = await findUsableInvite(req.params.token as string);
+    res.json({
+      data: {
+        email: invite.email,
+        role: invite.role,
+        brand: invite.brand,
+        expiresAt: invite.expiresAt,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/auth/invite/:token/accept — cria a conta e o vínculo, num passo só
+authRouter.post('/invite/:token/accept', rateLimit({ windowSec: 3600, max: 10, keyPrefix: 'invite-accept' }), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const rawToken = req.params.token as string;
+    const { name, password } = req.body as { name?: unknown; password?: unknown };
+
+    if (typeof name !== 'string' || name.trim().length === 0) {
+      throw createError(400, 'Nome é obrigatório.');
+    }
+    if (typeof password !== 'string' || password.length < 8) {
+      throw createError(400, 'A senha deve ter ao menos 8 caracteres');
+    }
+
+    const invite = await findUsableInvite(rawToken);
+
+    // O email pode ter se registrado sozinho entre o convite e o aceite.
+    const existing = await prisma.user.findUnique({ where: { email: invite.email }, select: { id: true } });
+    if (existing) {
+      throw createError(409, 'Já existe uma conta com este email. Faça login para acessar a marca.');
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Tudo ou nada: sem transação, uma falha no meio deixaria a conta criada com o
+    // convite ainda aberto (ou vínculo sem convite consumido).
+    const user = await prisma.$transaction(async (tx) => {
+      const created = await tx.user.create({
+        data: { email: invite.email, name: name.trim(), password: hashedPassword },
+        select: { id: true, email: true, name: true, role: true },
+      });
+
+      await tx.brandMember.create({
+        data: { userId: created.id, brandId: invite.brandId, role: invite.role },
+      });
+
+      // Marca como aceito exigindo que ainda esteja aberto: se dois aceites correrem
+      // em paralelo, o segundo não encontra a linha e a transação inteira falha.
+      const consumed = await tx.invite.updateMany({
+        where: { id: invite.id, acceptedAt: null },
+        data: { acceptedAt: new Date() },
+      });
+      if (consumed.count === 0) throw createError(410, 'Este convite já foi usado.');
+
+      return created;
+    });
+
+    const token = jwt.sign({ userId: user.id, role: user.role }, config.jwtSecret, { expiresIn: '7d' });
+    res.status(201).json({ data: { user, token } });
   } catch (error) {
     next(error);
   }
