@@ -1,7 +1,8 @@
 import { Router, Response, NextFunction } from 'express';
 import prisma from '../lib/prisma.js';
 import multer from 'multer';
-import { uploadFileToR2 } from '../lib/r2.js';
+import sharp from 'sharp';
+import { uploadFileToR2, deleteFromR2 } from '../lib/r2.js';
 import { createError } from '../middleware/errorHandler.js';
 import { requireBrandRole, ANY_MEMBER, EDITORS, type BrandRequest } from '../middleware/brandAccess.js';
 
@@ -34,6 +35,20 @@ assetsRouter.post('/', requireBrandRole(EDITORS), upload.single('file'), async (
 
     const brand = req.brand!;
 
+    // Dimensões: sem elas o editor não sabe a proporção e insere a imagem esticada
+    // num quadrado. Falha de leitura não impede o upload (pode ser SVG/fonte).
+    let width: number | undefined;
+    let height: number | undefined;
+    if (file.mimetype.startsWith('image/')) {
+      try {
+        const meta = await sharp(file.buffer).metadata();
+        width = meta.width;
+        height = meta.height;
+      } catch {
+        // segue sem dimensões
+      }
+    }
+
     // Upload to R2
     const url = await uploadFileToR2(
       file.buffer,
@@ -50,7 +65,8 @@ assetsRouter.post('/', requireBrandRole(EDITORS), upload.single('file'), async (
         url,
         fileType: file.mimetype,
         sizeBytes: file.size,
-        // TODO: Extrair dimensões para imagens (sharp) depois
+        width,
+        height,
       }
     });
     res.status(201).json({ data: asset });
@@ -66,10 +82,23 @@ assetsRouter.delete('/:assetId', requireBrandRole(EDITORS), async (req: BrandReq
     const brand = req.brand!;
 
     // Escopado à marca: sem o brandId aqui, qualquer membro apagaria asset de outra marca.
-    const result = await prisma.asset.deleteMany({ where: { id: assetId, brandId: brand.id } });
-    if (result.count === 0) throw createError(404, 'Asset não encontrado nesta marca.');
+    const asset = await prisma.asset.findFirst({
+      where: { id: assetId, brandId: brand.id },
+      select: { id: true, url: true },
+    });
+    if (!asset) throw createError(404, 'Asset não encontrado nesta marca.');
 
-    // TODO: Apagar do Cloudflare R2
+    await prisma.asset.delete({ where: { id: asset.id } });
+
+    // Apaga o objeto no R2. Se falhar, a linha já saiu do banco: o arquivo vira lixo
+    // pago, mas o usuário não fica com um asset zumbi na biblioteca. Logamos para
+    // permitir uma limpeza posterior.
+    try {
+      await deleteFromR2(asset.url);
+    } catch (r2Err) {
+      console.error(`[Assets] falha ao apagar ${asset.url} no R2:`, (r2Err as Error).message);
+    }
+
     res.json({ message: 'Asset deletado.' });
   } catch (error) {
     next(error);

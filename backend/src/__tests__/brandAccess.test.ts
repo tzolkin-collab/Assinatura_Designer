@@ -78,7 +78,9 @@ describe('Autorização por marca (RBAC)', () => {
     it('bloqueia apagar asset (403)', async () => {
       const res = await auth(request(app).delete('/api/brands/marca-alheia/assets/asset-1'));
       expect(res.status).toBe(403);
-      expect(prismaMock.asset.deleteMany).not.toHaveBeenCalled();
+      // O guard barra antes de a rota sequer localizar o asset.
+      expect(prismaMock.asset.findFirst).not.toHaveBeenCalled();
+      expect(prismaMock.asset.delete).not.toHaveBeenCalled();
     });
 
     it('bloqueia criar pasta (403)', async () => {
@@ -102,13 +104,18 @@ describe('Autorização por marca (RBAC)', () => {
     });
 
     it('permite apagar asset da própria marca', async () => {
-      prismaMock.asset.deleteMany.mockResolvedValue({ count: 1 });
+      prismaMock.asset.findFirst.mockResolvedValue({ id: 'asset-1', url: 'https://cdn/x.png' });
+      prismaMock.asset.delete.mockResolvedValue({});
+
       const res = await auth(request(app).delete('/api/brands/marca-alheia/assets/asset-1'));
+
       expect(res.status).toBe(200);
-      // Escopado à marca: sem o brandId, apagaria asset de outra marca.
-      expect(prismaMock.asset.deleteMany).toHaveBeenCalledWith({
+      // Escopado à marca: sem o brandId, alcançaria asset de outra marca.
+      expect(prismaMock.asset.findFirst).toHaveBeenCalledWith({
         where: { id: 'asset-1', brandId: 'brand-1' },
+        select: { id: true, url: true },
       });
+      expect(prismaMock.asset.delete).toHaveBeenCalled();
     });
 
     it('permite ler as configurações da marca', async () => {

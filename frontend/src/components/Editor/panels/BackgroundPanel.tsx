@@ -1,7 +1,9 @@
 'use client';
 
+import { useParams } from 'next/navigation';
 import { Layers, Image as ImageIcon, Trash2 } from 'lucide-react';
 import { Section, Field, ColorSwatch } from './shared';
+import AssetLibrary from '@/components/Editor/AssetLibrary';
 
 interface Props {
   color: string;
@@ -11,13 +13,8 @@ interface Props {
 }
 
 export default function BackgroundPanel({ color, backgroundImage, onChange, onBgImageChange }: Props) {
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const url = URL.createObjectURL(file);
-      onBgImageChange(url);
-    }
-  };
+  const params = useParams();
+  const slug = params.marca as string;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingBottom: 24 }}>
@@ -52,16 +49,15 @@ export default function BackgroundPanel({ color, backgroundImage, onChange, onBg
               </button>
             </div>
           ) : (
-            <label style={{
-              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-              padding: '12px', border: '1px dashed rgba(0,0,0,0.1)', borderRadius: 8,
-              cursor: 'pointer', fontSize: 12, color: 'var(--color-text-secondary)',
-              backgroundColor: 'var(--color-surface)'
-            }}>
-              <ImageIcon size={14} />
-              <span>Fazer upload de imagem</span>
-              <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleFileChange} />
-            </label>
+            // Antes isto era um input que fazia URL.createObjectURL(file) e mandava um
+            // `blob:` como fundo do slide — URL válida só naquela aba. O post era salvo
+            // com um fundo que não existia para mais ninguém.
+            <AssetLibrary
+              slug={slug}
+              actionLabel="Usar como fundo"
+              compact
+              onSelect={(asset) => onBgImageChange(asset.url)}
+            />
           )}
         </div>
       </Section>

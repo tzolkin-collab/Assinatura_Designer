@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import crypto from 'crypto';
 import { config } from '../config.js';
 import { createError } from '../middleware/errorHandler.js';
@@ -58,4 +58,29 @@ export async function uploadFileToR2(
 
 export async function uploadPngToR2(buffer: Buffer): Promise<string> {
   return uploadFileToR2(buffer, 'render.png', 'image/png', 'renders');
+}
+
+/**
+ * Extrai a key do objeto a partir da URL pública. Guardar a key numa coluna seria
+ * mais direto, mas os assets já gravados só têm a URL — derivar aqui evita uma
+ * migração e mantém os antigos apagáveis.
+ * Devolve null se a URL não pertence ao nosso bucket (não apagamos o que não é nosso).
+ */
+export function r2KeyFromUrl(url: string): string | null {
+  const base = config.r2PublicUrl?.replace(/\/$/, '');
+  if (!base || !url.startsWith(`${base}/`)) return null;
+
+  const key = url.slice(base.length + 1).split('?')[0];
+  return key ? decodeURIComponent(key) : null;
+}
+
+/** Apaga o objeto no R2. Não lança se a URL for externa — só não faz nada. */
+export async function deleteFromR2(url: string): Promise<boolean> {
+  assertR2Configured();
+
+  const key = r2KeyFromUrl(url);
+  if (!key) return false;
+
+  await s3.send(new DeleteObjectCommand({ Bucket: config.r2BucketName, Key: key }));
+  return true;
 }

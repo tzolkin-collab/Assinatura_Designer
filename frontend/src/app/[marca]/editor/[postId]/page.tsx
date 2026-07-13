@@ -49,6 +49,7 @@ import { copyLayers, pasteLayers, getClipboardCount } from '@/lib/clipboardStore
 import { api, getApiErrorMessage } from '@/lib/api';
 import { useBrandPermissions } from '@/hooks/useBrandPermissions';
 import { acompanharExport } from '@/lib/canvaExport';
+import AssetLibrary from '@/components/Editor/AssetLibrary';
 import { useBrandPosts, type Post } from '@/lib/hooks';
 import Button from '@/components/ui/Button';
 import styles from './editor.module.css';
@@ -445,6 +446,56 @@ export default function DesignEditorPage() {
     });
     setIsDirty(true);
   }, []);
+
+  /**
+   * Insere uma imagem da biblioteca da marca no slide atual.
+   *
+   * Precisa cobrir os dois caminhos: o ir-design (elemento no IR, via patch) e o
+   * legado (layer em `pages`). Antes, o "upload" do editor inseria um `blob:` URL
+   * criado com URL.createObjectURL — válido só naquela aba do navegador. O post
+   * era salvo com uma URL morta.
+   */
+  const handleInsertAsset = useCallback(
+    (asset: { url: string; name: string; width?: number | null; height?: number | null }) => {
+      if (!canEditRef.current) return;
+
+      if (loadStateRef.current === 'ir') {
+        const ir = irPostContent?.ir as DesignIR | undefined;
+        const slide = ir?.slides?.[activeSlideRef.current];
+        if (!slide) return;
+
+        // Encaixa a imagem dentro do canvas mantendo a proporção quando conhecida.
+        const maxW = Math.round((ir?.width ?? 1080) * 0.5);
+        const ratio = asset.width && asset.height ? asset.height / asset.width : 1;
+        const width = maxW;
+        const height = Math.round(maxW * ratio);
+
+        handleIRPatch({
+          ops: [
+            {
+              op: 'add-element',
+              slideId: slide.id,
+              element: {
+                id: `img-${Date.now()}`,
+                type: 'image',
+                role: 'decoration',
+                name: asset.name,
+                src: asset.url,
+                bounds: { x: 80, y: 80, width, height },
+                zIndex: (slide.elements?.length ?? 0) + 1,
+                style: { objectFit: 'cover' },
+                visible: true,
+              },
+            },
+          ],
+        });
+        return;
+      }
+
+      addLayer('image', asset.url);
+    },
+    [irPostContent, handleIRPatch, addLayer],
+  );
 
   const handleLayersChange = useCallback(
     (newLayers: Layer[]) =>
@@ -1326,27 +1377,13 @@ export default function DesignEditorPage() {
             {/* Assets — kept mounted */}
             <div style={{ display: sidebarTab === 'assets' ? 'block' : 'none' }} className={styles.assetList}>
               <div style={{ padding: '0 var(--space-2) var(--space-3)' }}>
-                <label style={{
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                  padding: '12px', border: '1px dashed rgba(0,0,0,0.1)', borderRadius: 8,
-                  cursor: 'pointer', fontSize: 12, color: 'var(--color-text-secondary)',
-                  backgroundColor: 'var(--color-surface)', transition: 'all 0.15s ease'
-                }}>
-                  <ImageIcon size={14} />
-                  <span>Upload de Imagem</span>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    style={{ display: 'none' }}
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) {
-                        const url = URL.createObjectURL(file);
-                        addLayer('image', url);
-                      }
-                    }}
-                  />
-                </label>
+                <AssetLibrary slug={slug} onSelect={handleInsertAsset} actionLabel="Inserir" compact />
+              </div>
+
+              <div style={{ padding: '0 var(--space-2)' }}>
+                <p style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--color-text-dim)', margin: '4px 0 8px' }}>
+                  Imagens usadas neste design
+                </p>
               </div>
               {allImageLayers.length === 0 ? (
                 <p className={styles.emptyList}>Nenhum asset de imagem nos slides.</p>
