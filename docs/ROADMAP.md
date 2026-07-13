@@ -35,7 +35,7 @@ durável, reviewer religado, anti-SSRF, rate-limit, WS autenticado).
 | 02 Gestão de equipe | 🟡 `BrandMember`/`BrandRole` + `routes/team.ts` + página `configuracoes/equipe` existem |
 | 03 Agendamento | ⚫ **CANCELADA** |
 | 04 Cobrança | ⚫ **CANCELADA** |
-| 05 Histórico/versionamento | 🔴 não iniciada (só undo/redo em memória no editor) |
+| 05 Histórico/versionamento | ✅ `PostVersion` + histórico no editor (ver Fase 2) |
 | Export Canva | 🟡 OAuth PKCE + upload OK, mas não cria design (ver Fase 1.1) |
 
 ---
@@ -111,16 +111,19 @@ avulsa na biblioteca do Canva. Para "arte pronta pra postar":
 
 ---
 
-## Fase 2 — Histórico e versionamento (doc 05)
+## Fase 2 — Histórico e versionamento (doc 05) — ✅ FEITA
 
-A única feature nova que sobrou. Protege o ativo mais valioso (o trabalho no editor) e é o que sustenta
-confiança pra deixar a IA editar — especialmente agora que o editor é *o* lugar de edição (já que o Canva
-recebe arte achatada).
-
-- `SlideVersion` no schema + rotas de snapshot/restore.
-- `zustand` + `zundo` (nenhum instalado hoje) para undo/redo local; snapshot no banco só em passos grandes
-  (geração de IA, debounce).
-- `AIAcceptReject`: IA propõe versão, usuário aceita/descarta, em vez de sobrescrever direto.
+- ✅ `PostVersion` no schema + `GET/POST /posts/:id/versions` e `POST .../restore`. A versão é do **post
+  inteiro** (slides re-hidratados), não de um slide solto: restaurar meio deck deixaria a arte incoerente.
+- ✅ Snapshot em passo grande: **antes** de cada escrita da IA (`ai-patch`, `edit-slide`, chat do brain),
+  antes de restaurar, e no salvamento do editor com janela de 5 min. Dedupe por hash de conteúdo e teto de
+  20 versões por post — um deck de 200 slides passa de 2MB por versão.
+- ✅ Painel de histórico no editor (marcar versão, restaurar, badge de "Antes da IA").
+- ⚪ `zustand` + `zundo`: **descartado**. O editor já tem undo/redo em memória (60 passos, IR e legado); o que
+  faltava era sobreviver ao reload e à IA, e isso é o histórico no banco. Trocar o que funciona seria churn.
+- ⚪ `AIAcceptReject` (IA propõe, usuário aceita antes de aplicar): não feito como fluxo de proposta. A IA
+  aplica e o estado anterior fica no histórico com um clique de volta. Vale revisitar se o "aplicar e
+  desfazer" incomodar na prática.
 
 ---
 

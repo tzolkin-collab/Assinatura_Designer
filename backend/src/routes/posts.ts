@@ -13,6 +13,7 @@ import { extractJsonObject } from '../lib/designDocument.js';
 import { resolveBrandContext } from '../lib/brandContext.js';
 import { uploadPngToR2 } from '../lib/r2.js';
 import { mergeSlidesIntoPost, syncPostSlides } from '../lib/postHelper.js';
+import { snapshotPost, restorePostVersion } from '../lib/postVersions.js';
 import { enqueueCanvaExport, canvaExportQueue } from '../lib/queue.js';
 import { resolveRenderableDeck } from '../lib/renderableDeck.js';
 import type { SlideNode as IRSlideNode } from '../lib/designIR/types.js';
@@ -132,6 +133,15 @@ postsRouter.post('/:id/edit-slide', async (req: AuthRequest, res: Response, next
     }
 
     const idx = Math.max(0, Math.min(Number(slideIndex) || 0, content.slides.length - 1));
+
+    // O estado de antes da IA vira versão. É o único jeito de o usuário voltar:
+    // a edição escreve direto na tabela de slides.
+    await snapshotPost(post.id, {
+      source: 'AI',
+      label: `Antes da IA editar o slide ${idx + 1}: "${instruction.trim().slice(0, 100)}"`,
+      userId: req.user?.userId,
+    });
+
     const brand = await resolveBrandContext(post.brand.slug);
     const model = config.geminiDesignDocumentModel || 'gemini-3.1-pro-preview';
 
@@ -217,6 +227,16 @@ postsRouter.post('/:id/ai-patch', async (req: AuthRequest, res: Response, next: 
 
     const slides = content.ir!.slides;
     const idx = Math.max(0, Math.min(Number(slideIndex) || 0, slides.length - 1));
+
+    // O patch é aplicado no editor e só depois salvo, mas o banco AGORA ainda tem o
+    // estado pré-IA: é aqui que ele tem de ser congelado. Esperar o PUT não serve —
+    // o snapshot do editor é debounced e engoliria justamente esta mudança.
+    await snapshotPost(post.id, {
+      source: 'AI',
+      label: `Antes da IA editar o slide ${idx + 1}: "${instruction.trim().slice(0, 100)}"`,
+      userId: req.user?.userId,
+    });
+
     const slide = slides[idx]!;
     const elementIds = new Set((slide.elements ?? []).map((e) => e.id));
     const selected = (Array.isArray(selectedElementIds) ? selectedElementIds : []).filter((eid) => elementIds.has(eid));
@@ -344,6 +364,10 @@ postsRouter.put('/:id', async (req: AuthRequest, res: Response, next: NextFuncti
     }
 
     if (content !== undefined) {
+      // Congela o estado anterior ANTES de sobrescrever. Debounce e dedupe ficam
+      // no snapshotPost: o editor salva direto e não pode virar uma versão por tecla.
+      await snapshotPost(post.id, { source: 'EDITOR', userId: req.user?.userId });
+
       if (content && content.kind === 'html-design' && Array.isArray(content.slides)) {
         // Sincroniza os slides relacionais primeiro
         await syncPostSlides(post.id, content);
@@ -407,6 +431,79 @@ postsRouter.put('/:id', async (req: AuthRequest, res: Response, next: NextFuncti
     });
 
     res.json({ data: mergeSlidesIntoPost(updatedPost) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/** Acha o post e checa a marca do usuário. `roles` decide se é leitura ou escrita. */
+async function findPostForUser(postId: string, userId: string | undefined, roles = EDITORS) {
+  const post = await prisma.post.findFirst({
+    where: { id: postId, brand: brandMemberFilter(userId, roles) },
+    select: { id: true },
+  });
+  if (!post) throw createError(404, 'Post not found');
+  return post;
+}
+
+// GET /api/posts/:id/versions - histórico do post (sem o conteúdo: são MBs por versão)
+postsRouter.get('/:id/versions', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const id = req.params.id as string;
+    await findPostForUser(id, req.user?.userId, ANY_MEMBER);
+
+    const versions = await prisma.postVersion.findMany({
+      where: { postId: id },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        label: true,
+        source: true,
+        slideCount: true,
+        createdAt: true,
+        createdBy: { select: { id: true, name: true } },
+      },
+    });
+
+    res.json({ data: versions });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/posts/:id/versions - marca uma versão à mão ("salvar como ponto de retorno")
+postsRouter.post('/:id/versions', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const id = req.params.id as string;
+    const { label } = req.body as { label?: string };
+    await findPostForUser(id, req.user?.userId);
+
+    const version = await snapshotPost(id, {
+      source: 'MANUAL',
+      label: label?.trim() || undefined,
+      userId: req.user?.userId,
+    });
+
+    // `null` = o conteúdo é idêntico à última versão. Não é erro: já está guardado.
+    if (!version) {
+      return res.status(200).json({ data: null, message: 'Nada mudou desde a última versão.' });
+    }
+
+    res.status(201).json({ data: version });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/posts/:id/versions/:versionId/restore - volta o post para a versão
+postsRouter.post('/:id/versions/:versionId/restore', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const id = req.params.id as string;
+    const versionId = req.params.versionId as string;
+    await findPostForUser(id, req.user?.userId);
+
+    const post = await restorePostVersion(id, versionId, req.user?.userId);
+    res.json({ data: post });
   } catch (error) {
     next(error);
   }

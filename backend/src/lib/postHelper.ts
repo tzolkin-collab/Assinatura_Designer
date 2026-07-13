@@ -78,6 +78,48 @@ export function mergeSlidesIntoPost(post: PostWithSlides | null): PostWithSlides
 }
 
 /**
+ * Grava o conteúdo do post do jeito certo: os slides vão para a tabela relacional
+ * (fonte de verdade) e saem do blob `content`, que só guarda o envelope. Salvar o
+ * blob com os slides dentro faz o `mergeSlidesIntoPost` sobrescrever a edição com
+ * os slides antigos na próxima leitura.
+ */
+export async function persistPostContent(postId: string, content: unknown): Promise<void> {
+  if (!isRecord(content)) {
+    await prisma.post.update({
+      where: { id: postId },
+      data: { content: content as Prisma.InputJsonValue },
+    });
+    return;
+  }
+
+  const typed = content as PostContent;
+  const isHtml = typed.kind === 'html-design' && Array.isArray(typed.slides);
+  const isIr = typed.kind === 'ir-design' && isRecord(typed.ir) && Array.isArray(typed.ir.slides);
+
+  if (!isHtml && !isIr) {
+    await prisma.post.update({
+      where: { id: postId },
+      data: { content: content as Prisma.InputJsonValue },
+    });
+    return;
+  }
+
+  await syncPostSlides(postId, content);
+
+  const contentToSave: PostContent = isIr
+    ? { ...typed, ir: { ...typed.ir } }
+    : { ...typed };
+
+  if (isIr) delete (contentToSave.ir as Record<string, unknown>).slides;
+  else delete contentToSave.slides;
+
+  await prisma.post.update({
+    where: { id: postId },
+    data: { content: contentToSave as Prisma.InputJsonValue },
+  });
+}
+
+/**
  * Synchronizes the slides array inside a Post's content object back into individual
  * rows in the relational Slide table. Performs update-in-place to minimize database churn.
  */

@@ -26,6 +26,7 @@ model User {
   notifications      Notification[]
   createdPosts       Post[]
   accessRequests     AccessRequest[]
+  postVersions       PostVersion[]
 }
 
 enum BrandRole {
@@ -169,9 +170,42 @@ model Post {
   folder         Folder?    @relation(fields: [folderId], references: [id])
   createdBy      User?      @relation(fields: [createdById], references: [id], onDelete: SetNull)
   slides         Slide[]
+  versions       PostVersion[]
 
   @@index([brandId])
   @@index([folderId])
+}
+
+/// De onde veio o snapshot. `AI` é o que mais importa: guarda o estado ANTES de a
+/// IA escrever, que é o trabalho do usuário que estaria perdido sem isto.
+enum VersionSource {
+  MANUAL
+  EDITOR
+  AI
+  RESTORE
+}
+
+/// Snapshot do conteúdo inteiro do post (slides re-hidratados), não de um slide
+/// solto: restaurar meio deck deixaria o post incoerente.
+///
+/// `contentHash` existe para não gravar duas versões idênticas — o editor salva
+/// direto, e sem isto o histórico viraria uma pilha de cópias iguais. Um deck de
+/// 200 slides passa de 2MB de JSON, então o número de versões por post é limitado
+/// (as mais antigas caem).
+model PostVersion {
+  id          String        @id @default(uuid())
+  postId      String
+  post        Post          @relation(fields: [postId], references: [id], onDelete: Cascade)
+  content     Json
+  contentHash String
+  label       String?       @db.VarChar(160)
+  source      VersionSource @default(EDITOR)
+  slideCount  Int           @default(0)
+  createdById String?
+  createdBy   User?         @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime      @default(now())
+
+  @@index([postId, createdAt])
 }
 
 model Slide {

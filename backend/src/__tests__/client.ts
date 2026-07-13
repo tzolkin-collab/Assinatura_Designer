@@ -63,7 +63,14 @@ vi.mock('../lib/prisma', () => {
     },
     brandConfig: { findUnique: vi.fn(), upsert: vi.fn() },
     canvaIntegration: { upsert: vi.fn(), delete: vi.fn() },
-    post: { findFirst: vi.fn(), findMany: vi.fn(), findUnique: vi.fn() },
+    post: { findFirst: vi.fn(), findMany: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
+    postVersion: {
+      findFirst: vi.fn(),
+      findMany: vi.fn(),
+      create: vi.fn(),
+      deleteMany: vi.fn(),
+    },
+    slide: { findMany: vi.fn(), update: vi.fn(), create: vi.fn(), deleteMany: vi.fn() },
   };
 
   // O aceite de convite roda numa transação. Executamos o callback com o próprio mock,

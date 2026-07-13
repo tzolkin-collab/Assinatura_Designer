@@ -22,6 +22,7 @@ import { editHtmlSlide, type HtmlDesignContent } from '../../lib/htmlDesign.js';
 import { executeTool } from '../tools/index.js';
 import { resolveBrandContext } from '../../lib/brandContext.js';
 import { mergeSlidesIntoPost, syncPostSlides } from '../../lib/postHelper.js';
+import { snapshotPost } from '../../lib/postVersions.js';
 import { extractJsonObject } from '../../lib/designDocument.js';
 
 const ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
@@ -501,6 +502,28 @@ async function applySlideEdits(
   const slides = [...envelope.slides];
   const width = envelope.width ?? 1080;
   const height = envelope.height ?? 1080;
+
+  // Congela o design de antes da IA mexer. Depois do loop de edições o estado
+  // anterior já não existe em lugar nenhum — o post é sobrescrito no fim daqui.
+  try {
+    const alvo = await prisma.post.findFirst({
+      where: { content: { path: ['sessionId'], equals: sessionId } },
+      select: { id: true },
+    });
+    if (alvo) {
+      const instrucoes = edits
+        .map(e => (typeof e?.instruction === 'string' ? e.instruction.trim() : ''))
+        .filter(Boolean)
+        .join('; ');
+      await snapshotPost(alvo.id, {
+        source: 'AI',
+        label: `Antes da IA ajustar o design: "${instrucoes.slice(0, 100)}"`,
+      });
+    }
+  } catch (err) {
+    // Não derruba a edição por causa do histórico, mas o usuário perde o ponto de volta.
+    console.error('[Brain] Falha ao versionar o design antes da edição por IA:', err);
+  }
 
   await updateSession(sessionId, { phase: 'revising', workerStatus: 'running', activeQuestion: null });
   const revising = await getSession(sessionId);

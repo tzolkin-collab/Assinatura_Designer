@@ -25,7 +25,11 @@ import {
   Plus,
   Wand2,
   Undo2,
-  Redo2
+  Redo2,
+  History,
+  Bookmark,
+  RotateCcw,
+  X
 } from 'lucide-react';
 import DesignRenderer, { type DesignPage, type Layer } from '@/components/Fabrica/DesignRenderer';
 import CanvasEditor, { type CanvasEditorHandle } from '@/components/Editor/CanvasEditor';
@@ -95,6 +99,36 @@ function LayerThumbnail({ layer }: { layer: Layer }) {
   );
 }
 
+/** Espelha MAX_VERSIONS_PER_POST do backend — as mais antigas caem. */
+const MAX_VERSIONS_SHOWN = 20;
+
+type VersionSource = 'MANUAL' | 'EDITOR' | 'AI' | 'RESTORE';
+
+interface PostVersion {
+  id: string;
+  label: string | null;
+  source: VersionSource;
+  slideCount: number;
+  createdAt: string;
+  createdBy: { id: string; name: string } | null;
+}
+
+const VERSION_SOURCE_LABEL: Record<VersionSource, string> = {
+  MANUAL: 'Marcada por você',
+  EDITOR: 'Salvamento automático',
+  AI: 'Antes da IA',
+  RESTORE: 'Antes de restaurar',
+};
+
+function formatVersionDate(iso: string) {
+  return new Date(iso).toLocaleString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
 export default function DesignEditorPage() {
   const params = useParams();
   const router = useRouter();
@@ -112,6 +146,14 @@ export default function DesignEditorPage() {
   const [htmlPostContent, setHtmlPostContent] = useState<HtmlDesignPostContent | null>(null);
   const [irPostContent, setIrPostContent] = useState<IRDesignPostContent | null>(null);
   const [editInstruction, setEditInstruction] = useState('');
+
+  // Histórico: o undo/redo acima é em memória e morre no reload. Estas versões
+  // vivem no banco e são o que protege o trabalho de uma edição da IA.
+  const [showHistory, setShowHistory] = useState(false);
+  const [versions, setVersions] = useState<PostVersion[]>([]);
+  const [loadingVersions, setLoadingVersions] = useState(false);
+  const [restoringVersionId, setRestoringVersionId] = useState<string | null>(null);
+  const [savingVersion, setSavingVersion] = useState(false);
   const [editingSlide, setEditingSlide] = useState(false);
   const [editLog, setEditLog] = useState<string[]>([]);
   const [compileWarnings, setCompileWarnings] = useState<string[]>([]);
@@ -334,7 +376,9 @@ export default function DesignEditorPage() {
 
   const { posts } = useBrandPosts(slug);
 
-  useEffect(() => {
+  // Recarrega o post do banco. Além do load inicial, é o que roda depois de
+  // restaurar uma versão — o editor tem de mostrar o que o banco passou a ter.
+  const loadPost = useCallback(() => {
     if (!postId) return;
     setLoading(true);
     setActiveSlide(0);
@@ -393,6 +437,45 @@ export default function DesignEditorPage() {
       .catch(console.error)
       .finally(() => setLoading(false));
   }, [postId]);
+
+  useEffect(() => {
+    loadPost();
+  }, [loadPost]);
+
+  const fetchVersions = useCallback(async () => {
+    if (!postId) return;
+    setLoadingVersions(true);
+    try {
+      const data = await api.get<PostVersion[]>(`/posts/${postId}/versions`);
+      setVersions(data ?? []);
+    } catch (err) {
+      console.error('Falha ao carregar o histórico:', err);
+    } finally {
+      setLoadingVersions(false);
+    }
+  }, [postId]);
+
+  const openHistory = useCallback(() => {
+    setShowHistory(true);
+    fetchVersions();
+  }, [fetchVersions]);
+
+  const handleRestoreVersion = useCallback(async (versionId: string) => {
+    if (restoringVersionId) return;
+    if (!confirm('Restaurar esta versão? O estado atual vira uma versão no histórico, então dá para voltar.')) return;
+
+    setRestoringVersionId(versionId);
+    try {
+      await api.post(`/posts/${postId}/versions/${versionId}/restore`, {});
+      loadPost(); // o banco mudou; recarrega em vez de adivinhar o estado
+      await fetchVersions();
+      setShowHistory(false);
+    } catch (err) {
+      console.error('Falha ao restaurar a versão:', err);
+    } finally {
+      setRestoringVersionId(null);
+    }
+  }, [postId, restoringVersionId, loadPost, fetchVersions]);
 
   useEffect(() => {
     setSelectedLayerIds([]);
@@ -616,6 +699,25 @@ export default function DesignEditorPage() {
       setIsSaving(false);
     }
   }, []);
+
+  const handleSaveVersion = useCallback(async () => {
+    if (savingVersion) return;
+    const label = prompt('Nome desta versão (opcional):');
+    if (label === null) return; // cancelou
+
+    setSavingVersion(true);
+    try {
+      // Grava o trabalho atual ANTES de marcá-lo: a versão é feita do que está no
+      // banco, então sem isto o ponto de retorno seria o estado anterior à edição.
+      await handleSave();
+      await api.post(`/posts/${postId}/versions`, { label: label.trim() || undefined });
+      await fetchVersions();
+    } catch (err) {
+      console.error('Falha ao salvar a versão:', err);
+    } finally {
+      setSavingVersion(false);
+    }
+  }, [postId, savingVersion, handleSave, fetchVersions]);
 
   // ── Shortcut action builders (read state from refs → no stale closures) ──────
 
@@ -1163,6 +1265,13 @@ export default function DesignEditorPage() {
             >
               <Redo2 size={16} />
             </button>
+            <button
+              className={styles.toolbarBtn}
+              onClick={openHistory}
+              title="Histórico de versões — desfazer/refazer não sobrevive ao reload; isto sobrevive"
+            >
+              <History size={16} />
+            </button>
           </div>
 
           {pages.length > 0 && (
@@ -1615,6 +1724,71 @@ export default function DesignEditorPage() {
           ) : null}
         </main>
       </div>
+
+      {showHistory && (
+        <div className={styles.historyOverlay} onClick={() => setShowHistory(false)}>
+          <aside className={styles.historyPanel} onClick={(e) => e.stopPropagation()}>
+            <header className={styles.historyHeader}>
+              <div>
+                <h3 className={styles.historyTitle}>Histórico de versões</h3>
+                <p className={styles.historyHint}>
+                  As {MAX_VERSIONS_SHOWN} versões mais recentes. Restaurar guarda o estado atual antes.
+                </p>
+              </div>
+              <button className={styles.toolbarBtn} onClick={() => setShowHistory(false)} title="Fechar">
+                <X size={16} />
+              </button>
+            </header>
+
+            <button
+              className={styles.historySaveBtn}
+              onClick={handleSaveVersion}
+              disabled={savingVersion}
+            >
+              <Bookmark size={14} />
+              {savingVersion ? 'Salvando...' : 'Marcar versão atual'}
+            </button>
+
+            {loadingVersions ? (
+              <p className={styles.historyEmpty}>Carregando...</p>
+            ) : versions.length === 0 ? (
+              <p className={styles.historyEmpty}>
+                Nenhuma versão ainda. Uma é criada sozinha antes de cada edição da IA.
+              </p>
+            ) : (
+              <ul className={styles.historyList}>
+                {versions.map((version) => (
+                  <li key={version.id} className={styles.historyItem}>
+                    <div className={styles.historyItemHead}>
+                      <span className={`${styles.historyBadge} ${version.source === 'AI' ? styles.historyBadgeAi : ''}`}>
+                        {VERSION_SOURCE_LABEL[version.source]}
+                      </span>
+                      <time className={styles.historyDate}>{formatVersionDate(version.createdAt)}</time>
+                    </div>
+
+                    {version.label && <p className={styles.historyLabel}>{version.label}</p>}
+
+                    <div className={styles.historyItemFoot}>
+                      <span className={styles.historyMeta}>
+                        {version.slideCount} slide{version.slideCount === 1 ? '' : 's'}
+                        {version.createdBy ? ` · ${version.createdBy.name}` : ''}
+                      </span>
+                      <button
+                        className={styles.historyRestoreBtn}
+                        onClick={() => handleRestoreVersion(version.id)}
+                        disabled={restoringVersionId !== null}
+                      >
+                        <RotateCcw size={13} />
+                        {restoringVersionId === version.id ? 'Restaurando...' : 'Restaurar'}
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </aside>
+        </div>
+      )}
     </div>
   );
 }
