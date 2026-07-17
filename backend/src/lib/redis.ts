@@ -87,6 +87,18 @@ export interface FabricaSession {
   phase: SessionPhase;
   reviewMode: ReviewMode;
   activeQuestion?: FabricaQuestion | null;
+  /**
+   * Roteiro aguardando aprovação (fluxo copy-first): o brain planeja ANTES de
+   * gerar quando há copy oficial, mostra a estrutura no chat e só enfileira o
+   * pipeline depois do "aprovar". Estrutural (não importa o tipo do planner)
+   * para não acoplar o Redis aos agents.
+   */
+  pendingPlan?: {
+    format: 'presentation' | 'carousel';
+    skeleton: Array<{ title: string; goal: string; layout_type: string; order: number; copy?: string }>;
+    sourceCopy?: string;
+    brief: string;
+  } | null;
   messages: ChatMessage[];
   currentDesign: DesignPage[];
   workerStatus: WorkerStatus;

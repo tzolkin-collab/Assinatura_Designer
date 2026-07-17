@@ -11,7 +11,14 @@ export interface SlideSkeletonItem {
   goal: string;
   layout_type: string;
   order: number;
+  /** Copy OFICIAL do slide (verbatim, extraída da copy fornecida pelo usuário).
+   *  Presente apenas no modo roteirista — quando existe, o gerador NÃO inventa
+   *  conteúdo: usa este texto. */
+  copy?: string;
 }
+
+// Teto de sanidade da copy injetada nos prompts do planner (~15-20K tokens).
+const MAX_SOURCE_COPY_CHARS = 60_000;
 
 /** Shape decorativo proposto pelo modelo. Campos opcionais: vêm de JSON do LLM,
  *  sem garantia de schema — quem consome trata a ausência. */
@@ -87,6 +94,24 @@ function coerceItem(item: Partial<SlideSkeletonItem>, order: number, isFirst: bo
       ? item.layout_type
       : (isFirst ? 'title-hero' : isLast ? 'closing' : 'content-split'),
     order,
+    ...(typeof item?.copy === 'string' && item.copy.trim() ? { copy: item.copy.trim() } : {}),
+  };
+}
+
+// Bloco de instruções do modo ROTEIRISTA: com copy oficial em mãos, o planner
+// distribui o texto REAL pelos slides em vez de inventar goals genéricos.
+function buildCopyBlock(sourceCopy: string | undefined): { schemaExtra: string; rules: string; copySection: string } {
+  if (!sourceCopy?.trim()) return { schemaExtra: '', rules: '', copySection: '' };
+  const copy = sourceCopy.slice(0, MAX_SOURCE_COPY_CHARS);
+  return {
+    schemaExtra: `
+  copy: string;        // trecho VERBATIM da copy oficial que pertence a este slide`,
+    rules: `
+- MODO ROTEIRISTA: o usuário forneceu a COPY OFICIAL abaixo. Sua tarefa é DISTRIBUIR esse texto pelos slides, na ordem, sem pular nem repetir trechos.
+- O campo "copy" de cada slide recebe o trecho VERBATIM (pode ajustar quebras de linha, nunca reescrever).
+- NÃO invente conteúdo que não esteja na copy. Título pode ser extraído/derivado do trecho.
+- Slides de capa e encerramento podem ter copy curta (título/CTA extraídos da copy).`,
+    copySection: `\n## COPY OFICIAL (distribua pelos slides):\n${copy}\n`,
   };
 }
 
@@ -97,6 +122,9 @@ export async function runPlanner(params: {
   // Contagem alvo explícita (ex.: extraída do brief). Sem ela, o modelo escolhe
   // dentro da faixa heurística (comportamento antigo).
   targetSlideCount?: number;
+  /** Copy oficial fornecida pelo usuário (modo roteirista): o planner distribui
+   *  este texto verbatim pelos slides em vez de inventar conteúdo. */
+  sourceCopy?: string;
 }): Promise<SlideSkeletonItem[]> {
   const target = params.targetSlideCount
     ? Math.max(1, Math.min(MAX_SLIDES, Math.floor(params.targetSlideCount)))
@@ -109,7 +137,11 @@ export async function runPlanner(params: {
 
   const countRule = target
     ? `Gere EXATAMENTE ${target} slides (order de 1 a ${target}).`
+    : params.sourceCopy?.trim()
+    ? `Escolha a quantidade de slides que a COPY pedir naturalmente (sem espremer nem esticar), até ${PLAN_CHUNK}.`
     : `Para o formato carrossel, planeje de 4 a 6 slides. Para apresentações, de 6 a 10 slides.`;
+
+  const copyBlock = buildCopyBlock(params.sourceCopy);
 
   const prompt = `Você é o Agente Manager (Gerente Planejador) de um sistema de design de apresentações com IA.
 Sua tarefa é planejar a estrutura lógica (esqueleto) de uma apresentação/carrossel do tipo "${params.format}" baseando-se no briefing e no contexto da marca fornecidos.
@@ -119,7 +151,7 @@ Array<{
   title: string;       // título sugerido/tema do slide
   goal: string;        // objetivo de conteúdo do slide (o que o slide deve transmitir de forma textual)
   layout_type: string; // sugestão de layout (ex: title-hero, content-split, metrics, quote, closing)
-  order: number;       // índice sequencial do slide, começando do 1
+  order: number;       // índice sequencial do slide, começando do 1${copyBlock.schemaExtra}
 }>
 
 Regras Importantes:
@@ -127,14 +159,14 @@ Regras Importantes:
 2. O último slide deve ser sempre um encerramento ou chamada de ação (ex: closing).
 3. Distribua os tipos de slides (layout_type) para criar um ritmo visual dinâmico.
 4. ${countRule}
-5. Retorne APENAS o array JSON limpo, sem marcações de código markdown (como \`\`\`json).
+5. Retorne APENAS o array JSON limpo, sem marcações de código markdown (como \`\`\`json).${copyBlock.rules}
 
 ## Briefing do usuário:
 ${params.brief}
 
 ## Contexto da marca:
 ${params.brandContext}
-
+${copyBlock.copySection}
 ## Sua resposta (array JSON puro):`;
 
   const response = await generateWithRetry(ai, {
@@ -161,36 +193,43 @@ function normalizeToCount(items: SlideSkeletonItem[], target: number): SlideSkel
 
 // ── Planejamento em chunks (decks grandes) ──────────────────────────────────────
 async function runPlannerChunked(
-  params: { brief: string; brandContext: string; format: 'presentation' | 'carousel' },
+  params: { brief: string; brandContext: string; format: 'presentation' | 'carousel'; sourceCopy?: string },
   target: number,
 ): Promise<SlideSkeletonItem[]> {
   const items: SlideSkeletonItem[] = [];
+  const copyBlock = buildCopyBlock(params.sourceCopy);
 
   for (let start = 0; start < target; start += PLAN_CHUNK) {
     const end = Math.min(start + PLAN_CHUNK, target);
-    // Janela de continuidade: últimos títulos já planejados.
+    // Janela de continuidade: últimos títulos já planejados. No modo roteirista,
+    // inclui também o FIM da última copy distribuída — é o que permite ao chunk
+    // seguinte retomar a copy do ponto exato, sem pular nem repetir trechos.
     const priorTitles = items.slice(-24).map((it) => `${it.order}. ${it.title}`).join('\n');
+    const lastCopy = copyBlock.copySection ? (items[items.length - 1]?.copy ?? '') : '';
+    const copyCursor = lastCopy
+      ? `\n## Último trecho de copy já distribuído (continue a partir do que vem DEPOIS dele):\n"...${lastCopy.slice(-400)}"`
+      : '';
 
     const prompt = `Você é o Agente Manager planejando uma apresentação GRANDE de ${target} slides no total (tipo "${params.format}").
 Gere APENAS os slides de ${start + 1} a ${end} (${end - start} itens), continuando o arco narrativo de forma coesa e sem repetir o que já foi planejado.
 
 Schema de cada item (array JSON puro, sem markdown):
-{ "title": string, "goal": string, "layout_type": string, "order": number }
+{ "title": string, "goal": string, "layout_type": string, "order": number${copyBlock.schemaExtra ? ', "copy": string' : ''} }
 
 Regras:
 1. order deve ir de ${start + 1} a ${end}, em sequência.
 ${start === 0 ? '2. O slide 1 é a capa (title-hero).' : '2. NÃO é o início — dê continuidade ao que já existe.'}
 ${end === target ? `3. O slide ${target} é o encerramento/CTA (closing).` : '3. NÃO é o final — deixe gancho para os próximos.'}
 4. Varie os layout_type para ritmo visual.
-5. Retorne SÓ o array JSON dos ${end - start} itens.
+5. Retorne SÓ o array JSON dos ${end - start} itens.${copyBlock.rules}
 
 ## Briefing do usuário:
 ${params.brief.slice(0, 4000)}
 
 ## Contexto da marca:
 ${params.brandContext.slice(0, 1500)}
-${priorTitles ? `\n## Slides já planejados (continue a partir daqui):\n${priorTitles}` : ''}
-
+${priorTitles ? `\n## Slides já planejados (continue a partir daqui):\n${priorTitles}` : ''}${copyCursor}
+${copyBlock.copySection}
 ## Sua resposta (array JSON dos slides ${start + 1} a ${end}):`;
 
     let chunk: SlideSkeletonItem[] = [];

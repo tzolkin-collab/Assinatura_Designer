@@ -34,7 +34,7 @@ export interface GenerateHtmlDesignInput {
     agentPrompt?: string;
     logoUrl?: string | null;
   };
-  skeleton?: Array<{ title: string; goal: string; layout_type: string; order: number }>;
+  skeleton?: Array<{ title: string; goal: string; layout_type: string; order: number; copy?: string }>;
 }
 
 export class HtmlDesignValidationError extends Error {
@@ -435,11 +435,19 @@ function buildBatchUserPrompt(
   const endIndex = Math.min(startIndex + BATCH_SIZE, total);
 
   let skeletonPrompt = '\nSLIDES PLANEJADOS NESTE LOTE:\n';
+  let hasCopy = false;
   for (let i = startIndex; i < endIndex; i++) {
     const item = input.skeleton?.[i];
     if (item) {
       skeletonPrompt += `- SLIDE ${i + 1}: ${item.title} | ${item.goal} | ${item.layout_type}\n`;
+      if (item.copy?.trim()) {
+        hasCopy = true;
+        skeletonPrompt += `  COPY OFICIAL DO SLIDE ${i + 1} (use este texto VERBATIM como conteúdo — distribua em título/corpo conforme o layout, NÃO reescreva nem invente):\n  """${item.copy.trim()}"""\n`;
+      }
     }
+  }
+  if (hasCopy) {
+    skeletonPrompt += '\nREGRA DE COPY: os slides acima têm copy oficial aprovada. O texto renderizado deve ser ESSE texto — sua liberdade é o DESIGN (layout, cor, tipografia), nunca o conteúdo.\n';
   }
 
   // Referência CONCRETA de identidade: o HTML do slide 1 (truncado) ancora paleta,

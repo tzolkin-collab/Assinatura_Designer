@@ -28,6 +28,8 @@ import { logger } from '../../lib/logger.js';
 import { generateIRPatchForSlide } from '../../lib/designIR/aiPatch.js';
 import { applyPatchToSlide } from '../../lib/designIR/patcher.js';
 import type { SlideNode as IRSlideNode } from '../../lib/designIR/types.js';
+import { runPlanner, type SlideSkeletonItem } from '../planner/index.js';
+import { parseRequestedSlideCount } from '../pipeline.js';
 
 const ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
 
@@ -135,6 +137,114 @@ function buildQuestionAnswerMessage(
 }
 
 const BRAIN_MODEL = 'gemini-2.5-pro';
+
+// ── Fluxo copy-first: detecção da copy oficial na conversa ─────────────────────
+// A Gabi entrega a copy inteira (colada no chat ou como anexo de texto). Quando
+// ela existe, o deck NÃO nasce de um brief resumido: o planner distribui esse
+// texto verbatim pelos slides e o usuário aprova o roteiro ANTES da geração.
+
+/** Mensagem avulsa só vira "copy" se for claramente um texto colado, não um pedido. */
+const LONG_MESSAGE_CHARS = 1200;
+/** Total mínimo para ativar o fluxo copy-first (roteiro + pausa de aprovação). */
+const COPY_MIN_CHARS = 500;
+
+function decodeTextAttachment(a: ChatAttachment): string | null {
+  const isText = (a.mimeType ?? '').startsWith('text/') || /\.(txt|md|markdown|csv)$/i.test(a.name ?? '');
+  if (!isText || !a.dataBase64) return null;
+  try {
+    return Buffer.from(a.dataBase64, 'base64').toString('utf8');
+  } catch {
+    return null;
+  }
+}
+
+function extractSourceCopy(messages: ChatMessage[]): string | undefined {
+  const parts: string[] = [];
+  for (const m of messages) {
+    if (m.role !== 'user') continue;
+    for (const a of m.attachments ?? []) {
+      const text = decodeTextAttachment(a);
+      if (text?.trim()) parts.push(`--- ${a.name} ---\n${text.trim()}`);
+    }
+    if (m.content.length >= LONG_MESSAGE_CHARS) parts.push(m.content);
+  }
+  const joined = parts.join('\n\n');
+  return joined.length >= COPY_MIN_CHARS ? joined : undefined;
+}
+
+/** Resumo legível do roteiro para o chat (títulos + amostra da copy por slide). */
+function resumoDoRoteiro(skeleton: SlideSkeletonItem[]): string {
+  const MAX_LINHAS = 30;
+  const linhas = skeleton.slice(0, MAX_LINHAS).map((s) => {
+    const copyPreview = s.copy ? ` — “${s.copy.replace(/\s+/g, ' ').slice(0, 70)}${s.copy.length > 70 ? '…' : ''}”` : '';
+    return `${s.order}. **${s.title}** (${s.layout_type})${copyPreview}`;
+  });
+  if (skeleton.length > MAX_LINHAS) linhas.push(`… e mais ${skeleton.length - MAX_LINHAS} slides.`);
+  return linhas.join('\n');
+}
+
+const APROVAR_ROTEIRO_LABEL = 'Aprovar roteiro e gerar';
+
+/**
+ * Planeja o roteiro a partir da copy oficial e PAUSA para aprovação no chat.
+ * A geração só é enfileirada quando o usuário aprova (interceptação determinística
+ * em handleUserMessageInner) — é a pausa barata ANTES do trabalho caro.
+ */
+async function planAndAskApproval(
+  sessionId: string,
+  session: NonNullable<Awaited<ReturnType<typeof getSession>>>,
+  format: 'presentation' | 'carousel',
+  fullBrief: string,
+  sourceCopy: string,
+): Promise<void> {
+  await updateSession(sessionId, { phase: 'ready', workerStatus: 'running' });
+  const planning = await getSession(sessionId);
+  if (planning) emitSessionState(sessionId, planning);
+  ws.token(sessionId, '\n\nRecebi a copy oficial — montando o roteiro slide a slide para você aprovar antes de eu gerar...\n');
+
+  try {
+    const skeleton = await runPlanner({
+      brief: fullBrief,
+      brandContext: getSessionBrandContextSummary(session),
+      format,
+      targetSlideCount: parseRequestedSlideCount(fullBrief),
+      sourceCopy,
+    });
+
+    const texto = `\n**Roteiro proposto (${skeleton.length} slides, copy oficial distribuída):**\n\n${resumoDoRoteiro(skeleton)}\n\n*Confira se a divisão da copy faz sentido. Ao aprovar, eu gero o deck inteiro de uma vez, sem mais pausas.*`;
+    ws.token(sessionId, texto);
+    await appendMessage(sessionId, { role: 'assistant', content: texto.trim(), timestamp: Date.now() });
+
+    await updateSession(sessionId, {
+      pendingPlan: { format, skeleton, sourceCopy, brief: fullBrief },
+      activeQuestion: {
+        id: randomUUID(),
+        kind: 'generic',
+        question: 'O roteiro está bom?',
+        options: [
+          { id: 'aprovar', label: APROVAR_ROTEIRO_LABEL, description: 'Gerar o deck inteiro com esta estrutura e copy' },
+          { id: 'ajustar', label: 'Ajustar o roteiro', description: 'Me diga o que mudar que eu replanejo' },
+        ],
+        allowFreeform: true,
+        allowSkip: false,
+        mode: session.reviewMode,
+      },
+      phase: 'listening',
+      workerStatus: 'idle',
+    });
+    const atual = await getSession(sessionId);
+    if (atual) emitSessionState(sessionId, atual);
+  } catch (err) {
+    // Planner indisponível: não trava a entrega — gera direto (o pipeline ainda
+    // recebe a copy e replaneja lá dentro, só perde a pausa de aprovação).
+    logger.error('Roteiro copy-first falhou; caindo para geração direta', { error: (err as Error).message });
+    ws.token(sessionId, '\n\n*Não consegui montar o roteiro prévio agora — vou gerar direto usando a copy como fonte.*\n');
+    enqueuePipeline({ sessionId, brief: fullBrief, format, sourceCopy }).catch((e) => {
+      logger.error('Falha ao enfileirar o pipeline (fallback copy-first)', { error: (e as Error).message });
+      ws.error(sessionId, `Erro ao iniciar a geração: ${(e as Error).message}`);
+    });
+  }
+}
 
 function normalizeAttachments(value: unknown): ChatAttachment[] | undefined {
   if (!Array.isArray(value)) return undefined;
@@ -369,6 +479,38 @@ async function handleUserMessageInner(
   if (session.activeQuestion) {
     await updateSession(sessionId, { activeQuestion: null });
   }
+
+  // ── Pausa do fluxo copy-first: a aprovação do roteiro é DETERMINÍSTICA ───────
+  // O roteiro pendente foi mostrado no chat; a resposta não passa pelo LLM (que
+  // poderia "decidir" replanejar). Aprovou → gera com o roteiro exato aprovado.
+  // Qualquer outra resposta → o plano pendente morre e a conversa segue; um
+  // próximo [DISPATCH] replaneja com o contexto novo.
+  if (session.pendingPlan) {
+    const plan = session.pendingPlan;
+    const msg = userMessage.trim();
+    const aprovou = msg.toLowerCase() === APROVAR_ROTEIRO_LABEL.toLowerCase()
+      || /^(aprovado|aprovo|aprovar|pode gerar|gera|manda ver|perfeito,? pode gerar)[.!]?$/i.test(msg);
+    if (aprovou) {
+      await updateSession(sessionId, { pendingPlan: null, activeQuestion: null, phase: 'ready', workerStatus: 'running' });
+      const aprovada = await getSession(sessionId);
+      if (aprovada) emitSessionState(sessionId, aprovada);
+      ws.token(sessionId, '\nRoteiro aprovado — gerando o deck inteiro agora, sem mais pausas.\n');
+      ws.end(sessionId);
+      enqueuePipeline({
+        sessionId,
+        brief: plan.brief,
+        format: plan.format,
+        approvedSkeleton: plan.skeleton,
+        sourceCopy: plan.sourceCopy,
+      }).catch((err) => {
+        logger.error('Falha ao enfileirar o pipeline (roteiro aprovado)', { error: (err as Error).message });
+        ws.error(sessionId, `Erro ao iniciar a geração: ${(err as Error).message}`);
+      });
+      return;
+    }
+    await updateSession(sessionId, { pendingPlan: null });
+  }
+
   const latestSession = await getSession(sessionId);
   if (!latestSession) return;
 
@@ -510,15 +652,24 @@ async function detectAndDispatch(
 
   const format = match[1] as 'presentation' | 'carousel';
 
-  await updateSession(sessionId, { phase: 'ready', workerStatus: 'running', activeQuestion: null });
-  const updated = await getSession(sessionId);
-  if (updated) emitSessionState(sessionId, updated);
-
   // Concatena as intenções do usuário para formar o brief completo (essencial para edições)
   const fullBrief = session.messages
     .filter(m => m.role === 'user')
     .map(m => m.content)
     .join('\n\n[Nova solicitação de edição]:\n');
+
+  // Fluxo copy-first: com copy oficial na conversa (colada ou anexo de texto),
+  // o roteiro é planejado ANTES e pausado para aprovação — a geração cara só
+  // roda depois do "aprovar". Sem copy, o fluxo direto continua o mesmo.
+  const sourceCopy = extractSourceCopy(session.messages);
+  if (sourceCopy) {
+    await planAndAskApproval(sessionId, session, format, fullBrief, sourceCopy);
+    return;
+  }
+
+  await updateSession(sessionId, { phase: 'ready', workerStatus: 'running', activeQuestion: null });
+  const updated = await getSession(sessionId);
+  if (updated) emitSessionState(sessionId, updated);
 
   // Enfileira a geração (durável, com retry) — não bloqueia o stream. O erro
   // aqui é só de enfileiramento (ex.: Redis fora); falhas da geração em si são

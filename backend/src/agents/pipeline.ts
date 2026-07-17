@@ -5,7 +5,7 @@ import { getSession, updateSession, updateBrandMemory } from '../lib/redis.js';
 import { ws } from '../lib/websocket.js';
 import { buildBrandContextSummary, resolveBrandContext } from '../lib/brandContext.js';
 import { executeTool } from './tools/index.js';
-import { runPlanner, MAX_SLIDES } from './planner/index.js';
+import { runPlanner, MAX_SLIDES, type SlideSkeletonItem } from './planner/index.js';
 import { runHtmlReviewer } from './reviewer/index.js';
 import type { ReviewResult } from './reviewer/index.js';
 import { generateHtmlDesignBatched } from '../lib/htmlDesign.js';
@@ -34,6 +34,12 @@ export interface PipelineParams {
   sessionId: string;
   brief: string;
   format: 'presentation' | 'carousel';
+  /** Roteiro PRÉ-APROVADO pelo usuário no chat (fluxo copy-first): quando
+   *  presente, o pipeline NÃO replaneja — gera exatamente estes slides, com a
+   *  copy verbatim que cada item carrega. */
+  approvedSkeleton?: SlideSkeletonItem[];
+  /** Copy oficial completa (para o planner, quando não há roteiro aprovado). */
+  sourceCopy?: string;
 }
 
 export async function runPipeline(params: PipelineParams): Promise<void> {
@@ -117,21 +123,26 @@ async function runPipelineInner(
     const requestedCount = parseRequestedSlideCount(planBrief);
 
     ws.progress(sessionId, 20, 'Planejando estrutura lógica...');
-    const skeleton = await runPlanner({
-      brief: planBrief,
-      brandContext: plannerBrandContext,
-      format,
-      targetSlideCount: requestedCount,
-    }).catch((err) => {
-      logger.error('Planner falhou; caindo na contagem de slides de fallback', { error: (err as Error).message });
-      const count = requestedCount ?? (format === 'presentation' ? 6 : 4);
-      return Array.from({ length: count }).map((_, i) => ({
-        title: `Slide ${i + 1}`,
-        goal: 'Apresentar conteúdo de marca',
-        layout_type: i === 0 ? 'title-hero' : i === count - 1 ? 'closing' : 'content-split',
-        order: i + 1,
-      }));
-    });
+    // Roteiro pré-aprovado (fluxo copy-first): o usuário JÁ viu e confirmou esta
+    // estrutura no chat — replanejar aqui jogaria fora a aprovação.
+    const skeleton = params.approvedSkeleton?.length
+      ? params.approvedSkeleton
+      : await runPlanner({
+          brief: planBrief,
+          brandContext: plannerBrandContext,
+          format,
+          targetSlideCount: requestedCount,
+          sourceCopy: params.sourceCopy,
+        }).catch((err) => {
+          logger.error('Planner falhou; caindo na contagem de slides de fallback', { error: (err as Error).message });
+          const count = requestedCount ?? (format === 'presentation' ? 6 : 4);
+          return Array.from({ length: count }).map((_, i) => ({
+            title: `Slide ${i + 1}`,
+            goal: 'Apresentar conteúdo de marca',
+            layout_type: i === 0 ? 'title-hero' : i === count - 1 ? 'closing' : 'content-split',
+            order: i + 1,
+          }));
+        });
 
     const slideCount = skeleton.length;
     const width = format === 'presentation' ? 1920 : 1080;
