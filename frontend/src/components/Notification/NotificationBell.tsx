@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Bell, Check } from 'lucide-react';
-import { api } from '@/lib/api';
+import { api, ApiError } from '@/lib/api';
 import styles from './Notification.module.css';
 
 interface Notification {
@@ -23,7 +23,11 @@ export default function NotificationBell() {
       const res = await api.get<Notification[]>('/notifications');
       setNotifications(res);
     } catch (e) {
-      console.error(e);
+      // Poller de fundo: falha transitória de rede (backend reiniciando em dev,
+      // wifi piscou) NÃO é erro de interface — o próximo tick em 30s recupera.
+      // console.error aqui vira overlay de erro no Next dev a cada restart.
+      if (e instanceof ApiError && e.code === 'NETWORK') return;
+      console.warn('[notifications] poll falhou:', e);
     }
   };
 
