@@ -21,7 +21,11 @@ interface TaskData {
   // documento e do mesmo chromium — a diferença é só o modo de captura, e é ela
   // que decide se o texto do deck vira pixel (screenshot) ou continua texto
   // vetorial, selecionável e nítido em qualquer zoom (print).
-  mode?: 'png' | 'pdf';
+  // O modo 'scan' não captura imagem: executa `script` na página (depois do
+  // layout e das webfonts) e devolve o resultado como JSON — é a base do export
+  // PPTX editável (geometria pós-layout real, medida pelo próprio chromium).
+  mode?: 'png' | 'pdf' | 'scan';
+  script?: string;
 }
 
 let clusterPromise: Promise<Cluster<TaskData, Buffer>> | null = null;
@@ -87,7 +91,7 @@ async function getCluster(): Promise<Cluster<TaskData, Buffer>> {
 
       // Define a tarefa padrão do cluster
       await c.task(async ({ page, data }) => {
-        const { html, opts, mode = 'png' } = data;
+        const { html, opts, mode = 'png', script } = data;
         const { width, height, maxDim = 768 } = opts;
 
         // Configura viewport
@@ -104,6 +108,11 @@ async function getCluster(): Promise<Cluster<TaskData, Buffer>> {
 
         // Pequena pausa para garantir a correta renderização final
         await new Promise((resolve) => setTimeout(resolve, 200));
+
+        if (mode === 'scan') {
+          const result = await page.evaluate(script ?? 'null');
+          return Buffer.from(JSON.stringify(result ?? null), 'utf8');
+        }
 
         if (mode === 'pdf') {
           // Uma página do tamanho exato do slide, sem margem: o PDF sai na mesma
@@ -183,4 +192,16 @@ export async function renderHtmlToBase64(html: string, opts: HtmlRasterOptions):
 export async function renderHtmlToPdf(html: string, opts: HtmlRasterOptions): Promise<Buffer> {
   const cluster = await getCluster();
   return await cluster.execute({ html, opts, mode: 'pdf' });
+}
+
+/**
+ * Carrega o documento no chromium (mesma espera de fontes do render) e executa
+ * `script` na página, devolvendo o resultado JSON-serializável. É como o export
+ * PPTX lê a geometria REAL pós-layout (getBoundingClientRect/getComputedStyle),
+ * em vez de confiar em coordenadas declaradas.
+ */
+export async function scanHtmlLayout<T>(html: string, opts: HtmlRasterOptions, script: string): Promise<T> {
+  const cluster = await getCluster();
+  const buf = await cluster.execute({ html, opts, mode: 'scan', script });
+  return JSON.parse(buf.toString('utf8')) as T;
 }
