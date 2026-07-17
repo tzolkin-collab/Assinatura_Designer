@@ -163,34 +163,50 @@ export function useFabricaWs(brandSlug: string, initialSessionId?: string | null
         break;
       }
 
-      // Delta de um slide (geração progressiva IR). Acumula sobre o envelope já
+      // Delta de um slide (geração progressiva). Acumula sobre o envelope já
       // recebido, reconstruindo o mesmo shape [envelope] que o design:update
-      // final entrega — sem receber o design inteiro a cada slide.
+      // final entrega — sem receber o design inteiro a cada slide. Dual-formato:
+      // html-design guarda os slides no topo do envelope; ir-design em ir.slides.
       case 'design:slide': {
         const { index, slide, envelope } = data as {
           index: number;
           slide: unknown;
-          envelope: { postId?: string; ir?: { slides?: unknown[] } } & Record<string, unknown>;
+          envelope: { kind?: string; postId?: string; ir?: { slides?: unknown[] }; slides?: unknown[] } & Record<string, unknown>;
         };
         // O postId chega no envelope do PRIMEIRO slide, e o `job:done` só viria no
         // fim. Publicá-lo aqui é o que deixa o artefato baixável DURANTE a geração:
         // o slide já está persistido no banco no instante em que aparece na tela.
         if (envelope.postId) setPid(envelope.postId);
         setDesign(prev => {
-          const prevEnv = (prev[0] as (Record<string, unknown> & { kind?: string; postId?: string; ir?: { slides?: unknown[] } }) | undefined);
-          const isIr = prevEnv?.kind === 'ir-design';
-          // Novo deck: se a arte anterior é de outra geração (postId diferente), NÃO
-          // herdamos os slides dela — senão sobra lixo do deck antigo quando o novo
-          // tem menos slides. Sem postId (backend antigo) mantém o acúmulo por isIr.
+          const prevEnv = (prev[0] as (Record<string, unknown> & { kind?: string; postId?: string; ir?: { slides?: unknown[] }; slides?: unknown[] }) | undefined);
+          const kind = envelope.kind ?? prevEnv?.kind;
+          const isHtml = kind === 'html-design';
+          // Novo deck: se a arte anterior é de outra geração (postId diferente) ou
+          // de outro formato, NÃO herdamos os slides dela — senão sobra lixo do
+          // deck antigo quando o novo tem menos slides.
           const incomingId = envelope.postId;
           const isNewDeck = incomingId != null && prevEnv?.postId != null && incomingId !== prevEnv.postId;
-          const accumulate = isIr && !isNewDeck;
-          const baseSlides = accumulate && Array.isArray(prevEnv?.ir?.slides) ? prevEnv!.ir!.slides!.slice() : [];
+          const accumulate = prevEnv?.kind === kind && !isNewDeck;
+
+          if (isHtml) {
+            const baseSlides = accumulate && Array.isArray(prevEnv?.slides) ? prevEnv!.slides!.slice() : [];
+            baseSlides[index] = slide;
+            const merged = {
+              ...(accumulate ? prevEnv : envelope),
+              ...envelope,
+              slides: baseSlides,
+            };
+            return [merged as unknown as DesignPage];
+          }
+
+          // ir-design (decks legados) e formatos desconhecidos: acúmulo em ir.slides.
+          const canAccumulateIr = kind === 'ir-design' && accumulate;
+          const baseSlides = canAccumulateIr && Array.isArray(prevEnv?.ir?.slides) ? prevEnv!.ir!.slides!.slice() : [];
           baseSlides[index] = slide;
           const merged = {
-            ...(accumulate ? prevEnv : envelope),
+            ...(canAccumulateIr ? prevEnv : envelope),
             ...envelope,
-            ir: { ...(envelope.ir ?? {}), ...(accumulate ? prevEnv?.ir : {}), slides: baseSlides },
+            ir: { ...(envelope.ir ?? {}), ...(canAccumulateIr ? prevEnv?.ir : {}), slides: baseSlides },
           };
           return [merged as unknown as DesignPage];
         });

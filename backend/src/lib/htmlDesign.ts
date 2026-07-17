@@ -348,6 +348,309 @@ export async function generateHtmlDesignProgressive(
   }
 }
 
+// ── Geração em LOTES PARALELOS (escala para decks grandes) ─────────────────────
+// Portado da era ir-design (lib/irDesign.ts): style bible imutável para coesão,
+// lotes de 3 slides com retry próprio, pool de concorrência limitada e slide de
+// fallback para lote perdido. A diferença é o meio de desenho: o modelo volta a
+// emitir HTML/CSS livre (seu modo nativo) em vez do schema JSON rígido do IR.
+
+const MAX_BATCH_RETRIES = 3;
+const BATCH_SIZE = 3;
+
+// A "base" imutável que NÃO pode derivar entre os lotes: paleta/fontes da marca
+// + direção de arte que o modelo define no lote 1. Injetada verbatim em TODO
+// lote — é o que garante coesão num deck de dezenas de slides gerado em paralelo.
+interface StyleBible {
+  palette: string[];
+  fonts: string[];
+  artDirection: string;
+}
+
+function renderStyleBible(bible: StyleBible): string {
+  const palette = bible.palette.length ? bible.palette.join(', ') : 'definida no lote 1';
+  const fonts = bible.fonts.length ? bible.fonts.join(', ') : 'definidas no lote 1';
+  return [
+    'STYLE BIBLE (BASE IMUTÁVEL — siga à risca em TODOS os slides deste e dos próximos lotes):',
+    `- Paleta canônica (use SOMENTE estas cores em hex): ${palette}`,
+    `- Tipografia canônica (use SOMENTE estas famílias): ${fonts}`,
+    bible.artDirection ? `- Direção de arte fixada:\n${bible.artDirection}` : '',
+    '- NÃO reinvente paleta, fontes ou sistema de layout a cada lote. Varie a COMPOSIÇÃO, nunca a identidade.',
+  ].filter(Boolean).join('\n');
+}
+
+function buildBatchSystemInstruction(input: GenerateHtmlDesignInput, startIndex: number, total: number, bible: StyleBible): string {
+  const endIndex = Math.min(startIndex + BATCH_SIZE, total);
+
+  let skeletonInstruction = '\nVocê deve gerar os seguintes slides baseados nesta estrutura planejada:\n';
+  for (let i = startIndex; i < endIndex; i++) {
+    const item = input.skeleton?.[i];
+    if (item) {
+      skeletonInstruction += `- SLIDE ${i + 1}: Título/Tema: "${item.title}", Objetivo: "${item.goal}", Layout: "${item.layout_type}"\n`;
+    }
+  }
+
+  return `Você é um diretor de arte premiado especializado em social media premium. Você desenha em HTML e CSS, como um designer que codifica.
+
+${renderStyleBible(bible)}
+
+Sua tarefa: gerar um LOTE DE SLIDES (do slide ${startIndex + 1} até ${endIndex}) de um total de ${total}, com ${input.width}x${input.height}px, como HTML/CSS de alta qualidade, prontos para renderizar.
+${skeletonInstruction}
+Retorne SOMENTE um objeto JSON puro (sem markdown) com este formato:
+{
+  "reasoning": "direção de arte (só envie no primeiro lote): paleta, tipografia, ritmo entre slides",
+  "fonts": ["Família Google Fonts 1", "Família Google Fonts 2"],
+  "slides": [
+    { "html": "<...conteúdo interno do .slide-root do slide ${startIndex + 1}...>", "css": "...regras do slide (sem <style>)..." }
+  ]
+}
+
+REGRAS:
+- O HTML de cada slide preenche um container de ${input.width}x${input.height}px chamado .slide-root (já existe; position:relative). Escreva o conteúdo interno desse container.
+- Coloque o CSS no campo "css" (sem <style>). Prefixe as classes com s${startIndex + 1}-, s${startIndex + 2}-, ... (o índice do slide) para não colidir entre slides.
+- Use as fontes do campo "fonts" (Google Fonts). Tipografia com caráter — NUNCA Arial/Roboto/Times genéricos.
+- Use flexbox/grid/position absolute livremente. Padding generoso, respiro, alinhamento impecável.
+
+QUALIDADE (nível "designer humano postaria sem retrabalho"):
+- Tipografia ousada: contraste forte de tamanho (display 90-160px vs corpo 22-32px), pesos variados, hierarquia clara.
+- CONTRASTE WCAG obrigatório: texto sempre legível. Fundo escuro -> texto claro; fundo claro -> texto escuro. Sobre imagem, card/faixa sólida atrás do texto.
+- Cor: paleta da marca. Ouse com fundos escuros/vibrantes e gradientes. Evite o clichê "gradiente roxo sobre branco".
+- Copy REAL em português (nunca "Texto", "Lorem", placeholders).
+- Visual: prefira gradientes CSS, formas geométricas e tipografia forte. Para fotos/logo, <img> com URLs https REAIS. Sem texto embutido em imagem.
+- Marque editáveis com data-editable="true" e data-role="headline|subtitle|body|cta|image".
+
+COESÃO: mantenha a MESMA direção de arte dos slides anteriores, mas VARIE o layout.
+
+PROIBIDO: <script>, <iframe>, handlers on*, conteúdo genérico, placeholders, texto ilegível.
+PROIBIDO TERMINANTEMENTE: data: URLs ou base64 inline em <img>/background/CSS. Imagens SOMENTE por URL https real.`;
+}
+
+function buildBatchUserPrompt(
+  input: GenerateHtmlDesignInput,
+  startIndex: number,
+  total: number,
+  bible: StyleBible,
+  referenceSlides: HtmlDesignSlide[],
+): string {
+  const b = input.brand;
+  const endIndex = Math.min(startIndex + BATCH_SIZE, total);
+
+  let skeletonPrompt = '\nSLIDES PLANEJADOS NESTE LOTE:\n';
+  for (let i = startIndex; i < endIndex; i++) {
+    const item = input.skeleton?.[i];
+    if (item) {
+      skeletonPrompt += `- SLIDE ${i + 1}: ${item.title} | ${item.goal} | ${item.layout_type}\n`;
+    }
+  }
+
+  // Referência CONCRETA de identidade: o HTML do slide 1 (truncado) ancora paleta,
+  // fontes e linguagem visual sem criar dependência serial entre os lotes.
+  const refBlock = referenceSlides.length
+    ? `\nReferência de identidade (slide 1 já criado — siga a MESMA linguagem visual, mas NÃO copie o layout):\n${(referenceSlides[0]!.css ?? '').slice(0, 1800)}`
+    : '';
+
+  return `Marca: ${b.name}
+Cores oficiais: ${b.colors.length ? b.colors.join(', ') : 'livre, profissional'}
+Fontes sugeridas: ${b.primaryFonts.length ? b.primaryFonts.join(', ') : 'escolha tipografia premium'}
+Diretrizes: ${b.guidelines || 'não definidas'}
+${b.agentPrompt ? `Instruções do agente: ${b.agentPrompt}` : ''}
+${b.logoUrl ? `Logo: ${b.logoUrl}` : ''}
+${skeletonPrompt}
+${renderStyleBible(bible)}${refBlock}
+
+Briefing:
+${input.prompt.slice(0, 6000)}
+
+Gere os slides de ${startIndex + 1} a ${endIndex} (${input.width}x${input.height}px) como array "slides" de objetos {html, css}. Copy final real em português.`;
+}
+
+// Pool de concorrência limitada, sem dependência externa.
+async function runPool<T>(items: T[], concurrency: number, worker: (item: T) => Promise<void>): Promise<void> {
+  let idx = 0;
+  const runners = Array.from({ length: Math.max(1, Math.min(concurrency, items.length)) }, async () => {
+    while (idx < items.length) {
+      const cur = items[idx++]!;
+      await worker(cur);
+    }
+  });
+  await Promise.all(runners);
+}
+
+// Texto claro/escuro conforme a luminância do fundo (fallback legível sem modelo).
+function pickTextColor(bgHex: string): string {
+  const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec((bgHex ?? '').trim());
+  if (!m) return '#ffffff';
+  let h = m[1]!;
+  if (h.length === 3) h = h.split('').map((c) => c + c).join('');
+  const n = parseInt(h, 16);
+  const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  return lum > 0.5 ? '#111111' : '#ffffff';
+}
+
+export async function generateHtmlDesignBatched(
+  generateText: (systemInstruction: string, userPrompt: string) => Promise<string>,
+  input: GenerateHtmlDesignInput,
+  extractJson: (raw: string) => unknown,
+  onSlide?: (partial: HtmlDesignContent, index: number, total: number, completed: number) => void | Promise<void>,
+  options?: { concurrency?: number },
+): Promise<HtmlDesignContent> {
+  const total = Math.max(1, input.slideCount);
+  const concurrency = Math.max(1, options?.concurrency ?? 1);
+
+  let fonts: string[] = [];
+  let direction = '';
+
+  const bible: StyleBible = {
+    palette: input.brand.colors ?? [],
+    fonts: input.brand.primaryFonts ?? [],
+    artDirection: '',
+  };
+
+  // Slots por índice absoluto: lotes paralelos terminam fora de ordem, mas cada
+  // slide é emitido com seu índice (o evento design:slide posiciona por índice).
+  const slots: (HtmlDesignSlide | undefined)[] = new Array(total);
+  let completed = 0;
+
+  const emitSlide = async (index: number, slide: HtmlDesignSlide) => {
+    slots[index] = slide;
+    completed++;
+    const partial: HtmlDesignContent = {
+      kind: 'html-design',
+      version: 1,
+      width: input.width,
+      height: input.height,
+      format: input.format,
+      fonts: fonts.length ? fonts : ['Inter'],
+      // Referência compartilhada (esparsa): o consumidor lê só slides[index].
+      slides: slots as HtmlDesignSlide[],
+      reasoning: direction || undefined,
+    };
+    await onSlide?.(partial, index, total, completed);
+  };
+
+  const parseBatchSlides = (batchSlides: unknown[], startIndex: number): HtmlDesignSlide[] => {
+    const out: HtmlDesignSlide[] = [];
+    for (const s of batchSlides) {
+      const rec = isRecord(s) ? s : {};
+      const html = typeof rec.html === 'string' ? sanitizeSlideHtml(rec.html) : '';
+      const css = typeof rec.css === 'string' ? sanitizeSlideCss(rec.css) : undefined;
+      if (html.trim()) out.push({ html, css });
+    }
+    if (out.length === 0) throw new HtmlDesignValidationError(`lote de slides ${startIndex + 1} sem html válido`);
+    return out;
+  };
+
+  const runBatch = async (startIndex: number, referenceSlides: HtmlDesignSlide[]): Promise<Record<string, unknown>> => {
+    let lastErr: unknown;
+    for (let attempt = 1; attempt <= MAX_BATCH_RETRIES; attempt++) {
+      try {
+        const raw = await generateText(
+          buildBatchSystemInstruction(input, startIndex, total, bible),
+          buildBatchUserPrompt(input, startIndex, total, bible, referenceSlides),
+        );
+        const parsed = extractJson(raw); // lança se não houver JSON válido
+        const rec = isRecord(parsed) ? parsed : {};
+        const bs = Array.isArray(rec.slides) ? rec.slides : [];
+        if (bs.length === 0) throw new HtmlDesignValidationError(`lote de slides ${startIndex + 1} sem slides gerados`);
+        return rec;
+      } catch (e) {
+        lastErr = e;
+        const msg = e instanceof Error ? e.message : String(e);
+        console.warn(`[htmlDesign] lote ${startIndex + 1} falhou (tentativa ${attempt}/${MAX_BATCH_RETRIES}):`, msg);
+        if (attempt < MAX_BATCH_RETRIES) await new Promise((r) => setTimeout(r, 800 * attempt));
+      }
+    }
+    throw lastErr;
+  };
+
+  // Slide mínimo, legível e on-brand, para não deixar buraco quando um lote
+  // falha mesmo após os retries (num deck de 200, 1 lote azarado não deve matar
+  // os outros 199). O id de classe -fallback- permite ao reviewer sinalizá-lo.
+  const buildFallbackSlide = (index: number): HtmlDesignSlide => {
+    const item = input.skeleton?.[index];
+    const bg = input.brand.colors?.[0] || '#111111';
+    const fg = pickTextColor(bg);
+    const title = item?.title ?? `Slide ${index + 1}`;
+    return {
+      html: `<div class="s${index + 1}-fallback-wrap"><h1 class="s${index + 1}-fallback-title">${title.replace(/</g, '&lt;')}</h1></div>`,
+      css: `.s${index + 1}-fallback-wrap{position:absolute;inset:0;background:${bg};display:flex;align-items:center;justify-content:center;padding:8%;}
+.s${index + 1}-fallback-title{color:${fg};font-family:${(fonts[0] ?? 'Inter')},sans-serif;font-size:${Math.round(input.width * 0.05)}px;font-weight:700;text-align:center;}`,
+    };
+  };
+
+  const processBatch = async (startIndex: number, batchSlides: HtmlDesignSlide[]) => {
+    for (let j = 0; j < batchSlides.length && startIndex + j < total; j++) {
+      await emitSlide(startIndex + j, batchSlides[j]!);
+    }
+    // Lote veio curto (modelo devolveu menos slides que o pedido): completa com
+    // fallback para não deixar buraco no deck.
+    const end = Math.min(startIndex + BATCH_SIZE, total);
+    for (let idx = startIndex + batchSlides.length; idx < end; idx++) {
+      await emitSlide(idx, buildFallbackSlide(idx));
+    }
+  };
+
+  const processFallbackBatch = async (startIndex: number) => {
+    const end = Math.min(startIndex + BATCH_SIZE, total);
+    for (let idx = startIndex; idx < end; idx++) {
+      await emitSlide(idx, buildFallbackSlide(idx));
+    }
+  };
+
+  // ── Lote 1: SEQUENCIAL — estabelece o style bible (fontes + direção). ─────────
+  // Não é fatal: se falhar após os retries, degradamos para a base da marca +
+  // slides de fallback e seguimos. A guarda de "nenhum slide real" no fim ainda
+  // marca FAILED se a geração inteira desandar.
+  try {
+    const firstRec = await runBatch(0, []);
+    if (Array.isArray(firstRec.fonts)) fonts = (firstRec.fonts as unknown[]).filter((f): f is string => typeof f === 'string');
+    if (typeof firstRec.reasoning === 'string') direction = firstRec.reasoning;
+    bible.artDirection = direction;
+    if (fonts.length) bible.fonts = fonts;
+    await processBatch(0, parseBatchSlides(firstRec.slides as unknown[], 0));
+  } catch (e) {
+    console.error('[htmlDesign] lote 1 falhou após os retries; degradando para fallback:', e instanceof Error ? e.message : e);
+    await processFallbackBatch(0);
+  }
+
+  // Os slides do lote 1 viram referência visual para os lotes paralelos.
+  const referenceSlides = slots.slice(0, BATCH_SIZE).filter(Boolean) as HtmlDesignSlide[];
+
+  // ── Lotes restantes: PARALELOS com concorrência limitada. ─────────────────────
+  const starts: number[] = [];
+  for (let i = BATCH_SIZE; i < total; i += BATCH_SIZE) starts.push(i);
+
+  await runPool(starts, concurrency, async (startIndex) => {
+    try {
+      const rec = await runBatch(startIndex, referenceSlides);
+      await processBatch(startIndex, parseBatchSlides(rec.slides as unknown[], startIndex));
+    } catch (e) {
+      console.error(`[htmlDesign] lote ${startIndex + 1} falhou após os retries; usando fallback:`, e instanceof Error ? e.message : e);
+      await processFallbackBatch(startIndex);
+    }
+  });
+
+  const finalSlides = slots.filter(Boolean) as HtmlDesignSlide[];
+
+  // Guarda: se NADA real foi gerado (todos os lotes caíram no fallback), é falha
+  // genuína — melhor marcar FAILED do que entregar um deck só de títulos.
+  const realCount = finalSlides.filter((s) => !s.html.includes('-fallback-')).length;
+  if (realCount === 0) {
+    throw new HtmlDesignValidationError('geração falhou: nenhum slide real gerado (todos os lotes falharam)');
+  }
+
+  return {
+    kind: 'html-design',
+    version: 1,
+    width: input.width,
+    height: input.height,
+    format: input.format,
+    fonts: fonts.length ? fonts : ['Inter'],
+    slides: finalSlides,
+    reasoning: direction || undefined,
+  };
+}
+
 // ── Edição cirúrgica de UM slide (Fase 5: chat + preview) ───────────────────────
 export interface EditHtmlSlideInput {
   slide: HtmlDesignSlide;

@@ -14,7 +14,9 @@ import {
 } from '../../lib/redis.js';
 import type { FabricaQuestion, PresentationConfig, ReviewMode } from '../../lib/fabricaSession.js';
 import { ws, onWsMessage, type WsAttachment } from '../../lib/websocket.js';
-import { generateStreamWithRetry, humanizeGeminiError } from '../../lib/geminiRetry.js';
+import { generateStreamWithRetry, generateWithRetry, humanizeGeminiError } from '../../lib/geminiRetry.js';
+import { extractJsonObject } from '../../lib/designDocument.js';
+import { editHtmlSlide, type HtmlDesignSlide } from '../../lib/htmlDesign.js';
 import { enqueuePipeline } from '../../lib/queue.js';
 import { BRAIN_SYSTEM_PROMPT } from './prompts.js';
 import prisma from '../../lib/prisma.js';
@@ -546,18 +548,16 @@ type ResultadoEdicao =
   | { outcome: 'falhou'; motivo: string };
 
 /**
- * Edita slides de um deck `ir-design` a partir de instruções em linguagem natural.
+ * Edita slides de um deck a partir de instruções em linguagem natural.
  *
- * Antes isto rodava sobre `html-design` (via `editHtmlSlide`) — um formato que o
- * pipeline não produz desde a migração para o IR. O gate `kind !== 'html-design'`
- * devolvia `false` em 100% dos decks reais, e a edição pelo chat simplesmente não
- * existia. Agora usa o MESMO motor da rota `ai-patch` do editor (`generateIRPatchForSlide`),
- * que funciona no IR, e aplica no servidor (`applyPatchToSlide`), porque aqui não há
- * canvas do outro lado para aplicar.
+ * Dual-formato: `html-design` (o que o pipeline produz desde 07-17, via
+ * `editHtmlSlide`) e `ir-design` (decks legados da era IR, via
+ * `generateIRPatchForSlide` + `applyPatchToSlide` no servidor — aqui não há
+ * canvas do outro lado para aplicar o patch).
  *
  * Fonte de verdade é o POST, não `session.currentDesign`: o Redis expira, e o
- * `currentDesign` de um deck ir-design volta vazio na reconexão. Editar a partir dele
- * daria "não há arte" para um deck que existe.
+ * `currentDesign` volta vazio na reconexão. Editar a partir dele daria
+ * "não há arte" para um deck que existe.
  */
 async function applySlideEdits(
   sessionId: string,
@@ -592,13 +592,20 @@ async function applySlideEdits(
 
   const content = (mergeSlidesIntoPost(postRow).content ?? null) as {
     kind?: string;
+    width?: number;
+    height?: number;
     ir?: { slides?: IRSlideNode[] };
+    slides?: HtmlDesignSlide[];
   } | null;
 
-  const slides = content?.ir?.slides;
-  if (content?.kind !== 'ir-design' || !Array.isArray(slides) || slides.length === 0) {
+  const isIr = content?.kind === 'ir-design' && Array.isArray(content.ir?.slides) && content.ir!.slides!.length > 0;
+  const isHtml = content?.kind === 'html-design' && Array.isArray(content.slides) && content.slides.length > 0;
+  if (!isIr && !isHtml) {
     return { outcome: 'sem-arte' };
   }
+  const irSlides = isIr ? content!.ir!.slides! : [];
+  const htmlSlides = isHtml ? content!.slides! : [];
+  const total = isIr ? irSlides.length : htmlSlides.length;
 
   // Congela o design de ANTES da IA mexer — depois do loop o estado anterior não
   // existe em lugar nenhum. Uma vez só, cobrindo o turno inteiro.
@@ -616,16 +623,34 @@ async function applySlideEdits(
   const revising = await getSession(sessionId);
   if (revising) emitSessionState(sessionId, revising);
 
-  const brandColors = (postRow.brand as { colors?: string[] } | null)?.colors ?? [];
-  const total = slides.length;
+  const brand = postRow.brand as { name?: string; colors?: string[]; primaryFonts?: string[]; guidelines?: string | null; agentPrompt?: string | null } | null;
+  const brandColors = brand?.colors ?? [];
 
   // Envelope leve do delta: o front (useFabricaWs) acumula os slides por índice e só
   // reseta o acúmulo se o `postId` mudar. Emitindo com o postId do próprio deck, o
   // preview troca SÓ o slide editado, ao vivo — sem uma linha de frontend.
-  const envelopeDelta = {
-    ...(content as Record<string, unknown>),
-    postId: postRow.id,
-    ir: { ...(content!.ir as Record<string, unknown>), slides: [] as unknown[] },
+  const envelopeDelta = isIr
+    ? {
+        ...(content as Record<string, unknown>),
+        postId: postRow.id,
+        ir: { ...(content!.ir as Record<string, unknown>), slides: [] as unknown[] },
+      }
+    : {
+        ...(content as Record<string, unknown>),
+        postId: postRow.id,
+        slides: [] as unknown[],
+      };
+
+  // editHtmlSlide precisa de um gerador de texto; usa o mesmo caminho com retry
+  // do resto do produto (tier estética preservada pelo preferredModel).
+  const editModel = config.geminiDesignDocumentModel || 'gemini-3.1-pro-preview';
+  const generateText = async (systemInstruction: string, userPrompt: string): Promise<string> => {
+    const response = await generateWithRetry(ai, {
+      model: editModel,
+      contents: userPrompt,
+      config: { systemInstruction, responseMimeType: 'application/json', maxOutputTokens: 16384 },
+    }, editModel);
+    return response.text ?? '{}';
   };
 
   let changed = 0;
@@ -634,26 +659,52 @@ async function applySlideEdits(
   for (let i = 0; i < edits.length; i++) {
     const { index, instruction } = edits[i]!;
     const idx = Math.min(index, total - 1);
-    const slide = slides[idx];
-    if (!slide) continue;
 
     ws.progress(sessionId, 40 + Math.round(((i + 1) / edits.length) * 50), `Ajustando slide ${idx + 1}...`);
 
     try {
-      const patch = await generateIRPatchForSlide({ slide, instruction, brandColors });
+      if (isIr) {
+        const slide = irSlides[idx];
+        if (!slide) continue;
+        const patch = await generateIRPatchForSlide({ slide, instruction, brandColors });
 
-      // O sanitizador descartou tudo: a IA não conseguiu traduzir o pedido em uma
-      // alteração válida. Isso é uma FALHA e vai ser dita — não engolida.
-      if (patch.ops.length === 0) {
-        falhas.push(`slide ${idx + 1}`);
-        continue;
+        // O sanitizador descartou tudo: a IA não conseguiu traduzir o pedido em uma
+        // alteração válida. Isso é uma FALHA e vai ser dita — não engolida.
+        if (patch.ops.length === 0) {
+          falhas.push(`slide ${idx + 1}`);
+          continue;
+        }
+
+        const novo = applyPatchToSlide(slide, patch);
+        irSlides[idx] = novo;
+        changed++;
+        ws.designSlide(sessionId, { index: idx, total, slide: novo, envelope: envelopeDelta });
+      } else {
+        const slide = htmlSlides[idx];
+        if (!slide) continue;
+        const novo = await editHtmlSlide(generateText, {
+          slide,
+          instruction,
+          brand: {
+            name: brand?.name ?? '',
+            colors: brandColors,
+            primaryFonts: brand?.primaryFonts ?? [],
+            guidelines: brand?.guidelines ?? undefined,
+            agentPrompt: brand?.agentPrompt ?? undefined,
+          },
+          width: content?.width ?? 1080,
+          height: content?.height ?? 1080,
+        }, extractJsonObject);
+
+        if (!novo.html.trim()) {
+          falhas.push(`slide ${idx + 1}`);
+          continue;
+        }
+
+        htmlSlides[idx] = novo;
+        changed++;
+        ws.designSlide(sessionId, { index: idx, total, slide: novo, envelope: envelopeDelta });
       }
-
-      const novo = applyPatchToSlide(slide, patch);
-      slides[idx] = novo;
-      changed++;
-
-      ws.designSlide(sessionId, { index: idx, total, slide: novo, envelope: envelopeDelta });
     } catch (err) {
       falhas.push(`slide ${idx + 1}`);
       logger.error('Edição de slide por IA falhou', { slide: idx + 1, error: (err as Error).message });

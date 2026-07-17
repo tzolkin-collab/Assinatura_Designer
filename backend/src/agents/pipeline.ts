@@ -6,9 +6,9 @@ import { ws } from '../lib/websocket.js';
 import { buildBrandContextSummary, resolveBrandContext } from '../lib/brandContext.js';
 import { executeTool } from './tools/index.js';
 import { runPlanner, MAX_SLIDES } from './planner/index.js';
-import { runIRReviewer } from './reviewer/index.js';
+import { runHtmlReviewer } from './reviewer/index.js';
 import type { ReviewResult } from './reviewer/index.js';
-import { generateIRDesignProgressive } from '../lib/irDesign.js';
+import { generateHtmlDesignBatched } from '../lib/htmlDesign.js';
 import { syncPostSlides } from '../lib/postHelper.js';
 import { researchBrand, type VisualRef } from '../lib/fabricaLegacy.js';
 import { humanizeGeminiError } from '../lib/geminiRetry.js';
@@ -150,7 +150,7 @@ async function runPipelineInner(
           type: format === 'presentation' ? 'PRESENTATION' : 'CAROUSEL',
           status: 'GENERATING',
           content: {
-            kind: 'ir-design',
+            kind: 'html-design',
             version: 1,
             width,
             height,
@@ -196,7 +196,7 @@ async function runPipelineInner(
         referencesCount: brand?.references?.length,
       });
 
-      const ir = await generateIRDesignProgressive(
+      const design = await generateHtmlDesignBatched(
         async (systemInstruction, userPrompt) => {
           const response = await generateWithRetry(ai, {
             model: preferredModel,
@@ -237,7 +237,7 @@ async function runPipelineInner(
         // progresso na faixa 30%→80%. Com lotes paralelos os slides chegam fora
         // de ordem — por isso o progresso usa `completed` (monotônico), não index.
         async (partial, index, totalSlides, completed) => {
-          const slide = partial.ir.slides[index];
+          const slide = partial.slides[index];
 
           // Envelope LEVE (sem o array de slides) — o front acumula os deltas e
           // reconstrói o mesmo envelope. Antes reescrevíamos/transmitíamos o
@@ -245,7 +245,7 @@ async function runPipelineInner(
           // slide. A persistência incremental fica na tabela relacional `slides`
           // (abaixo); o Redis currentDesign é gravado uma vez só, no fim.
           const envelope = {
-            kind: 'ir-design' as const,
+            kind: 'html-design' as const,
             version: 1 as const,
             source: 'codegen' as const,
             // Identidade do deck: o front usa isto pra saber quando um novo deck
@@ -256,14 +256,7 @@ async function runPipelineInner(
             format: partial.format,
             fonts: partial.fonts,
             reasoning: partial.reasoning,
-            ir: {
-              version: 1 as const,
-              width: partial.ir.width,
-              height: partial.ir.height,
-              fonts: partial.ir.fonts,
-              tokens: partial.ir.tokens,
-              slides: [] as unknown[],
-            },
+            slides: [] as unknown[],
           };
           ws.designSlide(sessionId, { index, total: totalSlides, slide, envelope });
 
@@ -290,7 +283,7 @@ async function runPipelineInner(
             lastCurrentDesignPersist = now;
             const liveEnvelope = {
               ...envelope,
-              ir: { ...envelope.ir, slides: (partial.ir.slides as unknown[]).filter(Boolean) },
+              slides: (partial.slides as unknown[]).filter(Boolean),
             };
             currentPages = [liveEnvelope] as unknown as typeof currentPages;
             await updateSession(sessionId, { currentDesign: currentPages }).catch((e) =>
@@ -307,22 +300,22 @@ async function runPipelineInner(
         { concurrency: config.generationConcurrency },
       );
 
-      // Envelope de conteúdo (preview no front + persistência). kind ir-design.
+      // Envelope de conteúdo (preview no front + persistência). kind html-design.
       const content = {
-        kind: 'ir-design' as const,
+        kind: 'html-design' as const,
         version: 1 as const,
         source: 'codegen' as const,
         postId,
-        width: ir.width,
-        height: ir.height,
-        format: ir.format,
-        fonts: ir.fonts,
-        ir: ir.ir,
-        reasoning: ir.reasoning,
+        width: design.width,
+        height: design.height,
+        format: design.format,
+        fonts: design.fonts,
+        slides: design.slides,
+        reasoning: design.reasoning,
       };
 
       // Persiste no Redis + broadcast WS (design:update). O frontend renderiza o
-      // envelope ir-design via IRSlideRenderer (preview da Fábrica) / IRCanvasEditor.
+      // envelope html-design via HtmlSlideRenderer (preview da Fábrica).
       currentPages = await executeTool('set_design', { pages: [content] }, sessionId, currentPages);
 
       // ── 3. Reviewer (visão sobre render fiel em chromium) ─────────────────────
@@ -340,18 +333,13 @@ async function runPipelineInner(
         });
       }
 
-      // Reviewer do IR: estrutural determinístico (fora-do-canvas, sobreposição,
-      // contraste WCAG, texto vazio/placeholder, fonte fora da paleta) + passada
-      // semântica de conteúdo. A crítica VISUAL fica pendente do compilador
-      // IR→HTML. Fail-safe: se o reviewer estourar, aprova para não travar a entrega.
+      // Reviewer do HTML: crítica sobre o render fiel (rasteriza em chromium e o
+      // modelo multimodal vê a arte). Fail-safe: se o reviewer estourar, aprova
+      // para não travar a entrega.
       try {
-        reviewResult = await runIRReviewer({
-          ir: ir.ir,
-          brandContext,
-          objective: brief,
-        });
+        reviewResult = await runHtmlReviewer(design, brandContext, brief);
       } catch (reviewErr) {
-        logger.error('Reviewer IR falhou; aprovando por segurança (fail-safe)', { error: (reviewErr as Error).message });
+        logger.error('Reviewer HTML falhou; aprovando por segurança (fail-safe)', { error: (reviewErr as Error).message });
         reviewResult = { approved: true, score: 75, deviations: [], feedback: 'Revisão automática indisponível', correctionInstructions: undefined };
       }
 
@@ -369,7 +357,13 @@ async function runPipelineInner(
       }
 
     } catch (err) {
-      logger.error('Erro no DesignDocument', { error: (err as Error).message });
+      logger.error('Erro no DesignDocument', {
+        postId,
+        slideCount,
+        model: config.geminiDesignDocumentModel || 'gemini-3.1-pro-preview',
+        error: (err as Error).message,
+        stack: (err as Error).stack,
+      });
       // Atualiza o status do post para FAILED no banco de dados
       await prisma.post.update({
         where: { id: postId },
