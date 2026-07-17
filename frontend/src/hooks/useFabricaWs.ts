@@ -159,7 +159,11 @@ export function useFabricaWs(brandSlug: string, initialSessionId?: string | null
       }
 
       case 'design:update': {
-        setDesign((data.pages ?? []) as DesignPage[]);
+        const pages = (data.pages ?? []) as DesignPage[];
+        setDesign(pages);
+        // Mesmo motivo do session:state: o envelope final traz o postId.
+        const envPid = (pages[0] as { postId?: string } | undefined)?.postId;
+        if (envPid) setPid(envPid);
         break;
       }
 
@@ -261,7 +265,14 @@ export function useFabricaWs(brandSlug: string, initialSessionId?: string | null
           role: string; content: string; timestamp: number; attachments?: FabricaAttachment[];
         }>;
         if (p) setPh(p);
-        if (d.length > 0) setDesign(d);
+        if (d.length > 0) {
+          setDesign(d);
+          // O envelope persistido carrega o postId do deck. Sem re-hidratá-lo
+          // aqui, um F5 deixava o botão Baixar desabilitado para sempre
+          // ("Disponível assim que o primeiro slide sair") num deck já pronto.
+          const envPid = (d[0] as { postId?: string } | undefined)?.postId;
+          if (envPid) setPid(envPid);
+        }
         if (rm) setRm(rm);
         setQuestion(question);
         // IDs determinísticos por posição: o rehydrate reusa os mesmos IDs a cada
