@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Search, Plus, Filter, Loader2, X, Trash2 } from 'lucide-react';
+import { Search, Plus, Filter, Loader2, X, Trash2, Edit3 } from 'lucide-react';
 import PageHeader from '@/components/ui/PageHeader';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
@@ -43,6 +43,12 @@ export default function GaleriaPage() {
   const [deleteTarget, setDeleteTarget] = useState<Brand | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState('');
   const [deleting, setDeleting] = useState(false);
+
+  // Editar marca
+  const [editTarget, setEditTarget] = useState<Brand | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editColor, setEditColor] = useState('#171717');
+  const [savingEdit, setSavingEdit] = useState(false);
 
   useEffect(() => {
     api.get<Brand[]>('/brands')
@@ -103,6 +109,32 @@ export default function GaleriaPage() {
     }
   };
 
+  const handleEditBrand = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editTarget || !editName.trim()) return;
+    setSavingEdit(true);
+    try {
+      const updated = await api.put<Brand>(`/brands/${editTarget.slug}`, { name: editName.trim(), color: editColor });
+      setBrands((prev) => prev.map((b) => (b.slug === editTarget.slug ? updated : b)));
+      setEditTarget(null);
+    } catch {
+      // manter modal aberto em caso de erro
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  const openEditModal = (brand: Brand) => {
+    setEditTarget(brand);
+    setEditName(brand.name);
+    setEditColor(brand.color || '#171717');
+  };
+
+  const closeEditModal = () => {
+    if (savingEdit) return;
+    setEditTarget(null);
+  };
+
   const closeDeleteModal = () => {
     if (deleting) return;
     setDeleteTarget(null);
@@ -115,12 +147,10 @@ export default function GaleriaPage() {
         title="Galeria de Marcas"
         description="Gerencie seus projetos e acesse as configurações de cada marca."
         actions={
-          <Link href="/onboarding">
-            <Button size="sm">
-              <Plus size={16} />
-              Nova Marca
-            </Button>
-          </Link>
+          <Button size="sm" onClick={() => setShowModal(true)}>
+            <Plus size={16} />
+            Nova Marca
+          </Button>
         }
       />
 
@@ -175,6 +205,15 @@ export default function GaleriaPage() {
                         </div>
                       </Card>
                     </Link>
+                    {(brand.myRole === 'OWNER' || brand.myRole === 'ADMIN') && (
+                      <button
+                        className={styles.cardEditBtn}
+                        onClick={(e) => { e.preventDefault(); openEditModal(brand); }}
+                        title="Editar marca"
+                      >
+                        <Edit3 size={13} />
+                      </button>
+                    )}
                     {brand.myRole === 'OWNER' && (
                       <button
                         className={styles.cardDeleteBtn}
@@ -290,6 +329,56 @@ export default function GaleriaPage() {
                 </Button>
                 <Button type="submit" size="sm" disabled={creating || !newName.trim()}>
                   {creating ? 'Criando...' : 'Criar Marca'}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Editar Marca Modal */}
+      {editTarget && (
+        <div className={styles.modalOverlay} onClick={closeEditModal}>
+          <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
+            <div className={styles.modalHeader}>
+              <h2 className={styles.modalTitle}>Editar Marca</h2>
+              <button className={styles.modalClose} onClick={closeEditModal}>
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleEditBrand} className={styles.modalForm}>
+              <div className={styles.formGroup}>
+                <label className={styles.formLabel}>Nome da marca</label>
+                <input
+                  className={styles.formInput}
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  placeholder="Ex: Minha Marca"
+                  required
+                  autoFocus
+                />
+              </div>
+
+              <div className={styles.formGroup}>
+                <label className={styles.formLabel}>Cor de destaque</label>
+                <div className={styles.colorPickerRow}>
+                  <input
+                    type="color"
+                    value={editColor}
+                    onChange={(e) => setEditColor(e.target.value)}
+                    className={styles.colorPicker}
+                  />
+                  <span className={styles.colorValue}>{editColor}</span>
+                </div>
+              </div>
+
+              <div className={styles.modalActions}>
+                <Button type="button" variant="secondary" size="sm" onClick={closeEditModal} disabled={savingEdit}>
+                  Cancelar
+                </Button>
+                <Button type="submit" size="sm" disabled={savingEdit || !editName.trim()}>
+                  {savingEdit ? 'Salvando...' : 'Salvar Alterações'}
                 </Button>
               </div>
             </form>

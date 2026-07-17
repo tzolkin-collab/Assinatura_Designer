@@ -20,11 +20,17 @@ vi.mock('../lib/redis', () => {
       del: vi.fn(async () => 1),
       quit: vi.fn(async () => 'OK'),
       incrby: vi.fn(async () => 1),
-      // Contadores do teto de IA usam multi(): o mock encadeia e não fala com Redis.
+      // Contabilidade por modelo lê índices (SET) e hashes; sem registro, tudo vazio.
+      smembers: vi.fn(async () => []),
+      hgetall: vi.fn(async () => ({})),
+      // Contadores/hashes do teto de IA usam multi(): o mock encadeia e não fala com Redis.
       multi: vi.fn(() => {
         const chain = {
           incrby: vi.fn(() => chain),
+          hincrby: vi.fn(() => chain),
+          sadd: vi.fn(() => chain),
           expire: vi.fn(() => chain),
+          hgetall: vi.fn(() => chain),
           exec: vi.fn(async () => []),
         };
         return chain;

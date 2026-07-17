@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Bot, Palette, Eye, PlugZap, ChevronRight, Trash2, X, Users, Image as ImageIcon } from 'lucide-react';
+import { ArrowLeft, Bot, Palette, Eye, PlugZap, ChevronRight, Trash2, X, Users, Image as ImageIcon, BarChart3 } from 'lucide-react';
 import PageHeader from '@/components/ui/PageHeader';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
@@ -31,8 +31,8 @@ const CONFIG_SECTIONS = [
   },
   {
     key: 'canva',
-    label: 'Editor Penpot',
-    description: 'Configure a instância self-hosted do Penpot para editar designs sem sair do app.',
+    label: 'Integração Canva',
+    description: 'Conecte seu perfil do Canva para exportar apresentações e designs prontos direto para sua conta do Canva.',
     icon: <PlugZap size={20} />,
   },
   {
@@ -46,6 +46,12 @@ const CONFIG_SECTIONS = [
     label: 'Biblioteca de Mídia',
     description: 'Gerencie os uploads (imagens e fontes) compartilhados por esta marca.',
     icon: <ImageIcon size={20} />,
+  },
+  {
+    key: 'billing',
+    label: 'Gastos de IA',
+    description: 'Consumo e custo estimado por modelo, mês a mês — gasto e impostos separados.',
+    icon: <BarChart3 size={20} />,
   },
 ];
 

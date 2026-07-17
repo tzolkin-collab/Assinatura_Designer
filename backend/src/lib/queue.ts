@@ -12,6 +12,7 @@ import { config } from '../config.js';
 import { ws } from './websocket.js';
 import { runPipeline, type PipelineParams } from '../agents/pipeline.js';
 import { runCanvaExport, type CanvaExportParams } from './canvaExport.js';
+import { runDeckExport, type DeckExportParams } from './deckExport.js';
 import { logger } from './logger.js';
 
 const QUEUE_NAME = 'pipeline';
@@ -76,6 +77,61 @@ canvaExportQueue.on('error', (err) => logger.error('Fila de export do Canva com 
 export async function enqueueCanvaExport(params: CanvaExportParams): Promise<string> {
   const job = await canvaExportQueue.add('export', params);
   return job.id!;
+}
+
+// ── Fila de export do deck como ARQUIVO (PDF / ZIP de PNGs) ───────────────────
+// Mesmo motivo da fila do Canva: um deck de 30 slides são 30 renders no chromium,
+// dezenas de segundos. Como request HTTP síncrono isso é timeout na cara do usuário.
+
+const DECK_EXPORT_QUEUE_NAME = 'deck-export';
+
+export const deckExportQueue = new Queue<DeckExportParams>(DECK_EXPORT_QUEUE_NAME, {
+  connection: makeConnection(),
+  defaultJobOptions: {
+    // 1 tentativa: um retry re-renderiza o deck inteiro e sobe outro arquivo no R2.
+    // Falhou, o usuário clica de novo — mais barato do que duplicar 200 renders.
+    attempts: 1,
+    removeOnComplete: { count: 100, age: 24 * 3600 },
+    removeOnFail: { count: 200, age: 24 * 3600 },
+  },
+});
+
+deckExportQueue.on('error', (err) => logger.error('Fila de export de deck com erro', { error: err.message }));
+
+export async function enqueueDeckExport(params: DeckExportParams): Promise<string> {
+  const job = await deckExportQueue.add('export', params);
+  return job.id!;
+}
+
+let deckWorker: Worker<DeckExportParams> | null = null;
+
+export function startDeckExportWorker(): Worker<DeckExportParams> {
+  if (deckWorker) return deckWorker;
+
+  deckWorker = new Worker<DeckExportParams>(
+    DECK_EXPORT_QUEUE_NAME,
+    async (job: Job<DeckExportParams>) => {
+      return runDeckExport(job.data, async (done, total) => {
+        // O progresso vive no job: o editor/fábrica lê por polling, sem depender
+        // de sessão de WebSocket (o export também é pedido fora da Fábrica).
+        await job.updateProgress({ done, total });
+      });
+    },
+    {
+      connection: makeConnection(),
+      // Cada slide é um render full-res. Concorrência 1 por processo mantém a
+      // memória previsível — o gargalo é o chromium, não o IO.
+      concurrency: 1,
+    },
+  );
+
+  deckWorker.on('failed', (job, err) => {
+    logger.error('Job de export de deck falhou', { jobId: job?.id, format: job?.data.format, error: err.message });
+  });
+  deckWorker.on('error', (err) => logger.error('Worker de export de deck com erro', { error: err.message }));
+
+  console.log(`  ├─ Worker:       fila "${DECK_EXPORT_QUEUE_NAME}" (concorrência 1)`);
+  return deckWorker;
 }
 
 let exportWorker: Worker<CanvaExportParams> | null = null;
@@ -150,6 +206,8 @@ export function startPipelineWorker(): Worker<PipelineParams> {
 export async function closeQueue(): Promise<void> {
   await worker?.close();
   await exportWorker?.close();
+  await deckWorker?.close();
   await pipelineQueue.close();
   await canvaExportQueue.close();
+  await deckExportQueue.close();
 }

@@ -120,7 +120,7 @@ export default function ProjetosPage() {
                 ))}
               </div>
             </section>
-          ))}
+      ))}
         </div>
       )}
     </div>

@@ -613,17 +613,18 @@ export async function fixDesign(
   // ── planOnly mode: analyze + plan, then return original pages unchanged ──────
   if (opts.planOnly) {
     ctx.emit({ type: 'analyze-start' });
-    let issues: DesignIssue[];
-    try {
-      issues = await analyzeDesign(workingPages, dims, brandColors, brandContext);
-    } catch { issues = []; }
+    // Sem `try` aqui de propósito: análise que falha não é design sem problemas.
+    // Engolir a exceção e seguir com `issues = []` fazia a UI anunciar que estava
+    // tudo certo justamente quando ninguém tinha olhado. Os dois callers já sabem
+    // falhar o job (failFixJob / evento `error`), então deixamos subir.
+    const issues: DesignIssue[] = await analyzeDesign(workingPages, dims, brandColors, brandContext);
     ctx.emit({ type: 'analyze-done', issues });
 
+    // Idem: há problemas conhecidos e o plano falhou — `fixes = []` seria dizer
+    // "nada a corrigir" para uma lista de defeitos que acabamos de listar.
     let fixes: DesignFix[] = [];
     if (issues.length > 0) {
-      try {
-        fixes = await planFixes(issues, brandColors, dims);
-      } catch { fixes = []; }
+      fixes = await planFixes(issues, brandColors, dims);
     }
     ctx.emit({ type: 'plan-done', fixes });
     ctx.emit({ type: 'complete', pages: workingPages as unknown[] });
@@ -665,12 +666,19 @@ export async function fixDesign(
     );
 
     ctx.emit({ type: 'verify-start', iteration: 1 });
+    // Aqui os fixes já foram aplicados: deixar a exceção subir jogaria fora trabalho
+    // real do usuário. Mas "não consegui verificar" também não é "está tudo certo" —
+    // antes, o catch zerava `remaining` e a UI cravava "✅ Design corrigido!" sem
+    // ninguém ter conferido. Entregamos as páginas e admitimos que não sabemos.
     let remaining: DesignIssue[] = [];
+    let verifyFailure: string | undefined;
     try {
       const all = await analyzeDesign(workingPages, dims, brandColors, brandContext);
       remaining = all.filter(i => i.severity !== 'minor');
-    } catch { remaining = []; }
-    ctx.emit({ type: 'verify-done', remaining, iteration: 1 });
+    } catch (err) {
+      verifyFailure = err instanceof Error ? err.message : 'erro desconhecido';
+    }
+    ctx.emit({ type: 'verify-done', remaining, iteration: 1, message: verifyFailure });
     ctx.emit({ type: 'complete', pages: workingPages as unknown[] });
     return workingPages;
   }

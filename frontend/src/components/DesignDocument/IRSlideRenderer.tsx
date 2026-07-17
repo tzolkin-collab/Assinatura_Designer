@@ -1,12 +1,15 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import type { DesignIR, SlideNode, ElementNode, BackgroundDef } from '@/lib/designIR/types';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import type { DesignIR } from '@/lib/designIR/types';
+import IRSlideView from '@/components/DesignIR/IRSlideView';
 
-// Renderer read-only e leve de um envelope `ir-design`. Espelha o layout do
-// HtmlSlideRenderer/DesignRenderer (auto-scale via ResizeObserver, aspect-ratio
-// no wrapper), mas desenha a árvore IR diretamente em divs — sem lógica de
-// edição/drag. Usado no preview da Fábrica durante e após a geração.
+// Preview read-only de um envelope `ir-design`: cuida do enquadramento (auto-scale via
+// ResizeObserver, aspect-ratio, navegação entre slides) e delega o DESENHO ao
+// IRSlideView — o renderizador único, espelho do compilador que gera o PNG.
+//
+// Antes este arquivo tinha a própria cópia do desenho, e ela divergia do editor e do
+// compilador. Três renderizadores, três resultados para o mesmo IR.
 
 export interface IRDesignEnvelope {
   kind?: string;
@@ -49,100 +52,6 @@ function useGoogleFonts(fonts: string[] | undefined) {
     link.href = href;
     document.head.appendChild(link);
   }, [fonts]);
-}
-
-function backgroundStyle(bg: BackgroundDef | undefined): CSSProperties {
-  if (!bg) return { background: '#ffffff' };
-  if (bg.type === 'gradient' && bg.gradient) return { background: bg.gradient };
-  if (bg.type === 'image' && bg.src) {
-    return { backgroundImage: `url(${bg.src})`, backgroundSize: 'cover', backgroundPosition: 'center' };
-  }
-  return { background: bg.color ?? '#ffffff' };
-}
-
-function clipPathFor(shapeType: ElementNode['shapeType']): string | undefined {
-  switch (shapeType) {
-    case 'triangle': return 'polygon(50% 0%, 0% 100%, 100% 100%)';
-    case 'polygon':  return 'polygon(50% 0%, 100% 38%, 82% 100%, 18% 100%, 0% 38%)';
-    default: return undefined;
-  }
-}
-
-function elementStyle(el: ElementNode): CSSProperties {
-  const s = el.style ?? {};
-  const isCircle = el.type === 'shape' && el.shapeType === 'circle';
-  const css: CSSProperties = {
-    position: 'absolute',
-    left: el.bounds.x,
-    top: el.bounds.y,
-    width: el.bounds.width,
-    height: el.bounds.height,
-    zIndex: el.zIndex,
-    opacity: s.opacity,
-    transform: el.bounds.rotation ? `rotate(${el.bounds.rotation}deg)` : undefined,
-    // Typography
-    fontFamily: s.fontFamily,
-    fontSize: s.fontSize,
-    fontWeight: s.fontWeight as CSSProperties['fontWeight'],
-    lineHeight: s.lineHeight,
-    letterSpacing: s.letterSpacing,
-    textAlign: s.textAlign,
-    textTransform: s.textTransform,
-    fontStyle: s.italic ? 'italic' : undefined,
-    textDecoration: s.textDecoration,
-    color: s.color,
-    // Box / appearance
-    background: s.background ?? s.backgroundColor,
-    borderRadius: isCircle ? '50%' : s.borderRadius,
-    borderWidth: s.borderWidth,
-    borderColor: s.borderColor,
-    borderStyle: s.borderStyle ?? (s.borderWidth ? 'solid' : undefined),
-    boxShadow: s.boxShadow,
-    backdropFilter: s.backdropFilter,
-    padding: s.padding,
-    overflow: s.overflow ?? 'hidden',
-    clipPath: clipPathFor(el.shapeType),
-    // Flex (defaults faithful to IRCanvasEditor)
-    display: s.display ?? 'flex',
-    flexDirection: s.flexDirection as CSSProperties['flexDirection'],
-    alignItems: s.alignItems ?? (el.type === 'text' ? 'flex-start' : 'center'),
-    justifyContent: s.justifyContent ?? (el.type === 'text' ? 'flex-start' : 'center'),
-    gap: s.gap,
-    whiteSpace: 'pre-wrap',
-    wordBreak: 'break-word',
-  };
-  return css;
-}
-
-function SlideView({ slide }: { slide: SlideNode }) {
-  const elements = useMemo(
-    () => [...(slide.elements ?? [])].filter(Boolean).sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0)),
-    [slide.elements],
-  );
-  const overlay = slide.background?.overlay;
-  return (
-    <>
-      {overlay && (
-        <div style={{ position: 'absolute', inset: 0, background: overlay, zIndex: 0, pointerEvents: 'none' }} />
-      )}
-      {elements.map((el) => {
-        if (el.visible === false) return null;
-        return (
-          <div key={el.id} style={elementStyle(el)}>
-            {el.type === 'text' && <span>{el.content}</span>}
-            {el.type === 'image' && el.src && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={el.src}
-                alt={el.name ?? ''}
-                style={{ width: '100%', height: '100%', objectFit: el.style?.objectFit ?? 'cover', display: 'block' }}
-              />
-            )}
-          </div>
-        );
-      })}
-    </>
-  );
 }
 
 export default function IRSlideRenderer({
@@ -193,7 +102,9 @@ export default function IRSlideRenderer({
     height,
     position: 'absolute',
     overflow: 'hidden',
-    ...backgroundStyle(slide.background),
+    // O fundo NÃO vai aqui: o IRSlideView desenha as camadas (sólido/gradiente/imagem
+    // + overlay) como o compilador faz. Aplicar o fundo no container mataria o overlay.
+    background: '#ffffff',
     transform: `scale(${scale})`,
     transformOrigin: mode === 'cover' ? 'center center' : 'top left',
     ...(mode === 'cover'
@@ -215,7 +126,7 @@ export default function IRSlideRenderer({
       >
         {scale > 0 && (
           <div style={innerStyle}>
-            <SlideView slide={slide} />
+            <IRSlideView slide={slide} />
           </div>
         )}
       </div>

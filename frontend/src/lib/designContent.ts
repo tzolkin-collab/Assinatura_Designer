@@ -231,13 +231,8 @@ export function extractEditablePages(content: unknown): EditablePagesResult {
 }
 
 export function extractPreviewSource(content: unknown, previewUrl?: string | null): PreviewSource {
-  if (typeof previewUrl === 'string' && previewUrl.trim().length > 0) {
-    return { kind: 'image', url: previewUrl };
-  }
-
-  const imageUrl = extractImageUrlFromContent(content);
-  if (imageUrl) return { kind: 'image', url: imageUrl };
-
+  // Prefer rich deck/design formats over static preview images, so that interactive
+  // slide previews, full capabilities (exporting/editing), and multi-slide controls are preserved.
   if (isHtmlDesignContent(content)) return { kind: 'html-design', content };
 
   if (isIRDesignContent(content)) return { kind: 'ir-design', content };
@@ -262,11 +257,24 @@ export function extractPreviewSource(content: unknown, previewUrl?: string | nul
     return { kind: 'hybrid-document', document: editable.document };
   }
 
+  // Fallback to static preview URL or image content URL
+  if (typeof previewUrl === 'string' && previewUrl.trim().length > 0) {
+    return { kind: 'image', url: previewUrl };
+  }
+
+  const imageUrl = extractImageUrlFromContent(content);
+  if (imageUrl) return { kind: 'image', url: imageUrl };
+
   return null;
 }
 
+// O `ir-design` PRECISA estar nestas duas listas. O backend grava `sessionId` e
+// `chatHistory` no envelope de todo deck (pipeline.ts), mas a migração para o IR não
+// passou por aqui: como ir-design é hoje o único formato que o produto gera, TODO deck
+// aparecia na galeria como "Sessão: não registrada", com histórico vazio e sem o link
+// "Abrir sessão" — ou seja, sem caminho de volta para a conversa que o criou.
 export function extractChatHistory(content: unknown): FabricaChatHistoryMessage[] {
-  if (isFabricaDesignContent(content) || isHybridDesignContent(content) || isHtmlDesignContent(content)) {
+  if (isFabricaDesignContent(content) || isHybridDesignContent(content) || isHtmlDesignContent(content) || isIRDesignContent(content)) {
     return content.chatHistory ?? [];
   }
   return [];
@@ -280,6 +288,9 @@ export function extractSessionId(content: unknown): string | null {
     return content.sessionId ?? null;
   }
   if (isHtmlDesignContent(content)) {
+    return content.sessionId ?? null;
+  }
+  if (isIRDesignContent(content)) {
     return content.sessionId ?? null;
   }
   return null;

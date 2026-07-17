@@ -109,6 +109,7 @@ interface AIFixPanelProps {
   fixList: FixStatus[];
   selectedFixIds: Set<string>;
   remainingIssues: DesignIssue[];
+  verifyWarning?: string | null;
   correctedPages: DesignPage[] | null;
   iteration: number;
   errorMessage: string | null;
@@ -130,6 +131,7 @@ export default function AIFixPanel({
   fixList,
   selectedFixIds,
   remainingIssues,
+  verifyWarning,
   correctedPages,
   iteration,
   errorMessage,
@@ -184,10 +186,14 @@ export default function AIFixPanel({
           {phase === 'done' && (
             <div className={styles.doneBox}>
               <p className={styles.doneTitle}>
-                {remainingIssues.length === 0 ? '✅ Design corrigido!' : '⚠ Correção parcial'}
+                {verifyWarning
+                  ? '⚠ Aplicado, mas não verificado'
+                  : remainingIssues.length === 0 ? '✅ Design corrigido!' : '⚠ Correção parcial'}
               </p>
               <p className={styles.doneMsg}>
-                {remainingIssues.length === 0
+                {verifyWarning
+                  ? `${fixList.filter(f => f.status === 'success').length} correções aplicadas, mas a verificação final falhou (${verifyWarning}). Confira o resultado manualmente.`
+                  : remainingIssues.length === 0
                   ? `${fixList.filter(f => f.status === 'success').length} correções aplicadas com sucesso.`
                   : `${remainingIssues.length} problema${remainingIssues.length > 1 ? 's' : ''} persistente${remainingIssues.length > 1 ? 's' : ''} — revise manualmente se necessário.`}
               </p>

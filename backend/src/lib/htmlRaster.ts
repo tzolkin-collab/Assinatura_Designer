@@ -17,6 +17,11 @@ export interface HtmlRasterOptions {
 interface TaskData {
   html: string;
   opts: HtmlRasterOptions;
+  // PNG é o padrão (crítico visual, export de slide, Canva). O PDF sai do MESMO
+  // documento e do mesmo chromium — a diferença é só o modo de captura, e é ela
+  // que decide se o texto do deck vira pixel (screenshot) ou continua texto
+  // vetorial, selecionável e nítido em qualquer zoom (print).
+  mode?: 'png' | 'pdf';
 }
 
 let clusterPromise: Promise<Cluster<TaskData, Buffer>> | null = null;
@@ -82,7 +87,7 @@ async function getCluster(): Promise<Cluster<TaskData, Buffer>> {
 
       // Define a tarefa padrão do cluster
       await c.task(async ({ page, data }) => {
-        const { html, opts } = data;
+        const { html, opts, mode = 'png' } = data;
         const { width, height, maxDim = 768 } = opts;
 
         // Configura viewport
@@ -99,6 +104,20 @@ async function getCluster(): Promise<Cluster<TaskData, Buffer>> {
 
         // Pequena pausa para garantir a correta renderização final
         await new Promise((resolve) => setTimeout(resolve, 200));
+
+        if (mode === 'pdf') {
+          // Uma página do tamanho exato do slide, sem margem: o PDF sai na mesma
+          // proporção do canvas. `printBackground` é obrigatório — sem ele o
+          // chromium descarta fundo/gradiente e o slide sai branco.
+          const pdf = await page.pdf({
+            width: `${width}px`,
+            height: `${height}px`,
+            printBackground: true,
+            pageRanges: '1',
+            margin: { top: '0', right: '0', bottom: '0', left: '0' },
+          });
+          return Buffer.from(pdf);
+        }
 
         // Tira o screenshot do slide
         const raw = await page.screenshot({
@@ -155,4 +174,13 @@ export async function renderHtmlToPng(html: string, opts: HtmlRasterOptions): Pr
 export async function renderHtmlToBase64(html: string, opts: HtmlRasterOptions): Promise<string> {
   const buf = await renderHtmlToPng(html, opts);
   return buf.toString('base64');
+}
+
+/**
+ * Renderiza um documento HTML/CSS completo para um PDF de UMA página, do tamanho
+ * do slide. O merge das páginas num deck fica em `deckExport.ts`.
+ */
+export async function renderHtmlToPdf(html: string, opts: HtmlRasterOptions): Promise<Buffer> {
+  const cluster = await getCluster();
+  return await cluster.execute({ html, opts, mode: 'pdf' });
 }

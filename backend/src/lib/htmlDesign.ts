@@ -1,6 +1,9 @@
 // Geração de design em HTML/CSS livre (modo nativo do modelo) + utilitários de
 // montagem e sanitização. Substitui o schema JSON rígido como meio de geração.
 
+import createDOMPurify, { type WindowLike } from 'dompurify';
+import { JSDOM } from 'jsdom';
+
 export interface HtmlDesignSlide {
   html: string;
   css?: string;
@@ -41,14 +44,38 @@ export class HtmlDesignValidationError extends Error {
   }
 }
 
-// ── Sanitização (defesa básica; o iframe do frontend usará DOMPurify estrito) ───
+// ── Sanitização ─────────────────────────────────────────────────────────────────
+// Este HTML é gerado por LLM e vai direto para `page.setContent` num chromium com
+// `--no-sandbox` (ver htmlRaster.ts): o que passar daqui EXECUTA no servidor. Até
+// aqui a defesa era um punhado de regex que prometia, em comentário, um DOMPurify
+// no iframe do frontend que nunca foi escrito. `<script src=x>` sem tag de
+// fechamento atravessava inteiro, porque a regex exigia o `</script>`.
+// Agora é parser de verdade: o jsdom monta a árvore e o DOMPurify poda em cima
+// dela, então não há truque de tokenização (tag aninhada, sem fechamento, atributo
+// sem aspas) que engane a limpeza.
+const purifyWindow = new JSDOM('').window;
+const purify = createDOMPurify(purifyWindow as unknown as WindowLike);
+
 export function sanitizeSlideHtml(html: string): string {
-  return String(html)
-    .replace(/<script[\s\S]*?<\/script>/gi, '')
-    .replace(/<\/?(?:iframe|object|embed|link|meta)[^>]*>/gi, '')
-    .replace(/\son\w+\s*=\s*"[^"]*"/gi, '')
-    .replace(/\son\w+\s*=\s*'[^']*'/gi, '')
-    .replace(/\son\w+\s*=\s*[^\s>]+/gi, '')
+  return purify.sanitize(String(html), {
+    // Os slides trazem CSS embutido e ilustração vetorial; sem isto o design chega
+    // sem estilo. O DOMPurify limpa o conteúdo do <style> e do SVG por dentro.
+    ADD_TAGS: ['style'],
+    FORBID_TAGS: ['script', 'iframe', 'object', 'embed', 'link', 'meta', 'base', 'form'],
+    FORBID_ATTR: ['srcdoc', 'formaction'],
+  });
+}
+
+// CSS não é HTML: passá-lo pelo DOMPurify escaparia `>` de seletor e quebraria o
+// layout. O risco aqui é outro — fechar o <style> em que ele será embutido e
+// emendar uma tag, ou fazer o chromium buscar coisa de fora.
+export function sanitizeSlideCss(css: string): string {
+  return String(css)
+    .replace(/<\/?\s*style[^>]*>/gi, '')
+    .replace(/<\/?\s*script[^>]*>/gi, '')
+    .replace(/@import[^;]*;?/gi, '')
+    .replace(/expression\s*\(/gi, '')
+    .replace(/(?:-moz-)?binding\s*:/gi, '')
     .replace(/javascript:/gi, '');
 }
 
@@ -64,7 +91,7 @@ function googleFontsHref(fonts: string[]): string {
 
 // Monta o documento HTML completo de um slide (para rasterizar OU exibir no iframe).
 export function buildSlideDocument(slide: HtmlDesignSlide, fonts: string[], width: number, height: number): string {
-  const css = sanitizeSlideHtml(slide.css ?? '');
+  const css = sanitizeSlideCss(slide.css ?? '');
   const html = sanitizeSlideHtml(slide.html ?? '');
   return `<!doctype html><html><head><meta charset="utf-8">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -93,7 +120,7 @@ export function validateHtmlDesign(value: unknown, expect: { width: number; heig
     const rec = isRecord(s) ? s : {};
     const html = typeof rec.html === 'string' ? rec.html : '';
     const css = typeof rec.css === 'string' ? rec.css : undefined;
-    return { html: sanitizeSlideHtml(html), css: css ? sanitizeSlideHtml(css) : undefined };
+    return { html: sanitizeSlideHtml(html), css: css ? sanitizeSlideCss(css) : undefined };
   }).filter((s) => s.html.trim().length > 0);
   if (slides.length === 0) throw new HtmlDesignValidationError('slides sem html');
 
@@ -281,7 +308,7 @@ export async function generateHtmlDesignProgressive(
 
       const html = typeof rec.html === 'string' ? sanitizeSlideHtml(rec.html) : '';
       if (!html.trim()) throw new HtmlDesignValidationError(`slide ${i + 1} sem html`);
-      const css = typeof rec.css === 'string' ? sanitizeSlideHtml(rec.css) : undefined;
+      const css = typeof rec.css === 'string' ? sanitizeSlideCss(rec.css) : undefined;
 
       if (i === 0) {
         if (Array.isArray(rec.fonts)) fonts = rec.fonts.filter((f): f is string => typeof f === 'string');
@@ -386,6 +413,6 @@ Retorne o slide editado (apenas o que mudou aplicado sobre o atual).`;
   const parsed = extractJson(raw);
   const rec = isRecord(parsed) ? parsed : {};
   const html = typeof rec.html === 'string' && rec.html.trim() ? sanitizeSlideHtml(rec.html) : sanitizeSlideHtml(input.slide.html);
-  const css = typeof rec.css === 'string' ? sanitizeSlideHtml(rec.css) : (input.slide.css ? sanitizeSlideHtml(input.slide.css) : undefined);
+  const css = typeof rec.css === 'string' ? sanitizeSlideCss(rec.css) : (input.slide.css ? sanitizeSlideCss(input.slide.css) : undefined);
   return { html, css };
 }

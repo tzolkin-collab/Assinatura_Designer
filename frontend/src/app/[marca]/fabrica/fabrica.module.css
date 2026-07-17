@@ -1,11 +1,28 @@
-/* ── Layout ─────────────────────────────────────────────────────────────────── */
+/* ── Layout ───────────────────────────────────────────────────────────────────
+   Página full-screen (sem AppShell): ocupa a viewport inteira e trava o scroll
+   externo — quem rola é a .thread e o preview. */
 
 .root {
   display: flex;
-  height: 100%;
+  height: 100vh;
+  height: 100dvh;
   min-height: 0;
   background: var(--color-bg);
   overflow: hidden;
+}
+
+/* ── Utilitário ─────────────────────────────────────────────────────────────── */
+
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* ── Chat panel (left) ───────────────────────────────────────────────────────── */
@@ -17,12 +34,13 @@
 }
 
 .chatPanel {
-  width: 400px;
+  width: clamp(340px, 38vw, 460px);
   flex-shrink: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   border-right: 1px solid rgba(255, 255, 255, 0.2);
-  background: 
+  background:
     radial-gradient(circle at 10% 20%, rgba(217, 119, 87, 0.08) 0%, transparent 40%),
     radial-gradient(circle at 90% 80%, rgba(217, 119, 87, 0.05) 0%, transparent 40%),
     rgba(250, 248, 245, 0.6);
@@ -38,6 +56,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 10px;
   padding: 16px 18px 14px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.3);
   background: rgba(255, 255, 255, 0.65);
@@ -56,6 +75,13 @@
   min-width: 0;
 }
 
+.chatHeaderRight {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 .chatTitle {
   font-size: 14px;
   font-weight: 600;
@@ -70,7 +96,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-brand);
   background: color-mix(in srgb, var(--color-brand) 10%, white);
   border: 1px solid rgba(217, 119, 87, 0.18);
@@ -79,6 +105,29 @@
   white-space: nowrap;
   font-weight: 500;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55);
+}
+
+.newConvBtn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 5px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.newConvBtn:hover {
+  color: var(--color-text);
+  border-color: rgba(217, 119, 87, 0.3);
+  background: rgba(255, 255, 255, 0.9);
 }
 
 .connectionBadge {
@@ -90,7 +139,7 @@
   border: 1px solid rgba(0, 0, 0, 0.05);
   background: rgba(255, 255, 255, 0.86);
   color: var(--color-text-secondary);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.04);
 }
@@ -120,6 +169,7 @@
 
 .thread {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 24px 18px 30px;
   display: flex;
@@ -128,6 +178,7 @@
   background: transparent;
   position: relative;
   z-index: 1;
+  overscroll-behavior: contain;
 }
 
 .thread::-webkit-scrollbar { width: 4px; }
@@ -160,7 +211,7 @@
 }
 
 .emptyTitle {
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
   color: var(--color-text);
   margin: 0;
@@ -168,9 +219,37 @@
 
 .emptySubtitle {
   font-size: 12px;
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
   line-height: 1.6;
   margin: 0;
+}
+
+.suggestChips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: 16px;
+}
+
+.suggestChip {
+  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  padding: 8px 12px;
+  border-radius: 14px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
+  transition: transform 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.suggestChip:hover {
+  transform: translateY(-2px);
+  border-color: rgba(217, 119, 87, 0.3);
+  color: var(--color-text);
 }
 
 /* Messages */
@@ -185,20 +264,21 @@
   animation: slideUpFadeMsg 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
+/* Bubble do usuário: escuro (accent), texto branco — filhos precisam de
+   tratamento próprio para continuar legíveis sobre o fundo escuro. */
 .userBubble {
-  max-width: 85%;
-  background: linear-gradient(135deg, rgba(255, 250, 248, 0.95) 0%, rgba(255, 242, 236, 0.9) 100%);
-  border: 1px solid rgba(255, 255, 255, 0.8);
-  border-radius: 20px 20px 6px 20px;
+  max-width: min(85%, 560px);
+  background: var(--color-accent);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 18px 18px 4px 18px;
   padding: 14px 18px;
-  font-size: 13.5px;
-  color: #2D2422;
+  font-size: 14px;
+  color: #fff;
   line-height: 1.65;
   white-space: pre-wrap;
   word-break: break-word;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  box-shadow: 0 10px 30px rgba(217, 119, 87, 0.1), inset 0 2px 0 rgba(255, 255, 255, 0.6);
+  overflow-wrap: anywhere;
+  box-shadow: 0 10px 30px rgba(35, 34, 31, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 .aiRow {
@@ -209,8 +289,8 @@
 }
 
 .aiAvatar {
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   border-radius: 12px;
   background: linear-gradient(135deg, rgba(255, 247, 243, 1) 0%, rgba(255, 225, 210, 1) 100%);
   border: 1px solid rgba(255, 255, 255, 0.9);
@@ -266,59 +346,71 @@
   40% { transform: scale(1); opacity: 1; }
 }
 
-/* Progress Row */
+/* ── Progress row (definição ÚNICA — a antiga duplicata com padding gigante
+   quebrava o cartão; unificado aqui) ───────────────────────────────────────── */
+
 .progressRow {
-  background: rgba(255, 255, 255, 0.95);
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  border-radius: 16px;
-  padding: 16px 20px;
-  margin-top: 16px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.04);
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
+  width: 100%;
+  max-width: 100%;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  border-radius: 18px;
+  padding: 14px 18px;
+  overflow: hidden;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.04);
 }
 
 .progressHeader {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .progressEyebrow {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.05em;
+  font-size: 12px;
+  font-weight: 600;
   text-transform: uppercase;
-  color: var(--color-text-tertiary);
+  letter-spacing: 0.06em;
+  color: var(--color-text-secondary);
 }
 
 .progressValue {
   font-size: 12px;
   font-weight: 600;
-  color: #E65A3D;
+  color: var(--color-brand);
+  flex-shrink: 0;
 }
 
 .progressLabel {
-  font-size: 14px;
+  font-size: 13px;
   color: var(--color-text-secondary);
   margin: 0;
-  line-height: 1.4;
+  line-height: 1.5;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .progressTrack {
-  height: 6px;
-  background: rgba(0, 0, 0, 0.04);
+  position: relative;
+  width: 100%;
+  height: 8px;
+  background: rgba(217, 119, 87, 0.1);
   border-radius: 999px;
   overflow: hidden;
 }
 
 .progressBar {
   height: 100%;
-  background: linear-gradient(90deg, #FF6B4A, #E65A3D);
+  background: linear-gradient(90deg, rgba(217, 119, 87, 0.88) 0%, rgba(217, 119, 87, 0.58) 100%);
+  transition: width 0.5s ease;
   border-radius: 999px;
-  transition: width 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
+
+/* ── Thinking block (header vira <button> no TSX) ────────────────────────────── */
 
 .thinkingBlock {
   border: 1px solid var(--color-border-hover);
@@ -330,32 +422,40 @@
 .thinkingHeader {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 6px;
-  padding: 6px 10px;
-  font-size: 11px;
-  color: var(--color-text-tertiary);
+  width: 100%;
+  padding: 8px 10px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--color-text-secondary);
   background: var(--color-bg-secondary);
+  border: none;
   border-bottom: 1px solid var(--color-border-hover);
+  cursor: pointer;
+  text-align: left;
 }
 
 .thinkingBody {
   padding: 10px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text-secondary);
   font-family: var(--font-mono);
   line-height: 1.6;
   white-space: pre-wrap;
+  word-break: break-word;
   max-height: 200px;
   overflow-y: auto;
   background: var(--color-surface);
 }
 
 .aiText {
-  font-size: 13.5px;
-  color: var(--color-text-secondary);
+  font-size: 14px;
+  color: var(--color-text);
   line-height: 1.7;
   white-space: pre-wrap;
   word-break: break-word;
+  overflow-wrap: anywhere;
   flex: 1;
   min-width: 0;
 }
@@ -376,7 +476,7 @@
 }
 
 .systemRow {
-  font-size: 11.5px;
+  font-size: 12px;
   color: #991b1b;
   background: linear-gradient(135deg, rgba(254, 242, 242, 0.8) 0%, rgba(254, 226, 226, 0.7) 100%);
   backdrop-filter: blur(12px);
@@ -388,64 +488,162 @@
   animation: slideUpFadeMsg 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
-/* Progress row in thread */
-.progressRow {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  background: rgba(255, 255, 255, 0.92);
-  border: 1px solid rgba(0, 0, 0, 0.05);
-  border-radius: 18px;
-  width: 100%;
-  max-width: 100%;
-  padding-top: 100px;
-  padding-bottom: 100px;
-  overflow: hidden;
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.04);
+/* ── Pergunta ativa (accordion na thread) ────────────────────────────────────── */
+
+.questionAccordion {
+  margin-bottom: 12px;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  border-radius: 20px;
+  padding: 16px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.06), inset 0 2px 0 rgba(255, 255, 255, 0.5);
+  animation: slideUpFade 0.4s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.progressHeader {
+@keyframes slideUpFade {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.questionMeta {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
+  margin-bottom: 10px;
 }
 
-.progressEyebrow {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--color-text-tertiary);
-  font-weight: 600;
-}
-
-.progressValue {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--color-brand);
-}
-
-.progressTrack {
-  position: relative;
-  width: 100%;
-  height: 8px;
-  background: rgba(217, 119, 87, 0.1);
+.questionPill,
+.questionMode {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 10px;
   border-radius: 999px;
-  overflow: hidden;
-}
-
-.progressBar {
-  height: 100%;
-  background: linear-gradient(90deg, rgba(217, 119, 87, 0.88) 0%, rgba(217, 119, 87, 0.58) 100%);
-  transition: width 0.5s ease;
-  border-radius: 999px;
-}
-
-.progressLabel {
   font-size: 12px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.questionPill {
+  background: color-mix(in srgb, var(--color-brand) 10%, white);
+  color: var(--color-brand);
+  border: 1px solid rgba(217, 119, 87, 0.15);
+}
+
+.questionMode {
+  background: var(--color-bg-secondary);
   color: var(--color-text-secondary);
-  margin: 0;
+  border: 1px solid rgba(0, 0, 0, 0.05);
+}
+
+.questionHeader {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+  margin-bottom: 8px;
+  line-height: 1.45;
+}
+
+.questionHeaderIcon {
+  color: var(--color-brand);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.questionHelper {
+  margin: 0 0 12px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+}
+
+.questionOptions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.questionOptionBtn {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  width: 100%;
+  background: var(--color-surface);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  color: var(--color-text);
+  font-size: 14px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-align: left;
+}
+
+.questionOptionLabel {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.questionOptionDesc {
+  font-size: 12px;
   line-height: 1.5;
+  color: var(--color-text-secondary);
+}
+
+.questionOptionBtn:hover {
+  background: rgba(255, 251, 248, 1);
+  border-color: rgba(217, 119, 87, 0.24);
+  transform: translateY(-1px);
+  box-shadow: 0 10px 22px rgba(217, 119, 87, 0.07);
+}
+
+.questionFreeformWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.questionInput {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(0, 0, 0, 0.07);
+  background: rgba(250, 248, 245, 0.85);
+  color: var(--color-text);
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+
+.questionInput:focus {
+  border-color: rgba(217, 119, 87, 0.35);
+  box-shadow: 0 0 0 4px rgba(217, 119, 87, 0.08);
+  background: #fff;
+}
+
+.questionInput::placeholder {
+  color: var(--color-text-tertiary);
+}
+
+.questionFreeformBtn {
+  background: rgba(255, 247, 243, 1);
+}
+
+.questionSkipBtn {
+  background: transparent;
+  border-style: dashed;
+  color: var(--color-text-secondary);
 }
 
 /* ── Input area ──────────────────────────────────────────────────────────────── */
@@ -471,7 +669,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text-secondary);
   background: rgba(255, 255, 255, 0.96);
   border: 1px solid rgba(0, 0, 0, 0.06);
@@ -493,16 +691,16 @@
 .btwTag {
   color: var(--color-brand);
   font-weight: 500;
-  font-size: 10px;
+  font-size: 12px;
   flex-shrink: 0;
 }
 
-/* Asana context pill */
+/* Asana context pill (input area, fundo claro) */
 .asanaPill {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 11px;
+  font-size: 12px;
   color: #c4522a;
   background: linear-gradient(180deg, #fff7f3 0%, #fff1eb 100%);
   border: 1px solid rgba(249, 93, 143, 0.18);
@@ -525,36 +723,38 @@
   flex-shrink: 0;
 }
 
-/* Asana context block inside user bubble */
+/* Asana context block — dentro do userBubble (fundo escuro):
+   header em tom quente claro; body mantém cartão branco para legibilidade. */
 .asanaBlock {
   margin-top: 8px;
-  border-top: 1px solid rgba(249, 93, 143, 0.2);
-  padding-top: 7px;
+  border-top: 1px solid rgba(255, 255, 255, 0.18);
+  padding-top: 8px;
 }
 
 .asanaBlockHeader {
   display: flex;
   align-items: center;
   gap: 5px;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 600;
-  color: #c4522a;
+  color: #f6c4a8;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  margin-bottom: 5px;
+  margin-bottom: 6px;
 }
 
 .asanaBlockBody {
-  font-size: 11px;
-  color: var(--color-text-secondary);
+  font-size: 12px;
+  color: var(--color-text);
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
+  overflow-wrap: anywhere;
   margin: 0;
   font-family: inherit;
   background: rgba(255, 255, 255, 1);
-  border-radius: 5px;
-  padding: 5px 8px;
+  border-radius: 8px;
+  padding: 8px 10px;
 }
 
 .pillRemove {
@@ -575,157 +775,11 @@
   background: rgba(0, 0, 0, 0.06);
 }
 
-.questionAccordion {
-  margin-bottom: 12px;
-  background: rgba(255, 255, 255, 0.85);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.8);
-  border-radius: 20px;
-  padding: 16px;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.06), inset 0 2px 0 rgba(255, 255, 255, 0.5);
-  animation: slideUpFade 0.4s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.questionMeta {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 10px;
-}
-
-.questionPill,
-.questionMode {
-  display: inline-flex;
-  align-items: center;
-  min-height: 24px;
-  padding: 0 10px;
-  border-radius: 999px;
-  font-size: 10px;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  font-weight: 600;
-}
-
-.questionPill {
-  background: color-mix(in srgb, var(--color-brand) 10%, white);
-  color: var(--color-brand);
-  border: 1px solid rgba(217, 119, 87, 0.15);
-}
-
-.questionMode {
-  background: var(--color-bg-secondary);
-  color: var(--color-text-tertiary);
-  border: 1px solid rgba(0, 0, 0, 0.05);
-}
-
-@keyframes slideUpFade {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-.questionHeader {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--color-text);
-  margin-bottom: 8px;
-  line-height: 1.45;
-}
-
-.questionHelper {
-  margin: 0 0 12px;
-  font-size: 12px;
-  line-height: 1.6;
-  color: var(--color-text-secondary);
-}
-
-.questionOptions {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.questionOptionBtn {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 3px;
-  width: 100%;
-  background: var(--color-surface);
-  border: 1px solid rgba(0, 0, 0, 0.06);
-  color: var(--color-text);
-  font-size: 12px;
-  padding: 10px 12px;
-  border-radius: 14px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  text-align: left;
-}
-
-.questionOptionLabel {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--color-text);
-}
-
-.questionOptionDesc {
-  font-size: 11px;
-  line-height: 1.5;
-  color: var(--color-text-tertiary);
-}
-
-.questionOptionBtn:hover {
-  background: rgba(255, 251, 248, 1);
-  border-color: rgba(217, 119, 87, 0.24);
-  transform: translateY(-1px);
-  box-shadow: 0 10px 22px rgba(217, 119, 87, 0.07);
-}
-
-.questionFreeformWrap {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 2px;
-}
-
-.questionInput {
-  width: 100%;
-  min-height: 44px;
-  padding: 0 14px;
-  border-radius: 14px;
-  border: 1px solid rgba(0, 0, 0, 0.07);
-  background: rgba(250, 248, 245, 0.85);
-  color: var(--color-text);
-  font-size: 13px;
-  outline: none;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
-}
-
-.questionInput:focus {
-  border-color: rgba(217, 119, 87, 0.35);
-  box-shadow: 0 0 0 4px rgba(217, 119, 87, 0.08);
-  background: #fff;
-}
-
-.questionFreeformBtn {
-  background: rgba(255, 247, 243, 1);
-}
-
-.questionSkipBtn {
-  background: transparent;
-  border-style: dashed;
-  color: var(--color-text-secondary);
-}
-
 .attachStrip {
   display: flex;
   align-items: center;
   gap: 7px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--color-text-secondary);
   background: rgba(255, 255, 255, 0.96);
   border: 1px solid rgba(0, 0, 0, 0.06);
@@ -745,6 +799,7 @@
   align-items: center;
 }
 
+/* Pills de anexo dentro do userBubble (fundo escuro) */
 .messageAttachments {
   display: flex;
   flex-wrap: wrap;
@@ -757,10 +812,12 @@
   align-items: center;
   padding: 4px 9px;
   border-radius: 999px;
-  background: rgba(217, 119, 87, 0.08);
-  border: 1px solid rgba(217, 119, 87, 0.16);
-  font-size: 11px;
-  color: var(--color-text-secondary);
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  font-size: 12px;
+  color: #fff;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 .inputWrap {
@@ -800,11 +857,13 @@
   font-weight: 500;
   color: var(--color-text);
   min-width: 70px;
+  flex-shrink: 0;
 }
 
 .slashDesc {
-  font-size: 11px;
-  color: var(--color-text-tertiary);
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  min-width: 0;
 }
 
 /* Input bar */
@@ -812,6 +871,7 @@
   display: flex;
   align-items: flex-end;
   gap: 10px;
+  min-height: 48px;
   background: rgba(255, 255, 255, 0.75);
   backdrop-filter: blur(24px);
   -webkit-backdrop-filter: blur(24px);
@@ -825,7 +885,9 @@
 .inputBar:focus-within {
   background: rgba(255, 255, 255, 0.95);
   border-color: rgba(217, 119, 87, 0.4);
-  box-shadow: 0 16px 48px rgba(217, 119, 87, 0.12), 0 0 0 4px rgba(217, 119, 87, 0.05), inset 0 2px 0 rgba(255, 255, 255, 0.8);
+  outline: 2px solid var(--color-brand);
+  outline-offset: 2px;
+  box-shadow: 0 16px 48px rgba(217, 119, 87, 0.12), inset 0 2px 0 rgba(255, 255, 255, 0.8);
   transform: translateY(-2px);
 }
 
@@ -852,11 +914,12 @@
 
 .inputField {
   flex: 1;
+  min-width: 0;
   background: none;
   border: none;
   outline: none;
   color: var(--color-text);
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.5;
   resize: none;
   min-height: 22px;
@@ -880,7 +943,7 @@
   cursor: not-allowed;
   flex-shrink: 0;
   transition: all 0.15s;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,0.45);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45);
 }
 
 @keyframes sendGlow {
@@ -890,7 +953,7 @@
 }
 
 .sendActive {
-  background: linear-gradient(135deg, #FF6B4A 0%, #E65A3D 50%, #FF8A66 100%);
+  background: linear-gradient(135deg, #ff6b4a 0%, #e65a3d 50%, #ff8a66 100%);
   background-size: 200% 200%;
   animation: sendGlow 3s ease infinite;
   color: #fff;
@@ -904,8 +967,8 @@
 }
 
 .inputHint {
-  font-size: 10px;
-  color: var(--color-text-tertiary);
+  font-size: 12px;
+  color: var(--color-text-secondary);
   text-align: center;
   margin: 0;
 }
@@ -915,6 +978,7 @@
 .previewPanel {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -925,6 +989,7 @@
 /* Empty state */
 .previewEmpty {
   flex: 1;
+  min-height: 0;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -952,14 +1017,13 @@
 .previewEmptyTitle {
   font-size: 15px;
   font-weight: 500;
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
   margin: 0;
 }
 
 .previewEmptyHint {
   font-size: 12px;
-  color: var(--color-text-tertiary);
-  opacity: 0.6;
+  color: var(--color-text-secondary);
   margin: 0;
 }
 
@@ -981,7 +1045,7 @@
 
 .previewProgressLabel {
   font-size: 12px;
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
   margin: 0;
 }
 
@@ -1043,6 +1107,11 @@
   background: var(--color-border-hover);
 }
 
+/* Variação de largura das linhas do skeleton (ordem no JSX:
+   buildSkBlock é o filho 1; as 3 buildSkLine são os filhos 2, 3 e 4) */
+.buildSkLine:nth-child(3) { width: 64%; }
+.buildSkLine:nth-child(4) { width: 40%; }
+
 .buildFilmstrip {
   display: flex;
   gap: 8px;
@@ -1070,6 +1139,7 @@
 /* Content state */
 .previewContent {
   flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1090,6 +1160,44 @@
   height: 100%;
   background: var(--color-brand);
   transition: width 0.5s ease;
+}
+
+/* Badge de salvamento (canto superior direito do preview) */
+.saveBadge {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  padding: 5px 10px;
+  border-radius: 20px;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
+}
+
+.saveBadgeSaving {
+  color: #92400e;
+  background: rgba(254, 243, 199, 0.92);
+  border: 1px solid rgba(146, 64, 14, 0.18);
+}
+
+.saveBadgeSaved {
+  color: #166534;
+  background: rgba(220, 252, 231, 0.92);
+  border: 1px solid rgba(22, 101, 52, 0.18);
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.saveBadgeSpin {
+  animation: spin 1s linear infinite;
 }
 
 .slideWrap {
@@ -1139,7 +1247,7 @@
 
 .slideNavLabel {
   font-size: 12px;
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
   min-width: 50px;
   text-align: center;
 }
@@ -1160,8 +1268,8 @@
   border-radius: 6px;
   background: var(--color-surface);
   border: 1px solid var(--color-border-hover);
-  color: var(--color-text-tertiary);
-  font-size: 11px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
   cursor: pointer;
   flex-shrink: 0;
   transition: all 0.1s;
@@ -1175,4 +1283,115 @@
   background: var(--color-brand-light);
   border-color: rgba(217, 119, 87, 0.4);
   color: var(--color-brand);
+}
+
+/* ── Foco visível — todos os interativos ─────────────────────────────────────── */
+
+.newConvBtn:focus-visible,
+.suggestChip:focus-visible,
+.pillRemove:focus-visible,
+.attachRemove:focus-visible,
+.questionOptionBtn:focus-visible,
+.questionInput:focus-visible,
+.thinkingHeader:focus-visible,
+.slashItem:focus-visible,
+.iconBtn:focus-visible,
+.sendBtn:focus-visible,
+.slideNavBtn:focus-visible,
+.thumb:focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 2px;
+}
+
+/* ── Responsividade ──────────────────────────────────────────────────────────── */
+
+@media (max-width: 900px) {
+  .root {
+    flex-direction: column;
+  }
+
+  .previewPanel {
+    order: -1;
+    flex: 0 1 auto;
+    max-height: 42vh;
+    min-height: 0;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  }
+
+  .chatPanel {
+    width: 100%;
+    flex: 1 1 auto;
+    min-height: 0;
+    border-right: none;
+  }
+
+  .thread {
+    padding: 16px 14px 20px;
+    gap: 18px;
+  }
+
+  .slideWrap {
+    padding: 12px;
+  }
+}
+
+@media (max-width: 640px) {
+  .chatHeader {
+    padding: 12px 14px 10px;
+  }
+
+  .thread {
+    padding: 14px 12px 16px;
+    gap: 16px;
+  }
+
+  .inputArea {
+    padding: 0 12px 12px;
+  }
+
+  .previewPanel {
+    max-height: 36vh;
+  }
+
+  .previewEmptyContent {
+    padding: 20px;
+  }
+
+  .buildSkeleton {
+    padding: 20px;
+  }
+
+  .emptyState {
+    padding: 24px 16px;
+  }
+}
+
+/* ── Movimento reduzido ──────────────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  .chatPanel { animation: none; }
+
+  .userRow,
+  .aiRow,
+  .systemRow { animation: none; }
+
+  .questionAccordion { animation: none; }
+
+  .typingDots span {
+    animation: none;
+    opacity: 0.7;
+  }
+
+  .buildSkeleton::after { animation: none; }
+
+  .buildFilmCard {
+    animation: none;
+    opacity: 0.6;
+  }
+
+  .sendActive { animation: none; }
+
+  .cursor { animation: none; }
+
+  .saveBadgeSpin { animation: none; }
 }

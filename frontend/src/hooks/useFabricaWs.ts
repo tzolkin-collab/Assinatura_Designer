@@ -36,6 +36,10 @@ function getToken(): string | null {
 
 function normalizeUiMessage(message: string): string {
   if (!message) return 'Houve uma falha temporária.';
+  // Conta sem crédito TAMBÉM chega como 429 — e o backend já explica isso direito. Sem
+  // esta guarda, as regras abaixo reescreviam a verdade ("sem créditos, recarregue")
+  // como "limite temporário, tente de novo" e mandavam o usuário insistir para sempre.
+  if (/cr[ée]dito/i.test(message)) return message;
   if (message.includes('high demand') || message.includes('UNAVAILABLE') || message.includes('503')) {
     return 'O modelo está com alta demanda agora. Estou tentando novamente ou trocando para um fallback.';
   }
@@ -59,6 +63,22 @@ export function useFabricaWs(brandSlug: string, initialSessionId?: string | null
   const [isStreaming, setIsStreaming] = useState(false);
   const [postId, setPostId] = useState<string | undefined>();
   const [connected, setConnected] = useState(false);
+
+  // Se o initialSessionId mudar (ex: navegação via link de reabrir conversa na galeria),
+  // atualizamos o estado interno e limpamos mensagens/design anteriores para não exibir dados antigos (stale).
+  useEffect(() => {
+    if (initialSessionId) {
+      setSessionId(initialSessionId);
+      setMessages([]);
+      setCurrentDesign([]);
+      setPhase('listening');
+      setWorkerStatus('idle');
+      setProgress(0);
+      setProgressLabel('');
+      setActiveQuestion(null);
+      setPostId(undefined);
+    }
+  }, [initialSessionId]);
 
   const wsRef = useRef<WebSocket | null>(null);
   const streamingMsgIdRef = useRef<string | null>(null);
@@ -152,6 +172,10 @@ export function useFabricaWs(brandSlug: string, initialSessionId?: string | null
           slide: unknown;
           envelope: { postId?: string; ir?: { slides?: unknown[] } } & Record<string, unknown>;
         };
+        // O postId chega no envelope do PRIMEIRO slide, e o `job:done` só viria no
+        // fim. Publicá-lo aqui é o que deixa o artefato baixável DURANTE a geração:
+        // o slide já está persistido no banco no instante em que aparece na tela.
+        if (envelope.postId) setPid(envelope.postId);
         setDesign(prev => {
           const prevEnv = (prev[0] as (Record<string, unknown> & { kind?: string; postId?: string; ir?: { slides?: unknown[] } }) | undefined);
           const isIr = prevEnv?.kind === 'ir-design';

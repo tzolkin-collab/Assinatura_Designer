@@ -14,6 +14,8 @@ import { generateWithRetry, generateStreamWithRetry } from '../lib/geminiRetry.j
 import { DesignDocumentValidationError, generateDesignDocument, reviewDesignDocument, type DesignFormat, type HybridDesignPostContent, type HybridDesignChatMessage } from '../lib/designDocument.js';
 import { buildBrandAssistantInstruction, buildBrandContextSummary, resolveBrandContext, type ResolvedBrandContext } from '../lib/brandContext.js';
 import { requireBrandRole, EDITORS, type BrandRequest } from '../middleware/brandAccess.js';
+import { MAX_SLIDES } from '../agents/planner/index.js';
+import { logger } from '../lib/logger.js';
 
 export const aiRouter = Router();
 
@@ -379,6 +381,42 @@ function normalizeSlideCount(value: unknown, format: DesignFormat): number {
   return typeof value === 'number' && Number.isFinite(value) ? Math.max(1, Math.min(12, Math.floor(value))) : fallback;
 }
 
+// Contagem de slides pedida na geração livre (não é o mesmo teto do `normalizeSlideCount`,
+// que serve ao fluxo de posts e para em 12 — aqui apresentações de 50+ são legítimas).
+// Sem teto nenhum, `slideCount: 100000` viravam 100k chamadas de IA numa requisição:
+// cota e custo iam junto. MAX_SLIDES é o mesmo limite que o planner já aplica.
+function normalizeRequestedSlideCount(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.max(1, Math.min(MAX_SLIDES, Math.floor(value)))
+    : fallback;
+}
+
+// Os dois call sites de `generateDesignDocument` geram o documento INTEIRO numa
+// tacada — ao contrário do irDesign, que vai de 3 em 3 slides — e eram justamente
+// os únicos sem teto de saída nem limite de thinking. Sem `maxOutputTokens` o
+// Gemini assume 8192, e o modelo pro gasta boa parte disso pensando: sobrava pouco
+// para o JSON do deck, que chegava cortado e morria como "did not contain valid
+// JSON". Mesmo tratamento que pipeline.ts e posts.ts já aplicavam.
+const DESIGN_DOCUMENT_OUTPUT_CONFIG = {
+  maxOutputTokens: 32768,
+  thinkingConfig: { thinkingBudget: config.geminiThinkingBudget },
+} as const;
+
+// A truncagem falhava calada: aparecia só o erro de JSON inválido, sem a causa.
+function warnIfTruncated(
+  response: { candidates?: Array<{ finishReason?: unknown }>; text?: string },
+  origem: string,
+): void {
+  const finish = response.candidates?.[0]?.finishReason;
+  if (finish && finish !== 'STOP') {
+    logger.warn('Geração terminou sem STOP — o JSON pode vir truncado', {
+      origem,
+      finishReason: finish,
+      textLength: response.text?.length ?? 0,
+    });
+  }
+}
+
 function normalizeStringArray(value: unknown, limit = 12): string[] {
   return Array.isArray(value)
     ? value.filter((item) => typeof item === 'string' && item.trim().length > 0).map((item) => item.trim()).slice(0, limit)
@@ -555,8 +593,10 @@ aiRouter.post('/:slug/generate-design-document', async (req: AuthRequest, res: R
           config: {
             systemInstruction,
             responseMimeType: 'application/json',
+            ...DESIGN_DOCUMENT_OUTPUT_CONFIG,
           },
         }, preferredModel);
+        warnIfTruncated(response, 'design-document');
         return response.text ?? '{}';
       },
       {
@@ -1433,8 +1473,10 @@ async function createHybridDesign(
         config: {
           systemInstruction,
           responseMimeType: 'application/json',
+          ...DESIGN_DOCUMENT_OUTPUT_CONFIG,
         },
       }, preferredModel);
+      warnIfTruncated(response, 'hybrid-design');
       return response.text ?? '{}';
     },
     {
@@ -1842,9 +1884,9 @@ aiRouter.post('/:slug/create-job', async (req: AuthRequest, res: Response, next:
             return;
           }
 
-          const normalizedSlideCount = typeof slideCount === 'number' && slideCount > 0 ? slideCount : 6;
-          const normalizedWidth = typeof width === 'number' && width > 0 ? width : 1920;
-          const normalizedHeight = typeof height === 'number' && height > 0 ? height : 1080;
+          const normalizedSlideCount = normalizeRequestedSlideCount(slideCount, 6);
+          const normalizedWidth = normalizeDesignDimension(width, 1920);
+          const normalizedHeight = normalizeDesignDimension(height, 1080);
 
           if (mode === 'hybrid') {
             try {
@@ -1942,9 +1984,9 @@ aiRouter.post('/:slug/create', async (req: AuthRequest, res: Response, next: Nex
       return;
     }
     
-    const sc = typeof slideCount === 'number' && slideCount > 0 ? slideCount : 6;
-    const w  = typeof width === 'number' && width > 0 ? width : 1920;
-    const h  = typeof height === 'number' && height > 0 ? height : 1080;
+    const sc = normalizeRequestedSlideCount(slideCount, 6);
+    const w  = normalizeDesignDimension(width, 1920);
+    const h  = normalizeDesignDimension(height, 1080);
 
     const mode = payload.mode;
     
@@ -2107,9 +2149,9 @@ aiRouter.post('/:slug/patch-design', async (req: AuthRequest, res: Response, nex
   } catch (e) { return next(e); }
   if (!brand) return next(createError(404, 'Brand not found'));
 
-  const sc = typeof slideCount === 'number' && slideCount > 0 ? slideCount : currentPages.length;
-  const w  = typeof width === 'number' && width > 0 ? width : 1920;
-  const h  = typeof height === 'number' && height > 0 ? height : 1080;
+  const sc = normalizeRequestedSlideCount(slideCount, currentPages.length);
+  const w  = normalizeDesignDimension(width, 1920);
+  const h  = normalizeDesignDimension(height, 1080);
   const dims = { width: w, height: h };
 
   const brandCtx = [

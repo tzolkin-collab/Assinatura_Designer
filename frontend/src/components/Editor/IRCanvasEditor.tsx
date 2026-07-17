@@ -1,5 +1,7 @@
 import React, { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { type DesignIR, type IRPatch, type IRPatchOp } from '../../lib/designIR/types';
+import { drawableElements, positionStyle } from '../../lib/designIR/style';
+import IRSlideView from '../DesignIR/IRSlideView';
 
 export interface IRCanvasEditorHandle {
   undo: () => void;
@@ -123,46 +125,52 @@ const IRCanvasEditor = forwardRef<IRCanvasEditorHandle, IRCanvasEditorProps>(({
             left: '50%',
             transform: `translate(-50%, -50%) scale(${scale})`,
             transformOrigin: 'center',
-            background: 'transparent',
+            overflow: 'hidden',
           }}
         >
-          {slide.elements.map(el => {
-            const isSelected = selectedElementIds.includes(el.id);
-            return (
+          {/*
+            A arte vem do renderizador FIEL (o mesmo do preview e espelho do compilador
+            que gera o PNG). Antes, o canvas desenhava à mão 11 propriedades de estilo e
+            ignorava sombra, rotação, opacidade, gradiente, shapes e grupos — então uma
+            edição da IA podia ser gravada, sair no export, e não mudar nada na tela.
+
+            A seleção é um OVERLAY por cima, e não estilo injetado nos elementos: assim
+            a arte que se vê é exatamente a arte que sai.
+          */}
+          <IRSlideView
+            slide={slide}
+            overlay={
               <div
-                key={el.id}
-                role="button"
-                aria-label={`Elemento ${el.type}: ${el.name || el.content || 'sem nome'}`}
+                style={{ position: 'absolute', inset: 0, zIndex: 2147483000 }}
                 onClick={(e) => {
-                  e.stopPropagation();
-                  onSelect(el.id, e.shiftKey);
-                }}
-                style={{
-                  position: 'absolute',
-                  left: el.bounds.x,
-                  top: el.bounds.y,
-                  width: el.bounds.width,
-                  height: el.bounds.height,
-                  zIndex: el.zIndex,
-                  outline: isSelected ? '2px solid #4f46e5' : 'none',
-                  cursor: 'pointer',
-                  fontFamily: el.style.fontFamily,
-                  fontSize: el.style.fontSize,
-                  fontWeight: el.style.fontWeight,
-                  color: el.style.color,
-                  textAlign: el.style.textAlign,
-                  display: el.style.display || 'flex',
-                  alignItems: el.style.alignItems || (el.type === 'text' ? 'flex-start' : 'center'),
-                  justifyContent: el.style.justifyContent || (el.type === 'text' ? 'flex-start' : 'center'),
-                  background: el.style.background || el.style.backgroundColor || 'transparent',
-                  borderRadius: el.style.borderRadius,
+                  // Clique no vazio do slide (fora de qualquer elemento) = desselecionar.
+                  if (e.target === e.currentTarget) onSelect(null, false);
                 }}
               >
-                {el.type === 'text' && <div>{el.content}</div>}
-                {el.type === 'image' && <img src={el.src} style={{ width: '100%', height: '100%', objectFit: el.style.objectFit || 'cover' }} alt="" />}
+                {drawableElements(slide.elements).map((el) => {
+                  const isSelected = selectedElementIds.includes(el.id);
+                  return (
+                    <div
+                      key={el.id}
+                      role="button"
+                      aria-label={`Elemento ${el.type}: ${el.name || el.content || 'sem nome'}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onSelect(el.id, e.shiftKey);
+                      }}
+                      style={{
+                        ...positionStyle(el),
+                        zIndex: undefined, // a ordem aqui é só de acerto de clique, não de arte
+                        outline: isSelected ? '2px solid #4f46e5' : 'none',
+                        cursor: 'pointer',
+                        background: 'transparent',
+                      }}
+                    />
+                  );
+                })}
               </div>
-            );
-          })}
+            }
+          />
         </div>
       )}
     </div>

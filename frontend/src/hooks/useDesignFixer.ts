@@ -49,6 +49,9 @@ interface UseDesignFixerReturn {
   fixList: FixStatus[];
   selectedFixIds: Set<string>;
   remainingIssues: DesignIssue[];
+  /** Preenchido quando a verificação final não rodou: `remainingIssues` vazio aqui
+   *  significa "não sabemos", não "sem problemas". */
+  verifyWarning: string | null;
   correctedPages: DesignPage[] | null;
   iteration: number;
   errorMessage: string | null;
@@ -80,6 +83,7 @@ export function useDesignFixer(): UseDesignFixerReturn {
   const [fixList, setFixList] = useState<FixStatus[]>([]);
   const [selectedFixIds, setSelectedFixIds] = useState<Set<string>>(new Set());
   const [remainingIssues, setRemainingIssues] = useState<DesignIssue[]>([]);
+  const [verifyWarning, setVerifyWarning] = useState<string | null>(null);
   const [correctedPages, setCorrectedPages] = useState<DesignPage[] | null>(null);
   const [iteration, setIteration] = useState(1);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -200,6 +204,7 @@ export function useDesignFixer(): UseDesignFixerReturn {
 
           case 'verify-done':
             setRemainingIssues((event.remaining as DesignIssue[]) ?? []);
+            setVerifyWarning((event.message as string) ?? null);
             break;
 
           case 'complete':
@@ -348,6 +353,7 @@ export function useDesignFixer(): UseDesignFixerReturn {
     fixList,
     selectedFixIds,
     remainingIssues,
+    verifyWarning,
     correctedPages,
     iteration,
     errorMessage,

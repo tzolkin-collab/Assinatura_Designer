@@ -4,19 +4,21 @@ import { useParams } from 'next/navigation';
 import PageHeader from '@/components/ui/PageHeader';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
-import { ArrowLeft, Download, Maximize2, X, Folder, FolderPlus, ChevronRight, ChevronDown, Plus, Trash2, LayoutGrid, List, Sparkles, MessageSquareText, ExternalLink, Edit3 } from 'lucide-react';
+import { ArrowLeft, Download, FileDown, Loader2, Maximize2, X, Folder, FolderPlus, ChevronRight, ChevronDown, Plus, Trash2, LayoutGrid, List, Sparkles, MessageSquareText, ExternalLink, Edit3, FolderInput, PenLine, Send } from 'lucide-react';
 import Link from 'next/link';
 import Image from 'next/image';
 import styles from './brand-galeria.module.css';
 import { useBrandPosts, useBrand, type Post } from '@/lib/hooks';
 import { useState, useEffect, useMemo } from 'react';
-import { api, API_BASE } from '@/lib/api';
+import { api, getApiErrorMessage } from '@/lib/api';
+import { exportarDeck, type DeckFileFormat } from '@/lib/deckFile';
 import { useBrandPermissions } from '@/hooks/useBrandPermissions';
-import { extractChatHistory, extractPreviewSource, extractSessionId, type FabricaChatHistoryMessage, type HtmlDesignPostContent } from '@/lib/designContent';
+import { extractChatHistory, extractPreviewSource, extractSessionId, type FabricaChatHistoryMessage, type HtmlDesignPostContent, type IRDesignPostContent } from '@/lib/designContent';
 import DesignRenderer, { type DesignPage } from '@/components/Fabrica/DesignRenderer';
 import DesignDocumentRenderer from '@/components/DesignDocument/DesignDocumentRenderer';
 import HtmlSlideRenderer from '@/components/DesignDocument/HtmlSlideRenderer';
 import IRSlideRenderer from '@/components/DesignDocument/IRSlideRenderer';
+import AiSpendBadge from '@/components/AiUsage/AiSpendBadge';
 
 function formatPostType(type: string) {
   switch (type) {
@@ -29,8 +31,7 @@ function formatPostType(type: string) {
 }
 
 function postMatchesPreviewImage(post: Post, previewImage: string): boolean {
-  const preview = extractPreviewSource(post.content, post.previewUrl);
-  return preview?.kind === 'image' && preview.url === previewImage;
+  return post.previewUrl === previewImage || !!(post.content && typeof post.content === 'object' && ((post.content as Record<string, unknown>).dataUrl === previewImage || (post.content as Record<string, unknown>).url === previewImage));
 }
 
 function formatChatTimestamp(timestamp: number) {
@@ -82,7 +83,7 @@ export default function BrandGaleriaPage() {
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [previewDesign, setPreviewDesign] = useState<{ pages: DesignPage[]; width: number; height: number; document?: unknown } | null>(null);
   const [previewHtml, setPreviewHtml] = useState<HtmlDesignPostContent | null>(null);
-  const [previewIr, setPreviewIr] = useState<any | null>(null);
+  const [previewIr, setPreviewIr] = useState<IRDesignPostContent | null>(null);
   const [chatHistoryPreview, setChatHistoryPreview] = useState<{ sessionId: string | null; messages: FabricaChatHistoryMessage[]; postLabel: string } | null>(null);
 
   const [folders, setFolders] = useState<FolderNode[]>([]);
@@ -122,6 +123,24 @@ export default function BrandGaleriaPage() {
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
 
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+
+  // Um export por vez: cada slide é um render de chromium no servidor: deixar o
+  // usuário disparar cinco decks juntos só derrubaria os cinco.
+  const [exportando, setExportando] = useState<
+    { postId: string; formato: DeckFileFormat; done: number; total: number } | null
+  >(null);
+
+  // Export Canva também é um job na fila — mesmo padrão do deck, um por vez.
+  const [exportandoCanva, setExportandoCanva] = useState<
+    { postId: string; done: number; total: number } | null
+  >(null);
+
+  // Renomear pasta
+  const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
+  const [renamingFolderName, setRenamingFolderName] = useState('');
+
+  // Mover post para pasta (dropdown explícito no card)
+  const [movingPostId, setMovingPostId] = useState<string | null>(null);
 
   const foldersByParent = useMemo(() => groupByParent(folders), [folders]);
 
@@ -324,10 +343,30 @@ export default function BrandGaleriaPage() {
             </button>
 
             <Folder size={16} />
-            <span className={styles.folderName}>{folder.name}</span>
+            {renamingFolderId === folder.id ? (
+              <form onSubmit={(e) => handleRenameFolder(e, folder.id)} style={{ flex: 1, display: 'flex', gap: '4px' }}>
+                <input
+                  type="text"
+                  value={renamingFolderName}
+                  onChange={(e) => setRenamingFolderName(e.target.value)}
+                  autoFocus
+                  style={{ flex: 1, padding: '2px 6px', fontSize: '13px', borderRadius: '4px', border: '1px solid var(--color-border)' }}
+                  onBlur={() => setRenamingFolderId(null)}
+                />
+              </form>
+            ) : (
+              <span className={styles.folderName}>{folder.name}</span>
+            )}
 
-            {canEdit && (
+            {canEdit && renamingFolderId !== folder.id && (
               <>
+                <button
+                  className={styles.closeBtn}
+                  onClick={(e) => { e.stopPropagation(); setRenamingFolderId(folder.id); setRenamingFolderName(folder.name); }}
+                  title="Renomear pasta"
+                >
+                  <Edit3 size={12} />
+                </button>
                 <button
                   className={styles.closeBtn}
                   onClick={(e) => openFolderModal(folder.id, e)}
@@ -371,28 +410,29 @@ export default function BrandGaleriaPage() {
     document.body.removeChild(link);
   };
 
-  // Export de post html-design: renderiza no backend (chromium) e baixa o PNG.
-  const handleDownloadHtml = async (e: React.MouseEvent, postId: string, slideCount: number) => {
+  // Export do deck como arquivo. Antes isto era um laço no navegador: uma requisição
+  // por slide (cada uma segurando um render de chromium) e — pior — CAPADO EM 12.
+  // Um deck de 30 baixava 12 imagens soltas e não avisava ninguém. Agora é um job na
+  // fila que devolve UM arquivo com o deck inteiro.
+  const handleDownloadDeck = async (
+    e: React.MouseEvent,
+    postId: string,
+    formato: DeckFileFormat,
+  ) => {
     e.preventDefault();
     e.stopPropagation();
+    if (exportando) return;
+
+    setExportando({ postId, formato, done: 0, total: 0 });
     try {
-      const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
-      const auth: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
-      for (let slide = 0; slide < Math.min(slideCount, 12); slide++) {
-        const resp = await fetch(`${API_BASE}/posts/${postId}/export?slide=${slide}`, { headers: auth });
-        if (!resp.ok) throw new Error('Falha ao exportar slide ' + (slide + 1));
-        const blob = await resp.blob();
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `post-${postId.slice(0, 8)}-slide-${slide + 1}.png`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-      }
+      await exportarDeck(postId, formato, (done, total) =>
+        setExportando({ postId, formato, done, total }),
+      );
     } catch (err) {
-      console.error('[export html]', err);
+      console.error('[export deck]', err);
+      alert(getApiErrorMessage(err, 'Não consegui gerar o arquivo do deck.'));
+    } finally {
+      setExportando(null);
     }
   };
 
@@ -404,6 +444,69 @@ export default function BrandGaleriaPage() {
       setIsGeneratingReport(false);
     }, 2500);
   };
+
+  const handleExportCanva = async (e: React.MouseEvent, postId: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (exportandoCanva) return;
+
+    setExportandoCanva({ postId, done: 0, total: 0 });
+    try {
+      const { jobId } = await api.post<{ jobId: string; total: number }>(
+        `/posts/${postId}/export-canva`,
+        {},
+      );
+      const { acompanharExport } = await import('@/lib/canvaExport');
+      await acompanharExport(postId, jobId, (done, total) =>
+        setExportandoCanva({ postId, done, total }),
+      );
+      alert('Exportado para o Canva com sucesso!');
+    } catch (err) {
+      console.error('[export canva]', err);
+      alert(getApiErrorMessage(err, 'Não consegui exportar para o Canva.'));
+    } finally {
+      setExportandoCanva(null);
+    }
+  };
+
+  const handleRenameFolder = async (e: React.FormEvent, folderId: string) => {
+    e.preventDefault();
+    if (!renamingFolderName.trim()) return;
+    try {
+      const updated = await api.patch<FolderNode>(`/folders/${folderId}`, { name: renamingFolderName.trim() });
+      setFolders((prev) => prev.map((f) => (f.id === folderId ? updated : f)));
+      setRenamingFolderId(null);
+      setRenamingFolderName('');
+    } catch (err) {
+      console.error('Failed to rename folder:', err);
+      alert(getApiErrorMessage(err, 'Não consegui renomear a pasta.'));
+    }
+  };
+
+  const formatStatus = (status?: string) => {
+    switch (status) {
+      case 'READY': return 'Pronto';
+      case 'GENERATING': return 'Gerando';
+      case 'FAILED': return 'Falhou';
+      case 'DRAFT': return 'Rascunho';
+      default: return status || 'Pronto';
+    }
+  };
+
+  const itemStyle = (active: boolean): React.CSSProperties => ({
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    width: '100%',
+    textAlign: 'left',
+    padding: '6px 10px',
+    background: active ? 'rgba(79,70,229,0.08)' : 'transparent',
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontSize: '12px',
+    color: 'inherit',
+  });
 
   return (
     <div>
@@ -652,13 +755,21 @@ export default function BrandGaleriaPage() {
         Voltar
       </Link>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '16px', flexWrap: 'wrap' }}>
         <PageHeader
           title={marca}
           description="Histórico de artes e criativos gerados para esta marca."
         />
-        
-        <div className={styles.viewToggle}>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+          <Link href={`/${slug}/fabrica`}>
+            <Button size="sm">
+              <Sparkles size={14} />
+              Nova Arte
+            </Button>
+          </Link>
+          <div className={styles.viewToggle}>
+          <AiSpendBadge slug={slug} />
           {brand?.members && (
             <div className={styles.teamAvatars}>
               {brand.members.slice(0, 3).map(m => (
@@ -689,6 +800,7 @@ export default function BrandGaleriaPage() {
           >
             <LayoutGrid size={18} />
           </button>
+        </div>
         </div>
       </div>
 
@@ -751,8 +863,8 @@ export default function BrandGaleriaPage() {
       ) : viewMode === 'grid' ? (
         <div className={styles.grid}>
           {filteredPosts.map((post, index) => {
-            const preview = extractPreviewSource(post.content, post.previewUrl);
-            const imageUrl = preview?.kind === 'image' ? preview.url : null;
+            const preview = extractPreviewSource(post.content, null);
+            const imageUrl = post.previewUrl || (preview?.kind === 'image' ? preview.url : null);
             const designPages = preview?.kind === 'design' ? preview.pages : null;
             const designDocument = (preview?.kind === 'design' || preview?.kind === 'hybrid-document') ? preview.document : undefined;
             const htmlContent = preview?.kind === 'html-design' ? preview.content : null;
@@ -773,17 +885,56 @@ export default function BrandGaleriaPage() {
                 <Card hover padding="none">
                   <div className={styles.postThumb}>
                     <span className={styles.postType}>{formatPostType(post.type)}</span>
+                    <span
+                      className={styles.postStatus}
+                      data-status={post.status || 'READY'}
+                      title={`Status: ${formatStatus(post.status)}`}
+                    >
+                      {formatStatus(post.status)}
+                    </span>
 
                     <div className={styles.postActions}>
                       {canEdit && (
-                        <button
-                          className={styles.actionBtn}
-                          onClick={(e) => handleDeletePost(post.id, e)}
-                          title="Excluir Arte"
-                          style={{ color: 'rgb(220, 38, 38)' }}
-                        >
-                          <Trash2 size={16} />
-                        </button>
+                        <>
+                          <button
+                            className={styles.actionBtn}
+                            onClick={(e) => handleDeletePost(post.id, e)}
+                            title="Excluir Arte"
+                            style={{ color: 'rgb(220, 38, 38)' }}
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                          <div style={{ position: 'relative' }}>
+                            <button
+                              className={styles.actionBtn}
+                              onClick={(e) => { e.stopPropagation(); setMovingPostId(movingPostId === post.id ? null : post.id); }}
+                              title="Mover para pasta"
+                            >
+                              <FolderInput size={14} />
+                            </button>
+                            {movingPostId === post.id && (
+                              <div className={styles.folderSelectMenu}>
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); handleMoveToFolder(post.id, null); setMovingPostId(null); }}
+                                  style={itemStyle(!post.folderId)}
+                                >
+                                  Sem pasta
+                                </button>
+                                {folders.map((f) => (
+                                  <button
+                                    key={f.id}
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); handleMoveToFolder(post.id, f.id); setMovingPostId(null); }}
+                                    style={itemStyle(post.folderId === f.id)}
+                                  >
+                                    {f.name}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </>
                       )}
                       {imageUrl && (
                         <>
@@ -803,23 +954,49 @@ export default function BrandGaleriaPage() {
                           </button>
                         </>
                       )}
-                      {htmlContent && (
-                        <button
-                          className={styles.actionBtn}
-                          onClick={(e) => handleDownloadHtml(e, post.id, htmlContent.slides.length)}
-                          title="Baixar PNGs"
-                        >
-                          <Download size={14} />
-                        </button>
+                      {(htmlContent || (irContent && (irContent.ir?.slides?.length ?? 0) > 0)) && (
+                        <>
+                          <button
+                            className={styles.actionBtn}
+                            onClick={(e) => handleDownloadDeck(e, post.id, 'pdf')}
+                            disabled={exportando !== null}
+                            title="Baixar PDF do deck"
+                          >
+                            {exportando?.postId === post.id && exportando.formato === 'pdf'
+                              ? <Loader2 size={14} className={styles.spin} />
+                              : <FileDown size={14} />}
+                          </button>
+                          <button
+                            className={styles.actionBtn}
+                            onClick={(e) => handleDownloadDeck(e, post.id, 'zip')}
+                            disabled={exportando !== null}
+                            title="Baixar PNGs (ZIP)"
+                          >
+                            {exportando?.postId === post.id && exportando.formato === 'zip'
+                              ? <Loader2 size={14} className={styles.spin} />
+                              : <Download size={14} />}
+                          </button>
+                          <button
+                            className={styles.actionBtn}
+                            onClick={(e) => handleExportCanva(e, post.id)}
+                            disabled={exportandoCanva !== null}
+                            title="Exportar para o Canva"
+                          >
+                            {exportandoCanva?.postId === post.id
+                              ? <Loader2 size={14} className={styles.spin} />
+                              : <Send size={14} />}
+                          </button>
+                        </>
                       )}
-                      {irContent && (irContent.ir?.slides?.length ?? 0) > 0 && (
-                        <button
+                      {(htmlContent || (irContent && (irContent.ir?.slides?.length ?? 0) > 0)) && canEdit && (
+                        <Link
+                          href={`/${slug}/editor/${post.id}`}
                           className={styles.actionBtn}
-                          onClick={(e) => handleDownloadHtml(e, post.id, irContent.ir.slides.length)}
-                          title="Baixar PNGs"
+                          title="Abrir no Editor"
+                          onClick={(e) => e.stopPropagation()}
                         >
-                          <Download size={14} />
-                        </button>
+                          <PenLine size={14} />
+                        </Link>
                       )}
                       {(chatHistory.length > 0 || sessionId) && (
                         <button
@@ -840,15 +1017,32 @@ export default function BrandGaleriaPage() {
                     </div>
 
                     {imageUrl ? (
-                      <Image
-                        src={imageUrl}
-                        alt="Post thumbnail"
-                        fill
-                        className={styles.thumbImage}
-                        sizes="260px"
-                        unoptimized
-                        priority={index < 4}
-                      />
+                      <div
+                        className={styles.thumbDesign}
+                        style={{ cursor: 'pointer' }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (htmlContent) setPreviewHtml(htmlContent);
+                          else if (irContent) setPreviewIr(irContent);
+                          else if (designPages) setPreviewDesign({ pages: designPages, width: firstPage?.width ?? 1080, height: firstPage?.height ?? 1080, document: designDocument });
+                          else setPreviewImage(imageUrl);
+                        }}
+                      >
+                        <Image
+                          src={imageUrl}
+                          alt="Post thumbnail"
+                          fill
+                          className={styles.thumbImage}
+                          sizes="260px"
+                          unoptimized
+                          priority={index < 4}
+                        />
+                        {(htmlContent || irContent || designPages) && (
+                          <span className={styles.slideCount}>
+                            {htmlContent ? htmlContent.slides.length : irContent ? (irContent.ir?.slides?.length ?? 0) : designPages?.length} slides — clique para abrir
+                          </span>
+                        )}
+                      </div>
                     ) : htmlContent ? (
                       <div
                         className={styles.thumbDesign}
@@ -966,8 +1160,8 @@ export default function BrandGaleriaPage() {
       ) : (
         <div className={styles.list}>
           {filteredPosts.map((post, index) => {
-            const preview = extractPreviewSource(post.content, post.previewUrl);
-            const imageUrl = preview?.kind === 'image' ? preview.url : null;
+            const preview = extractPreviewSource(post.content, null);
+            const imageUrl = post.previewUrl || (preview?.kind === 'image' ? preview.url : null);
             const designPages = preview?.kind === 'design' ? preview.pages : null;
             const designDocument = preview?.kind === 'design' ? preview.document : undefined;
             const htmlContent = preview?.kind === 'html-design' ? preview.content : null;
@@ -988,15 +1182,27 @@ export default function BrandGaleriaPage() {
                 <div className={styles.listInfo}>
                   <div className={styles.listThumb}>
                     {imageUrl ? (
-                      <Image
-                        src={imageUrl}
-                        alt="Post thumbnail"
-                        fill
-                        className={styles.thumbImage}
-                        sizes="64px"
-                        unoptimized
-                        priority={index < 6}
-                      />
+                      <div
+                        className={styles.thumbDesign}
+                        style={{ cursor: 'pointer', width: '100%', height: '100%' }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (htmlContent) setPreviewHtml(htmlContent);
+                          else if (irContent) setPreviewIr(irContent);
+                          else if (designPages) setPreviewDesign({ pages: designPages, width: firstPage?.width ?? 1080, height: firstPage?.height ?? 1080, document: designDocument });
+                          else setPreviewImage(imageUrl);
+                        }}
+                      >
+                        <Image
+                          src={imageUrl}
+                          alt="Post thumbnail"
+                          fill
+                          className={styles.thumbImage}
+                          sizes="64px"
+                          unoptimized
+                          priority={index < 6}
+                        />
+                      </div>
                     ) : htmlContent ? (
                       <div
                         className={styles.thumbDesign}
@@ -1066,6 +1272,14 @@ export default function BrandGaleriaPage() {
                         <span>{formatPostType(post.type)}</span>
                         <span>•</span>
                         <span>{new Date(post.createdAt).toLocaleDateString()}</span>
+                        <span>•</span>
+                        <span
+                          className={styles.postStatus}
+                          data-status={post.status || 'READY'}
+                          style={{ position: 'static', background: 'var(--color-bg-secondary)', color: 'var(--color-text-secondary)' }}
+                        >
+                          {formatStatus(post.status)}
+                        </span>
                         {post.createdBy && (
                           <>
                             <span>•</span>
@@ -1101,6 +1315,28 @@ export default function BrandGaleriaPage() {
                         <Download size={16} />
                       </button>
                     </>
+                  )}
+                  {(htmlContent || (irContent && (irContent.ir?.slides?.length ?? 0) > 0)) && canEdit && (
+                    <Link
+                      href={`/${slug}/editor/${post.id}`}
+                      className={styles.actionBtn}
+                      title="Abrir no Editor"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <PenLine size={16} />
+                    </Link>
+                  )}
+                  {(htmlContent || (irContent && (irContent.ir?.slides?.length ?? 0) > 0)) && (
+                    <button
+                      className={styles.actionBtn}
+                      onClick={(e) => handleExportCanva(e, post.id)}
+                      disabled={exportandoCanva !== null}
+                      title="Exportar para o Canva"
+                    >
+                      {exportandoCanva?.postId === post.id
+                        ? <Loader2 size={16} className={styles.spin} />
+                        : <Send size={16} />}
+                    </button>
                   )}
                   {designPages && firstPage && (
                      <button

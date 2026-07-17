@@ -190,8 +190,12 @@ async function captureWebsiteScreenshot(url: string): Promise<string | null> {
   try {
     const pageSpeedUrl = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?screenshot=true&url=${encodeURIComponent(url)}`;
     const response = await fetch(pageSpeedUrl);
-    const data = await response.json();
-    // @ts-expect-error PageSpeed response shape is intentionally narrowed here
+    // Tipado na mão em vez de `@ts-expect-error`: o retorno de `response.json()` varia
+    // (`unknown` pelo @types/node, `any` quando a lib DOM entra no projeto), e a
+    // diretiva quebrava o build no dia em que a resposta parasse de dar erro.
+    const data = (await response.json()) as {
+      lighthouseResult?: { audits?: Record<string, { details?: { data?: unknown } } | undefined> };
+    } | null;
     const screenshotData = data?.lighthouseResult?.audits?.['final-screenshot']?.details?.data;
     
     if (screenshotData && typeof screenshotData === 'string') {

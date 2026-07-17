@@ -12,7 +12,7 @@ import { authRouter } from './routes/auth.js';
 import { aiRouter } from './routes/ai.js';
 import { postsRouter } from './routes/posts.js';
 import { foldersRouter } from './routes/folders.js';
-import { canvaRouter } from './routes/canva.js';
+import { canvaRouter, canvaPublicRouter } from './routes/canva.js';
 import { uploadRouter } from './routes/upload.js';
 import { fabricaRouter } from './routes/fabrica.js';
 import { asanaRouter } from './routes/asana.js';
@@ -59,8 +59,11 @@ app.use('/api/brands/:brandId/assets', requireAuth, assetsRouter);
 app.use('/api/notifications', requireAuth, notificationsRouter);
 
 // ── Canva Routes ──
-// Callback must be public (browser redirect from Canva OAuth)
-app.get('/api/canva/callback', canvaRouter);
+// O callback é público (redirect de browser vindo do Canva, sem header nosso) e
+// precisa vir antes do mount autenticado para não esbarrar no requireAuth.
+// Tem que ser `use` e não `get`: só o `use` descasca o prefixo do mount, e sem isso
+// o router recebia o path inteiro, não casava com nada e caía no 401 abaixo.
+app.use('/api/canva', canvaPublicRouter);
 // All other Canva routes require auth
 app.use('/api/canva', requireAuth, canvaRouter);
 

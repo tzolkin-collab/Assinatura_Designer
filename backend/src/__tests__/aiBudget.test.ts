@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 import './client';
 import { redis } from '../lib/redis';
 import { config } from '../config';
-import { assertWithinBudget, recordUsage } from '../lib/aiBudget';
+import { assertWithinBudget, recordUsage, computeCost } from '../lib/aiBudget';
 import { runWithAiContext } from '../lib/aiContext';
 
 const redisMock = redis as unknown as Record<string, Mock>;
@@ -50,7 +50,13 @@ describe('Teto de gasto de IA', () => {
 
   it('soma os tokens da chamada no contador da marca e no global', async () => {
     const incrby = vi.fn((..._args: unknown[]) => chain);
-    const chain = { incrby, expire: vi.fn(() => chain), exec: vi.fn(async () => []) };
+    const chain = {
+      incrby,
+      hincrby: vi.fn(() => chain),
+      sadd: vi.fn(() => chain),
+      expire: vi.fn(() => chain),
+      exec: vi.fn(async () => []),
+    };
     redisMock.multi.mockReturnValue(chain);
 
     await runWithAiContext({ brandSlug: 'marca-1' }, () =>
@@ -75,5 +81,27 @@ describe('Teto de gasto de IA', () => {
   it('resposta sem usageMetadata não vira contagem fantasma', async () => {
     await recordUsage('gemini-3.5-flash', undefined);
     expect(redisMock.multi).not.toHaveBeenCalled();
+  });
+});
+
+describe('Custo estimado por modelo', () => {
+  // Sem AI_USD_TO_BRL/AI_TAX_RATE no env de teste: moeda US$, imposto 0.
+  // Preço default do gemini-3.5-flash: input 0.3, output 2.5 (USD/1M).
+  it('cobra input e output com preços separados', () => {
+    const cost = computeCost(1_000_000, 1_000_000, 0, 'gemini-3.5-flash');
+    expect(cost.currency).toBe('USD');
+    expect(cost.base).toBeCloseTo(2.8, 4); // 0.3 (input) + 2.5 (output)
+    expect(cost.tax).toBe(0);
+    expect(cost.total).toBeCloseTo(2.8, 4);
+  });
+
+  it('conta thinking como output (é como o Gemini cobra)', () => {
+    const cost = computeCost(0, 0, 1_000_000, 'gemini-3.5-flash');
+    expect(cost.base).toBeCloseTo(2.5, 4);
+  });
+
+  it('modelo fora da tabela sem preço de reserva custa 0 (não chuta preço)', () => {
+    const cost = computeCost(1_000_000, 1_000_000, 0, 'modelo-desconhecido');
+    expect(cost.total).toBe(0);
   });
 });

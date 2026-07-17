@@ -71,19 +71,19 @@ function renderStyleBible(bible: StyleBible): string {
     'STYLE BIBLE (BASE IMUTÁVEL — siga à risca em TODOS os slides deste e dos próximos lotes):',
     `- Paleta canônica (use SOMENTE estas cores em hex): ${palette}`,
     `- Tipografia canônica (use SOMENTE estas famílias): ${fonts}`,
-    bible.artDirection ? `- Direção de arte fixada:\\n${bible.artDirection}` : '',
+    bible.artDirection ? `- Direção de arte fixada:\n${bible.artDirection}` : '',
     '- NÃO reinvente paleta, fontes ou sistema de layout a cada lote. Varie a COMPOSIÇÃO, nunca a identidade.',
-  ].filter(Boolean).join('\\n');
+  ].filter(Boolean).join('\n');
 }
 
 function buildBatchSystemInstruction(input: GenerateHtmlDesignInput, startIndex: number, batchSize: number, total: number, bible: StyleBible): string {
   const endIndex = Math.min(startIndex + batchSize, total);
 
-  let skeletonInstruction = '\\nVocê deve gerar os seguintes slides baseados nesta estrutura planejada:\\n';
+  let skeletonInstruction = '\nVocê deve gerar os seguintes slides baseados nesta estrutura planejada:\n';
   for (let i = startIndex; i < endIndex; i++) {
     const item = input.skeleton?.[i];
     if (item) {
-      skeletonInstruction += `- SLIDE ${i + 1}: Título/Tema: "${item.title}", Objetivo: "${item.goal}", Layout: "${item.layout_type}"\\n`;
+      skeletonInstruction += `- SLIDE ${i + 1}: Título/Tema: "${item.title}", Objetivo: "${item.goal}", Layout: "${item.layout_type}"\n`;
     }
   }
 
@@ -152,23 +152,23 @@ function buildBatchUserPrompt(
   const b = input.brand;
   const endIndex = Math.min(startIndex + batchSize, total);
 
-  let skeletonPrompt = '\\nSLIDES PLANEJADOS NESTE LOTE:\\n';
+  let skeletonPrompt = '\nSLIDES PLANEJADOS NESTE LOTE:\n';
   for (let i = startIndex; i < endIndex; i++) {
     const item = input.skeleton?.[i];
     if (item) {
-      skeletonPrompt += `- SLIDE ${i + 1}: ${item.title} | ${item.goal} | ${item.layout_type}\\n`;
+      skeletonPrompt += `- SLIDE ${i + 1}: ${item.title} | ${item.goal} | ${item.layout_type}\n`;
     }
   }
 
   // A base (paleta/fontes/direção) vai VERBATIM via style bible — não truncamos
   // mais a direção de arte, é o que evitava a deriva em apresentações longas.
-  const directionBlock = `\\n${renderStyleBible(bible)}`;
+  const directionBlock = `\n${renderStyleBible(bible)}`;
 
   // Sliding window context: só envia os últimos 3 slides para continuidade visual
   // imediata, sem explodir o prompt. A COESÃO global fica por conta do style bible.
   const recentSlides = priorSlides.slice(-3);
   const priorBlock = priorSlides.length
-    ? `\\nContexto: você já criou ${priorSlides.length} de ${total} slides. Mantenha a coesão. Resumo dos últimos slides:\\n${JSON.stringify(recentSlides.map(s => ({ id: s.id, texts: s.elements.filter(e => e.type === 'text').map(e => e.content) })))}`
+    ? `\nContexto: você já criou ${priorSlides.length} de ${total} slides. Mantenha a coesão. Resumo dos últimos slides:\n${JSON.stringify(recentSlides.map(s => ({ id: s.id, texts: s.elements.filter(e => e.type === 'text').map(e => e.content) })))}`
     : '';
   return `Marca: ${b.name}
 Cores oficiais: ${b.colors.length ? b.colors.join(', ') : 'livre, profissional'}

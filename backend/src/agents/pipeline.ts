@@ -143,6 +143,10 @@ async function runPipelineInner(
         data: {
           id: postId,
           brandId: brand.id,
+          // O deck nasce JÁ dentro da pasta escolhida na fábrica. Antes nascia solto e
+          // o usuário tinha de ir arrastá-lo na galeria — na prática, deck gerado era
+          // deck perdido. `null` = raiz, que segue sendo o default.
+          folderId: session.folderId ?? null,
           type: format === 'presentation' ? 'PRESENTATION' : 'CAROUSEL',
           status: 'GENERATING',
           content: {
@@ -181,6 +185,16 @@ async function runPipelineInner(
       // Gravamos no máximo ~1x/1.5s (e sempre no último slide) — restaura o
       // preview no reconnect sem voltar ao O(n²) de gravar todo slide.
       let lastCurrentDesignPersist = 0;
+
+      logger.info('Diagnostico: Tamanhos dos inputs da geracao', {
+        planBriefLength: planBrief?.length,
+        skeletonLength: skeleton?.length,
+        brandName: brand?.name,
+        guidelinesLength: brand?.guidelines?.length,
+        agentPromptLength: brand?.agentPrompt?.length,
+        logoUrlLength: brand?.logoUrl?.length,
+        referencesCount: brand?.references?.length,
+      });
 
       const ir = await generateIRDesignProgressive(
         async (systemInstruction, userPrompt) => {

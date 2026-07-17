@@ -1,6 +1,44 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
+/**
+ * Preço por modelo, em USD por 1M de tokens, com input e output SEPARADOS — no Gemini
+ * o output custa ~5-8x o input, então um preço único mentiria feio num deck (muito
+ * output) contra um chat (muito input).
+ *
+ * Estes defaults são ESTIMATIVA e envelhecem: a fatura real é a do Google. Servem só
+ * para dar ordem de grandeza na tela. Sobrescreva com AI_MODEL_PRICES (JSON) quando o
+ * preço mudar — o env sempre vence o default, modelo a modelo.
+ */
+export type ModelPrice = { input: number; output: number };
+
+const DEFAULT_MODEL_PRICES: Record<string, ModelPrice> = {
+  'gemini-3.1-pro-preview': { input: 2.0, output: 12.0 },
+  'gemini-2.5-pro': { input: 1.25, output: 10.0 },
+  'gemini-3.5-flash': { input: 0.3, output: 2.5 },
+  'gemini-2.5-flash': { input: 0.3, output: 2.5 },
+  'gemini-2.5-flash-lite': { input: 0.1, output: 0.4 },
+};
+
+function parseModelPrices(raw: string | undefined): Record<string, ModelPrice> {
+  const merged: Record<string, ModelPrice> = { ...DEFAULT_MODEL_PRICES };
+  if (!raw) return merged;
+  try {
+    const parsed = JSON.parse(raw) as Record<string, Partial<ModelPrice>>;
+    for (const [model, price] of Object.entries(parsed)) {
+      const input = Number(price?.input);
+      const output = Number(price?.output);
+      if (Number.isFinite(input) && Number.isFinite(output)) {
+        merged[model] = { input, output };
+      }
+    }
+  } catch {
+    // JSON inválido no env não pode derrubar o boot: fica só com os defaults.
+    console.warn('⚠️  AI_MODEL_PRICES não é um JSON válido; usando a tabela de preço padrão.');
+  }
+  return merged;
+}
+
 export const config = {
   port: parseInt(process.env.PORT || '4000', 10),
   databaseUrl: process.env.DATABASE_URL || '',
@@ -24,7 +62,16 @@ export const config = {
   aiDailyTokenBudget: parseInt(process.env.AI_DAILY_TOKEN_BUDGET || '20000000', 10),
   aiBrandDailyTokenBudget: parseInt(process.env.AI_BRAND_DAILY_TOKEN_BUDGET || '5000000', 10),
   // Só para estimar o custo no log. 0 = não estima (default: não chutamos preço).
+  // Também é o preço de reserva (input=output) para um modelo fora da tabela abaixo.
   aiUsdPerMillionTokens: parseFloat(process.env.AI_USD_PER_MILLION_TOKENS || '0'),
+  // ── Billing / transparência de gasto ──
+  // Preço por modelo (input/output USD/1M). Estimativa, sobrescrevível por AI_MODEL_PRICES.
+  aiModelPrices: parseModelPrices(process.env.AI_MODEL_PRICES),
+  // Câmbio para exibir o gasto em R$. 0 = mostra em US$ (não inventamos câmbio).
+  aiUsdToBrl: parseFloat(process.env.AI_USD_TO_BRL || '0'),
+  // Alíquota de imposto sobre o gasto (fração: 0.0638 = 6,38% de IOF, por ex.). É
+  // mostrada SEPARADA do gasto na tela, nunca embutida no preço do modelo. 0 = sem imposto.
+  aiTaxRate: parseFloat(process.env.AI_TAX_RATE || '0'),
   // ── Timeout por tentativa ──
   // Um modelo lento é pior que um modelo fora do ar: ele não dá erro, então o retry
   // e o circuit breaker nunca entram, e a chamada só… demora. Medido: o
@@ -36,6 +83,17 @@ export const config = {
   // (40-75s é normal num lote de slides); flash = chamada que deveria ser rápida.
   aiTimeoutLightMs: parseInt(process.env.AI_TIMEOUT_LIGHT_MS || '25000', 10),
   aiTimeoutHeavyMs: parseInt(process.env.AI_TIMEOUT_HEAVY_MS || '150000', 10),
+  // ── Cota / rate limit ──
+  // Teto de chamadas SIMULTÂNEAS por modelo. É um ponto de partida, não uma promessa:
+  // o controle de congestão (lib/aiThrottle.ts) desce sozinho quando toma 429 e volta
+  // a subir quando a cota respira. Deixe-o folgado — quem descobre o limite real da
+  // cota é o AIMD, não este número.
+  aiMaxInflightPerModel: parseInt(process.env.AI_MAX_INFLIGHT_PER_MODEL || '8', 10),
+  // Quantas vezes insistir no MESMO modelo quando o erro é 429 (rate limit). Alto de
+  // propósito: 429 é oscilação de cota causada pela nossa própria paralelização, e
+  // desistir dele significaria terminar o deck com um modelo pior. Esperar é de graça
+  // (só tempo); trocar de modelo custa a estética do deck inteiro.
+  aiRateLimitRetries: parseInt(process.env.AI_RATE_LIMIT_RETRIES || '6', 10),
   nodeEnv: process.env.NODE_ENV || 'development',
   isDev: process.env.NODE_ENV !== 'production',
   // ── Cloudflare R2 ──
@@ -54,7 +112,7 @@ export const config = {
   // O lote 1 sempre roda sozinho (ancora a direção de arte); os demais correm em
   // pool. Total de chamadas Gemini simultâneas ≈ pipelineConcurrency × este valor,
   // então cuidado com rate limit. Default conservador.
-  generationConcurrency: parseInt(process.env.GENERATION_CONCURRENCY || '4', 10),
+  generationConcurrency: parseInt(process.env.GENERATION_CONCURRENCY || '2', 10),
   // Se true, o próprio processo da API também processa a fila (deploy de 1
   // processo). Coloque false na API e rode `node dist/worker.js` separado para
   // escalar workers independentemente.

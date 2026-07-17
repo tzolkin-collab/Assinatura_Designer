@@ -36,7 +36,9 @@ Há DUAS formas de acionar o sistema. Escolha com MUITO cuidado — usar a forma
    Regras: "index" é 0-based (slide 1 = index 0); inclua um item em "edits" para CADA slide a alterar; cada "instruction" deve ser específica.
    Use sempre que já existir uma arte e o pedido for localizado (ex.: "mais contraste no slide 2", "troca o título do primeiro", "deixa o fundo do último mais escuro").
 
-Na dúvida entre as duas, prefira [EDIT]. Só use [DISPATCH] quando for realmente recomeçar.
+Como escolher:
+- **Ainda NÃO existe arte** (nenhuma peça foi gerada nesta conversa): use [DISPATCH]. [EDIT] não tem o que editar.
+- **JÁ existe arte** e o pedido é localizado: use [EDIT]. Na dúvida entre as duas com arte existente, prefira [EDIT] — só use [DISPATCH] quando for realmente recomeçar.
 
 ## Estados reais do fluxo
 

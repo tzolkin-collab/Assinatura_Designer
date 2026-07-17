@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { ArrowUp, Paperclip, Sparkles, Wifi, WifiOff, X, ChevronDown, ChevronRight, MessageSquarePlus, Check, Loader2 } from 'lucide-react';
 import DesignRenderer from '@/components/Fabrica/DesignRenderer';
 import HtmlSlideRenderer from '@/components/DesignDocument/HtmlSlideRenderer';
@@ -9,6 +9,9 @@ import IRSlideRenderer from '@/components/DesignDocument/IRSlideRenderer';
 import { type HtmlDesignPostContent } from '@/lib/designContent';
 import { AsanaPopup } from '@/components/Fabrica/AsanaPopup';
 import { NotificationCard } from '@/components/Fabrica/NotificationCard';
+import FolderPicker from '@/components/Fabrica/FolderPicker';
+import { ArtifactPanel } from '@/components/Fabrica/ArtifactPanel';
+import AiSpendBadge from '@/components/AiUsage/AiSpendBadge';
 import { useFabricaWs } from '@/hooks/useFabricaWs';
 import { API_BASE } from '@/lib/api';
 import { useBrandPermissions } from '@/hooks/useBrandPermissions';
@@ -17,20 +20,21 @@ import s from './fabrica.module.css';
 // ── Components ────────────────────────────────────────────────────────────────
 function ThinkingBlock({ thinking }: { thinking: string }) {
   const [expanded, setExpanded] = useState(false);
+  const bodyId = useId();
   return (
     <div className={s.thinkingBlock}>
-      <div 
-        className={s.thinkingHeader} 
-        onClick={() => setExpanded(!expanded)} 
-        style={{ cursor: 'pointer', justifyContent: 'space-between' }}
+      <button
+        type="button"
+        className={s.thinkingHeader}
+        onClick={() => setExpanded(!expanded)}
+        aria-expanded={expanded}
+        aria-controls={bodyId}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <Sparkles size={11} />
-          <span>{expanded ? 'Ocultar raciocínio' : 'Mostrar raciocínio'}</span>
-        </div>
+        <Sparkles size={11} />
+        <span>{expanded ? 'Ocultar raciocínio' : 'Mostrar raciocínio'}</span>
         {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-      </div>
-      {expanded && <div className={s.thinkingBody}>{thinking}</div>}
+      </button>
+      {expanded && <div id={bodyId} className={s.thinkingBody}>{thinking}</div>}
     </div>
   );
 }
@@ -68,14 +72,16 @@ async function fileToBase64(file: File): Promise<Attachment> {
 export default function FabricaPage() {
   const { marca } = useParams() as { marca: string };
   const router = useRouter();
-  // Capturado UMA vez (lazy): se lêssemos o sessionStorage a cada render, a
-  // gravação da sessão (effect abaixo) mudaria este valor e re-dispararia o
-  // effect de conexão — causando um ciclo conecta→fecha→reconecta no load.
-  const [initialSessionId] = useState<string | null>(() =>
-    typeof window !== 'undefined'
-      ? (new URLSearchParams(window.location.search).get('sessionId') || sessionStorage.getItem(`fabrica_session_${marca}`))
-      : null,
+  const searchParams = useSearchParams();
+  const sessionIdFromUrl = searchParams ? searchParams.get('sessionId') : null;
+
+  // Carregado uma única vez na inicialização para evitar o loop de reconexão infinito
+  // ao ler o sessionStorage em cada render.
+  const [cachedSessionId] = useState<string | null>(() =>
+    typeof window !== 'undefined' ? sessionStorage.getItem(`fabrica_session_${marca}`) : null
   );
+
+  const initialSessionId = sessionIdFromUrl || cachedSessionId;
 
   const {
     phase,
@@ -369,31 +375,32 @@ export default function FabricaPage() {
         <div className={s.chatHeader}>
           <div className={s.chatHeaderLeft}>
             <span className={s.chatTitle}>{brandName || marca}</span>
-            <span className={s.chatPhase}>{phaseLabel[phase] ?? phase}</span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div className={s.chatHeaderRight}>
+            <AiSpendBadge slug={marca} />
             <button
+              className={s.newConvBtn}
               onClick={handleNewConversation}
               title="Iniciar uma nova conversa"
-              style={{
-                display: 'flex', alignItems: 'center', gap: 6,
-                fontSize: 12, fontWeight: 500, padding: '5px 10px', borderRadius: 8,
-                border: '1px solid rgba(0,0,0,0.08)', background: 'rgba(255,255,255,0.7)',
-                color: 'var(--color-text-secondary)', cursor: 'pointer', backdropFilter: 'blur(8px)',
-              }}
+              aria-label="Iniciar nova conversa"
             >
               <MessageSquarePlus size={14} /> Nova
             </button>
-            <div className={s.connectionBadge} title={connected ? 'Conectado' : 'Reconectando...'}>
+            <div className={s.connectionBadge} role="status" title={connected ? 'Conectado' : 'Reconectando...'}>
               <span className={`${s.connectionDot} ${connected ? s.connectionOnline : s.connectionOffline}`} />
-              {connected ? <Wifi size={13} /> : <WifiOff size={13} />}
-              <span className={s.connectionLabel}>{connected ? 'Online' : 'Reconectando'}</span>
             </div>
           </div>
         </div>
 
         {/* Thread */}
-        <div className={s.thread} ref={threadRef} onScroll={handleThreadScroll}>
+        <div
+          className={s.thread}
+          ref={threadRef}
+          onScroll={handleThreadScroll}
+          role="log"
+          aria-live="polite"
+          aria-label="Conversa com a fábrica"
+        >
           {displayMessages.length === 0 ? (
             <div className={s.emptyState}>
               <div className={s.emptyIcon}>
@@ -403,9 +410,9 @@ export default function FabricaPage() {
               <p className={s.emptySubtitle}>
                 Descreva a peça — apresentação, carrossel, proposta — e o agente conduz o processo.
               </p>
-              
+
               {/* Sugestões de Prompt para quebrar Blank Page */}
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center', marginTop: 16 }}>
+              <div className={s.suggestChips}>
                 {[
                   'Carrossel com 5 dicas de finanças',
                   'Apresentação comercial de 6 slides',
@@ -413,21 +420,8 @@ export default function FabricaPage() {
                 ].map((sug, i) => (
                   <button
                     key={i}
+                    className={s.suggestChip}
                     onClick={() => setInput(sug)}
-                    style={{
-                      background: 'rgba(255,255,255,0.8)',
-                      border: '1px solid rgba(0,0,0,0.06)',
-                      padding: '8px 12px',
-                      borderRadius: 14,
-                      fontSize: 12,
-                      color: 'var(--color-text-secondary)',
-                      cursor: 'pointer',
-                      backdropFilter: 'blur(10px)',
-                      boxShadow: '0 4px 12px rgba(0,0,0,0.03)',
-                      transition: 'all 0.15s'
-                    }}
-                    onMouseEnter={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.borderColor = 'rgba(217, 119, 87, 0.3)'; }}
-                    onMouseLeave={e => { e.currentTarget.style.transform = 'none'; e.currentTarget.style.borderColor = 'rgba(0,0,0,0.06)'; }}
                   >
                     {sug}
                   </button>
@@ -515,7 +509,7 @@ export default function FabricaPage() {
                 <span className={s.questionMode}>{activeQuestion.mode === 'auto' ? 'Modo automático' : 'Modo guiado'}</span>
               </div>
               <div className={s.questionHeader}>
-                <Sparkles size={13} style={{ color: 'var(--color-brand)' }} />
+                <Sparkles size={13} className={s.questionHeaderIcon} />
                 <span>{activeQuestion.question}</span>
               </div>
               {activeQuestion.helperText && (
@@ -577,13 +571,19 @@ export default function FabricaPage() {
 
           {/* Generation progress row */}
           {workerStatus === 'running' && (
-            <div className={s.progressRow}>
+            <div className={s.progressRow} role="status">
               <div className={s.progressHeader}>
                 <span className={s.progressEyebrow}>Fábrica em execução</span>
                 <span className={s.progressValue}>{progress}%</span>
               </div>
               <p className={s.progressLabel}>{progressLabel || 'Gerando...'}</p>
-              <div className={s.progressTrack}>
+              <div
+                className={s.progressTrack}
+                role="progressbar"
+                aria-valuenow={progress}
+                aria-valuemin={0}
+                aria-valuemax={100}
+              >
                 <div className={s.progressBar} style={{ width: `${progress}%` }} />
               </div>
             </div>
@@ -636,11 +636,13 @@ export default function FabricaPage() {
           <div className={s.inputWrap}>
             {/* Slash command menu */}
             {showSlash && filteredSlash.length > 0 && (
-              <div className={s.slashMenu}>
+              <div className={s.slashMenu} role="listbox">
                 {filteredSlash.map((cmd, i) => (
                   <div
                     key={cmd.id}
                     className={`${s.slashItem} ${i === slashIdx ? s.slashActive : ''}`}
+                    role="option"
+                    aria-selected={i === slashIdx}
                     onMouseDown={e => { e.preventDefault(); applySlash(cmd.id); }}
                     onMouseEnter={() => setSlashIdx(i)}
                   >
@@ -651,11 +653,16 @@ export default function FabricaPage() {
               </div>
             )}
 
+            {/* Destino do deck, escolhido ANTES de gerar — sem isto ele nascia solto
+                na raiz e só era achado caçando na galeria. */}
+            <FolderPicker marca={marca} sessionId={sessionId} disabled={isStreaming} />
+
             <div className={s.inputBar}>
               <button
                 className={s.iconBtn}
                 onClick={() => fileRef.current?.click()}
                 title="Anexar arquivo"
+                aria-label="Anexar arquivo"
               >
                 <Paperclip size={15} />
               </button>
@@ -663,7 +670,7 @@ export default function FabricaPage() {
                 ref={fileRef}
                 type="file"
                 accept="image/*,.pdf"
-                style={{ display: 'none' }}
+                className={s.visuallyHidden}
                 onChange={handleFile}
               />
               <textarea
@@ -672,6 +679,8 @@ export default function FabricaPage() {
                 value={input}
                 onChange={handleInputChange}
                 onKeyDown={handleKey}
+                aria-label="Mensagem para a fábrica"
+                aria-describedby="fabricaInputHint"
                 placeholder={
                   isStreaming
                     ? 'Gerando... digite algo para adicionar contexto em tempo real'
@@ -687,13 +696,14 @@ export default function FabricaPage() {
                 onClick={handleSend}
                 disabled={!canSend}
                 title={canGenerate ? undefined : permHint}
+                aria-label="Enviar mensagem"
               >
                 <ArrowUp size={15} />
               </button>
             </div>
           </div>
 
-          <p className={s.inputHint}>
+          <p className={s.inputHint} id="fabricaInputHint">
             {canGenerate
               ? 'Enter envia · Shift+Enter nova linha · / para comandos'
               : permHint}
@@ -713,8 +723,8 @@ export default function FabricaPage() {
                     <div className={s.buildSkeleton}>
                       <div className={s.buildSkBlock} />
                       <div className={s.buildSkLine} />
-                      <div className={s.buildSkLine} style={{ width: '64%' }} />
-                      <div className={s.buildSkLine} style={{ width: '40%' }} />
+                      <div className={s.buildSkLine} />
+                      <div className={s.buildSkLine} />
                     </div>
                   </div>
                   <div className={s.previewProgressWrap}>
@@ -736,6 +746,13 @@ export default function FabricaPage() {
             </div>
           </div>
         ) : (
+          <ArtifactPanel
+            design={currentDesign[0]}
+            postId={postId}
+            slideIndex={safeSlide}
+            slideCount={slideCount}
+            gerando={workerStatus === 'running'}
+          >
           <div className={s.previewContent}>
             {/* Progress overlay during update */}
             {workerStatus === 'running' && (
@@ -746,19 +763,10 @@ export default function FabricaPage() {
 
             {/* Save status badge */}
             {saveStatus && (
-              <div
-                style={{
-                  position: 'absolute', top: 12, right: 12, zIndex: 5,
-                  display: 'flex', alignItems: 'center', gap: 6,
-                  fontSize: 11, fontWeight: 500, padding: '5px 10px', borderRadius: 20,
-                  background: 'rgba(255,255,255,0.85)', backdropFilter: 'blur(8px)',
-                  boxShadow: '0 2px 10px rgba(0,0,0,0.06)',
-                  color: saveStatus === 'saving' ? '#92400e' : '#166534',
-                }}
-              >
+              <div className={`${s.saveBadge} ${saveStatus === 'saving' ? s.saveBadgeSaving : s.saveBadgeSaved}`}>
                 {saveStatus === 'saving' ? (
                   <>
-                    <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} />
+                    <Loader2 size={12} className={s.saveBadgeSpin} />
                     Salvando rascunho…
                   </>
                 ) : (
@@ -827,6 +835,7 @@ export default function FabricaPage() {
               </div>
             )}
           </div>
+          </ArtifactPanel>
         )}
       </main>
     </div>

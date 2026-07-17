@@ -54,6 +54,14 @@ export function mergeSlidesIntoPost(post: PostWithSlides | null): PostWithSlides
   if (isRecord(content)) {
     const slidesRelation = (cloned.slides ?? []) as SlideRow[];
 
+    // Tabela relacional vazia = post ANTERIOR à migração, cujos slides moram no blob
+    // `content`. Sobrescrever com [] apagava esses slides na leitura: o deck existia
+    // no banco e chegava vazio em quem lê. Era isto que derrubava export de PDF/ZIP e
+    // Canva ("Este design ainda não tem slides") em todo o acervo html-design antigo.
+    // Post moderno nunca cai aqui com slides no blob — `savePostContent` os retira ao
+    // gravar, então não há risco de ressuscitar slide velho por cima de uma edição.
+    if (slidesRelation.length === 0) return cloned;
+
     // Sort slides by their position/index
     slidesRelation.sort((a, b) => a.position - b.position);
 

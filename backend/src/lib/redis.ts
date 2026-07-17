@@ -77,6 +77,13 @@ export interface FabricaSession {
   id: string;
   userId?: string;
   brandSlug: string;
+  /**
+   * Pasta de destino do deck que esta sessão vai gerar. É a sessão que carrega isto
+   * porque o Post só nasce lá no fim do pipeline — e sem um destino combinado ANTES,
+   * o deck caía solto na raiz e o usuário tinha de ir caçá-lo na galeria.
+   * `null`/ausente = raiz (sem pasta), que continua sendo o default.
+   */
+  folderId?: string | null;
   phase: SessionPhase;
   reviewMode: ReviewMode;
   activeQuestion?: FabricaQuestion | null;
@@ -135,12 +142,14 @@ export async function createSession(
   brandSlug: string,
   userId?: string,
   reviewMode: ReviewMode = 'manual',
+  folderId?: string | null,
 ): Promise<FabricaSession> {
   const now = Date.now();
   const session: FabricaSession = {
     id: sessionId,
     userId,
     brandSlug,
+    folderId: folderId ?? null,
     phase: 'listening',
     reviewMode,
     activeQuestion: null,

@@ -18,6 +18,11 @@ import {
 
 export const canvaRouter = Router();
 
+// Rotas que o browser acessa sem sessão nossa. O callback do OAuth chega como
+// redirect do Canva, sem Authorization header — quem prova a identidade aqui é o
+// `state` (gerado por nós e conferido no banco), não o JWT.
+export const canvaPublicRouter = Router();
+
 // ── Helper: get brand, exigindo vínculo do usuário (BrandMember) ──
 // Antes comparava `brand.userId` (só o dono legacy). Como a entrega do produto passa
 // pelo Canva, isso trancava a equipe fora do caminho de export.
@@ -80,7 +85,7 @@ canvaRouter.get('/:slug/auth-url', async (req: AuthRequest, res: Response, next:
 // ── GET /api/canva/callback ──
 // OAuth callback — exchanges the authorization code for tokens
 
-canvaRouter.get('/callback', async (req: AuthRequest, res: Response, next: NextFunction) => {
+canvaPublicRouter.get('/callback', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { code, state } = req.query;
 

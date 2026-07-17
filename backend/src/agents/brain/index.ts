@@ -14,18 +14,18 @@ import {
 } from '../../lib/redis.js';
 import type { FabricaQuestion, PresentationConfig, ReviewMode } from '../../lib/fabricaSession.js';
 import { ws, onWsMessage, type WsAttachment } from '../../lib/websocket.js';
-import { generateStreamWithRetry, generateWithRetry, humanizeGeminiError } from '../../lib/geminiRetry.js';
+import { generateStreamWithRetry, humanizeGeminiError } from '../../lib/geminiRetry.js';
 import { enqueuePipeline } from '../../lib/queue.js';
 import { BRAIN_SYSTEM_PROMPT } from './prompts.js';
 import prisma from '../../lib/prisma.js';
-import { editHtmlSlide, type HtmlDesignContent } from '../../lib/htmlDesign.js';
 import { executeTool } from '../tools/index.js';
-import { resolveBrandContext } from '../../lib/brandContext.js';
-import { mergeSlidesIntoPost, syncPostSlides } from '../../lib/postHelper.js';
+import { mergeSlidesIntoPost, persistPostContent } from '../../lib/postHelper.js';
 import { snapshotPost } from '../../lib/postVersions.js';
 import { runWithAiContext, enrichAiContext } from '../../lib/aiContext.js';
-import { extractJsonObject } from '../../lib/designDocument.js';
 import { logger } from '../../lib/logger.js';
+import { generateIRPatchForSlide } from '../../lib/designIR/aiPatch.js';
+import { applyPatchToSlide } from '../../lib/designIR/patcher.js';
+import type { SlideNode as IRSlideNode } from '../../lib/designIR/types.js';
 
 const ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
 
@@ -235,9 +235,11 @@ export async function createBrainSession(params: {
   userId?: string;
   brandContextSummary: string;
   presentationConfig?: PresentationConfig;
+  /** Pasta de destino do deck. A rota já validou que ela é desta marca. */
+  folderId?: string | null;
 }) {
   const reviewMode: ReviewMode = params.presentationConfig?.autoMode ? 'auto' : 'manual';
-  const session = await createSession(params.sessionId, params.brandSlug, params.userId, reviewMode);
+  const session = await createSession(params.sessionId, params.brandSlug, params.userId, reviewMode, params.folderId);
 
   // Injeta contexto de marca na memória da sessão
   await appendMessage(params.sessionId, {
@@ -292,6 +294,8 @@ export async function reconnectSession(sessionId: string, userId?: string) {
           session.phase = 'done';
           if (content.pages) {
             session.currentDesign = content.pages;
+          } else if ((content as any).kind === 'ir-design' || (content as any).kind === 'html-design') {
+            session.currentDesign = [content as any];
           }
           await updateSession(sessionId, session);
           logger.info('Sessão recuperada a partir do Post', { sessionId, postId: post.id });
@@ -454,17 +458,53 @@ async function detectAndDispatch(
 ): Promise<void> {
   if (!session) return;
 
+  let semArteParaEditar = false;
+
   // [EDIT:{...}] — ajuste cirúrgico de uma arte existente, SEM regenerar tudo.
   const editMatch = response.match(/\[EDIT:\s*(\{[\s\S]*?\})\s*\]/i);
   if (editMatch) {
-    const applied = await applySlideEdits(sessionId, session, editMatch[1] as string);
-    if (applied) return; // editou preservando o resto; não cai no dispatch
-    // Se não havia arte para editar ou o payload era inválido, segue para DISPATCH.
+    const resultado = await applySlideEdits(sessionId, session, editMatch[1] as string);
+
+    // Editou preservando o resto: acabou aqui.
+    if (resultado.outcome === 'editado') return;
+
+    // Havia arte e a edição não deu. É preciso DIZER — o prompt manda a IA usar [EDIT]
+    // ou [DISPATCH], nunca os dois, então antes daqui o código simplesmente retornava
+    // em silêncio: a Gabi prometia "vou ajustar" e o design ficava intacto, sem erro
+    // nenhum. E regenerar o deck por conta própria seria pior: ninguém pediu para
+    // refazer a peça inteira.
+    if (resultado.outcome === 'falhou') {
+      ws.token(
+        sessionId,
+        `\n\n*Não consegui fazer esse ajuste (${resultado.motivo}). O design continua como estava — descreva de outro jeito, ou peça para eu refazer a peça do zero.*\n`,
+      );
+      await updateSession(sessionId, { phase: 'done', workerStatus: 'idle' });
+      const atual = await getSession(sessionId);
+      if (atual) emitSessionState(sessionId, atual);
+      return;
+    }
+
+    // `sem-arte`: ainda não existe deck para editar → é legítimo cair para geração.
+    semArteParaEditar = true;
   }
 
   // [DISPATCH:presentation] ou [DISPATCH:carousel]
   const match = response.match(/\[DISPATCH:(presentation|carousel)\]/i);
-  if (!match) return;
+  if (!match) {
+    // A IA pediu para EDITAR, não há arte, e ela não pediu geração. Sem isto, o pedido
+    // morreria calado — o mesmo silêncio que este bloco inteiro existe para matar.
+    // Não geramos por conta própria: criar uma peça do zero é uma decisão da pessoa.
+    if (semArteParaEditar) {
+      ws.token(
+        sessionId,
+        '\n\n*Ainda não há nenhuma arte criada para eu ajustar. Quer que eu crie a peça do zero?*\n',
+      );
+      await updateSession(sessionId, { phase: 'listening', workerStatus: 'idle' });
+      const atual = await getSession(sessionId);
+      if (atual) emitSessionState(sessionId, atual);
+    }
+    return;
+  }
 
   const format = match[1] as 'presentation' | 'carousel';
 
@@ -488,57 +528,85 @@ async function detectAndDispatch(
 }
 
 // ── Ajuste cirúrgico de slides (preserva o design existente) ──────────────────
-// Aplica editHtmlSlide apenas nos slides citados, mantendo o resto idêntico.
-// Retorna false (sem editar) se não houver arte html-design ou o payload for
-// inválido — nesse caso o chamador pode seguir para regeneração completa.
+
+/**
+ * O que aconteceu com o `[EDIT]`. O chamador precisa saber a DIFERENÇA entre "não há
+ * arte ainda" e "havia arte e a edição falhou" — antes ele não sabia, e o custo disso
+ * era o produto mentir: a IA dizia "vou ajustar" e nada acontecia, em silêncio.
+ *
+ * - `sem-arte`  → ainda não existe deck; é legítimo cair para geração.
+ * - `editado`   → aplicado e persistido.
+ * - `falhou`    → havia arte e não deu. Diga a verdade. NUNCA regenerar por baixo dos
+ *                 panos: refazer um deck que a pessoa não pediu para refazer é pior do
+ *                 que não fazer nada.
+ */
+type ResultadoEdicao =
+  | { outcome: 'sem-arte' }
+  | { outcome: 'editado'; changed: number }
+  | { outcome: 'falhou'; motivo: string };
+
+/**
+ * Edita slides de um deck `ir-design` a partir de instruções em linguagem natural.
+ *
+ * Antes isto rodava sobre `html-design` (via `editHtmlSlide`) — um formato que o
+ * pipeline não produz desde a migração para o IR. O gate `kind !== 'html-design'`
+ * devolvia `false` em 100% dos decks reais, e a edição pelo chat simplesmente não
+ * existia. Agora usa o MESMO motor da rota `ai-patch` do editor (`generateIRPatchForSlide`),
+ * que funciona no IR, e aplica no servidor (`applyPatchToSlide`), porque aqui não há
+ * canvas do outro lado para aplicar.
+ *
+ * Fonte de verdade é o POST, não `session.currentDesign`: o Redis expira, e o
+ * `currentDesign` de um deck ir-design volta vazio na reconexão. Editar a partir dele
+ * daria "não há arte" para um deck que existe.
+ */
 async function applySlideEdits(
   sessionId: string,
   session: NonNullable<Awaited<ReturnType<typeof getSession>>>,
   rawPayload: string,
-): Promise<boolean> {
+): Promise<ResultadoEdicao> {
   let payload: { edits?: Array<{ index?: number; instruction?: string }> };
   try {
     payload = JSON.parse(rawPayload);
   } catch {
-    return false;
-  }
-  const edits = Array.isArray(payload.edits) ? payload.edits : [];
-  if (edits.length === 0) return false;
-
-  const envelope = (session.currentDesign?.[0] ?? null) as unknown as HtmlDesignContent | null;
-  if (!envelope || envelope.kind !== 'html-design' || !Array.isArray(envelope.slides) || envelope.slides.length === 0) {
-    return false; // sem arte html-design para editar → cai para DISPATCH
+    return { outcome: 'falhou', motivo: 'não entendi quais slides ajustar' };
   }
 
-  let brand;
+  const edits = (Array.isArray(payload.edits) ? payload.edits : [])
+    .map((e) => ({
+      index: Math.max(0, Number(e?.index) || 0),
+      instruction: typeof e?.instruction === 'string' ? e.instruction.trim() : '',
+    }))
+    .filter((e) => e.instruction.length > 0);
+
+  if (edits.length === 0) return { outcome: 'falhou', motivo: 'não entendi o que mudar' };
+
+  // A linha do Prisma fica com o tipo dela (para `id`/`brand`); o `mergeSlidesIntoPost`
+  // serve só para reidratar o `content` com os slides da tabela relacional — que é onde
+  // eles realmente vivem (o blob não os guarda).
+  const postRow = await prisma.post.findFirst({
+    where: { content: { path: ['sessionId'], equals: sessionId } },
+    include: { brand: true, slides: { orderBy: { position: 'asc' } } },
+    orderBy: { createdAt: 'desc' },
+  });
+  if (!postRow) return { outcome: 'sem-arte' };
+
+  const content = (mergeSlidesIntoPost(postRow).content ?? null) as {
+    kind?: string;
+    ir?: { slides?: IRSlideNode[] };
+  } | null;
+
+  const slides = content?.ir?.slides;
+  if (content?.kind !== 'ir-design' || !Array.isArray(slides) || slides.length === 0) {
+    return { outcome: 'sem-arte' };
+  }
+
+  // Congela o design de ANTES da IA mexer — depois do loop o estado anterior não
+  // existe em lugar nenhum. Uma vez só, cobrindo o turno inteiro.
   try {
-    brand = await resolveBrandContext(session.brandSlug);
-  } catch {
-    return false;
-  }
-
-  const model = config.geminiDesignDocumentModel || 'gemini-3.1-pro-preview';
-  const slides = [...envelope.slides];
-  const width = envelope.width ?? 1080;
-  const height = envelope.height ?? 1080;
-
-  // Congela o design de antes da IA mexer. Depois do loop de edições o estado
-  // anterior já não existe em lugar nenhum — o post é sobrescrito no fim daqui.
-  try {
-    const alvo = await prisma.post.findFirst({
-      where: { content: { path: ['sessionId'], equals: sessionId } },
-      select: { id: true },
+    await snapshotPost(postRow.id, {
+      source: 'AI',
+      label: `Antes da IA ajustar o design: "${edits.map((e) => e.instruction).join('; ').slice(0, 100)}"`,
     });
-    if (alvo) {
-      const instrucoes = edits
-        .map(e => (typeof e?.instruction === 'string' ? e.instruction.trim() : ''))
-        .filter(Boolean)
-        .join('; ');
-      await snapshotPost(alvo.id, {
-        source: 'AI',
-        label: `Antes da IA ajustar o design: "${instrucoes.slice(0, 100)}"`,
-      });
-    }
   } catch (err) {
     // Não derruba a edição por causa do histórico, mas o usuário perde o ponto de volta.
     logger.error('Falha ao versionar o design antes da edição por IA', { error: (err as Error).message });
@@ -548,67 +616,82 @@ async function applySlideEdits(
   const revising = await getSession(sessionId);
   if (revising) emitSessionState(sessionId, revising);
 
+  const brandColors = (postRow.brand as { colors?: string[] } | null)?.colors ?? [];
+  const total = slides.length;
+
+  // Envelope leve do delta: o front (useFabricaWs) acumula os slides por índice e só
+  // reseta o acúmulo se o `postId` mudar. Emitindo com o postId do próprio deck, o
+  // preview troca SÓ o slide editado, ao vivo — sem uma linha de frontend.
+  const envelopeDelta = {
+    ...(content as Record<string, unknown>),
+    postId: postRow.id,
+    ir: { ...(content!.ir as Record<string, unknown>), slides: [] as unknown[] },
+  };
+
   let changed = 0;
+  const falhas: string[] = [];
+
   for (let i = 0; i < edits.length; i++) {
-    const instruction = typeof edits[i]?.instruction === 'string' ? edits[i]!.instruction!.trim() : '';
-    if (!instruction) continue;
-    const idx = Math.max(0, Math.min(Number(edits[i]?.index) || 0, slides.length - 1));
+    const { index, instruction } = edits[i]!;
+    const idx = Math.min(index, total - 1);
+    const slide = slides[idx];
+    if (!slide) continue;
+
     ws.progress(sessionId, 40 + Math.round(((i + 1) / edits.length) * 50), `Ajustando slide ${idx + 1}...`);
+
     try {
-      slides[idx] = await editHtmlSlide(
-        async (si, up) =>
-          (await generateWithRetry(ai, {
-            model,
-            contents: up,
-            config: { systemInstruction: si, responseMimeType: 'application/json', maxOutputTokens: 32768 },
-          }, model)).text ?? '{}',
-        {
-          slide: slides[idx]!,
-          instruction,
-          brand: { name: brand.name, colors: brand.colors, primaryFonts: brand.primaryFonts },
-          width,
-          height,
-        },
-        extractJsonObject,
-      );
+      const patch = await generateIRPatchForSlide({ slide, instruction, brandColors });
+
+      // O sanitizador descartou tudo: a IA não conseguiu traduzir o pedido em uma
+      // alteração válida. Isso é uma FALHA e vai ser dita — não engolida.
+      if (patch.ops.length === 0) {
+        falhas.push(`slide ${idx + 1}`);
+        continue;
+      }
+
+      const novo = applyPatchToSlide(slide, patch);
+      slides[idx] = novo;
       changed++;
+
+      ws.designSlide(sessionId, { index: idx, total, slide: novo, envelope: envelopeDelta });
     } catch (err) {
-      logger.error('editHtmlSlide falhou', { slide: idx, error: (err as Error).message });
+      falhas.push(`slide ${idx + 1}`);
+      logger.error('Edição de slide por IA falhou', { slide: idx + 1, error: (err as Error).message });
     }
   }
 
-  if (changed === 0) return false;
+  if (changed === 0) {
+    await updateSession(sessionId, { phase: 'done', workerStatus: 'idle' });
+    const parado = await getSession(sessionId);
+    if (parado) emitSessionState(sessionId, parado);
+    return { outcome: 'falhou', motivo: 'não consegui traduzir o pedido numa alteração válida' };
+  }
 
-  const newEnvelope: HtmlDesignContent = { ...envelope, slides };
-  // set_design persiste currentDesign no Redis e faz broadcast (ws.designUpdate).
-  await executeTool('set_design', { pages: [newEnvelope] }, sessionId, session.currentDesign);
-
-  // Persiste no Post correspondente (galeria/reconexão), se existir.
+  // Persiste: os slides vão para a tabela relacional e SAEM do blob. Gravar o blob com
+  // os slides dentro faria o `mergeSlidesIntoPost` sobrescrever esta edição com os
+  // slides antigos na próxima leitura.
   try {
-    const post = await prisma.post.findFirst({ where: { content: { path: ['sessionId'], equals: sessionId } } });
-    if (post && post.content) {
-      const content = post.content as Record<string, unknown>;
-      content.slides = slides;
-
-      // Sincroniza os slides relacionais na tabela slides
-      await syncPostSlides(post.id, content);
-
-      // Remove os slides do blob para manter a tabela leve
-      const contentToSave = { ...content };
-      delete contentToSave.slides;
-
-      await prisma.post.update({
-        where: { id: post.id },
-        data: { content: contentToSave as import('@prisma/client').Prisma.InputJsonValue },
-      });
-    }
+    await persistPostContent(postRow.id, content);
   } catch (err) {
     logger.error('Falha ao persistir a edição no Post', { error: (err as Error).message });
+  }
+
+  // Espelha no Redis (preview/reconexão) — set_design faz o broadcast do design cheio.
+  try {
+    await executeTool('set_design', { pages: [content] }, sessionId, session.currentDesign);
+  } catch (err) {
+    logger.error('Falha ao espelhar o design editado na sessão', { error: (err as Error).message });
   }
 
   await updateSession(sessionId, { phase: 'done', workerStatus: 'done' });
   const done = await getSession(sessionId);
   if (done) emitSessionState(sessionId, done);
-  ws.token(sessionId, `\n\n*Ajustei ${changed} slide${changed > 1 ? 's' : ''} e mantive o resto do design intacto.*\n`);
-  return true;
+
+  const resumo = `\n\n*Ajustei ${changed} slide${changed > 1 ? 's' : ''} e mantive o resto do design intacto.*\n`;
+  const aviso = falhas.length > 0
+    ? `\n*Não consegui aplicar o pedido em: ${falhas.join(', ')}. Tente descrever de outro jeito.*\n`
+    : '';
+  ws.token(sessionId, resumo + aviso);
+
+  return { outcome: 'editado', changed };
 }

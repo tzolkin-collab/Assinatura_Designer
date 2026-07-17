@@ -5,16 +5,28 @@ import type { AuthRequest } from '../middleware/auth.js';
 import { mergeSlidesIntoPost } from '../lib/postHelper.js';
 import { deleteFromR2 } from '../lib/r2.js';
 import { requireBrandRole, ANY_MEMBER, type BrandRequest } from '../middleware/brandAccess.js';
-import { getUsage } from '../lib/aiBudget.js';
+import { getUsage, getBilling } from '../lib/aiBudget.js';
 
 export const brandsRouter = Router();
 
-// GET /api/brands/:slug/ai-usage - quanto de IA esta marca já gastou hoje.
+// GET /api/brands/:slug/ai-usage - quanto de IA esta marca já gastou hoje, por modelo.
 // Sem isto o teto é invisível: só se descobre que existe quando ele corta.
 brandsRouter.get('/:slug/ai-usage', requireBrandRole(ANY_MEMBER), async (req: BrandRequest, res: Response, next: NextFunction) => {
   try {
     const usage = await getUsage(req.brand!.slug);
     res.json({ data: usage });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/brands/:slug/ai-usage/billing?month=YYYY-MM - gasto do mês quebrado por modelo.
+// O diário some em 3 dias; isto lê o rollup mensal (retenção longa) que sustenta a fatura.
+brandsRouter.get('/:slug/ai-usage/billing', requireBrandRole(ANY_MEMBER), async (req: BrandRequest, res: Response, next: NextFunction) => {
+  try {
+    const month = typeof req.query.month === 'string' ? req.query.month : undefined;
+    const billing = await getBilling(req.brand!.slug, month);
+    res.json({ data: billing });
   } catch (error) {
     next(error);
   }

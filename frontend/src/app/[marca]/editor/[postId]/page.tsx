@@ -1023,8 +1023,12 @@ export default function DesignEditorPage() {
 
   // ── Export ───────────────────────────────────────────────────────────────────
 
+  // Exporta a FONTE do que está aberto. `pages` só existe no editor clássico: num
+  // deck ir-design (o que a Fábrica gera hoje) ele fica vazio, e este botão baixava
+  // um `[]` — um arquivo sem nada dentro, sem dizer nada a ninguém.
   const exportJson = () => {
-    const blob = new Blob([JSON.stringify(pages, null, 2)], { type: 'application/json' });
+    const fonte = irPostContent ?? htmlPostContent ?? pages;
+    const blob = new Blob([JSON.stringify(fonte, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -1149,6 +1153,7 @@ export default function DesignEditorPage() {
           fixList={fixer.fixList}
           selectedFixIds={fixer.selectedFixIds}
           remainingIssues={fixer.remainingIssues}
+          verifyWarning={fixer.verifyWarning}
           correctedPages={fixer.correctedPages}
           iteration={fixer.iteration}
           errorMessage={fixer.errorMessage}

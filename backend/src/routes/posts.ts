@@ -15,58 +15,14 @@ import { uploadPngToR2 } from '../lib/r2.js';
 import { mergeSlidesIntoPost, syncPostSlides } from '../lib/postHelper.js';
 import { snapshotPost, restorePostVersion } from '../lib/postVersions.js';
 import { enrichAiContext } from '../lib/aiContext.js';
-import { enqueueCanvaExport, canvaExportQueue } from '../lib/queue.js';
+import { enqueueCanvaExport, canvaExportQueue, enqueueDeckExport, deckExportQueue } from '../lib/queue.js';
 import { resolveRenderableDeck } from '../lib/renderableDeck.js';
+import { generateIRPatchForSlide } from '../lib/designIR/aiPatch.js';
 import type { SlideNode as IRSlideNode } from '../lib/designIR/types.js';
 
 const ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
 
 export const postsRouter = Router();
-
-// Ops seguras para edição por IA de UM slide (structural ops como add/remove-slide
-// e update-tokens ficam de fora de propósito). Espelha o applyPatch do front.
-const AI_PATCH_OPS = new Set([
-  'update-style', 'update-content', 'update-bounds', 'update-element',
-  'update-background', 'reorder-element', 'remove-element',
-]);
-
-// Valida a resposta do modelo: mantém só ops permitidas, força o slideId real e
-// exige elementId existente. Um LLM não pode corromper o design com isto no meio.
-function sanitizeIRPatch(
-  raw: unknown,
-  slideId: string,
-  elementIds: Set<string>,
-): { ops: Array<Record<string, unknown>> } {
-  const rawOps = raw && typeof raw === 'object' && Array.isArray((raw as { ops?: unknown }).ops)
-    ? (raw as { ops: unknown[] }).ops
-    : [];
-  const ops: Array<Record<string, unknown>> = [];
-
-  for (const item of rawOps) {
-    if (!item || typeof item !== 'object') continue;
-    const op = item as Record<string, unknown>;
-    const kind = op.op;
-    if (typeof kind !== 'string' || !AI_PATCH_OPS.has(kind)) continue;
-
-    const base: Record<string, unknown> = { ...op, slideId };
-
-    if (kind !== 'update-background') {
-      if (typeof base.elementId !== 'string' || !elementIds.has(base.elementId)) continue;
-    }
-    if (kind === 'update-style' && (typeof base.style !== 'object' || base.style === null)) continue;
-    if (kind === 'update-content' && typeof base.content !== 'string') continue;
-    if (kind === 'update-bounds' && (typeof base.bounds !== 'object' || base.bounds === null)) continue;
-    if (kind === 'update-element' && (typeof base.changes !== 'object' || base.changes === null)) continue;
-    if (kind === 'update-background' && (typeof base.background !== 'object' || base.background === null)) continue;
-    if (kind === 'reorder-element' && typeof base.newZIndex !== 'number') continue;
-
-    ops.push(base);
-    if (ops.length >= 40) break;
-  }
-
-  return { ops };
-}
-
 
 // POST /api/posts/render-batch - renderiza múltiplos slides HTML/CSS em paralelo e envia para o R2
 postsRouter.post('/render-batch', async (req: AuthRequest, res: Response, next: NextFunction) => {
@@ -245,59 +201,33 @@ postsRouter.post('/:id/ai-patch', async (req: AuthRequest, res: Response, next: 
     });
 
     const slide = slides[idx]!;
-    const elementIds = new Set((slide.elements ?? []).map((e) => e.id));
-    const selected = (Array.isArray(selectedElementIds) ? selectedElementIds : []).filter((eid) => elementIds.has(eid));
-
-    // Só o essencial vai pro modelo (id/tipo/papel/conteúdo/bounds/estilo) — o
-    // suficiente pra decidir a edição sem inflar o prompt com o slide inteiro.
-    const slideForModel = {
-      id: slide.id,
-      background: slide.background,
-      elements: (slide.elements ?? []).map((e) => ({
-        id: e.id, type: e.type, role: e.role, content: e.content, src: e.src, bounds: e.bounds, style: e.style,
-      })),
-    };
-
-    const model = config.geminiDesignDocumentModel || 'gemini-3.1-pro-preview';
     const brandColors = (post.brand as { colors?: string[] } | null)?.colors ?? [];
 
-    const systemInstruction = [
-      'Você edita UM slide de um design representado como DesignIR (JSON). A partir de uma instrução em linguagem natural, devolva um PATCH mínimo — apenas as mudanças necessárias.',
-      'Responda SOMENTE com JSON puro (sem markdown) no formato: { "ops": [ ... ] }.',
-      'Operações permitidas (use exatamente estes formatos):',
-      '- { "op": "update-style", "slideId": string, "elementId": string, "style": { ...campos CSS parciais } }',
-      '- { "op": "update-content", "slideId": string, "elementId": string, "content": string }',
-      '- { "op": "update-bounds", "slideId": string, "elementId": string, "bounds": { "x"?, "y"?, "width"?, "height"?, "rotation"? } }',
-      '- { "op": "update-element", "slideId": string, "elementId": string, "changes": { ...campos parciais do elemento } }',
-      '- { "op": "update-background", "slideId": string, "background": { "type": "solid"|"gradient"|"image", "color"?, "gradient"?, "src"? } }',
-      '- { "op": "reorder-element", "slideId": string, "elementId": string, "newZIndex": number }',
-      '- { "op": "remove-element", "slideId": string, "elementId": string }',
-      `SEMPRE use "slideId": "${slide.id}". Só referencie "elementId" que existam no slide fornecido.`,
-      selected.length > 0 ? `O usuário selecionou estes elementos — priorize editá-los: ${selected.join(', ')}.` : 'Nenhum elemento selecionado — infira o alvo pela instrução.',
-      brandColors.length ? `Paleta da marca (prefira estas cores em hex): ${brandColors.join(', ')}.` : '',
-      'Tamanhos em px (fontSize, bounds). Não invente elementos novos a menos que a instrução peça explicitamente.',
-    ].filter(Boolean).join('\n');
+    const patch = await generateIRPatchForSlide({
+      slide,
+      instruction,
+      brandColors,
+      selectedElementIds: Array.isArray(selectedElementIds) ? selectedElementIds : [],
+    });
 
-    const userPrompt = `Slide atual (DesignIR):\n${JSON.stringify(slideForModel)}\n\nInstrução do usuário:\n${instruction.trim()}\n\nDevolva só o JSON { "ops": [...] }.`;
-
-    const raw = (await generateWithRetry(ai, {
-      model,
-      contents: userPrompt,
-      config: { systemInstruction, responseMimeType: 'application/json', maxOutputTokens: 8192 },
-    }, model)).text ?? '{}';
-
-    const patch = sanitizeIRPatch(extractJsonObject(raw), slide.id, elementIds);
     if (patch.ops.length === 0) {
       throw createError(422, 'Não consegui traduzir a instrução em uma alteração válida. Tente ser mais específico.');
     }
 
+    // Devolve o patch e NÃO persiste: o editor aplica no canvas (entra no undo) e o
+    // save normal grava. Persistir aqui sobrescreveria o que o usuário ainda não salvou.
     res.json({ data: { patch } });
   } catch (error) {
     next(error);
   }
 });
 
-// GET /api/posts/:id/export?slide=N - renderiza um slide html-design em PNG full-res
+// GET /api/posts/:id/export?slide=N&format=png|html - baixa UM slide.
+//
+// `html` é o "ver a fonte" do slide: o mesmo documento que vai para o chromium,
+// devolvido como arquivo. Custa uma compilação e nenhum render — dá para baixar
+// no meio de uma geração, porque os slides já estão na tabela relacional e o
+// `mergeSlidesIntoPost` remonta o IR a partir dela.
 postsRouter.get('/:id/export', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const id = req.params.id as string;
@@ -317,10 +247,19 @@ postsRouter.get('/:id/export', async (req: AuthRequest, res: Response, next: Nex
     const slideIdx = Math.max(0, Math.min(requested, deck.count - 1));
 
     const doc = deck.docAt(slideIdx);
+    const nomeBase = `post-${id.slice(0, 8)}-slide-${slideIdx + 1}`;
+
+    if (req.query.format === 'html') {
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${nomeBase}.html"`);
+      res.send(doc);
+      return;
+    }
+
     const png = await renderHtmlToPng(doc, { width: deck.width, height: deck.height, maxDim: 0 }); // full-res
 
     res.setHeader('Content-Type', 'image/png');
-    res.setHeader('Content-Disposition', `attachment; filename="post-${id.slice(0, 8)}-slide-${slideIdx + 1}.png"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${nomeBase}.png"`);
     res.send(png);
   } catch (error) {
     next(error);
@@ -534,6 +473,73 @@ postsRouter.delete('/:id', async (req: AuthRequest, res: Response, next: NextFun
       where: { id: post.id },
     });
     res.json({ success: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/posts/:id/export-file { format: 'pdf' | 'zip' } — ENFILEIRA o export do
+// deck INTEIRO como arquivo e devolve o jobId. É o "baixar o arquivo" que faltava:
+// até aqui o deck só saía daqui em pedaços (um PNG por request) ou rasterizado no
+// Canva. O PDF sai com texto de verdade, não pixel.
+postsRouter.post('/:id/export-file', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const id = req.params.id as string;
+    const { format } = (req.body ?? {}) as { format?: string };
+    const userId = req.user?.userId;
+
+    if (format !== 'pdf' && format !== 'zip') {
+      throw createError(400, "format deve ser 'pdf' ou 'zip'");
+    }
+
+    // Valida barato ANTES de enfileirar: um job que morre no worker por post
+    // inexistente ou formato não-renderizável é péssima experiência.
+    const post = await prisma.post.findFirst({
+      where: { id, brand: brandMemberFilter(userId, ANY_MEMBER) },
+      include: { slides: { orderBy: { position: 'asc' } } },
+    });
+    if (!post) throw createError(404, 'Post não encontrado');
+
+    const deck = resolveRenderableDeck(mergeSlidesIntoPost(post).content);
+    if (!deck) {
+      throw createError(400, 'Export disponível apenas para designs html-design ou ir-design');
+    }
+    if (deck.count === 0) throw createError(400, 'Este design ainda não tem slides.');
+
+    const jobId = await enqueueDeckExport({ postId: id, userId: userId!, format });
+
+    res.status(202).json({ data: { jobId, total: deck.count } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/posts/:id/export-file/:jobId — progresso do export do deck.
+postsRouter.get('/:id/export-file/:jobId', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const jobId = req.params.jobId as string;
+    const job = await deckExportQueue.getJob(jobId);
+    if (!job) throw createError(404, 'Job de export não encontrado');
+
+    // O job carrega o userId de quem pediu: sem esta checagem, qualquer usuário
+    // logado leria o progresso (e o link do arquivo) de um export alheio.
+    if (job.data.userId !== req.user?.userId || job.data.postId !== req.params.id) {
+      throw createError(403, 'Este export não pertence a você.');
+    }
+
+    const state = await job.getState();
+    const progress = (job.progress ?? {}) as { done?: number; total?: number };
+
+    res.json({
+      data: {
+        jobId,
+        status: state, // waiting | active | completed | failed
+        done: progress.done ?? 0,
+        total: progress.total ?? 0,
+        result: state === 'completed' ? (job.returnvalue as unknown) : undefined,
+        error: state === 'failed' ? job.failedReason : undefined,
+      },
+    });
   } catch (error) {
     next(error);
   }

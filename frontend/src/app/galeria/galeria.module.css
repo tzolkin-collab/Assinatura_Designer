@@ -44,12 +44,36 @@
   transition: opacity var(--transition-fast), color var(--transition-fast), background var(--transition-fast);
 }
 
-.cardWrapper:hover .cardDeleteBtn {
+.cardEditBtn {
+  position: absolute;
+  top: var(--space-2);
+  right: calc(var(--space-2) + 32px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: rgba(0, 0, 0, 0.55);
+  border: none;
+  border-radius: var(--radius-md);
+  color: rgba(255, 255, 255, 0.65);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--transition-fast), color var(--transition-fast), background var(--transition-fast);
+}
+
+.cardWrapper:hover .cardDeleteBtn,
+.cardWrapper:hover .cardEditBtn {
   opacity: 1;
 }
 
 .cardDeleteBtn:hover {
   color: #ef4444;
+  background: rgba(0, 0, 0, 0.75);
+}
+
+.cardEditBtn:hover {
+  color: #3b82f6;
   background: rgba(0, 0, 0, 0.75);
 }
 
