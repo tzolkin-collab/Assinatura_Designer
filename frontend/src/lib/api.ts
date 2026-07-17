@@ -34,6 +34,23 @@ export function getApiErrorMessage(error: unknown, fallback = 'Algo deu errado.'
   return fallback;
 }
 
+/**
+ * fetch com erro de REDE traduzido: "TypeError: Failed to fetch" não diz nada
+ * para quem está logando (backend reiniciando, porta errada, CORS). Vira um
+ * ApiError(0) com mensagem acionável — status 0 = a requisição nem chegou.
+ */
+async function fetchComRedeAmigavel(input: string, init?: RequestInit): Promise<Response> {
+  try {
+    return await fetch(input, init);
+  } catch {
+    throw new ApiError(
+      0,
+      'Não consegui falar com o servidor. Ele pode estar reiniciando — espere alguns segundos e tente de novo.',
+      'NETWORK',
+    );
+  }
+}
+
 async function apiFetch<T>(endpoint: string, options: FetchOptions = {}): Promise<T> {
   const { requireAuth = true, headers, ...customOptions } = options;
   
@@ -52,7 +69,7 @@ async function apiFetch<T>(endpoint: string, options: FetchOptions = {}): Promis
     }
   }
 
-  const response = await fetch(`${API_BASE}${endpoint}`, {
+  const response = await fetchComRedeAmigavel(`${API_BASE}${endpoint}`, {
     headers: headersConfig,
     ...customOptions,
   });
@@ -97,7 +114,7 @@ export const api = {
       if (token) headersConfig['Authorization'] = `Bearer ${token}`;
     }
 
-    const response = await fetch(`${API_BASE}${endpoint}`, {
+    const response = await fetchComRedeAmigavel(`${API_BASE}${endpoint}`, {
       method: 'POST',
       body: formData,
       headers: headersConfig,

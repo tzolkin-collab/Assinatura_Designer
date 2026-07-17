@@ -38,7 +38,12 @@ app.use(
     crossOriginResourcePolicy: { policy: 'cross-origin' },
   }),
 );
-app.use(cors({ origin: config.corsOrigin, credentials: true }));
+// Em dev, reflete qualquer origem: o Next expõe a mesma app em localhost E no IP
+// da rede (ex.: 192.168.x.x:3000) — com origem fixa, abrir pelo IP fazia TODO
+// fetch (login incluso) morrer com "Failed to fetch" sem pista nenhuma.
+// Em produção, lista estrita (CORS_ORIGIN aceita várias, separadas por vírgula).
+const corsOrigins = config.corsOrigin.split(',').map((s) => s.trim()).filter(Boolean);
+app.use(cors({ origin: config.isDev ? true : corsOrigins, credentials: true }));
 app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(requestContext);

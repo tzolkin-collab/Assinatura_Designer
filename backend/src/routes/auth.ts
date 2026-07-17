@@ -169,7 +169,9 @@ authRouter.post('/invite/:token/accept', rateLimit({ windowSec: 3600, max: 10, k
   }
 });
 
-authRouter.post('/login', rateLimit({ windowSec: 900, max: 10, keyPrefix: 'login' }), async (req: Request, res: Response, next: NextFunction) => {
+// Em dev o teto de 10/15min derruba o time testando contas diferentes na mesma
+// máquina (todo mundo é o mesmo IP). O freio anti-brute-force é para produção.
+authRouter.post('/login', rateLimit({ windowSec: 900, max: config.isDev ? 200 : 10, keyPrefix: 'login' }), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) throw createError(400, 'Email and password required');
