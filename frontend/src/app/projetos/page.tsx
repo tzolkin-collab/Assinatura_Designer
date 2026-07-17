@@ -74,7 +74,12 @@ export default function ProjetosPage() {
         <div style={{ textAlign: 'center', padding: '4rem 0', color: 'var(--color-text-secondary)' }}>
           <Globe size={48} style={{ margin: '0 auto 1rem', opacity: 0.2 }} />
           <h3>Nenhum projeto novo</h3>
-          <p>Você já tem acesso a todos os projetos cadastrados na plataforma.</p>
+          <p style={{ marginBottom: '1.5rem' }}>
+            Você já tem acesso a todos os projetos da equipe — eles estão em Minhas Marcas.
+          </p>
+          <Button onClick={() => { window.location.href = '/galeria'; }}>
+            Ir para Minhas Marcas
+          </Button>
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '3rem', paddingBottom: '2rem' }}>
