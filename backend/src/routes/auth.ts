@@ -5,6 +5,7 @@ import prisma from '../lib/prisma.js';
 import { config } from '../config.js';
 import { createError } from '../middleware/errorHandler.js';
 import { rateLimit } from '../middleware/rateLimit.js';
+import { ensureInternalTeamMemberships } from '../lib/internalTeam.js';
 import { hashInviteToken } from '../lib/invites.js';
 
 export const authRouter = Router();
@@ -41,6 +42,9 @@ authRouter.post('/register', rateLimit({ windowSec: 3600, max: 5, keyPrefix: 're
       },
       select: { id: true, email: true, name: true, role: true } // don't return password
     });
+
+    // Ferramenta interna: a conta nova já entra vendo todas as marcas da equipe.
+    ensureInternalTeamMemberships().catch(() => {});
 
     const token = jwt.sign({ userId: user.id, role: user.role }, config.jwtSecret, { expiresIn: '7d' });
 

@@ -1,5 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import prisma from '../lib/prisma.js';
+import { ensureInternalTeamMemberships } from '../lib/internalTeam.js';
 import { createError } from '../middleware/errorHandler.js';
 import type { AuthRequest } from '../middleware/auth.js';
 import { mergeSlidesIntoPost } from '../lib/postHelper.js';
@@ -139,15 +140,19 @@ brandsRouter.post('/', async (req: Request, res: Response, next: NextFunction) =
     if (exist) throw createError(409, 'Brand with this name already exists');
 
     const brand = await prisma.brand.create({
-      data: { 
-        name, 
-        slug, 
+      data: {
+        name,
+        slug,
         color: color || '#171717',
         members: {
           create: { user: { connect: { id: userId } }, role: 'OWNER' }
         }
       },
     });
+
+    // Ferramenta interna: a marca nova já nasce visível para a equipe inteira.
+    ensureInternalTeamMemberships().catch(() => {});
+
     res.status(201).json({ data: brand });
   } catch (error) {
     next(error);

@@ -4,6 +4,7 @@ import { config, validateConfig } from './config.js';
 import { redis } from './lib/redis.js';
 import { initWebSocket } from './lib/websocket.js';
 import { startPipelineWorker, startCanvaExportWorker, startDeckExportWorker, closeQueue } from './lib/queue.js';
+import { ensureInternalTeamMemberships } from './lib/internalTeam.js';
 
 const start = async () => {
   // Valida segredos/env obrigatórios antes de tudo — aborta em produção se faltar.
@@ -29,6 +30,12 @@ const start = async () => {
 
   const server = http.createServer(app);
   initWebSocket(server);
+
+  // Ferramenta interna: toda conta é membro de toda marca. Auto-cura na subida
+  // (novas contas/marcas também são cobertas nos pontos de criação).
+  ensureInternalTeamMemberships().catch((err) =>
+    console.error('  ⚠ Sincronização de equipe interna falhou:', (err as Error).message),
+  );
 
   // Processa a fila de geração no mesmo processo (deploy simples). Para escalar,
   // desligue com RUN_WORKER_IN_PROCESS=false na API e rode `node dist/worker.js`.
