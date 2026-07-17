@@ -6,8 +6,10 @@
 // Redis, são reprocessados após um crash/restart (jobs "stalled"), têm retry com
 // backoff e rodam desacoplados do ciclo de vida da requisição.
 
+import { randomUUID } from 'crypto';
 import { Queue, Worker, type Job } from 'bullmq';
 import IORedis from 'ioredis';
+import prisma from './prisma.js';
 import { config } from '../config.js';
 import { ws } from './websocket.js';
 import { runPipeline, type PipelineParams } from '../agents/pipeline.js';
@@ -47,7 +49,10 @@ pipelineQueue.on('error', (err) => logger.error('Fila de pipeline com erro', { e
  * Retorna assim que o job está persistido no Redis — não espera a geração.
  */
 export async function enqueuePipeline(params: PipelineParams): Promise<void> {
-  await pipelineQueue.add('generate', params, {
+  // A identidade do Post nasce AQUI e viaja no job: um retry (crash/restart no
+  // meio da geração) reusa o mesmo post em vez de duplicar e deixar zumbi.
+  const withPostId: PipelineParams = { ...params, postId: params.postId ?? randomUUID() };
+  await pipelineQueue.add('generate', withPostId, {
     // Rastreabilidade nos logs/inspeção; não usado para dedup (regenerações
     // legítimas na mesma sessão precisam poder re-enfileirar). NÃO usar ':' —
     // o BullMQ rejeita custom job id com dois-pontos ("Custom Id cannot contain :").
@@ -197,6 +202,19 @@ export function startPipelineWorker(): Worker<PipelineParams> {
   });
 
   worker.on('error', (err) => logger.error('Worker de pipeline com erro', { error: err.message }));
+
+  // Zumbis de crash: um restart no meio da geração deixava posts GENERATING
+  // órfãos para sempre. Com o postId no job, o retry retoma o post; o que
+  // continua GENERATING além de qualquer geração plausível não tem job vivo
+  // por trás — é FAILED. (45min cobre com folga decks grandes e não alcança
+  // gerações legítimas de outro processo em deploys multi-worker.)
+  const ZOMBIE_MIN = 45;
+  prisma.post.updateMany({
+    where: { status: 'GENERATING', updatedAt: { lt: new Date(Date.now() - ZOMBIE_MIN * 60_000) } },
+    data: { status: 'FAILED' },
+  }).then((r) => {
+    if (r.count > 0) logger.info('Posts GENERATING órfãos marcados como FAILED', { count: r.count, olderThanMin: ZOMBIE_MIN });
+  }).catch((e) => logger.error('Varredura de posts zumbis falhou', { error: (e as Error).message }));
 
   console.log(`  ├─ Worker:       fila "${QUEUE_NAME}" (concorrência ${config.pipelineConcurrency})`);
   return worker;

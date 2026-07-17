@@ -34,6 +34,11 @@ export interface PipelineParams {
   sessionId: string;
   brief: string;
   format: 'presentation' | 'carousel';
+  /** Identidade do Post, gerada no ENFILEIRAMENTO (queue.ts). Antes nascia
+   *  dentro do run: um retry do job (crash/restart no meio) criava um post
+   *  DUPLICADO e deixava o anterior zumbi em GENERATING. Com o id no job, o
+   *  retry continua exatamente no mesmo post. */
+  postId?: string;
   /** Roteiro PRÉ-APROVADO pelo usuário no chat (fluxo copy-first): quando
    *  presente, o pipeline NÃO replaneja — gera exatamente estes slides, com a
    *  copy verbatim que cada item carrega. */
@@ -94,7 +99,7 @@ async function runPipelineInner(
   let researchedRefs: VisualRef[] = [];
   let researchSummary = '';
 
-  const postId = randomUUID();
+  const postId = params.postId ?? randomUUID();
 
   // Geração de passo único: gera → revisa → para. NÃO regeramos automaticamente
   // a apresentação inteira. A análise do revisor é mostrada ao usuário, que
@@ -181,7 +186,17 @@ async function runPipelineInner(
         },
       });
     } catch (dbErr) {
-      logger.error('Falha ao pré-criar Post/Slides no banco', { error: (dbErr as Error).message });
+      // Retry do job: o post da tentativa anterior já existe — seguimos NELE
+      // (os writes incrementais são por postId+position e o update final idem).
+      const updated = await prisma.post.update({
+        where: { id: postId },
+        data: { status: 'GENERATING' },
+      }).catch(() => null);
+      if (updated) {
+        logger.warn('Post já existia (retry do job) — continuando no mesmo post', { postId });
+      } else {
+        logger.error('Falha ao pré-criar Post/Slides no banco', { error: (dbErr as Error).message });
+      }
     }
 
     // ── 2. Geração HTML/CSS (modo nativo do modelo) ───────────────────────────
