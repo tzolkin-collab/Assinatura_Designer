@@ -152,6 +152,9 @@ export function ArtifactPanel({
       <div
         style={{
           display: 'flex', alignItems: 'center', gap: 8,
+          // Telas estreitas (Fábrica empilhada no mobile): a barra quebra linha
+          // em vez de estourar horizontalmente.
+          flexWrap: 'wrap',
           padding: '8px 12px',
           borderBottom: '1px solid var(--color-border, rgba(0,0,0,0.08))',
           background: 'var(--color-surface, rgba(255,255,255,0.7))',
@@ -198,7 +201,7 @@ export function ArtifactPanel({
             <div
               style={{
                 position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 20,
-                width: 260, padding: '4px 0',
+                width: 'min(260px, calc(100vw - 24px))', padding: '4px 0',
                 background: 'var(--color-surface, #fff)',
                 border: '1px solid var(--color-border, rgba(0,0,0,0.12))',
                 borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,0.12)',

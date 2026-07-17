@@ -331,9 +331,15 @@ export function useFabricaWs(brandSlug: string, initialSessionId?: string | null
       setConnected(false);
       actionsRef.current.setIsStreaming(false);
       if (sessionIdRef.current) {
+        // Jitter no retry: se o backend reiniciou, N abas reconectando no mesmo
+        // instante viram um pico síncrono — espalhar 1.5–3s evita isso.
+        const delay = 1500 + Math.random() * 1500;
         reconnectTimeoutRef.current = setTimeout(() => {
-          if (sessionIdRef.current) connectWsRef.current?.(sessionIdRef.current);
-        }, 2000);
+          // rehydrate=true: a queda pode ter engolido eventos (slides, job:done).
+          // Sem re-hidratar, o que se perdeu na janela nunca chega — deck com
+          // buracos e UI presa em "gerando" eram exatamente isso.
+          if (sessionIdRef.current) connectWsRef.current?.(sessionIdRef.current, true);
+        }, delay);
       }
     };
 
