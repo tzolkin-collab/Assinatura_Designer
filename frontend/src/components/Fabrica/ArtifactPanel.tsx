@@ -19,10 +19,21 @@ interface ArtifactPanelProps {
 
 type Aba = 'preview' | 'fonte';
 
-/** O IR do slide em foco — é o que o usuário vê na aba Fonte. */
-function irDoSlide(design: unknown, index: number): unknown {
+/** A fonte do slide em foco — é o que o usuário vê na aba Fonte. */
+function fonteDoSlide(design: unknown, index: number): { raw: unknown; texto: string } {
   const env = design as { ir?: { slides?: unknown[] }; slides?: unknown[] } | undefined;
-  return env?.ir?.slides?.[index] ?? env?.slides?.[index] ?? null;
+  const raw = env?.ir?.slides?.[index] ?? env?.slides?.[index] ?? null;
+
+  // html-design: mostra o CÓDIGO de verdade (CSS + HTML), não JSON escapado —
+  // é o "ver os arquivos sendo gerados" do slide em foco, ao vivo.
+  const slide = raw as { html?: unknown; css?: unknown } | null;
+  if (slide && typeof slide.html === 'string') {
+    const css = typeof slide.css === 'string' && slide.css.trim() ? `/* ===== CSS ===== */\n${slide.css}\n\n` : '';
+    return { raw, texto: `${css}<!-- ===== HTML ===== -->\n${slide.html}` };
+  }
+
+  // ir-design (legado) e demais formatos: JSON estruturado.
+  return { raw, texto: raw ? JSON.stringify(raw, null, 2) : '' };
 }
 
 /**
@@ -60,7 +71,7 @@ export function ArtifactPanel({
 
   const temArtefato = Boolean(design) && slideCount > 0;
   const podeBaixar = temArtefato && Boolean(postId);
-  const fonte = temArtefato ? JSON.stringify(irDoSlide(design, slideIndex), null, 2) : '';
+  const fonte = temArtefato ? fonteDoSlide(design, slideIndex).texto : '';
 
   const copiarFonte = useCallback(async () => {
     try {
@@ -197,7 +208,7 @@ export function ArtifactPanel({
               {itemMenu('HTML deste slide', 'O documento que vira a arte', () =>
                 void comErro(() => baixarSlide(postId!, slideIndex, 'html')),
               )}
-              {itemMenu('JSON do design (IR)', 'A fonte do deck inteiro', () =>
+              {itemMenu('JSON do design', 'A fonte do deck inteiro', () =>
                 void comErro(async () => baixarIrJson(design, postId)),
               )}
             </div>
