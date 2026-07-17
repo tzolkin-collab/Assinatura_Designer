@@ -157,6 +157,12 @@ export function ArtifactPanel({
           background: 'var(--color-surface, rgba(255,255,255,0.7))',
           backdropFilter: 'blur(8px)',
           flexShrink: 0,
+          // O backdrop-filter cria um stacking context: sem z-index explícito a
+          // barra (e o dropdown de download DENTRO dela) pintava ABAIXO do corpo
+          // do preview, que vem depois no documento. z-30 põe a barra inteira
+          // (menu incluído) acima do preview.
+          position: 'relative',
+          zIndex: 30,
         }}
       >
         {botaoAba('preview', 'Preview', Eye)}
