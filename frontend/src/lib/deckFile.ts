@@ -7,7 +7,7 @@
 import { api, ApiError, API_BASE } from './api';
 import { acompanharJobDeExport, type AcompanharOpts } from './canvaExport';
 
-export type DeckFileFormat = 'pdf' | 'zip';
+export type DeckFileFormat = 'pdf' | 'zip' | 'pptx';
 
 export interface DeckExportResult {
   url: string;

@@ -187,6 +187,7 @@ export function ArtifactPanel({
                 borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
               }}
             >
+              {itemMenu('PPTX editável', 'Texto, formas e imagens editáveis (PowerPoint/Canva)', () => void baixarDeck('pptx'))}
               {itemMenu('PDF do deck', 'Uma página por slide, texto de verdade', () => void baixarDeck('pdf'))}
               {itemMenu('ZIP com os PNGs', `${slideCount} imagem${slideCount > 1 ? 'ns' : ''} em alta`, () => void baixarDeck('zip'))}
               <div style={{ height: 1, background: 'var(--color-border, rgba(0,0,0,0.08))', margin: '4px 0' }} />

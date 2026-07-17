@@ -1,6 +1,8 @@
 // Spike PPTX editável — roda o conversor htmlToPptx contra um post REAL do banco.
 //
-//   npx tsx scripts/pptx-spike.ts [postId] [maxSlides]
+//   npx tsx scripts/pptx-spike.ts [postId] [maxSlides]   → um post (ou o mais recente)
+//   npx tsx scripts/pptx-spike.ts all [pastaDestino]     → TODOS os posts renderizáveis,
+//                                                          um .pptx por deck (padrão: ./pptx-export/)
 //
 // Sem postId: pega o post READY mais recente que resolver num deck renderizável
 // (html-design OU ir-design — o ir é compilado para HTML pelo renderableDeck,
@@ -41,8 +43,53 @@ img.foto{position:absolute;right:60px;top:140px;width:280px;height:280px;border-
 <div class="dot"></div>
 </div></body></html>`;
 
+// Exporta TODOS os posts renderizáveis do banco, um .pptx por deck.
+async function exportAll(destino: string) {
+  const { default: prisma } = await import('../src/lib/prisma.js');
+  const { mergeSlidesIntoPost } = await import('../src/lib/postHelper.js');
+  const { resolveRenderableDeck } = await import('../src/lib/renderableDeck.js');
+
+  fs.mkdirSync(destino, { recursive: true });
+
+  const posts = await prisma.post.findMany({
+    where: { status: 'READY' },
+    orderBy: { createdAt: 'desc' },
+    include: { slides: { orderBy: { position: 'asc' } } },
+  });
+
+  let ok = 0;
+  let pulados = 0;
+  for (const post of posts) {
+    const content = mergeSlidesIntoPost(post).content;
+    const deck = resolveRenderableDeck(content);
+    if (!deck || deck.count === 0) { pulados++; continue; }
+
+    const nome = `${(post.name || 'deck').replace(/[^\p{L}0-9-_ ]+/gu, '').trim().slice(0, 50) || 'deck'}-${post.id.slice(0, 8)}.pptx`;
+    try {
+      const docs = Array.from({ length: deck.count }, (_, i) => deck.docAt(i));
+      const { buffer } = await htmlDocsToPptx(docs, deck.width, deck.height, post.name ?? undefined);
+      fs.writeFileSync(path.join(destino, nome), buffer);
+      ok++;
+      console.log(`✓ ${nome} (${deck.count} slides, ${(buffer.length / 1024).toFixed(0)} KB)`);
+    } catch (err) {
+      pulados++;
+      console.error(`✗ ${nome}: ${(err as Error).message.split('\n')[0]}`);
+    }
+  }
+
+  console.log(`\n${ok} decks exportados para ${path.resolve(destino)} (${pulados} pulados).`);
+  await prisma.$disconnect().catch(() => {});
+}
+
 async function main() {
   const [, , argPostId, argMax] = process.argv;
+
+  if (argPostId === 'all') {
+    await exportAll(argMax || path.resolve(process.cwd(), 'pptx-export'));
+    await closeBrowser();
+    process.exit(0);
+  }
+
   const maxSlides = Math.max(1, parseInt(argMax || '5', 10) || 5);
 
   let docs: string[] = [];

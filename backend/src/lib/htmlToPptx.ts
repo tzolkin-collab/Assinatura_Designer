@@ -280,6 +280,7 @@ export async function htmlDocsToPptx(
   width: number,
   height: number,
   title?: string,
+  onProgress?: (done: number, total: number) => Promise<void> | void,
 ): Promise<HtmlToPptxResult> {
   const pptx = new PptxGenJS();
   pptx.defineLayout({ name: 'DESIGNER', width: width / PX_PER_INCH, height: height / PX_PER_INCH });
@@ -367,6 +368,7 @@ export async function htmlDocsToPptx(
     }
 
     stats.push(st);
+    await onProgress?.(i + 1, docs.length);
   }
 
   const buffer = (await pptx.write({ outputType: 'nodebuffer' })) as Buffer;

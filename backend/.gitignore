@@ -2,3 +2,4 @@ node_modules/
 dist/
 .env
 pptx-spike-*.pptx
+pptx-export/

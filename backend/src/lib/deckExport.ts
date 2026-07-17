@@ -29,11 +29,18 @@ import prisma from './prisma.js';
 import { mergeSlidesIntoPost } from './postHelper.js';
 import { resolveRenderableDeck, type RenderableDeck } from './renderableDeck.js';
 import { renderHtmlToPng, renderHtmlToPdf } from './htmlRaster.js';
+import { htmlDocsToPptx } from './htmlToPptx.js';
 import { uploadFileToR2 } from './r2.js';
 import { createError } from '../middleware/errorHandler.js';
 import { logger } from './logger.js';
 
-export type DeckExportFormat = 'pdf' | 'zip';
+export type DeckExportFormat = 'pdf' | 'zip' | 'pptx';
+
+const MIME_BY_FORMAT: Record<DeckExportFormat, string> = {
+  pdf: 'application/pdf',
+  zip: 'application/zip',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+};
 
 export interface DeckExportParams {
   postId: string;
@@ -128,15 +135,21 @@ export async function runDeckExport(
 
   logger.info('Export de deck iniciado', { postId, format, slides: deck.count });
 
-  const buffer = format === 'pdf' ? await exportarPdf(deck, onProgress) : await exportarZip(deck, onProgress);
+  let buffer: Buffer;
+  if (format === 'pdf') {
+    buffer = await exportarPdf(deck, onProgress);
+  } else if (format === 'zip') {
+    buffer = await exportarZip(deck, onProgress);
+  } else {
+    // PPTX editável: scan de DOM → elementos nativos (texto continua texto).
+    const docs = Array.from({ length: deck.count }, (_, i) => deck.docAt(i));
+    const { buffer: pptxBuffer, stats } = await htmlDocsToPptx(docs, deck.width, deck.height, titulo, onProgress);
+    logger.info('PPTX gerado', { postId, slides: stats.length, stats });
+    buffer = pptxBuffer;
+  }
 
   const fileName = `${titulo}.${format}`;
-  const url = await uploadFileToR2(
-    buffer,
-    fileName,
-    format === 'pdf' ? 'application/pdf' : 'application/zip',
-    'exports',
-  );
+  const url = await uploadFileToR2(buffer, fileName, MIME_BY_FORMAT[format], 'exports');
 
   logger.info('Export de deck concluído', { postId, format, slides: deck.count, bytes: buffer.length });
 

@@ -4,7 +4,7 @@ import { useParams } from 'next/navigation';
 import PageHeader from '@/components/ui/PageHeader';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
-import { ArrowLeft, Download, FileDown, Loader2, Maximize2, X, Folder, FolderPlus, ChevronRight, ChevronDown, Plus, Trash2, LayoutGrid, List, Sparkles, MessageSquareText, ExternalLink, Edit3, FolderInput, PenLine, Send } from 'lucide-react';
+import { ArrowLeft, Download, FileDown, Loader2, Maximize2, X, Folder, FolderPlus, ChevronRight, ChevronDown, Plus, Trash2, LayoutGrid, List, Sparkles, MessageSquareText, ExternalLink, Edit3, FolderInput, PenLine, Send, Presentation } from 'lucide-react';
 import Link from 'next/link';
 import Image from 'next/image';
 import styles from './brand-galeria.module.css';
@@ -956,6 +956,16 @@ export default function BrandGaleriaPage() {
                       )}
                       {(htmlContent || (irContent && (irContent.ir?.slides?.length ?? 0) > 0)) && (
                         <>
+                          <button
+                            className={styles.actionBtn}
+                            onClick={(e) => handleDownloadDeck(e, post.id, 'pptx')}
+                            disabled={exportando !== null}
+                            title="Baixar PPTX editável"
+                          >
+                            {exportando?.postId === post.id && exportando.formato === 'pptx'
+                              ? <Loader2 size={14} className={styles.spin} />
+                              : <Presentation size={14} />}
+                          </button>
                           <button
                             className={styles.actionBtn}
                             onClick={(e) => handleDownloadDeck(e, post.id, 'pdf')}

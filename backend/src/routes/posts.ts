@@ -488,8 +488,8 @@ postsRouter.post('/:id/export-file', async (req: AuthRequest, res: Response, nex
     const { format } = (req.body ?? {}) as { format?: string };
     const userId = req.user?.userId;
 
-    if (format !== 'pdf' && format !== 'zip') {
-      throw createError(400, "format deve ser 'pdf' ou 'zip'");
+    if (format !== 'pdf' && format !== 'zip' && format !== 'pptx') {
+      throw createError(400, "format deve ser 'pdf', 'zip' ou 'pptx'");
     }
 
     // Valida barato ANTES de enfileirar: um job que morre no worker por post
