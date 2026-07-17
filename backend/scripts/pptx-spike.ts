@@ -1,8 +1,9 @@
 // Spike PPTX editável — roda o conversor htmlToPptx contra um post REAL do banco.
 //
-//   npx tsx scripts/pptx-spike.ts [postId] [maxSlides]   → um post (ou o mais recente)
-//   npx tsx scripts/pptx-spike.ts all [pastaDestino]     → TODOS os posts renderizáveis,
-//                                                          um .pptx por deck (padrão: ./pptx-export/)
+//   npx tsx scripts/pptx-spike.ts [postId] [maxSlides] [modo]  → um post (ou o mais recente)
+//                                                                modo: hybrid (padrão) | editable
+//   npx tsx scripts/pptx-spike.ts all [pastaDestino]           → TODOS os posts renderizáveis,
+//                                                                um .pptx por deck (padrão: ./pptx-export/)
 //
 // Sem postId: pega o post READY mais recente que resolver num deck renderizável
 // (html-design OU ir-design — o ir é compilado para HTML pelo renderableDeck,
@@ -91,6 +92,7 @@ async function main() {
   }
 
   const maxSlides = Math.max(1, parseInt(argMax || '5', 10) || 5);
+  const modo = (process.argv[4] === 'editable' ? 'editable' : 'hybrid') as 'hybrid' | 'editable';
 
   let docs: string[] = [];
   let width = 1080;
@@ -133,7 +135,8 @@ async function main() {
   if (docs.length === 0) docs = [SYNTHETIC_DOC];
 
   const t0 = Date.now();
-  const { buffer, stats } = await htmlDocsToPptx(docs, width, height, `Spike PPTX ${label}`);
+  const { buffer, stats } = await htmlDocsToPptx(docs, width, height, `Spike PPTX ${label}`, undefined, modo);
+  console.log(`modo: ${modo}`);
   const ms = Date.now() - t0;
 
   const outPath = path.resolve(process.cwd(), `pptx-spike-${label}.pptx`);

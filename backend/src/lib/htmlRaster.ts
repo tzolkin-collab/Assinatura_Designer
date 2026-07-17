@@ -24,7 +24,10 @@ interface TaskData {
   // O modo 'scan' não captura imagem: executa `script` na página (depois do
   // layout e das webfonts) e devolve o resultado como JSON — é a base do export
   // PPTX editável (geometria pós-layout real, medida pelo próprio chromium).
-  mode?: 'png' | 'pdf' | 'scan';
+  // O modo 'scanshot' faz as duas coisas na MESMA página: executa o script
+  // (que pode alterar o DOM, ex.: esconder os textos) e ENTÃO tira o
+  // screenshot — é a base do PPTX híbrido (fundo raster + texto nativo).
+  mode?: 'png' | 'pdf' | 'scan' | 'scanshot';
   script?: string;
 }
 
@@ -112,6 +115,15 @@ async function getCluster(): Promise<Cluster<TaskData, Buffer>> {
         if (mode === 'scan') {
           const result = await page.evaluate(script ?? 'null');
           return Buffer.from(JSON.stringify(result ?? null), 'utf8');
+        }
+
+        if (mode === 'scanshot') {
+          const result = await page.evaluate(script ?? 'null');
+          const shot = await page.screenshot({ type: 'png', clip: { x: 0, y: 0, width, height } });
+          return Buffer.from(
+            JSON.stringify({ scan: result ?? null, png: (shot as Buffer).toString('base64') }),
+            'utf8',
+          );
         }
 
         if (mode === 'pdf') {
@@ -204,4 +216,20 @@ export async function scanHtmlLayout<T>(html: string, opts: HtmlRasterOptions, s
   const cluster = await getCluster();
   const buf = await cluster.execute({ html, opts, mode: 'scan', script });
   return JSON.parse(buf.toString('utf8')) as T;
+}
+
+/**
+ * Scan + screenshot na MESMA página: o script mede (e pode alterar o DOM — ex.:
+ * tornar os textos transparentes) e o screenshot captura o resultado. Base do
+ * PPTX híbrido: fundo com fidelidade de pixel + caixas de texto nativas por cima.
+ */
+export async function scanAndShoot<T>(
+  html: string,
+  opts: HtmlRasterOptions,
+  script: string,
+): Promise<{ scan: T; png: Buffer }> {
+  const cluster = await getCluster();
+  const buf = await cluster.execute({ html, opts, mode: 'scanshot', script });
+  const parsed = JSON.parse(buf.toString('utf8')) as { scan: T; png: string };
+  return { scan: parsed.scan, png: Buffer.from(parsed.png, 'base64') };
 }

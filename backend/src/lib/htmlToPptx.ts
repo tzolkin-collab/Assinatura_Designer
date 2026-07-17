@@ -20,7 +20,7 @@
 //     tê-la — Google Fonts populares costumam existir no Canva.
 
 import PptxGenJS from 'pptxgenjs';
-import { scanHtmlLayout } from './htmlRaster.js';
+import { scanHtmlLayout, scanAndShoot } from './htmlRaster.js';
 import { logger } from './logger.js';
 
 const PX_PER_INCH = 96;
@@ -68,8 +68,15 @@ interface ScanResult {
 // gerados (o HTML livre usa sobreposição por ordem). Texto usa Range para medir
 // o retângulo REAL do texto (não a caixa flex que o centraliza) — é o que evita
 // o desalinhamento vertical quando o PPTX ancorar o texto no topo da caixa.
-const SCAN_SCRIPT = `
+//
+// `hideText` (modo híbrido): depois de medir, os GLIFOS dos textos capturados
+// viram transparentes (color/text-fill) — o screenshot seguinte vira o fundo do
+// slide com TUDO (gradientes, SVG, ilustrações, sombras) exceto o texto, que
+// entra por cima como caixa nativa editável.
+const buildScanScript = (hideText: boolean) => `
 (() => {
+  const HIDE_TEXT = ${hideText};
+  const textEls = [];
   const root = document.querySelector('.slide-root') || document.body;
   const rootRect = root.getBoundingClientRect();
   const items = [];
@@ -170,6 +177,7 @@ const SCAN_SCRIPT = `
             tw = tr.width; th = tr.height;
           }
         } catch (e) { /* mantém a caixa do elemento */ }
+        textEls.push(el);
         items.push({
           kind: 'text', x: tx, y: ty, w: tw, h: th,
           text: el.innerText,
@@ -190,6 +198,14 @@ const SCAN_SCRIPT = `
   };
 
   for (const child of root.children) walk(child);
+
+  if (HIDE_TEXT) {
+    for (const el of textEls) {
+      el.style.setProperty('color', 'transparent', 'important');
+      el.style.setProperty('-webkit-text-fill-color', 'transparent', 'important');
+      el.style.setProperty('text-shadow', 'none', 'important');
+    }
+  }
 
   const rootCs = getComputedStyle(root);
   return {
@@ -272,6 +288,17 @@ export interface HtmlToPptxResult {
 }
 
 /**
+ * - 'hybrid' (padrão): o fundo do slide é o RENDER REAL do chromium com os
+ *   textos ocultados — gradientes, SVG, ilustrações e sombras ficam
+ *   pixel-perfect — e só os TEXTOS entram como caixas nativas editáveis.
+ *   É a editabilidade que importa (a copy) sem a perda visual do mapeamento.
+ * - 'editable': tudo vira elemento nativo (texto + formas + imagens). Mais
+ *   manipulável no PowerPoint/Canva, menos fiel (gradiente → cor chapada,
+ *   SVG some, fontes substituídas desalinham vizinhos).
+ */
+export type PptxExportMode = 'hybrid' | 'editable';
+
+/**
  * Converte os documentos HTML dos slides (um por slide, já completos — saída de
  * `resolveRenderableDeck().docAt`) em um PPTX multi-slide editável.
  */
@@ -281,6 +308,7 @@ export async function htmlDocsToPptx(
   height: number,
   title?: string,
   onProgress?: (done: number, total: number) => Promise<void> | void,
+  mode: PptxExportMode = 'hybrid',
 ): Promise<HtmlToPptxResult> {
   const pptx = new PptxGenJS();
   pptx.defineLayout({ name: 'DESIGNER', width: width / PX_PER_INCH, height: height / PX_PER_INCH });
@@ -291,18 +319,36 @@ export async function htmlDocsToPptx(
   const stats: HtmlToPptxResult['stats'] = [];
 
   for (let i = 0; i < docs.length; i++) {
-    const scan = await scanHtmlLayout<ScanResult>(docs[i]!, { width, height }, SCAN_SCRIPT);
+    let scan: ScanResult;
+    let backgroundPng: Buffer | null = null;
+
+    if (mode === 'hybrid') {
+      const r = await scanAndShoot<ScanResult>(docs[i]!, { width, height }, buildScanScript(true));
+      scan = r.scan;
+      backgroundPng = r.png;
+    } else {
+      scan = await scanHtmlLayout<ScanResult>(docs[i]!, { width, height }, buildScanScript(false));
+    }
+
     const slide = pptx.addSlide();
     const st = { slide: i + 1, texts: 0, images: 0, shapes: 0, svgSkipped: scan.skipped?.svg ?? 0, gradientApprox: 0 };
 
-    // Fundo do slide: cor sólida, ou 1ª cor do gradiente (aproximação).
-    const bgSolid = parseCssColor(scan.background?.color);
-    const bgGrad = firstGradientColor(scan.background?.gradientCss);
-    if (scan.background?.gradientCss) st.gradientApprox++;
-    const bg = bgSolid ?? bgGrad;
-    if (bg) slide.background = { color: bg.hex };
+    if (backgroundPng) {
+      // Híbrido: o render fiel (sem os glifos) é o fundo — nada mais a mapear
+      // além dos textos.
+      slide.background = { data: `image/png;base64,${backgroundPng.toString('base64')}` };
+    } else {
+      // Fundo do slide: cor sólida, ou 1ª cor do gradiente (aproximação).
+      const bgSolid = parseCssColor(scan.background?.color);
+      const bgGrad = firstGradientColor(scan.background?.gradientCss);
+      if (scan.background?.gradientCss) st.gradientApprox++;
+      const bg = bgSolid ?? bgGrad;
+      if (bg) slide.background = { color: bg.hex };
+    }
 
     for (const item of scan.items ?? []) {
+      // Híbrido: formas e imagens já estão no fundo raster.
+      if (mode === 'hybrid' && item.kind !== 'text') continue;
       // Clampa ao canvas: elementos decorativos costumam vazar de propósito
       // (overflow:hidden corta no browser; o PPTX não corta).
       const x = Math.max(0, item.x);
@@ -360,6 +406,11 @@ export async function htmlDocsToPptx(
           align: ALIGN_MAP[item.align ?? 'left'] ?? 'left',
           valign: 'top',
           margin: 0,
+          // Fonte substituída (viewer sem Space Grotesk/Inter) mede mais largo
+          // que o chromium: sem isto o texto ESTOURA a caixa e invade o vizinho
+          // ("3,2h" por cima do rótulo). Com shrink, o PowerPoint reduz o corpo
+          // até caber — desvio de 1-2pt em vez de sobreposição.
+          fit: 'shrink',
           ...(item.lineHeightPx ? { lineSpacing: Math.round(item.lineHeightPx * PX_TO_PT * 10) / 10 } : {}),
           ...(item.letterSpacingPx ? { charSpacing: Math.round(item.letterSpacingPx * PX_TO_PT * 100) / 100 } : {}),
         });
