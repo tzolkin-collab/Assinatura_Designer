@@ -87,6 +87,19 @@ export async function exportarDeck(
     { ...opts, erroPadrao: `Não consegui gerar o ${format.toUpperCase()} do deck.` },
   );
 
-  baixarUrl(resultado.url, resultado.fileName);
+  // Download via PROXY do backend (mesma origem): a URL do R2 é cross-origin e
+  // o navegador ignora o atributo `download` do <a> — o clique não vira arquivo.
+  // O proxy manda Content-Disposition: attachment e o Bearer vai no header.
+  try {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
+    const resp = await fetch(`${API_BASE}/posts/${postId}/export-file/${jobId}/download`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!resp.ok) throw new Error(`proxy ${resp.status}`);
+    baixarBlob(await resp.blob(), resultado.fileName);
+  } catch {
+    // Fallback: navegação direta para o R2 (pode abrir em vez de baixar).
+    baixarUrl(resultado.url, resultado.fileName);
+  }
   return resultado;
 }

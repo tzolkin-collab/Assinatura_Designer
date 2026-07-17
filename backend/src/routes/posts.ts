@@ -1,4 +1,6 @@
 import { Router, Response, NextFunction } from 'express';
+import { Readable } from 'node:stream';
+import type { ReadableStream as WebReadableStream } from 'node:stream/web';
 import type { Prisma } from '@prisma/client';
 import prisma from '../lib/prisma.js';
 import { createError } from '../middleware/errorHandler.js';
@@ -549,6 +551,45 @@ postsRouter.get('/:id/export-file/:jobId', async (req: AuthRequest, res: Respons
         error: state === 'failed' ? job.failedReason : undefined,
       },
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/posts/:id/export-file/:jobId/download — entrega o ARQUIVO do export.
+//
+// O front não pode baixar direto do R2: a URL é de outra origem, então o
+// atributo `download` do <a> é ignorado pelo navegador e o clique não vira
+// arquivo. Aqui o backend faz proxy do R2 com Content-Disposition: attachment
+// — mesma origem, download garantido, e o Bearer token continua no header
+// (URL com token em query string está fora de cogitação).
+postsRouter.get('/:id/export-file/:jobId/download', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const jobId = req.params.jobId as string;
+    const job = await deckExportQueue.getJob(jobId);
+    if (!job) throw createError(404, 'Job de export não encontrado');
+    if (job.data.userId !== req.user?.userId || job.data.postId !== req.params.id) {
+      throw createError(403, 'Este export não pertence a você.');
+    }
+
+    const state = await job.getState();
+    if (state !== 'completed') throw createError(409, 'O export ainda não terminou.');
+
+    // Mesma releitura anti-corrida do endpoint de status.
+    let rv = job.returnvalue as { url?: string; fileName?: string } | null;
+    if (!rv?.url) rv = ((await deckExportQueue.getJob(jobId))?.returnvalue ?? null) as typeof rv;
+    if (!rv?.url) throw createError(500, 'Export sem arquivo associado.');
+
+    const upstream = await fetch(rv.url);
+    if (!upstream.ok || !upstream.body) throw createError(502, 'Não consegui buscar o arquivo no storage.');
+
+    const fileName = (rv.fileName ?? 'deck').replace(/["\r\n]/g, '');
+    res.setHeader('Content-Type', upstream.headers.get('content-type') ?? 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    const len = upstream.headers.get('content-length');
+    if (len) res.setHeader('Content-Length', len);
+
+    Readable.fromWeb(upstream.body as WebReadableStream).pipe(res);
   } catch (error) {
     next(error);
   }
