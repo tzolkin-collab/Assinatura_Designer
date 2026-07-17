@@ -530,13 +530,22 @@ postsRouter.get('/:id/export-file/:jobId', async (req: AuthRequest, res: Respons
     const state = await job.getState();
     const progress = (job.progress ?? {}) as { done?: number; total?: number };
 
+    // Corrida getJob→getState: se o job completa ENTRE as duas leituras, o
+    // returnvalue lido junto com o job ainda é null e o cliente recebe
+    // "completed sem resultado". O estado 'completed' é gravado junto com o
+    // returnvalue (mesmo script Lua), então uma releitura resolve.
+    let returnvalue: unknown = job.returnvalue;
+    if (state === 'completed' && returnvalue == null) {
+      returnvalue = (await deckExportQueue.getJob(jobId))?.returnvalue ?? null;
+    }
+
     res.json({
       data: {
         jobId,
         status: state, // waiting | active | completed | failed
         done: progress.done ?? 0,
         total: progress.total ?? 0,
-        result: state === 'completed' ? (job.returnvalue as unknown) : undefined,
+        result: state === 'completed' ? returnvalue : undefined,
         error: state === 'failed' ? job.failedReason : undefined,
       },
     });
@@ -610,13 +619,19 @@ postsRouter.get('/:id/export-canva/:jobId', async (req: AuthRequest, res: Respon
     const state = await job.getState();
     const progress = (job.progress ?? {}) as { done?: number; total?: number };
 
+    // Mesma corrida getJob→getState do export-file: releitura se completou no meio.
+    let returnvalue: unknown = job.returnvalue;
+    if (state === 'completed' && returnvalue == null) {
+      returnvalue = (await canvaExportQueue.getJob(jobId))?.returnvalue ?? null;
+    }
+
     res.json({
       data: {
         jobId,
         status: state, // waiting | active | completed | failed
         done: progress.done ?? 0,
         total: progress.total ?? 0,
-        result: state === 'completed' ? (job.returnvalue as unknown) : undefined,
+        result: state === 'completed' ? returnvalue : undefined,
         error: state === 'failed' ? job.failedReason : undefined,
       },
     });

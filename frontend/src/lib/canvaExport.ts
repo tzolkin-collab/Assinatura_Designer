@@ -59,8 +59,11 @@ export async function acompanharJobDeExport<T>(
     onProgress?.(status.done, status.total);
 
     if (status.status === 'completed') {
-      if (!status.result) throw new ApiError(500, 'Export concluiu sem resultado.');
-      return status.result;
+      if (status.result) return status.result;
+      // O servidor pode ter lido o estado 'completed' antes de o resultado estar
+      // visível (corrida de leitura no BullMQ). Não é falha: consulta de novo.
+      await sleep(pollMs);
+      continue;
     }
     if (status.status === 'failed') {
       throw new ApiError(500, status.error || erroPadrao);
