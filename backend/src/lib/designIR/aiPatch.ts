@@ -105,7 +105,7 @@ export async function generateIRPatchForSlide(input: GenerateIRPatchInput): Prom
     })),
   };
 
-  const model = config.geminiDesignDocumentModel || 'gemini-3.1-pro-preview';
+  const model = config.models.artist;
 
   const systemInstruction = [
     'Você edita UM slide de um design representado como DesignIR (JSON). A partir de uma instrução em linguagem natural, devolva um PATCH mínimo — apenas as mudanças necessárias.',

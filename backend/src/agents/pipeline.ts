@@ -203,7 +203,7 @@ async function runPipelineInner(
     ws.progress(sessionId, 30, 'Gerando design...');
 
     try {
-      const preferredModel = config.geminiDesignDocumentModel || 'gemini-3.1-pro-preview';
+      const preferredModel = config.models.artist;
 
       // Persistência do preview parcial no Redis, COM THROTTLE. O transporte ao
       // vivo é por deltas WS (design:slide), mas quem sai e volta no meio da
@@ -386,7 +386,7 @@ async function runPipelineInner(
       logger.error('Erro no DesignDocument', {
         postId,
         slideCount,
-        model: config.geminiDesignDocumentModel || 'gemini-3.1-pro-preview',
+        model: config.models.artist,
         error: (err as Error).message,
         stack: (err as Error).stack,
       });

@@ -4,6 +4,7 @@ import { GoogleGenAI, Type, Schema } from '@google/genai';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import crypto from 'crypto';
 import { generateWithRetry } from '../lib/geminiRetry.js';
+import { config } from '../config.js';
 import type { Prisma, BrandRole } from '@prisma/client';
 import prisma from '../lib/prisma.js';
 import { assertBrandAccess, ANY_MEMBER, EDITORS } from '../middleware/brandAccess.js';
@@ -312,7 +313,7 @@ Sua tarefa é analisar essa referência e retornar um JSON com os seguintes camp
     };
 
     const result = await generateWithRetry(ai, {
-      model: 'gemini-2.5-flash',
+      model: config.models.fast,
       contents: prompt,
       config: {
         responseMimeType: 'application/json',

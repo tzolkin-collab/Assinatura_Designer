@@ -39,7 +39,7 @@ export async function researchBrand(
 
   try {
     const resp = await generateWithRetry(ai, {
-      model: 'gemini-2.5-flash-lite',
+      model: config.models.utility,
       contents: `Pesquise agora a identidade visual da marca "${brandName}" e o contexto visual para: "${brief.slice(0, 200)}".
 
 Colete especificamente:
@@ -80,7 +80,7 @@ Retorne APENAS JSON:
 
   try {
     const resp = await generateWithRetry(ai, {
-      model: 'gemini-2.5-flash-lite',
+      model: config.models.utility,
       contents: structurePrompt,
       config: { responseMimeType: 'application/json' },
     });
@@ -142,7 +142,7 @@ Conteúdo REAL do roteiro — extraia com fidelidade. Nunca placeholder.`;
   const userPrompt = `Contexto da marca:\n${brandContext}\n\nRoteiro gerado (extraia o conteúdo exato de cada slide):\n${briefText.slice(0, 6000)}\n\nCrie as camadas de texto para ${slideCount} slides.`;
 
   const response = await generateWithRetry(ai, {
-    model: 'gemini-2.5-flash-lite',
+    model: config.models.utility,
     contents: userPrompt,
     config: { systemInstruction, responseMimeType: 'application/json' },
   });

@@ -45,8 +45,21 @@ export const config = {
   jwtSecret: process.env.JWT_SECRET || 'fallback-dev-secret',
   corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:3000',
   geminiApiKey: process.env.GEMINI_API_KEY || '',
-  // Cérebro de design padrão: Gemini 3.1 Pro (multimodal). Override via env.
-  // (gemini-3-pro-preview foi descontinuado no endpoint de geração; 3.1 é o pro atual.)
+  // ── Modelos por PAPEL ──
+  // A escolha de modelo estava espalhada por ~10 arquivos como string solta:
+  // trocar o modelo do planner era caçada de grep, e o do brain nem env tinha.
+  // Papel → modelo, num lugar só, cada um com override por env.
+  models: {
+    /** A arte: geração de deck e edição de slide. Tier "artista" do geminiRetry. */
+    artist: process.env.GEMINI_DESIGN_DOCUMENT_MODEL || 'gemini-3.1-pro-preview',
+    /** O cérebro do chat da Fábrica (multimodal, streaming, decide DISPATCH/EDIT). */
+    brain: process.env.GEMINI_BRAIN_MODEL || 'gemini-2.5-pro',
+    /** Planner/roteirista, reviewer textual, pesquisa: rápido > perfeito. */
+    fast: process.env.GEMINI_FAST_MODEL || 'gemini-2.5-flash',
+    /** Tarefas mecânicas (classificar, extrair, sugerir): o mais barato que funciona. */
+    utility: process.env.GEMINI_UTILITY_MODEL || 'gemini-2.5-flash-lite',
+  },
+  // Alias legado do models.artist — NÃO use em código novo (será removido).
   geminiDesignDocumentModel: process.env.GEMINI_DESIGN_DOCUMENT_MODEL || 'gemini-3.1-pro-preview',
   // Teto de tokens de "thinking" na geração. O modelo pro às vezes gasta quase
   // todo o maxOutputTokens pensando e trunca o JSON (finishReason MAX_TOKENS →

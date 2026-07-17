@@ -556,7 +556,13 @@ export async function generateWithRetry(
   // insistir em gastar o que já acabou.
   await assertWithinBudget();
 
-  return runWithFallback(buildModelList(preferredModel), hooks, async (model) => {
+  // Sem preferredModel explícito, o params.model do chamador É a preferência.
+  // Antes ele era simplesmente ignorado (o withTimeout sobrescreve o model):
+  // ~10 chamadas pedindo flash-lite rodavam no tier "rápido" (3.5-flash, ~6x o
+  // preço) sem ninguém pedir — item 3.3 da auditoria de 07-15.
+  const preferido = preferredModel ?? params.model;
+
+  return runWithFallback(buildModelList(preferido), hooks, async (model) => {
     const result = await ai.models.generateContent(withTimeout(params, model));
     await recordUsage(model, result.usageMetadata);
     return result;
@@ -590,7 +596,8 @@ export async function generateStreamWithRetry(
 ): Promise<StreamResult> {
   await assertWithinBudget();
 
-  return runWithFallback(buildModelList(preferredModel), hooks, async (model) => {
+  // Mesma regra do generateWithRetry: params.model vale como preferência.
+  return runWithFallback(buildModelList(preferredModel ?? params.model), hooks, async (model) => {
     const result = await ai.models.generateContentStream(withTimeout(params, model));
     return meterStream(result, model);
   });

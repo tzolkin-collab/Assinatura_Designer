@@ -273,7 +273,7 @@ Zero markdown. Zero comentários. JSON puro.`;
     }
 
     const response = await generateWithRetry(ai, {
-      model: 'gemini-2.5-flash-lite',
+      model: config.models.utility,
       contents,
       config: {
         systemInstruction,

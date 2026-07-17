@@ -136,7 +136,7 @@ function buildQuestionAnswerMessage(
   return `Pode pular a pergunta "${question.question}" e decidir no modo automático.`;
 }
 
-const BRAIN_MODEL = 'gemini-2.5-pro';
+const BRAIN_MODEL = config.models.brain;
 
 // ── Fluxo copy-first: detecção da copy oficial na conversa ─────────────────────
 // A Gabi entrega a copy inteira (colada no chat ou como anexo de texto). Quando
@@ -794,7 +794,7 @@ async function applySlideEdits(
 
   // editHtmlSlide precisa de um gerador de texto; usa o mesmo caminho com retry
   // do resto do produto (tier estética preservada pelo preferredModel).
-  const editModel = config.geminiDesignDocumentModel || 'gemini-3.1-pro-preview';
+  const editModel = config.models.artist;
   const generateText = async (systemInstruction: string, userPrompt: string): Promise<string> => {
     const response = await generateWithRetry(ai, {
       model: editModel,

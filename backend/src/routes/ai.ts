@@ -241,7 +241,7 @@ IDs únicos por slide: "title-${0}", "subtitle-${0}", "body-${0}", "tag-${0}" (s
   const userPrompt = `Contexto da marca:\n${brandContext}\n\nRoteiro gerado (extraia o conteúdo exato de cada slide):\n${briefText.slice(0, 6000)}\n\nCrie as camadas de texto para ${slideCount} slides.`;
 
   const response = await generateWithRetry(ai, {
-    model: 'gemini-2.5-flash-lite',
+    model: config.models.utility,
     contents: userPrompt,
     config: { systemInstruction, responseMimeType: 'application/json' },
   });
@@ -366,7 +366,7 @@ aiRouter.get('/jobs/:jobId/stream', (req: AuthRequest, res: Response) => {
 
 const ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
 
-const DESIGN_DOCUMENT_DEFAULT_MODEL = 'gemini-2.5-pro';
+const DESIGN_DOCUMENT_DEFAULT_MODEL = config.models.artist;
 
 function normalizeDesignFormat(value: unknown): DesignFormat {
   return value === 'carousel' || value === 'story' || value === 'single' ? value : 'single';
@@ -448,7 +448,7 @@ aiRouter.post('/:slug/chat', async (req: AuthRequest, res: Response, next: NextF
     res.setHeader('Connection', 'keep-alive');
 
     const stream = await generateStreamWithRetry(ai, {
-      model: 'gemini-2.5-flash-lite',
+      model: config.models.utility,
       contents: message,
       config: { systemInstruction: systemInstruction || undefined },
     });
@@ -504,7 +504,7 @@ Por favor, responda com uma análise estruturada (formato Markdown) focada em:
 `;
 
     const response = await generateWithRetry(ai, {
-      model: 'gemini-2.5-flash-lite',
+      model: config.models.utility,
       contents: prompt,
     });
 
@@ -542,7 +542,7 @@ Não retorne Markdown ou outras tags de formatação ao redor do JSON. Apenas o 
 `;
 
     const response = await generateWithRetry(ai, {
-      model: 'gemini-2.5-flash-lite',
+      model: config.models.utility,
       contents: prompt,
     });
 
@@ -756,7 +756,7 @@ Garanta COERÊNCIA visual entre slides (mesma paleta, linguagem visual consisten
 `;
 
     const briefStream = await generateStreamWithRetry(ai, {
-      model: 'gemini-2.5-flash-lite',
+      model: config.models.utility,
       contents: briefPrompt,
       config: { systemInstruction: briefSystemInstruction },
     });
@@ -891,7 +891,7 @@ aiRouter.post('/:slug/extract-from-logo', async (req: AuthRequest, res: Response
 Extraia as 5 cores dominantes reais presentes no logo como hex codes. Sugira uma fonte que harmonize com o estilo do logo. Retorne apenas JSON puro, sem markdown.`;
 
     const response = await generateWithRetry(ai, {
-      model: 'gemini-2.5-flash-lite',
+      model: config.models.utility,
       contents: {
         role: 'user',
         parts: [
@@ -1330,7 +1330,7 @@ Retorne APENAS JSON válido:
 }`;
 
   const resp = await generateWithRetry(ai, {
-    model: 'gemini-2.5-flash-lite',
+    model: config.models.utility,
     contents: prompt,
     config: { responseMimeType: 'application/json' },
   });
@@ -1357,7 +1357,7 @@ async function researchBrand(
   let researchSummary = '';
   try {
     const resp = await generateWithRetry(ai, {
-      model: 'gemini-2.5-flash-lite',
+      model: config.models.utility,
       contents: `Pesquise agora a identidade visual da marca "${brandName}" e o contexto visual para: "${brief.slice(0, 200)}".
 
 Colete especificamente:
@@ -1399,7 +1399,7 @@ Retorne APENAS JSON:
 
   try {
     const resp = await generateWithRetry(ai, {
-      model: 'gemini-2.5-flash-lite',
+      model: config.models.utility,
       contents: structurePrompt,
       config: { responseMimeType: 'application/json' },
     });
@@ -1630,7 +1630,7 @@ ${generateImages ? 'Quando uma imagem for necessária, descreva a imagem com suj
 Varie os padrões entre slides — não repita o mesmo PADRÃO DE COMPOSIÇÃO mais de 2 vezes seguidas.`;
 
   const briefStream = await generateStreamWithRetry(ai, {
-    model: 'gemini-2.5-flash-lite',
+    model: config.models.utility,
     contents: briefPrompt,
     config: { systemInstruction: briefSystemInstruction },
   });
@@ -2065,7 +2065,7 @@ aiRouter.post('/:slug/search-design-references', async (req: AuthRequest, res: R
     let researchText = '';
     try {
       const resp = await generateWithRetry(ai, {
-        model: 'gemini-2.5-flash-lite',
+        model: config.models.utility,
         contents: `Pesquise referências visuais de design para apresentações (slides, pitch decks) em sites como Behance, Dribbble, Pitch.com, Figma Community, Awwwards.
 
 Marca: "${brand.name}"
@@ -2101,7 +2101,7 @@ Retorne APENAS JSON:
 }`;
 
     const resp = await generateWithRetry(ai, {
-      model: 'gemini-2.5-flash-lite',
+      model: config.models.utility,
       contents: structurePrompt,
       config: { responseMimeType: 'application/json' },
     });
@@ -2193,7 +2193,7 @@ aiRouter.post('/:slug/patch-design', async (req: AuthRequest, res: Response, nex
     interface PatchTask { id: string; description: string; slides: number[] | 'all'; }
 
     const planResp = await generateWithRetry(ai, {
-      model: 'gemini-2.5-flash-lite',
+      model: config.models.utility,
       contents: `Você vai modificar um deck de ${sc} slides. Planeje tarefas visuais concretas.
 
 PEDIDO: "${request.slice(0, 400)}"

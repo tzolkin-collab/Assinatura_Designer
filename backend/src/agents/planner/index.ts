@@ -170,10 +170,10 @@ ${copyBlock.copySection}
 ## Sua resposta (array JSON puro):`;
 
   const response = await generateWithRetry(ai, {
-    model: 'gemini-2.5-flash',
+    model: config.models.fast,
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
     config: { responseMimeType: 'application/json', temperature: 0.4, maxOutputTokens: 16384 },
-  }, 'gemini-2.5-flash');
+  }, config.models.fast);
 
   const items = parseSkeletonArray(response.text ?? '[]');
 
@@ -235,10 +235,10 @@ ${copyBlock.copySection}
     let chunk: SlideSkeletonItem[] = [];
     try {
       const response = await generateWithRetry(ai, {
-        model: 'gemini-2.5-flash',
+        model: config.models.fast,
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         config: { responseMimeType: 'application/json', temperature: 0.4, maxOutputTokens: 8192 },
-      }, 'gemini-2.5-flash');
+      }, config.models.fast);
       chunk = parseSkeletonArray(response.text ?? '[]');
     } catch (err) {
       console.error(`[Planner] chunk ${start + 1}-${end} falhou, preenchendo com fallback:`, err);

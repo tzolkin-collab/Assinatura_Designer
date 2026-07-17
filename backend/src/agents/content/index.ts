@@ -70,10 +70,10 @@ Responda APENAS com JSON:
 }`;
 
   const response = await generateWithRetry(ai, {
-    model: 'gemini-2.5-flash',
+    model: config.models.fast,
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
     config: { responseMimeType: 'application/json', temperature: 0.6 },
-  }, 'gemini-2.5-flash');
+  }, config.models.fast);
 
   const raw = response.text ?? '{}';
   const parsed = JSON.parse(raw) as { slides: Array<{ index: number; zones: SlideContent }> };

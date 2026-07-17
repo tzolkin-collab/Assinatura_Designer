@@ -106,7 +106,7 @@ postsRouter.post('/:id/edit-slide', async (req: AuthRequest, res: Response, next
     });
 
     const brand = await resolveBrandContext(post.brand.slug);
-    const model = config.geminiDesignDocumentModel || 'gemini-3.1-pro-preview';
+    const model = config.models.artist;
 
     const edited = await editHtmlSlide(
       async (si, up) =>

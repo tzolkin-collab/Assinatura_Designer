@@ -65,7 +65,7 @@ describe('Retry, fallback e circuit breaker do Gemini', () => {
       return resposta;
     });
 
-    const res = await generateWithRetry(ai, { model: 'x', contents: 'oi' });
+    const res = await generateWithRetry(ai, { model: 'gemini-3.5-flash', contents: 'oi' });
 
     expect(res).toBe(resposta);
     // Antes: 3 tentativas no lotado (com 1s + 2s de backoff) antes de trocar — ~17s
@@ -76,6 +76,17 @@ describe('Retry, fallback e circuit breaker do Gemini', () => {
     expect(tentativasNoLotado).toHaveLength(1);
   });
 
+  it('params.model vale como preferência quando preferredModel é omitido (bug 3.3)', async () => {
+    // Antes o params.model era IGNORADO sem o 2º argumento: ~10 chamadas pedindo
+    // flash-lite rodavam no tier rápido (3.5-flash, ~6x o preço) sem ninguém pedir.
+    const { ai, generateContent } = fakeAi(async () => resposta);
+
+    await generateWithRetry(ai, { model: 'gemini-2.5-flash-lite', contents: 'oi' });
+
+    const primeiro = (generateContent.mock.calls[0]?.[0] as { model: string }).model;
+    expect(primeiro).toBe('gemini-2.5-flash-lite');
+  });
+
   it('blip de rede: insiste no MESMO modelo (ele costuma voltar)', async () => {
     let chamadas = 0;
     const { ai, generateContent } = fakeAi(async () => {
@@ -84,7 +95,7 @@ describe('Retry, fallback e circuit breaker do Gemini', () => {
       return resposta;
     });
 
-    const res = await generateWithRetry(ai, { model: 'x', contents: 'oi' }, 'gemini-2.5-flash');
+    const res = await generateWithRetry(ai, { model: 'gemini-3.5-flash', contents: 'oi' }, 'gemini-2.5-flash');
 
     expect(res).toBe(resposta);
     expect(generateContent.mock.calls.every((c) => (c[0] as { model: string }).model === 'gemini-2.5-flash')).toBe(true);
@@ -96,7 +107,7 @@ describe('Retry, fallback e circuit breaker do Gemini', () => {
       throw Object.assign(new Error('API key inválida'), { status: 401 });
     });
 
-    await expect(generateWithRetry(ai, { model: 'x', contents: 'oi' })).rejects.toThrow('API key inválida');
+    await expect(generateWithRetry(ai, { model: 'gemini-3.5-flash', contents: 'oi' })).rejects.toThrow('API key inválida');
     expect(generateContent).toHaveBeenCalledTimes(1);
   });
 
@@ -107,12 +118,12 @@ describe('Retry, fallback e circuit breaker do Gemini', () => {
     });
 
     // Duas chamadas descobrem a lotação (limiar do breaker = 2 falhas).
-    await generateWithRetry(ai, { model: 'x', contents: 'oi' });
-    await generateWithRetry(ai, { model: 'x', contents: 'oi' });
+    await generateWithRetry(ai, { model: 'gemini-3.5-flash', contents: 'oi' });
+    await generateWithRetry(ai, { model: 'gemini-3.5-flash', contents: 'oi' });
     generateContent.mockClear();
 
     // A terceira já não perde tempo com o lotado: vai direto no saudável.
-    await generateWithRetry(ai, { model: 'x', contents: 'oi' });
+    await generateWithRetry(ai, { model: 'gemini-3.5-flash', contents: 'oi' });
 
     const modelosTentados = generateContent.mock.calls.map((c) => (c[0] as { model: string }).model);
     expect(modelosTentados).toEqual(['gemini-2.5-flash']);
@@ -124,11 +135,11 @@ describe('Retry, fallback e circuit breaker do Gemini', () => {
       throw sobrecarga();
     });
 
-    await expect(generateWithRetry(ai, { model: 'x', contents: 'oi' })).rejects.toBeDefined();
-    await expect(generateWithRetry(ai, { model: 'x', contents: 'oi' })).rejects.toBeDefined();
+    await expect(generateWithRetry(ai, { model: 'gemini-3.5-flash', contents: 'oi' })).rejects.toBeDefined();
+    await expect(generateWithRetry(ai, { model: 'gemini-3.5-flash', contents: 'oi' })).rejects.toBeDefined();
     generateContent.mockClear();
 
-    await expect(generateWithRetry(ai, { model: 'x', contents: 'oi' })).rejects.toBeDefined();
+    await expect(generateWithRetry(ai, { model: 'gemini-3.5-flash', contents: 'oi' })).rejects.toBeDefined();
     expect(generateContent.mock.calls.length).toBeGreaterThan(0); // tentou mesmo assim
   });
 
@@ -145,7 +156,7 @@ describe('Retry, fallback e circuit breaker do Gemini', () => {
     it('cada tentativa vai com um abortSignal (senão o modelo lento nunca é cortado)', async () => {
       const { ai, generateContent } = fakeAi(async () => resposta);
 
-      await generateWithRetry(ai, { model: 'x', contents: 'oi' }, 'gemini-2.5-flash');
+      await generateWithRetry(ai, { model: 'gemini-3.5-flash', contents: 'oi' }, 'gemini-2.5-flash');
 
       const params = generateContent.mock.calls[0]![0] as { config?: { abortSignal?: AbortSignal } };
       expect(params.config?.abortSignal).toBeInstanceOf(AbortSignal);
@@ -157,7 +168,7 @@ describe('Retry, fallback e circuit breaker do Gemini', () => {
 
       await generateWithRetry(
         ai,
-        { model: 'x', contents: 'oi', config: { abortSignal: meuSinal } },
+        { model: 'gemini-3.5-flash', contents: 'oi', config: { abortSignal: meuSinal } },
         'gemini-2.5-flash',
       );
 
@@ -171,7 +182,7 @@ describe('Retry, fallback e circuit breaker do Gemini', () => {
         return resposta;
       });
 
-      const res = await generateWithRetry(ai, { model: 'x', contents: 'oi' });
+      const res = await generateWithRetry(ai, { model: 'gemini-3.5-flash', contents: 'oi' });
 
       expect(res).toBe(resposta);
       const tentativasNoLento = generateContent.mock.calls.filter(
@@ -186,11 +197,11 @@ describe('Retry, fallback e circuit breaker do Gemini', () => {
         return resposta;
       });
 
-      await generateWithRetry(ai, { model: 'x', contents: 'oi' });
-      await generateWithRetry(ai, { model: 'x', contents: 'oi' });
+      await generateWithRetry(ai, { model: 'gemini-3.5-flash', contents: 'oi' });
+      await generateWithRetry(ai, { model: 'gemini-3.5-flash', contents: 'oi' });
       generateContent.mockClear();
 
-      await generateWithRetry(ai, { model: 'x', contents: 'oi' });
+      await generateWithRetry(ai, { model: 'gemini-3.5-flash', contents: 'oi' });
 
       const modelos = generateContent.mock.calls.map((c) => (c[0] as { model: string }).model);
       expect(modelos).toEqual(['gemini-2.5-flash']); // nem tenta o lento
@@ -209,12 +220,12 @@ describe('Retry, fallback e circuit breaker do Gemini', () => {
       throw sobrecarga();
     });
 
-    await generateWithRetry(ai, { model: 'x', contents: 'oi' }); // falha -> fallback
-    await generateWithRetry(ai, { model: 'x', contents: 'oi' }); // ACERTA
-    await generateWithRetry(ai, { model: 'x', contents: 'oi' }); // falha de novo -> abre
+    await generateWithRetry(ai, { model: 'gemini-3.5-flash', contents: 'oi' }); // falha -> fallback
+    await generateWithRetry(ai, { model: 'gemini-3.5-flash', contents: 'oi' }); // ACERTA
+    await generateWithRetry(ai, { model: 'gemini-3.5-flash', contents: 'oi' }); // falha de novo -> abre
     generateContent.mockClear();
 
-    await generateWithRetry(ai, { model: 'x', contents: 'oi' });
+    await generateWithRetry(ai, { model: 'gemini-3.5-flash', contents: 'oi' });
 
     const modelos = generateContent.mock.calls.map((c) => (c[0] as { model: string }).model);
     expect(modelos).toEqual(['gemini-2.5-flash']); // nem tenta o intermitente
@@ -227,14 +238,14 @@ describe('Retry, fallback e circuit breaker do Gemini', () => {
       return resposta;
     });
 
-    await generateWithRetry(ai, { model: 'x', contents: 'oi' });
-    await generateWithRetry(ai, { model: 'x', contents: 'oi' }); // abre o circuito
+    await generateWithRetry(ai, { model: 'gemini-3.5-flash', contents: 'oi' });
+    await generateWithRetry(ai, { model: 'gemini-3.5-flash', contents: 'oi' }); // abre o circuito
 
     ruim = false;
     resetModelBreakers(); // simula o fim do cooldown
     generateContent.mockClear();
 
-    await generateWithRetry(ai, { model: 'x', contents: 'oi' });
+    await generateWithRetry(ai, { model: 'gemini-3.5-flash', contents: 'oi' });
     expect((generateContent.mock.calls[0]![0] as { model: string }).model).toBe('gemini-3.5-flash');
   });
 
@@ -263,7 +274,7 @@ describe('Retry, fallback e circuit breaker do Gemini', () => {
       });
 
       const res = await comTemposAdiantados(
-        generateWithRetry(ai, { model: 'x', contents: 'oi' }, 'gemini-3.1-pro-preview'),
+        generateWithRetry(ai, { model: 'gemini-3.5-flash', contents: 'oi' }, 'gemini-3.1-pro-preview'),
       );
 
       expect(res).toBe(resposta);
@@ -287,10 +298,10 @@ describe('Retry, fallback e circuit breaker do Gemini', () => {
       });
 
       // Duas oscilações seriam suficientes para o breaker banir o modelo, se 429 contasse.
-      await comTemposAdiantados(generateWithRetry(ai, { model: 'x', contents: 'oi' }, 'gemini-3.1-pro-preview'));
+      await comTemposAdiantados(generateWithRetry(ai, { model: 'gemini-3.5-flash', contents: 'oi' }, 'gemini-3.1-pro-preview'));
       generateContent.mockClear();
 
-      await comTemposAdiantados(generateWithRetry(ai, { model: 'x', contents: 'oi' }, 'gemini-3.1-pro-preview'));
+      await comTemposAdiantados(generateWithRetry(ai, { model: 'gemini-3.5-flash', contents: 'oi' }, 'gemini-3.1-pro-preview'));
 
       // Se o 429 tivesse alimentado o breaker, esta chamada começaria no 2.5-pro.
       expect((generateContent.mock.calls[0]![0] as { model: string }).model).toBe('gemini-3.1-pro-preview');
@@ -310,7 +321,7 @@ describe('Retry, fallback e circuit breaker do Gemini', () => {
       const antes = throttleState('gemini-3.1-pro-preview').limit;
       const rajada = Promise.all(
         Array.from({ length: 8 }, () =>
-          generateWithRetry(ai, { model: 'x', contents: 'oi' }, 'gemini-3.1-pro-preview'),
+          generateWithRetry(ai, { model: 'gemini-3.5-flash', contents: 'oi' }, 'gemini-3.1-pro-preview'),
         ),
       );
       await comTemposAdiantados(rajada);
@@ -324,7 +335,7 @@ describe('Retry, fallback e circuit breaker do Gemini', () => {
       });
 
       await comTemposAdiantados(
-        generateWithRetry(ai, { model: 'x', contents: 'oi' }, 'gemini-3.1-pro-preview').catch(() => undefined),
+        generateWithRetry(ai, { model: 'gemini-3.5-flash', contents: 'oi' }, 'gemini-3.1-pro-preview').catch(() => undefined),
       );
 
       // Cada rodada de congestionamento corta pela metade (8→4→2→1). Uma janela de 1
@@ -340,7 +351,7 @@ describe('Retry, fallback e circuit breaker do Gemini', () => {
         return resposta;
       });
 
-      const p = generateWithRetry(ai, { model: 'x', contents: 'oi' }, 'gemini-3.1-pro-preview');
+      const p = generateWithRetry(ai, { model: 'gemini-3.5-flash', contents: 'oi' }, 'gemini-3.1-pro-preview');
 
       // Antes dos 7s pedidos, ninguém retentou.
       await vi.advanceTimersByTimeAsync(6000);
@@ -365,7 +376,7 @@ describe('Retry, fallback e circuit breaker do Gemini', () => {
         return resposta;
       });
 
-      await generateWithRetry(ai, { model: 'x', contents: 'oi' }, 'gemini-3.1-pro-preview');
+      await generateWithRetry(ai, { model: 'gemini-3.5-flash', contents: 'oi' }, 'gemini-3.1-pro-preview');
 
       const modelos = generateContent.mock.calls.map((c) => (c[0] as { model: string }).model);
       expect(modelos).toEqual(['gemini-3.1-pro-preview', 'gemini-2.5-pro']);
@@ -378,7 +389,7 @@ describe('Retry, fallback e circuit breaker do Gemini', () => {
       });
 
       await expect(
-        generateWithRetry(ai, { model: 'x', contents: 'oi' }, 'gemini-3.1-pro-preview'),
+        generateWithRetry(ai, { model: 'gemini-3.5-flash', contents: 'oi' }, 'gemini-3.1-pro-preview'),
       ).rejects.toBeDefined();
 
       // Quem chamou decide o que fazer (o irDesign põe placeholder on-brand, que é
@@ -405,7 +416,7 @@ describe('Retry, fallback e circuit breaker do Gemini', () => {
       });
 
       await expect(
-        generateWithRetry(ai, { model: 'x', contents: 'oi' }, 'gemini-3.1-pro-preview'),
+        generateWithRetry(ai, { model: 'gemini-3.5-flash', contents: 'oi' }, 'gemini-3.1-pro-preview'),
       ).rejects.toThrow(/credits are depleted/i);
 
       // UMA chamada. Antes eram 6 tentativas × 2 modelos do tier = ~85s queimados
@@ -420,7 +431,7 @@ describe('Retry, fallback e circuit breaker do Gemini', () => {
 
       const antes = throttleState('gemini-3.1-pro-preview').limit;
       await expect(
-        generateWithRetry(ai, { model: 'x', contents: 'oi' }, 'gemini-3.1-pro-preview'),
+        generateWithRetry(ai, { model: 'gemini-3.5-flash', contents: 'oi' }, 'gemini-3.1-pro-preview'),
       ).rejects.toBeDefined();
 
       expect(throttleState('gemini-3.1-pro-preview').limit).toBe(antes);

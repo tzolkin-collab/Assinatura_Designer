@@ -15,7 +15,7 @@ import { logger } from '../../lib/logger.js';
 const ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
 
 // Modelo do crítico visual: por padrão o mesmo cérebro de design (multimodal).
-const VISION_MODEL = config.geminiDesignDocumentModel || 'gemini-3.1-pro-preview';
+const VISION_MODEL = config.models.artist;
 
 export interface ReviewDeviation {
   type: 'content' | 'visual' | 'brand' | 'overflow' | 'missing-zone';
@@ -94,7 +94,10 @@ async function runVisualReviewer(
 }
 
 // ── Núcleo da crítica visual: recebe PNGs já renderizados e o modelo os avalia ──
-async function critiqueRenderedSlides(images: string[], brandContext: string, objective: string): Promise<ReviewResult> {
+// `realIndexes`: posição REAL de cada imagem no deck quando a amostra é espaçada
+// (sem isto o slideIndex das deviations apontaria para a posição na amostra —
+// "conserta o slide 3" quando o problema está no 47).
+async function critiqueRenderedSlides(images: string[], brandContext: string, objective: string, realIndexes?: number[]): Promise<ReviewResult> {
   if (images.length === 0) {
     return { approved: true, score: 70, deviations: [], feedback: 'Sem slides para revisar', correctionInstructions: undefined };
   }
@@ -126,7 +129,7 @@ Responda APENAS com JSON:
   "approved": boolean,
   "score": number (0-100),
   "deviations": [
-    { "type": "content|visual|brand|overflow|missing-zone", "severity": "minor|major|critical", "slideIndex": number (0-based), "description": "o que está errado VISUALMENTE", "fix": "instrução concreta de correção" }
+    { "type": "content|visual|brand|overflow|missing-zone", "severity": "minor|major|critical", "slideIndex": number (0-based — use o número do rótulo "Slide N" da imagem: slideIndex = N - 1), "description": "o que está errado VISUALMENTE", "fix": "instrução concreta de correção" }
   ],
   "feedback": "mensagem curta para o usuário",
   "correctionInstructions": "instrução consolidada para regenerar (só se não aprovado)"
@@ -134,7 +137,8 @@ Responda APENAS com JSON:
 
   const parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [{ text: prompt }];
   images.forEach((b64, i) => {
-    parts.push({ text: `--- Slide ${i + 1} ---` });
+    const real = realIndexes?.[i] ?? i;
+    parts.push({ text: `--- Slide ${real + 1} ---` });
     parts.push({ inlineData: { mimeType: 'image/png', data: b64 } });
   });
 
@@ -168,11 +172,14 @@ Responda APENAS com JSON:
 // ── Crítico do caminho HTML: render fiel (chromium) -> visão ────────────────────
 export async function runHtmlReviewer(content: HtmlDesignContent, brandContext: string, objective: string): Promise<ReviewResult> {
   let images: string[] = [];
+  // Amostra ESPALHADA pelo deck (capa, encerramento e o meio distribuído) —
+  // antes era slice(0, 8): num deck de 200, 96% dos slides nunca eram vistos
+  // e o slide 150 quebrado passava reto pelo QA.
+  const indexes = sampleSlideIndexes(content.slides.length, config.reviewerSampleSize);
   try {
-    const slides = content.slides.slice(0, 8);
     images = await Promise.all(
-      slides.map((s) =>
-        renderHtmlToBase64(buildSlideDocument(s, content.fonts, content.width, content.height), {
+      indexes.map((i) =>
+        renderHtmlToBase64(buildSlideDocument(content.slides[i]!, content.fonts, content.width, content.height), {
           width: content.width,
           height: content.height,
           maxDim: 768,
@@ -183,7 +190,7 @@ export async function runHtmlReviewer(content: HtmlDesignContent, brandContext: 
     logger.error('Render HTML da revisão falhou; aprovando por segurança', { error: (err as Error).message });
     return { approved: true, score: 70, deviations: [], feedback: 'Revisão visual indisponível', correctionInstructions: undefined };
   }
-  return critiqueRenderedSlides(images, brandContext, objective);
+  return critiqueRenderedSlides(images, brandContext, objective, indexes);
 }
 
 // ── Caminho legado (Layer model): estrutural + texto, sem visão ─────────────────
@@ -243,10 +250,10 @@ Responda APENAS com JSON:
 }`;
 
   const response = await generateWithRetry(ai, {
-    model: 'gemini-2.5-flash',
+    model: config.models.fast,
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
     config: { responseMimeType: 'application/json', temperature: 0.1 },
-  }, 'gemini-2.5-flash');
+  }, config.models.fast);
 
   const raw = response.text ?? '{}';
   const llmResult = JSON.parse(raw) as ReviewResult;
@@ -481,7 +488,7 @@ export async function runIRReviewer(params: {
           amostrados: amostra.length,
           indices: amostra,
         });
-        llm = await critiqueRenderedSlides(images, brandContext, objective);
+        llm = await critiqueRenderedSlides(images, brandContext, objective, amostra);
 
         // O modelo numera os slides pela ORDEM DAS IMAGENS que recebeu. Com amostra
         // salteada isso não é o índice real: sem remapear, o feedback culparia o
@@ -559,10 +566,10 @@ Responda APENAS com JSON:
 }`;
 
   const response = await generateWithRetry(ai, {
-    model: 'gemini-2.5-flash',
+    model: config.models.fast,
     contents: [{ role: 'user', parts: [{ text: prompt }] }],
     config: { responseMimeType: 'application/json', temperature: 0.1 },
-  }, 'gemini-2.5-flash');
+  }, config.models.fast);
 
   const result = extractJsonObject(response.text ?? '{}') as ReviewResult;
   return {

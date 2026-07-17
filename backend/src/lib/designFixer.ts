@@ -242,7 +242,7 @@ Retorne APENAS JSON válido. Seja específico — identifique o ID exato dos lay
 }`;
 
   const response = await generateWithRetry(ai, {
-    model: 'gemini-2.5-flash-lite',
+    model: config.models.utility,
     contents: prompt,
     config: { responseMimeType: 'application/json' },
   });
@@ -315,7 +315,7 @@ Retorne APENAS JSON:
 }`;
 
   const response = await generateWithRetry(ai, {
-    model: 'gemini-2.5-flash-lite',
+    model: config.models.utility,
     contents: prompt,
     config: { responseMimeType: 'application/json' },
   });
@@ -401,7 +401,7 @@ Retorne APENAS JSON:
 }`;
 
   const response = await generateWithRetry(ai, {
-    model: 'gemini-2.5-flash-lite',
+    model: config.models.utility,
     contents: prompt,
     config: { responseMimeType: 'application/json' },
   });
@@ -548,7 +548,7 @@ Retorne APENAS JSON:
 }`;
 
   const response = await generateWithRetry(ai, {
-    model: 'gemini-2.5-flash-lite',
+    model: config.models.utility,
     contents: prompt,
     config: { responseMimeType: 'application/json' },
   });
