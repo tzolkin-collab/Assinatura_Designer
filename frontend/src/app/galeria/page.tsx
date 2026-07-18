@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Search, Plus, Filter, Loader2, X, Trash2, Edit3 } from 'lucide-react';
+import { Search, Plus, Filter, Loader2, X, Trash2, Edit3, Lock, Check } from 'lucide-react';
 import PageHeader from '@/components/ui/PageHeader';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
@@ -15,6 +15,7 @@ interface Brand {
   slug: string;
   name: string;
   color?: string;
+  logoUrl?: string;
   updatedAt: string;
   _count?: { posts: number };
   user?: {
@@ -23,6 +24,7 @@ interface Brand {
     email: string;
   };
   myRole?: string;
+  pendingRequest?: boolean;
 }
 
 export default function GaleriaPage() {
@@ -30,14 +32,11 @@ export default function GaleriaPage() {
   const [brands, setBrands] = useState<Brand[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-
-  // Nova Marca modal
-  const [showModal, setShowModal] = useState(false);
-  const [newName, setNewName] = useState('');
-  const [newColor, setNewColor] = useState('#171717');
-  const [creating, setCreating] = useState(false);
-  const [createError, setCreateError] = useState('');
-  const nameInputRef = useRef<HTMLInputElement>(null);
+  
+  // Filtros
+  const [filterMode, setFilterMode] = useState<'my' | 'discover'>('my');
+  const [showFilterDropdown, setShowFilterDropdown] = useState(false);
+  const [requestingAccessSlug, setRequestingAccessSlug] = useState<string | null>(null);
 
   // Apagar marca
   const [deleteTarget, setDeleteTarget] = useState<Brand | null>(null);
@@ -50,16 +49,18 @@ export default function GaleriaPage() {
   const [editColor, setEditColor] = useState('#171717');
   const [savingEdit, setSavingEdit] = useState(false);
 
-  useEffect(() => {
-    api.get<Brand[]>('/brands')
+  const loadBrands = () => {
+    setLoading(true);
+    const endpoint = filterMode === 'my' ? '/brands' : '/brands/discover';
+    api.get<Brand[]>(endpoint)
       .then((data) => setBrands(data ?? []))
       .catch(() => setBrands([]))
       .finally(() => setLoading(false));
-  }, []);
+  };
 
   useEffect(() => {
-    if (showModal) setTimeout(() => nameInputRef.current?.focus(), 50);
-  }, [showModal]);
+    loadBrands();
+  }, [filterMode]);
 
   const filtered = brands.filter((b) =>
     b.name.toLowerCase().includes(search.toLowerCase())
@@ -74,25 +75,6 @@ export default function GaleriaPage() {
     }
     groups[ownerName].push(brand);
   });
-
-  const handleCreateBrand = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newName.trim()) return;
-    setCreating(true);
-    setCreateError('');
-    try {
-      const brand = await api.post<Brand>('/brands', { name: newName.trim(), color: newColor });
-      setBrands((prev) => [brand, ...prev]);
-      setShowModal(false);
-      setNewName('');
-      setNewColor('#171717');
-      router.push(`/${brand.slug}/galeria`);
-    } catch (err) {
-      setCreateError(err instanceof ApiError ? err.message : 'Erro ao criar marca.');
-    } finally {
-      setCreating(false);
-    }
-  };
 
   const handleDeleteBrand = async () => {
     if (!deleteTarget || deleteConfirm !== deleteTarget.name) return;
@@ -115,12 +97,26 @@ export default function GaleriaPage() {
     setSavingEdit(true);
     try {
       const updated = await api.put<Brand>(`/brands/${editTarget.slug}`, { name: editName.trim(), color: editColor });
-      setBrands((prev) => prev.map((b) => (b.slug === editTarget.slug ? updated : b)));
+      setBrands((prev) => prev.map((b) => (b.slug === editTarget.slug ? { ...b, ...updated } : b)));
       setEditTarget(null);
     } catch {
       // manter modal aberto em caso de erro
     } finally {
       setSavingEdit(false);
+    }
+  };
+
+  const handleRequestAccess = async (brandSlug: string) => {
+    setRequestingAccessSlug(brandSlug);
+    try {
+      await api.post(`/brands/${brandSlug}/access-requests`, {});
+      alert('Solicitação de acesso enviada com sucesso!');
+      loadBrands();
+    } catch (err) {
+      console.error(err);
+      alert('Não foi possível enviar a solicitação.');
+    } finally {
+      setRequestingAccessSlug(null);
     }
   };
 
@@ -147,10 +143,12 @@ export default function GaleriaPage() {
         title="Galeria de Marcas"
         description="Gerencie seus projetos e acesse as configurações de cada marca."
         actions={
-          <Button size="sm" onClick={() => setShowModal(true)}>
-            <Plus size={16} />
-            Nova Marca
-          </Button>
+          <Link href="/onboarding">
+            <Button size="sm">
+              <Plus size={16} />
+              Nova Marca
+            </Button>
+          </Link>
         }
       />
 
@@ -164,10 +162,30 @@ export default function GaleriaPage() {
             icon={<Search size={16} />}
           />
         </div>
-        <Button variant="secondary" size="sm">
-          <Filter size={14} />
-          Filtros
-        </Button>
+        <div style={{ position: 'relative' }}>
+          <Button variant="secondary" size="sm" onClick={() => setShowFilterDropdown(!showFilterDropdown)}>
+            <Filter size={14} />
+            <span>Exibindo: {filterMode === 'my' ? 'Minhas Marcas' : 'Descobrir Novas Marcas'}</span>
+          </Button>
+          {showFilterDropdown && (
+            <div className={styles.dropdownList} style={{ position: 'absolute', right: 0, top: '42px', zIndex: 50, minWidth: '200px', boxShadow: 'var(--shadow-lg)' }} onMouseDown={(e) => e.preventDefault()}>
+              <div 
+                className={styles.dropdownItem} 
+                onClick={() => { setFilterMode('my'); setShowFilterDropdown(false); }}
+                style={{ fontWeight: filterMode === 'my' ? 600 : 400 }}
+              >
+                Minhas Marcas
+              </div>
+              <div 
+                className={styles.dropdownItem} 
+                onClick={() => { setFilterMode('discover'); setShowFilterDropdown(false); }}
+                style={{ fontWeight: filterMode === 'discover' ? 600 : 400 }}
+              >
+                Descobrir Marcas (Solicitar)
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {loading ? (
@@ -187,25 +205,68 @@ export default function GaleriaPage() {
                   {ownerBrands.length} {ownerBrands.length === 1 ? 'marca' : 'marcas'}
                 </span>
               </div>
+              
               <div className={styles.grid}>
                 {ownerBrands.map((brand) => (
                   <div key={brand.slug} className={styles.cardWrapper}>
-                    <Link href={`/${brand.slug}/galeria`} className={styles.cardLink}>
-                      <Card hover padding="none">
-                        <div className={styles.cardBanner} style={{ backgroundColor: brand.color || '#171717' }}>
-                          <span className={styles.cardInitial}>{brand.name[0]}</span>
-                        </div>
-                        <div className={styles.cardBody}>
-                          <h3 className={styles.cardTitle}>{brand.name}</h3>
-                          <div className={styles.cardMeta}>
-                            <span>{brand._count?.posts || 0} posts</span>
-                            <span className={styles.dot}>·</span>
-                            <span>{new Date(brand.updatedAt).toLocaleDateString('pt-BR')}</span>
+                    {filterMode === 'my' ? (
+                      <Link href={`/${brand.slug}/galeria`} className={styles.cardLink}>
+                        <Card hover padding="none">
+                          <div className={styles.cardBanner} style={{ backgroundColor: brand.color || '#171717', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', position: 'relative' }}>
+                            {brand.logoUrl ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img src={brand.logoUrl} alt={brand.name} style={{ width: '100%', height: '100%', objectFit: 'contain', padding: '16px' }} />
+                            ) : (
+                              <span className={styles.cardInitial}>{brand.name[0]}</span>
+                            )}
                           </div>
-                        </div>
-                      </Card>
-                    </Link>
-                    {(brand.myRole === 'OWNER' || brand.myRole === 'ADMIN') && (
+                          <div className={styles.cardBody}>
+                            <h3 className={styles.cardTitle}>{brand.name}</h3>
+                            <div className={styles.cardMeta}>
+                              <span>{brand._count?.posts || 0} posts</span>
+                              <span className={styles.dot}>·</span>
+                              <span>{new Date(brand.updatedAt).toLocaleDateString('pt-BR')}</span>
+                            </div>
+                          </div>
+                        </Card>
+                      </Link>
+                    ) : (
+                      <div className={styles.cardLink} style={{ cursor: 'default' }}>
+                        <Card padding="none">
+                          <div className={styles.cardBanner} style={{ backgroundColor: brand.color || '#171717', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', position: 'relative', opacity: 0.85 }}>
+                            {brand.logoUrl ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img src={brand.logoUrl} alt={brand.name} style={{ width: '100%', height: '100%', objectFit: 'contain', padding: '16px' }} />
+                            ) : (
+                              <span className={styles.cardInitial}>{brand.name[0]}</span>
+                            )}
+                            <div style={{ position: 'absolute', right: '12px', top: '12px', backgroundColor: 'rgba(0,0,0,0.6)', padding: '6px', borderRadius: '50%', color: '#fff' }}>
+                              <Lock size={14} />
+                            </div>
+                          </div>
+                          <div className={styles.cardBody}>
+                            <h3 className={styles.cardTitle}>{brand.name}</h3>
+                            <div style={{ marginTop: '12px' }}>
+                              {brand.pendingRequest ? (
+                                <button disabled style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', width: '100%', padding: '8px', fontSize: '13px', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', backgroundColor: '#f5f5f4', fontWeight: 600 }}>
+                                  <Check size={14} /> Solicitação Enviada
+                                </button>
+                              ) : (
+                                <button 
+                                  onClick={() => handleRequestAccess(brand.slug)}
+                                  disabled={requestingAccessSlug === brand.slug}
+                                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', width: '100%', padding: '8px', fontSize: '13px', color: '#fff', border: 'none', borderRadius: 'var(--radius-md)', backgroundColor: 'var(--color-accent)', cursor: 'pointer', fontWeight: 600 }}
+                                >
+                                  {requestingAccessSlug === brand.slug ? 'Enviando...' : 'Solicitar Acesso'}
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </Card>
+                      </div>
+                    )}
+
+                    {filterMode === 'my' && (brand.myRole === 'OWNER' || brand.myRole === 'ADMIN') && (
                       <button
                         className={styles.cardEditBtn}
                         onClick={(e) => { e.preventDefault(); openEditModal(brand); }}
@@ -214,7 +275,7 @@ export default function GaleriaPage() {
                         <Edit3 size={13} />
                       </button>
                     )}
-                    {brand.myRole === 'OWNER' && (
+                    {filterMode === 'my' && brand.myRole === 'OWNER' && (
                       <button
                         className={styles.cardDeleteBtn}
                         onClick={(e) => { e.preventDefault(); setDeleteTarget(brand); }}
@@ -231,7 +292,14 @@ export default function GaleriaPage() {
 
           {filtered.length === 0 && (
             <div className={styles.empty}>
-              <p>{search ? `Nenhuma marca encontrada para "${search}"` : 'Nenhuma marca criada ainda.'}</p>
+              <p>
+                {search 
+                  ? `Nenhuma marca encontrada para "${search}"` 
+                  : filterMode === 'my' 
+                    ? 'Nenhuma marca criada ainda.' 
+                    : 'Todas as marcas do sistema já pertencem ao seu perfil.'
+                }
+              </p>
             </div>
           )}
         </>
@@ -280,58 +348,6 @@ export default function GaleriaPage() {
                 {deleting ? 'Apagando...' : 'Apagar marca'}
               </Button>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* Nova Marca Modal */}
-      {showModal && (
-        <div className={styles.modalOverlay} onClick={() => setShowModal(false)}>
-          <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
-            <div className={styles.modalHeader}>
-              <h2 className={styles.modalTitle}>Nova Marca</h2>
-              <button className={styles.modalClose} onClick={() => setShowModal(false)}>
-                <X size={18} />
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateBrand} className={styles.modalForm}>
-              <div className={styles.formGroup}>
-                <label className={styles.formLabel}>Nome da marca</label>
-                <input
-                  ref={nameInputRef}
-                  className={styles.formInput}
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  placeholder="Ex: Minha Marca"
-                  required
-                />
-              </div>
-
-              <div className={styles.formGroup}>
-                <label className={styles.formLabel}>Cor de destaque</label>
-                <div className={styles.colorPickerRow}>
-                  <input
-                    type="color"
-                    value={newColor}
-                    onChange={(e) => setNewColor(e.target.value)}
-                    className={styles.colorPicker}
-                  />
-                  <span className={styles.colorValue}>{newColor}</span>
-                </div>
-              </div>
-
-              {createError && <p className={styles.formError}>{createError}</p>}
-
-              <div className={styles.modalActions}>
-                <Button type="button" variant="secondary" size="sm" onClick={() => setShowModal(false)}>
-                  Cancelar
-                </Button>
-                <Button type="submit" size="sm" disabled={creating || !newName.trim()}>
-                  {creating ? 'Criando...' : 'Criar Marca'}
-                </Button>
-              </div>
-            </form>
           </div>
         </div>
       )}

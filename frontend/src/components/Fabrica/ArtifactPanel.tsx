@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Check, ChevronDown, Code2, Copy, Download, Eye, Loader2 } from 'lucide-react';
 import { baixarIrJson, baixarSlide, exportarDeck, type DeckFileFormat } from '@/lib/deckFile';
 import { getApiErrorMessage } from '@/lib/api';
+import SlideCodeEditor, { type SlideCode } from '@/components/DesignDocument/SlideCodeEditor';
 
 interface ArtifactPanelProps {
   /** Envelope do design (ir-design/html-design). `undefined` = nada gerado ainda. */
@@ -13,6 +14,8 @@ interface ArtifactPanelProps {
   slideIndex: number;
   slideCount: number;
   gerando: boolean;
+  /** Persistiu a edição de código de um slide (aba Fonte) — atualize o preview. */
+  onSlideCodeSaved?: (slideIndex: number, slide: SlideCode) => void;
   /** O preview que já existia (renderer + navegação + thumbs). */
   children: ReactNode;
 }
@@ -50,6 +53,7 @@ export function ArtifactPanel({
   slideIndex,
   slideCount,
   gerando,
+  onSlideCodeSaved,
   children,
 }: ArtifactPanelProps) {
   const [aba, setAba] = useState<Aba>('preview');
@@ -72,6 +76,15 @@ export function ArtifactPanel({
   const temArtefato = Boolean(design) && slideCount > 0;
   const podeBaixar = temArtefato && Boolean(postId);
   const fonte = temArtefato ? fonteDoSlide(design, slideIndex).texto : '';
+
+  // Slide html-design com deck persistido e geração PARADA: código editável.
+  // Durante a geração é só leitura — o sync final do pipeline reescreveria a
+  // edição manual feita no meio.
+  const rawSlide = temArtefato ? (fonteDoSlide(design, slideIndex).raw as { html?: unknown; css?: unknown } | null) : null;
+  const slideEditavel: SlideCode | null =
+    !gerando && rawSlide && typeof rawSlide.html === 'string'
+      ? { html: rawSlide.html, css: typeof rawSlide.css === 'string' ? rawSlide.css : undefined }
+      : null;
 
   const copiarFonte = useCallback(async () => {
     try {
@@ -235,11 +248,24 @@ export function ArtifactPanel({
       <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
         {aba === 'preview' ? (
           children
+        ) : slideEditavel && postId && onSlideCodeSaved ? (
+          // html-design com deck persistido: o código é EDITÁVEL — a mesma
+          // primitiva que a IA usa (arquivo html/css do slide), sanitizada no
+          // servidor. Salvou → o preview atualiza na hora via onSlideCodeSaved.
+          <div style={{ position: 'absolute', inset: 0, overflow: 'auto', padding: '10px 12px' }}>
+            <SlideCodeEditor
+              postId={postId}
+              slideIndex={slideIndex}
+              slide={slideEditavel}
+              onSaved={onSlideCodeSaved}
+              maxAreaHeight={400}
+            />
+          </div>
         ) : (
           <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', flexShrink: 0 }}>
               <span style={{ fontSize: 12, color: 'var(--color-text-muted, #6b7280)' }}>
-                DesignIR · slide {slideIndex + 1} de {slideCount}
+                Fonte · slide {slideIndex + 1} de {slideCount}
               </span>
               <button
                 type="button"

@@ -143,6 +143,10 @@ export const config = {
   canvaClientSecret: process.env.CANVA_CLIENT_SECRET || '',
   canvaRedirectUri: process.env.CANVA_REDIRECT_URI || 'http://localhost:4000/api/canva/callback',
   canvaScopes: 'design:content:read design:content:write design:meta:read asset:read asset:write folder:read folder:write profile:read',
+  // ── Asana API ──
+  asanaClientId: process.env.ASANA_CLIENT_ID || '',
+  asanaClientSecret: process.env.ASANA_CLIENT_SECRET || '',
+  asanaRedirectUri: process.env.ASANA_REDIRECT_URI || 'http://localhost:4000/api/asana/callback',
 } as const;
 
 // ── Fail-fast de configuração ────────────────────────────────────────────────

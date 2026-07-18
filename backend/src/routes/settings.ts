@@ -1,12 +1,14 @@
 import { Router, Response, NextFunction } from 'express';
 import dns from 'dns/promises';
 import { GoogleGenAI, Type, Schema } from '@google/genai';
+import bcrypt from 'bcrypt';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import crypto from 'crypto';
 import { generateWithRetry } from '../lib/geminiRetry.js';
 import { config } from '../config.js';
 import type { Prisma, BrandRole } from '@prisma/client';
 import prisma from '../lib/prisma.js';
+import { getBilling } from '../lib/aiBudget.js';
 import { assertBrandAccess, ANY_MEMBER, EDITORS } from '../middleware/brandAccess.js';
 import { createError } from '../middleware/errorHandler.js';
 import { config as appConfig } from '../config.js';
@@ -388,3 +390,164 @@ settingsRouter.delete('/:slug/referencias/:id', async (req: AuthRequest, res: Re
     return next(error);
   }
 });
+
+// ── GET /api/settings/perfil ──
+settingsRouter.get('/perfil', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.userId;
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        asanaToken: true,
+        googleAccessToken: true,
+        canvaAccessToken: true,
+      },
+    });
+
+    if (!user) throw createError(404, 'Usuário não encontrado');
+
+    res.json({
+      data: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        connections: {
+          asana: !!user.asanaToken,
+          googleDrive: !!user.googleAccessToken,
+          canva: !!user.canvaAccessToken,
+        },
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── PUT /api/settings/perfil ──
+settingsRouter.put('/perfil', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.userId;
+    const { name, password } = req.body as { name?: string; password?: string };
+
+    const updateData: Prisma.UserUpdateInput = {};
+    if (name && name.trim().length > 0) {
+      updateData.name = name.trim();
+    }
+    if (password && password.length >= 8) {
+      updateData.password = await bcrypt.hash(password, 10);
+    }
+
+    if (Object.keys(updateData).length === 0) {
+      throw createError(400, 'Nenhum dado válido para atualização fornecido');
+    }
+
+    const updated = await prisma.user.update({
+      where: { id: userId },
+      data: updateData,
+      select: { id: true, name: true, email: true, role: true },
+    });
+
+    res.json({ data: updated });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── DELETE /api/settings/connections/:provider ──
+settingsRouter.delete('/connections/:provider', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.userId;
+    const { provider } = req.params;
+
+    const updateData: Prisma.UserUpdateInput = {};
+    if (provider === 'asana') {
+      updateData.asanaToken = null;
+    } else if (provider === 'google') {
+      updateData.googleAccessToken = null;
+      updateData.googleRefreshToken = null;
+      updateData.googleTokenExpiry = null;
+    } else if (provider === 'canva') {
+      updateData.canvaAccessToken = null;
+      updateData.canvaRefreshToken = null;
+    } else {
+      throw createError(400, 'Provedor de conexão inválido');
+    }
+
+    await prisma.user.update({
+      where: { id: userId },
+      data: updateData,
+    });
+
+    res.json({ message: `Conexão com ${provider} removida com sucesso` });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── GET /api/settings/tenants ──
+settingsRouter.get('/tenants', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    if (req.user?.role !== 'ADMIN') {
+      throw createError(403, 'Acesso exclusivo para administradores');
+    }
+
+    const brands = await prisma.brand.findMany({
+      include: {
+        members: {
+          select: {
+            role: true,
+            user: { select: { id: true, name: true, email: true } },
+          },
+        },
+        _count: { select: { posts: true, folders: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    res.json({ data: brands });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── GET /api/settings/billing ──
+settingsRouter.get('/billing', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    if (req.user?.role !== 'ADMIN') {
+      throw createError(403, 'Acesso exclusivo para administradores');
+    }
+
+    const { month } = req.query as { month?: string };
+    const report = await getBilling(undefined, month);
+
+    res.json({ data: report });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── GET /api/settings/agent ──
+settingsRouter.get('/agent', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    if (req.user?.role !== 'ADMIN') {
+      throw createError(403, 'Acesso exclusivo para administradores');
+    }
+
+    res.json({
+      data: {
+        models: config.models,
+        thinkingBudget: config.geminiThinkingBudget,
+        dailyTokenBudget: config.aiDailyTokenBudget,
+        brandDailyTokenBudget: config.aiBrandDailyTokenBudget,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+

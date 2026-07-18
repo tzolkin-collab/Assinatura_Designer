@@ -1,6 +1,19 @@
 import type { Metadata, Viewport } from 'next';
+import { Inter, Newsreader } from 'next/font/google';
 import './globals.css';
 import AppShell from '@/components/AppShell/AppShell';
+
+const inter = Inter({
+  subsets: ['latin'],
+  variable: '--font-inter',
+  display: 'swap',
+});
+
+const newsreader = Newsreader({
+  subsets: ['latin'],
+  variable: '--font-newsreader',
+  display: 'swap',
+});
 
 export const metadata: Metadata = {
   title: 'Designer - Assinatura Marca Própria',
@@ -20,12 +33,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="pt-BR" data-scroll-behavior="smooth">
-      <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <style id="dynamic-fonts"></style>
-      </head>
+    <html lang="pt-BR" data-scroll-behavior="smooth" className={`${inter.variable} ${newsreader.variable}`}>
       <body suppressHydrationWarning>
         <AppShell>{children}</AppShell>
       </body>

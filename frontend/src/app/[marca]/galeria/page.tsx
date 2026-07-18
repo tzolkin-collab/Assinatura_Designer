@@ -4,7 +4,7 @@ import { useParams } from 'next/navigation';
 import PageHeader from '@/components/ui/PageHeader';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
-import { ArrowLeft, Download, FileDown, Loader2, Maximize2, X, Folder, FolderPlus, ChevronRight, ChevronDown, Plus, Trash2, LayoutGrid, List, Sparkles, MessageSquareText, ExternalLink, Edit3, FolderInput, PenLine, Send, Presentation } from 'lucide-react';
+import { ArrowLeft, Download, FileDown, Loader2, Maximize2, X, Folder, FolderPlus, ChevronRight, ChevronDown, Plus, Trash2, LayoutGrid, List, Sparkles, MessageSquareText, ExternalLink, Edit3, FolderInput, PenLine, Send, Presentation, Image as LucideImage } from 'lucide-react';
 import Link from 'next/link';
 import Image from 'next/image';
 import styles from './brand-galeria.module.css';
@@ -15,10 +15,11 @@ import { exportarDeck, type DeckFileFormat } from '@/lib/deckFile';
 import { useBrandPermissions } from '@/hooks/useBrandPermissions';
 import { extractChatHistory, extractPreviewSource, extractSessionId, type FabricaChatHistoryMessage, type HtmlDesignPostContent, type IRDesignPostContent } from '@/lib/designContent';
 import DesignRenderer, { type DesignPage } from '@/components/Fabrica/DesignRenderer';
-import DesignDocumentRenderer from '@/components/DesignDocument/DesignDocumentRenderer';
-import HtmlSlideRenderer from '@/components/DesignDocument/HtmlSlideRenderer';
-import IRSlideRenderer from '@/components/DesignDocument/IRSlideRenderer';
-import AiSpendBadge from '@/components/AiUsage/AiSpendBadge';
+import dynamic from 'next/dynamic';
+const DesignDocumentRenderer = dynamic(() => import('@/components/DesignDocument/DesignDocumentRenderer'), { ssr: false });
+const HtmlSlideRenderer = dynamic(() => import('@/components/DesignDocument/HtmlSlideRenderer'), { ssr: false });
+const IRSlideRenderer = dynamic(() => import('@/components/DesignDocument/IRSlideRenderer'), { ssr: false });
+const AiSpendBadge = dynamic(() => import('@/components/AiUsage/AiSpendBadge'), { ssr: false });
 
 function formatPostType(type: string) {
   switch (type) {
@@ -80,10 +81,10 @@ export default function BrandGaleriaPage() {
   const marca = decodeURIComponent(slug);
   const { posts, loading, error, mutate } = useBrandPosts(slug);
   const { brand } = useBrand(slug);
-  const [previewImage, setPreviewImage] = useState<string | null>(null);
-  const [previewDesign, setPreviewDesign] = useState<{ pages: DesignPage[]; width: number; height: number; document?: unknown } | null>(null);
-  const [previewHtml, setPreviewHtml] = useState<HtmlDesignPostContent | null>(null);
-  const [previewIr, setPreviewIr] = useState<IRDesignPostContent | null>(null);
+  const [activePreviewPost, setActivePreviewPost] = useState<Post | null>(null);
+  const [activeCanvaExportPost, setActiveCanvaExportPost] = useState<Post | null>(null);
+  const [canvaFormat, setCanvaFormat] = useState<'png' | 'pptx' | 'html'>('png');
+  const [mostrarCanvaInstrucoes, setMostrarCanvaInstrucoes] = useState(false);
   const [chatHistoryPreview, setChatHistoryPreview] = useState<{ sessionId: string | null; messages: FabricaChatHistoryMessage[]; postLabel: string } | null>(null);
 
   const [folders, setFolders] = useState<FolderNode[]>([]);
@@ -219,7 +220,7 @@ export default function BrandGaleriaPage() {
     try {
       await api.delete(`/posts/${postId}`);
       if (mutate) mutate();
-      if (previewImage) setPreviewImage(null);
+      if (activePreviewPost?.id === postId) setActivePreviewPost(null);
     } catch (err) {
       console.error('Failed to delete post:', err);
     }
@@ -397,7 +398,6 @@ export default function BrandGaleriaPage() {
     return post.folderId === activeFolder;
   });
 
-  const previewPost = previewImage ? posts.find((p) => postMatchesPreviewImage(p, previewImage)) : undefined;
 
   const handleDownload = (e: React.MouseEvent, url: string, filename: string) => {
     e.preventDefault();
@@ -542,109 +542,568 @@ export default function BrandGaleriaPage() {
         </div>
       )}
 
-      {previewImage && (
-        <div className={styles.modalOverlay} onClick={() => setPreviewImage(null)}>
-          <div className={styles.modalContent} onClick={(e) => e.stopPropagation()}>
-            <div className={styles.modalHeader}>
-              <h3 className={styles.modalTitle}>Visualização</h3>
-              <button className={styles.closeBtn} onClick={() => setPreviewImage(null)}>
-                <X size={20} />
-              </button>
-            </div>
-            <Image
-              src={previewImage}
-              alt="Preview em tamanho real"
-              width={1080}
-              height={1080}
-              className={styles.modalImage}
-              unoptimized
-            />
-            <div style={{ display: 'flex', gap: '8px', justifyContent: 'center' }}>
-              <select 
-                className={styles.folderSelect}
-                value={previewPost?.folderId || ''}
-                onChange={(e) => {
-                  if (previewPost) handleMoveToFolder(previewPost.id, e.target.value || null);
-                }}
-              >
-                <option value="">Sem Pasta</option>
-                {folders.map(f => (
-                  <option key={f.id} value={f.id}>{f.name}</option>
-                ))}
-              </select>
-              <Button
-                variant="secondary"
-                onClick={(e) => previewPost && handleDeletePost(previewPost.id, e)}
-                disabled={!canEdit}
-                title={canEdit ? undefined : hint}
-              >
-                <Trash2 size={16} />
-                Excluir
-              </Button>
-              <Button onClick={(e) => handleDownload(e, previewImage, `post-${Date.now()}.png`)}>
-                <Download size={16} />
-                Fazer Download
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+      {activePreviewPost && (() => {
+        const preview = extractPreviewSource(activePreviewPost.content, null);
+        const imageUrl = activePreviewPost.previewUrl || (preview?.kind === 'image' ? preview.url : null);
+        const designPages = preview?.kind === 'design' ? preview.pages : null;
+        const designDocument = (preview?.kind === 'design' || preview?.kind === 'hybrid-document') ? preview.document : undefined;
+        const htmlContent = preview?.kind === 'html-design' ? preview.content : null;
+        const irContent = preview?.kind === 'ir-design' ? preview.content : null;
+        const firstPage = designPages?.[0];
+        const chatHistory = extractChatHistory(activePreviewPost.content);
+        const sessionId = extractSessionId(activePreviewPost.content);
 
-      {previewHtml && (
-        <div className={styles.modalOverlay} onClick={() => setPreviewHtml(null)}>
-          <div className={styles.designModal} onClick={(e) => e.stopPropagation()}>
-            <div className={styles.modalHeader}>
-              <h3 className={styles.modalTitle}>Apresentação — {previewHtml.slides.length} slides</h3>
-              <button className={styles.closeBtn} onClick={() => setPreviewHtml(null)}>
-                <X size={20} />
-              </button>
-            </div>
-            <div className={styles.designModalBody}>
-              <HtmlSlideRenderer content={previewHtml} mode="contain" />
-            </div>
-          </div>
-        </div>
-      )}
+        // Calcular proporção real das páginas
+        const contentWidth = htmlContent?.width 
+          || irContent?.ir?.width 
+          || (irContent as any)?.width 
+          || (preview?.kind === 'design' ? preview.width : null) 
+          || 1080;
+        const contentHeight = htmlContent?.height 
+          || irContent?.ir?.height 
+          || (irContent as any)?.height 
+          || (preview?.kind === 'design' ? preview.height : null) 
+          || 1080;
+        const aspectRatio = `${contentWidth} / ${contentHeight}`;
 
-      {previewIr && (
-        <div className={styles.modalOverlay} onClick={() => setPreviewIr(null)}>
-          <div className={styles.designModal} onClick={(e) => e.stopPropagation()}>
-            <div className={styles.modalHeader}>
-              <h3 className={styles.modalTitle}>Apresentação — {previewIr.ir?.slides?.length ?? 0} slides</h3>
-              <button className={styles.closeBtn} onClick={() => setPreviewIr(null)}>
-                <X size={20} />
-              </button>
-            </div>
-            <div className={styles.designModalBody}>
-              <IRSlideRenderer content={previewIr} mode="contain" />
-            </div>
-          </div>
-        </div>
-      )}
+        return (
+          <div className={styles.adobeModalOverlay} onClick={() => setActivePreviewPost(null)}>
+            <div className={styles.adobeModalContainer} onClick={(e) => e.stopPropagation()}>
+              
+              {/* Lado Esquerdo: Área de Preview (Fundo Escuro) */}
+              <div className={styles.adobePreviewArea}>
+                <button className={styles.adobeCloseBtn} onClick={() => setActivePreviewPost(null)}>
+                  <X size={20} />
+                </button>
+                
+                <div className={styles.adobePreviewWrapper}>
+                  {imageUrl ? (
+                    <div className={styles.adobePreviewSlideContainer}>
+                      <div className={styles.adobePreviewSlideHeader}>Imagem Final</div>
+                      <div className={styles.adobePreviewSlideContent} style={{ aspectRatio }}>
+                        <img
+                          src={imageUrl}
+                          alt="Preview"
+                          className={styles.adobePreviewImage}
+                        />
+                      </div>
+                    </div>
+                  ) : htmlContent ? (
+                    htmlContent.slides.map((slide: any, idx: number) => (
+                      <div key={idx} className={styles.adobePreviewSlideContainer}>
+                        <div className={styles.adobePreviewSlideHeader}>
+                          Slide {idx + 1}
+                        </div>
+                        <div className={styles.adobePreviewSlideContent} style={{ aspectRatio }}>
+                          <HtmlSlideRenderer
+                            content={{ ...htmlContent, slides: [slide] }}
+                            mode="contain"
+                            hideNav
+                          />
+                        </div>
+                      </div>
+                    ))
+                  ) : irContent ? (
+                    irContent.ir?.slides?.map((slide: any, idx: number) => (
+                      <div key={idx} className={styles.adobePreviewSlideContainer}>
+                        <div className={styles.adobePreviewSlideHeader}>
+                          Slide {idx + 1} {slide.name ? `— ${slide.name}` : ''}
+                        </div>
+                        <div className={styles.adobePreviewSlideContent} style={{ aspectRatio }}>
+                          <IRSlideRenderer
+                            content={{ ...irContent, ir: { ...irContent.ir, slides: [slide] } }}
+                            mode="contain"
+                            hideNav
+                          />
+                        </div>
+                      </div>
+                    ))
+                  ) : designPages ? (
+                    designPages.map((page: any, idx: number) => (
+                      <div key={page.id || idx} className={styles.adobePreviewSlideContainer}>
+                        <div className={styles.adobePreviewSlideHeader}>
+                          Slide {idx + 1} {page.name ? `— ${page.name}` : ''}
+                        </div>
+                        <div className={styles.adobePreviewSlideContent} style={{ aspectRatio }}>
+                          {designDocument ? (
+                            <DesignDocumentRenderer
+                              document={{ ...designDocument, pages: [page] }}
+                              mode="contain"
+                            />
+                          ) : (
+                            <DesignRenderer
+                              pages={[page]}
+                              canvasWidth={(preview?.kind === 'design' ? preview.width : null) ?? 1080}
+                              canvasHeight={(preview?.kind === 'design' ? preview.height : null) ?? 1080}
+                            />
+                          )}
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div style={{ color: 'var(--color-text-tertiary)' }}>Sem preview disponível</div>
+                  )}
+                </div>
+              </div>
 
-      {previewDesign && (
-        <div className={styles.modalOverlay} onClick={() => setPreviewDesign(null)}>
-          <div className={styles.designModal} onClick={(e) => e.stopPropagation()}>
-            <div className={styles.modalHeader}>
-              <h3 className={styles.modalTitle}>Apresentação — {previewDesign.pages.length} slides</h3>
-              <button className={styles.closeBtn} onClick={() => setPreviewDesign(null)}>
-                <X size={20} />
-              </button>
-            </div>
-            <div className={styles.designModalBody}>
-              {previewDesign.document ? (
-                <DesignDocumentRenderer document={previewDesign.document} mode="contain" />
-              ) : (
-                <DesignRenderer
-                  pages={previewDesign.pages}
-                  canvasWidth={previewDesign.width}
-                  canvasHeight={previewDesign.height}
-                />
-              )}
+              {/* Lado Direito: Barra de Configurações e Propriedades (Adobe-like) */}
+              <div className={styles.adobePanelArea}>
+                <div className={styles.adobePanelHeader}>
+                  <div className={styles.adobeMetaBadge}>
+                    {formatPostType(activePreviewPost.type)}
+                  </div>
+                  <h3 className={styles.adobePostTitle}>
+                    {activePreviewPost.name || `Arte ${activePreviewPost.id.split('-')[0]}`}
+                  </h3>
+                  <div className={styles.adobePanelMeta}>
+                    <span>Criado em: {new Date(activePreviewPost.createdAt).toLocaleDateString()}</span>
+                    <span>ID: {activePreviewPost.id.split('-')[0]}</span>
+                    {activePreviewPost.createdBy && (
+                      <span title={activePreviewPost.createdBy.email}>
+                        Por: {activePreviewPost.createdBy.name}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className={styles.adobePanelBody}>
+                  {/* Seção: Ações Rápidas */}
+                  {(htmlContent || irContent || (designPages && designPages.length > 0)) && canEdit && (
+                    <div className={styles.adobePanelSection}>
+                      <h4 className={styles.adobeSectionTitle}>Editar</h4>
+                      <Link
+                        href={`/${slug}/editor/${activePreviewPost.id}`}
+                        className={styles.adobeMainActionBtn}
+                        onClick={() => setActivePreviewPost(null)}
+                      >
+                        <PenLine size={16} />
+                        Abrir no Editor
+                      </Link>
+                    </div>
+                  )}
+
+                  {/* Seção: Exportar / Downloads */}
+                  <div className={styles.adobePanelSection}>
+                    <h4 className={styles.adobeSectionTitle}>Exportar e Downloads</h4>
+                    <div className={styles.adobeBtnGrid}>
+                      {imageUrl && (
+                        <button
+                          className={styles.adobeSecondaryBtn}
+                          onClick={(e) => handleDownload(e, imageUrl, `post-${activePreviewPost.id}.png`)}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <LucideImage size={14} style={{ opacity: 0.7 }} />
+                            <span>Baixar Imagem (PNG)</span>
+                          </div>
+                          <Download size={14} style={{ opacity: 0.5 }} />
+                        </button>
+                      )}
+                      
+                      {(htmlContent || irContent || (designPages && designPages.length > 0)) && (
+                        <>
+                          <button
+                            className={styles.adobeSecondaryBtn}
+                            onClick={(e) => handleDownloadDeck(e, activePreviewPost.id, 'pptx')}
+                            disabled={exportando !== null}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <Presentation size={14} style={{ opacity: 0.7 }} />
+                              <span>Apresentação (PPTX)</span>
+                            </div>
+                            {exportando?.postId === activePreviewPost.id && exportando.formato === 'pptx' ? (
+                              <Loader2 size={14} className={styles.spin} />
+                            ) : (
+                              <Download size={14} style={{ opacity: 0.5 }} />
+                            )}
+                          </button>
+                          <button
+                            className={styles.adobeSecondaryBtn}
+                            onClick={(e) => handleDownloadDeck(e, activePreviewPost.id, 'pdf')}
+                            disabled={exportando !== null}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <FileDown size={14} style={{ opacity: 0.7 }} />
+                              <span>Documento (PDF)</span>
+                            </div>
+                            {exportando?.postId === activePreviewPost.id && exportando.formato === 'pdf' ? (
+                              <Loader2 size={14} className={styles.spin} />
+                            ) : (
+                              <Download size={14} style={{ opacity: 0.5 }} />
+                            )}
+                          </button>
+                          <button
+                            className={styles.adobeSecondaryBtn}
+                            onClick={(e) => handleDownloadDeck(e, activePreviewPost.id, 'zip')}
+                            disabled={exportando !== null}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <Folder size={14} style={{ opacity: 0.7 }} />
+                              <span>Imagens Separadas (ZIP)</span>
+                            </div>
+                            {exportando?.postId === activePreviewPost.id && exportando.formato === 'zip' ? (
+                              <Loader2 size={14} className={styles.spin} />
+                            ) : (
+                              <Download size={14} style={{ opacity: 0.5 }} />
+                            )}
+                          </button>
+                          {htmlContent && (
+                            <button
+                              className={styles.adobeSecondaryBtn}
+                              onClick={(e) => handleDownloadDeck(e, activePreviewPost.id, 'html')}
+                              disabled={exportando !== null}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <FileDown size={14} style={{ opacity: 0.7 }} />
+                                <span>Código Fonte (HTML)</span>
+                              </div>
+                              {exportando?.postId === activePreviewPost.id && exportando.formato === 'html' ? (
+                                <Loader2 size={14} className={styles.spin} />
+                              ) : (
+                                <Download size={14} style={{ opacity: 0.5 }} />
+                              )}
+                            </button>
+                          )}
+                          <button
+                            className={styles.adobeSecondaryBtn}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setActiveCanvaExportPost(activePreviewPost);
+                              setCanvaFormat('png');
+                              setMostrarCanvaInstrucoes(false);
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <Send size={14} style={{ opacity: 0.7 }} />
+                              <span>Exportar para o Canva</span>
+                            </div>
+                            <ExternalLink size={14} style={{ opacity: 0.5 }} />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Seção: Organização e Pastas */}
+                  {canEdit && (
+                    <div className={styles.adobePanelSection}>
+                      <h4 className={styles.adobeSectionTitle}>Organizar</h4>
+                      <div className={styles.adobeFolderRow}>
+                        <span className={styles.adobeLabel}>Pasta destino:</span>
+                        <select 
+                          className={styles.folderSelect}
+                          value={activePreviewPost.folderId || ''}
+                          onChange={(e) => handleMoveToFolder(activePreviewPost.id, e.target.value || null)}
+                        >
+                          <option value="">Sem Pasta</option>
+                          {folders.map(f => (
+                            <option key={f.id} value={f.id}>{f.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Seção: Histórico de Conversa com IA */}
+                  {chatHistory.length > 0 && (
+                    <div className={styles.adobePanelSection}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                        <h4 className={styles.adobeSectionTitle} style={{ margin: 0 }}>Histórico</h4>
+                        {sessionId && (
+                          <Link
+                            href={`/${slug}/fabrica?sessionId=${encodeURIComponent(sessionId)}`}
+                            className={styles.adobeInlineLink}
+                            onClick={() => setActivePreviewPost(null)}
+                          >
+                            <ExternalLink size={12} />
+                            Continuar chat
+                          </Link>
+                        )}
+                      </div>
+                      <div className={styles.adobeChatHistoryList}>
+                        {chatHistory.map((message, index) => (
+                          <div key={index} className={styles.adobeChatItem}>
+                            <span className={styles.adobeChatItemRole} data-role={message.role}>{message.role}</span>
+                            <p className={styles.adobeChatItemText}>{message.content}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Seção: Perigo */}
+                  {canEdit && (
+                    <div className={styles.adobePanelSection} style={{ marginTop: 'auto', borderTop: '1px solid rgba(0, 0, 0, 0.08)', paddingTop: '16px' }}>
+                      <button
+                        className={styles.adobeDangerBtn}
+                        onClick={(e) => {
+                          handleDeletePost(activePreviewPost.id, e);
+                        }}
+                      >
+                        <Trash2 size={14} />
+                        Excluir Arte
+                      </button>
+                    </div>
+                  )}
+
+                </div>
+              </div>
+
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
+
+      {activeCanvaExportPost && (() => {
+        const preview = extractPreviewSource(activeCanvaExportPost.content, null);
+        const imageUrl = activeCanvaExportPost.previewUrl || (preview?.kind === 'image' ? preview.url : null);
+        const designPages = preview?.kind === 'design' ? preview.pages : null;
+        const designDocument = (preview?.kind === 'design' || preview?.kind === 'hybrid-document') ? preview.document : undefined;
+        const htmlContent = preview?.kind === 'html-design' ? preview.content : null;
+        const irContent = preview?.kind === 'ir-design' ? preview.content : null;
+        
+        // Calcular proporção real das páginas
+        const contentWidth = htmlContent?.width 
+          || irContent?.ir?.width 
+          || (irContent as any)?.width 
+          || (preview?.kind === 'design' ? preview.width : null) 
+          || 1080;
+        const contentHeight = htmlContent?.height 
+          || irContent?.ir?.height 
+          || (irContent as any)?.height 
+          || (preview?.kind === 'design' ? preview.height : null) 
+          || 1080;
+        const aspectRatio = `${contentWidth} / ${contentHeight}`;
+
+        const isRunningExport = exportandoCanva?.postId === activeCanvaExportPost.id 
+          || (exportando?.postId === activeCanvaExportPost.id && (exportando.formato === 'pptx' || exportando.formato === 'html'));
+
+        const handleExecutarCanvaExport = async (e: React.MouseEvent) => {
+          e.preventDefault();
+          if (canvaFormat === 'png') {
+            await handleExportCanva(e, activeCanvaExportPost.id);
+          } else {
+            setMostrarCanvaInstrucoes(false);
+            try {
+              await exportarDeck(
+                activeCanvaExportPost.id, 
+                canvaFormat, 
+                (done, total) => setExportando({ postId: activeCanvaExportPost.id, formato: canvaFormat, done, total }),
+                {}
+              );
+              setMostrarCanvaInstrucoes(true);
+            } catch (err) {
+              console.error(err);
+              alert('Não consegui exportar o arquivo.');
+            } finally {
+              setExportando(null);
+            }
+          }
+        };
+
+        return (
+          <div className={styles.canvaModalOverlay} onClick={() => { if (!isRunningExport) setActiveCanvaExportPost(null); }}>
+            <div className={styles.canvaModalContainer} onClick={(e) => e.stopPropagation()}>
+              
+              {/* Lado Esquerdo: Área de Preview (Fundo Escuro com Scroll) */}
+              <div className={styles.adobePreviewArea}>
+                <button className={styles.adobeCloseBtn} onClick={() => { if (!isRunningExport) setActiveCanvaExportPost(null); }}>
+                  <X size={20} />
+                </button>
+                
+                <div className={styles.adobePreviewWrapper}>
+                  {imageUrl ? (
+                    <div className={styles.adobePreviewSlideContainer}>
+                      <div className={styles.adobePreviewSlideHeader}>Imagem Final</div>
+                      <div className={styles.adobePreviewSlideContent} style={{ aspectRatio }}>
+                        <img src={imageUrl} alt="Preview" className={styles.adobePreviewImage} />
+                      </div>
+                    </div>
+                  ) : htmlContent ? (
+                    htmlContent.slides.map((slide: any, idx: number) => (
+                      <div key={idx} className={styles.adobePreviewSlideContainer}>
+                        <div className={styles.adobePreviewSlideHeader}>Slide {idx + 1}</div>
+                        <div className={styles.adobePreviewSlideContent} style={{ aspectRatio }}>
+                          <HtmlSlideRenderer content={{ ...htmlContent, slides: [slide] }} mode="contain" hideNav />
+                        </div>
+                      </div>
+                    ))
+                  ) : irContent ? (
+                    irContent.ir?.slides?.map((slide: any, idx: number) => (
+                      <div key={idx} className={styles.adobePreviewSlideContainer}>
+                        <div className={styles.adobePreviewSlideHeader}>Slide {idx + 1} {slide.name ? `— ${slide.name}` : ''}</div>
+                        <div className={styles.adobePreviewSlideContent} style={{ aspectRatio }}>
+                          <IRSlideRenderer content={{ ...irContent, ir: { ...irContent.ir, slides: [slide] } }} mode="contain" hideNav />
+                        </div>
+                      </div>
+                    ))
+                  ) : designPages ? (
+                    designPages.map((page: any, idx: number) => (
+                      <div key={page.id || idx} className={styles.adobePreviewSlideContainer}>
+                        <div className={styles.adobePreviewSlideHeader}>Slide {idx + 1} {page.name ? `— ${page.name}` : ''}</div>
+                        <div className={styles.adobePreviewSlideContent} style={{ aspectRatio }}>
+                          {designDocument ? (
+                            <DesignDocumentRenderer document={{ ...designDocument, pages: [page] }} mode="contain" />
+                          ) : (
+                            <DesignRenderer
+                              pages={[page]}
+                              canvasWidth={(preview?.kind === 'design' ? preview.width : null) ?? 1080}
+                              canvasHeight={(preview?.kind === 'design' ? preview.height : null) ?? 1080}
+                            />
+                          )}
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div style={{ color: 'var(--color-text-tertiary)' }}>Sem preview disponível</div>
+                  )}
+                </div>
+              </div>
+
+              {/* Lado Direito: Opções de Exportação Canva */}
+              <div className={styles.adobePanelArea} style={{ width: '420px' }}>
+                <div className={styles.adobePanelHeader}>
+                  <div className={styles.adobeMetaBadge}>Canva Connect</div>
+                  <h3 className={styles.adobePostTitle}>Exportar para o Canva</h3>
+                  <p style={{ fontSize: '13px', color: 'var(--color-text-secondary)', margin: '4px 0 0 0' }}>
+                    Escolha o formato de entrega ideal para o seu design.
+                  </p>
+                </div>
+
+                <div className={styles.adobePanelBody}>
+                  <div className={styles.adobePanelSection}>
+                    <h4 className={styles.adobeSectionTitle}>Formato de Exportação</h4>
+                    
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                      {/* PNG Card */}
+                      <div 
+                        className={styles.canvaFormatCard}
+                        data-selected={canvaFormat === 'png'}
+                        onClick={() => { if (!isRunningExport) { setCanvaFormat('png'); setMostrarCanvaInstrucoes(false); } }}
+                      >
+                        <input 
+                          type="radio" 
+                          className={styles.canvaFormatCardRadio} 
+                          checked={canvaFormat === 'png'}
+                          onChange={() => {}}
+                          disabled={isRunningExport}
+                        />
+                        <div>
+                          <div className={styles.canvaFormatCardTitle}>Imagem PNG (Automático)</div>
+                          <div className={styles.canvaFormatCardDesc}>
+                            Mantém 100% de fidelidade visual. Envia os slides renderizados como imagens de alta resolução direto para sua conta do Canva.
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* PPTX Card */}
+                      {(htmlContent || irContent || (designPages && designPages.length > 0)) && (
+                        <div 
+                          className={styles.canvaFormatCard}
+                          data-selected={canvaFormat === 'pptx'}
+                          onClick={() => { if (!isRunningExport) { setCanvaFormat('pptx'); setMostrarCanvaInstrucoes(false); } }}
+                        >
+                          <input 
+                            type="radio" 
+                            className={styles.canvaFormatCardRadio} 
+                            checked={canvaFormat === 'pptx'}
+                            onChange={() => {}}
+                            disabled={isRunningExport}
+                          />
+                          <div>
+                            <div className={styles.canvaFormatCardTitle}>Apresentação PPTX (Editável)</div>
+                            <div className={styles.canvaFormatCardDesc}>
+                              Exporta slides com caixas de texto editáveis e fontes nativas. Ideal para importação direta de apresentações no Canva.
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* HTML Card */}
+                      {htmlContent && (
+                        <div 
+                          className={styles.canvaFormatCard}
+                          data-selected={canvaFormat === 'html'}
+                          onClick={() => { if (!isRunningExport) { setCanvaFormat('html'); setMostrarCanvaInstrucoes(false); } }}
+                        >
+                          <input 
+                            type="radio" 
+                            className={styles.canvaFormatCardRadio} 
+                            checked={canvaFormat === 'html'}
+                            onChange={() => {}}
+                            disabled={isRunningExport}
+                          />
+                          <div>
+                            <div className={styles.canvaFormatCardTitle}>Código Fonte HTML (Editável)</div>
+                            <div className={styles.canvaFormatCardDesc}>
+                              Gera um ZIP com os arquivos de slides HTML/CSS isolados e buildados, prontos para a nova importação de HTML editável do Canva.
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Progresso ou Instruções */}
+                  {isRunningExport && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '12px', backgroundColor: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-md)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', fontWeight: 600 }}>
+                        <Loader2 size={16} className={styles.spin} />
+                        <span>Gerando arquivos e exportando...</span>
+                      </div>
+                      {exportando && (
+                        <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>
+                          Processado: {exportando.done} de {exportando.total} slides
+                        </div>
+                      )}
+                      {exportandoCanva && (
+                        <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>
+                          Enviado: {exportandoCanva.done} de {exportandoCanva.total} slides para o Canva
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {mostrarCanvaInstrucoes && (canvaFormat === 'pptx' || canvaFormat === 'html') && (
+                    <div className={styles.canvaInstructionBox}>
+                      <div style={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span>✓</span> O arquivo foi gerado com sucesso!
+                      </div>
+                      <div>
+                        Para importá-lo no Canva de forma 100% editável:
+                        <ol style={{ margin: '8px 0 0 16px', padding: 0 }}>
+                          <li>Abra a tela inicial do seu Canva.</li>
+                          <li>Clique em <strong>Criar um design</strong> e depois em <strong>Importar arquivo</strong>.</li>
+                          <li>Selecione o arquivo ZIP/PPTX que você acabou de baixar e pronto!</li>
+                        </ol>
+                      </div>
+                    </div>
+                  )}
+
+                  <div style={{ marginTop: 'auto', display: 'flex', gap: '12px' }}>
+                    <button
+                      className={styles.adobeDangerBtn}
+                      style={{ border: '1px solid var(--color-border)', color: 'var(--color-text)' }}
+                      onClick={() => setActiveCanvaExportPost(null)}
+                      disabled={isRunningExport}
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      className={styles.adobeMainActionBtn}
+                      onClick={handleExecutarCanvaExport}
+                      disabled={isRunningExport}
+                    >
+                      {isRunningExport ? 'Processando...' : 'Exportar agora'}
+                    </button>
+                  </div>
+                </div>
+
+              </div>
+
+            </div>
+          </div>
+        );
+      })()}
 
       {chatHistoryPreview && (
         <div className={styles.modalOverlay} onClick={() => setChatHistoryPreview(null)}>
@@ -871,8 +1330,6 @@ export default function BrandGaleriaPage() {
             const irContent = preview?.kind === 'ir-design' ? preview.content : null;
             const firstPage = designPages?.[0];
             const isHybridUncompiled = preview?.kind === 'hybrid-document';
-            const chatHistory = extractChatHistory(post.content);
-            const sessionId = extractSessionId(post.content);
 
             return (
               <div
@@ -882,209 +1339,34 @@ export default function BrandGaleriaPage() {
                 onDragStart={() => handleDragStart(post.id)}
                 onDragEnd={() => setDraggedPostId(null)}
               >
-                <Card hover padding="none">
-                  <div className={styles.postThumb}>
-                    <span className={styles.postType}>{formatPostType(post.type)}</span>
-                    <span
-                      className={styles.postStatus}
-                      data-status={post.status || 'READY'}
-                      title={`Status: ${formatStatus(post.status)}`}
-                    >
-                      {formatStatus(post.status)}
-                    </span>
-
-                    <div className={styles.postActions}>
-                      {canEdit && (
-                        <>
-                          <button
-                            className={styles.actionBtn}
-                            onClick={(e) => handleDeletePost(post.id, e)}
-                            title="Excluir Arte"
-                            style={{ color: 'rgb(220, 38, 38)' }}
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                          <div style={{ position: 'relative' }}>
-                            <button
-                              className={styles.actionBtn}
-                              onClick={(e) => { e.stopPropagation(); setMovingPostId(movingPostId === post.id ? null : post.id); }}
-                              title="Mover para pasta"
-                            >
-                              <FolderInput size={14} />
-                            </button>
-                            {movingPostId === post.id && (
-                              <div className={styles.folderSelectMenu}>
-                                <button
-                                  type="button"
-                                  onClick={(e) => { e.stopPropagation(); handleMoveToFolder(post.id, null); setMovingPostId(null); }}
-                                  style={itemStyle(!post.folderId)}
-                                >
-                                  Sem pasta
-                                </button>
-                                {folders.map((f) => (
-                                  <button
-                                    key={f.id}
-                                    type="button"
-                                    onClick={(e) => { e.stopPropagation(); handleMoveToFolder(post.id, f.id); setMovingPostId(null); }}
-                                    style={itemStyle(post.folderId === f.id)}
-                                  >
-                                    {f.name}
-                                  </button>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        </>
-                      )}
-                      {imageUrl && (
-                        <>
-                          <button
-                            className={styles.actionBtn}
-                            onClick={(e) => { e.stopPropagation(); setPreviewImage(imageUrl); }}
-                            title="Visualizar em tela cheia"
-                          >
-                            <Maximize2 size={14} />
-                          </button>
-                          <button
-                            className={styles.actionBtn}
-                            onClick={(e) => handleDownload(e, imageUrl, `post-${post.id}.png`)}
-                            title="Baixar imagem"
-                          >
-                            <Download size={14} />
-                          </button>
-                        </>
-                      )}
-                      {(htmlContent || (irContent && (irContent.ir?.slides?.length ?? 0) > 0)) && (
-                        <>
-                          <button
-                            className={styles.actionBtn}
-                            onClick={(e) => handleDownloadDeck(e, post.id, 'pptx')}
-                            disabled={exportando !== null}
-                            title="Baixar PPTX editável"
-                          >
-                            {exportando?.postId === post.id && exportando.formato === 'pptx'
-                              ? <Loader2 size={14} className={styles.spin} />
-                              : <Presentation size={14} />}
-                          </button>
-                          <button
-                            className={styles.actionBtn}
-                            onClick={(e) => handleDownloadDeck(e, post.id, 'pdf')}
-                            disabled={exportando !== null}
-                            title="Baixar PDF do deck"
-                          >
-                            {exportando?.postId === post.id && exportando.formato === 'pdf'
-                              ? <Loader2 size={14} className={styles.spin} />
-                              : <FileDown size={14} />}
-                          </button>
-                          <button
-                            className={styles.actionBtn}
-                            onClick={(e) => handleDownloadDeck(e, post.id, 'zip')}
-                            disabled={exportando !== null}
-                            title="Baixar PNGs (ZIP)"
-                          >
-                            {exportando?.postId === post.id && exportando.formato === 'zip'
-                              ? <Loader2 size={14} className={styles.spin} />
-                              : <Download size={14} />}
-                          </button>
-                          <button
-                            className={styles.actionBtn}
-                            onClick={(e) => handleExportCanva(e, post.id)}
-                            disabled={exportandoCanva !== null}
-                            title="Exportar para o Canva"
-                          >
-                            {exportandoCanva?.postId === post.id
-                              ? <Loader2 size={14} className={styles.spin} />
-                              : <Send size={14} />}
-                          </button>
-                        </>
-                      )}
-                      {(htmlContent || (irContent && (irContent.ir?.slides?.length ?? 0) > 0)) && canEdit && (
-                        <Link
-                          href={`/${slug}/editor/${post.id}`}
-                          className={styles.actionBtn}
-                          title="Abrir no Editor"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <PenLine size={14} />
-                        </Link>
-                      )}
-                      {(chatHistory.length > 0 || sessionId) && (
-                        <button
-                          className={styles.actionBtn}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setChatHistoryPreview({
-                              sessionId,
-                              messages: chatHistory,
-                              postLabel: `Arte ${post.id.split('-')[0]}`,
-                            });
-                          }}
-                          title="Ver histórico da conversa"
-                        >
-                          <MessageSquareText size={14} />
-                        </button>
-                      )}
+                  <div 
+                    className={styles.postThumb}
+                    onClick={() => setActivePreviewPost(post)}
+                  >
+                    <div className={styles.thumbOverlay}>
+                      <span className={styles.hoverText}>Visualizar</span>
                     </div>
 
                     {imageUrl ? (
-                      <div
-                        className={styles.thumbDesign}
-                        style={{ cursor: 'pointer' }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (htmlContent) setPreviewHtml(htmlContent);
-                          else if (irContent) setPreviewIr(irContent);
-                          else if (designPages) setPreviewDesign({ pages: designPages, width: firstPage?.width ?? 1080, height: firstPage?.height ?? 1080, document: designDocument });
-                          else setPreviewImage(imageUrl);
-                        }}
-                      >
-                        <Image
-                          src={imageUrl}
-                          alt="Post thumbnail"
-                          fill
-                          className={styles.thumbImage}
-                          sizes="260px"
-                          unoptimized
-                          priority={index < 4}
-                        />
-                        {(htmlContent || irContent || designPages) && (
-                          <span className={styles.slideCount}>
-                            {htmlContent ? htmlContent.slides.length : irContent ? (irContent.ir?.slides?.length ?? 0) : designPages?.length} slides — clique para abrir
-                          </span>
-                        )}
-                      </div>
+                      <Image
+                        src={imageUrl}
+                        alt="Post thumbnail"
+                        fill
+                        className={styles.thumbImage}
+                        sizes="260px"
+                        unoptimized
+                        priority={index < 4}
+                      />
                     ) : htmlContent ? (
-                      <div
-                        className={styles.thumbDesign}
-                        style={{ cursor: 'pointer' }}
-                        onClick={(e) => { e.stopPropagation(); setPreviewHtml(htmlContent); }}
-                      >
+                      <div className={styles.thumbDesign}>
                         <HtmlSlideRenderer content={htmlContent} mode="cover" hideNav />
-                        <span className={styles.slideCount}>{htmlContent.slides.length} slides — clique para abrir</span>
                       </div>
                     ) : irContent ? (
-                      <div 
-                        className={styles.thumbDesign}
-                        style={{ cursor: 'pointer' }}
-                        onClick={(e) => { e.stopPropagation(); setPreviewIr(irContent); }}
-                      >
+                      <div className={styles.thumbDesign}>
                         <IRSlideRenderer content={irContent} mode="cover" hideNav />
-                        <span className={styles.slideCount}>{irContent.ir?.slides?.length ?? 0} slides — clique para abrir</span>
                       </div>
                     ) : (designPages && firstPage) || isHybridUncompiled ? (
-                      <div
-                        className={styles.thumbDesign}
-                        style={{ backgroundColor: firstPage?.backgroundColor ?? '#111', cursor: 'pointer' }}
-                        onClick={(e) => { 
-                          e.stopPropagation(); 
-                          setPreviewDesign({ 
-                            pages: designPages ?? [], 
-                            width: firstPage?.width ?? 1080, 
-                            height: firstPage?.height ?? 1080, 
-                            document: designDocument 
-                          }); 
-                        }}
-                      >
+                      <div className={styles.thumbDesign}>
                         {designDocument ? (
                           <DesignDocumentRenderer document={designDocument} mode="cover" hideNav />
                         ) : designPages && firstPage ? (
@@ -1103,66 +1385,47 @@ export default function BrandGaleriaPage() {
                             </span>
                           </div>
                         )}
-                        <span className={styles.slideCount}>{designPages?.length ?? 1} slides — clique para abrir</span>
                       </div>
                     ) : (
                       <div className={styles.thumbEmpty}>
                         <span style={{ color: 'var(--color-text-tertiary)', fontSize: '12px' }}>Sem preview</span>
                       </div>
                     )}
+                    {(htmlContent || irContent || designPages) && (
+                      <span className={styles.slideCount}>
+                        {htmlContent ? htmlContent.slides.length : irContent ? (irContent.ir?.slides?.length ?? 0) : designPages?.length} slides
+                      </span>
+                    )}
                   </div>
+                  
                   <div className={styles.postBody}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', width: '100%' }}>
                       {renamingPostId === post.id ? (
-                        <form onSubmit={(e) => handleRenamePost(e, post.id)} style={{ flex: 1, display: 'flex', gap: '4px' }}>
+                        <form onSubmit={(e) => handleRenamePost(e, post.id)} style={{ width: '100%' }} onClick={(e) => e.stopPropagation()}>
                           <input 
                             type="text" 
                             value={newPostName} 
                             onChange={(e) => setNewPostName(e.target.value)} 
                             autoFocus 
-                            style={{ flex: 1, padding: '4px', fontSize: '14px', borderRadius: '4px', border: '1px solid var(--color-border)' }}
+                            style={{ width: '100%', padding: '4px', fontSize: '14px', borderRadius: '4px', border: '1px solid var(--color-border)' }}
                             onBlur={() => setRenamingPostId(null)}
                           />
                         </form>
                       ) : (
-                        <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 600, color: 'var(--color-text)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          {post.name || `Arte ${post.id.split('-')[0]}`}
-                          <button onClick={(e) => { e.stopPropagation(); setRenamingPostId(post.id); setNewPostName(post.name || ''); }} style={{ background: 'none', border: 'none', color: 'var(--color-text-secondary)', cursor: 'pointer', padding: 0 }}>
-                            <Edit3 size={14} />
+                        <h4 className={styles.postTitle} style={{ margin: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                          <span>{post.name || `Arte ${post.id.split('-')[0]}`}</span>
+                          <button 
+                            onClick={(e) => { e.stopPropagation(); setRenamingPostId(post.id); setNewPostName(post.name || ''); }} 
+                            style={{ background: 'none', border: 'none', color: 'var(--color-text-tertiary)', cursor: 'pointer', padding: 0 }}
+                            title="Renomear"
+                          >
+                            <Edit3 size={12} />
                           </button>
                         </h4>
                       )}
-                    </div>
-                    
-                    <div className={styles.postMetaGroup}>
                       <span className={styles.postDate}>{new Date(post.createdAt).toLocaleDateString()}</span>
-                      <span style={{ fontSize: '12px', background: 'var(--color-bg-secondary)', padding: '2px 6px', borderRadius: '4px', color: 'var(--color-text-secondary)' }}>
-                        {formatPostType(post.type)}
-                      </span>
-                      {post.createdBy && (
-                        <span className={styles.postCreator} title={post.createdBy.email}>
-                          👤 {post.createdBy.name.split(' ')[0]}
-                        </span>
-                      )}
                     </div>
-                    {(chatHistory.length > 0 || sessionId) && (
-                      <button
-                        className={styles.chatHistoryInlineBtn}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setChatHistoryPreview({
-                            sessionId,
-                            messages: chatHistory,
-                            postLabel: `Arte ${post.id.split('-')[0]}`,
-                          });
-                        }}
-                      >
-                        <MessageSquareText size={14} />
-                        Ver conversa
-                      </button>
-                    )}
                   </div>
-                </Card>
               </div>
             );
           })}
@@ -1197,10 +1460,7 @@ export default function BrandGaleriaPage() {
                         style={{ cursor: 'pointer', width: '100%', height: '100%' }}
                         onClick={(e) => {
                           e.stopPropagation();
-                          if (htmlContent) setPreviewHtml(htmlContent);
-                          else if (irContent) setPreviewIr(irContent);
-                          else if (designPages) setPreviewDesign({ pages: designPages, width: firstPage?.width ?? 1080, height: firstPage?.height ?? 1080, document: designDocument });
-                          else setPreviewImage(imageUrl);
+                          setActivePreviewPost(post);
                         }}
                       >
                         <Image
@@ -1217,7 +1477,7 @@ export default function BrandGaleriaPage() {
                       <div
                         className={styles.thumbDesign}
                         style={{ cursor: 'pointer' }}
-                        onClick={(e) => { e.stopPropagation(); setPreviewHtml(htmlContent); }}
+                        onClick={(e) => { e.stopPropagation(); setActivePreviewPost(post); }}
                       >
                         <HtmlSlideRenderer content={htmlContent} mode="cover" hideNav />
                       </div>
@@ -1225,7 +1485,7 @@ export default function BrandGaleriaPage() {
                       <div 
                         className={styles.thumbDesign}
                         style={{ cursor: 'pointer' }}
-                        onClick={(e) => { e.stopPropagation(); setPreviewIr(irContent); }}
+                        onClick={(e) => { e.stopPropagation(); setActivePreviewPost(post); }}
                       >
                         <IRSlideRenderer content={irContent} mode="cover" hideNav />
                       </div>
@@ -1233,7 +1493,7 @@ export default function BrandGaleriaPage() {
                       <div
                         className={styles.thumbDesign}
                         style={{ backgroundColor: firstPage.backgroundColor ?? '#111', cursor: 'pointer' }}
-                        onClick={(e) => { e.stopPropagation(); setPreviewDesign({ pages: designPages, width: firstPage.width ?? 1080, height: firstPage.height ?? 1080, document: designDocument }); }}
+                        onClick={(e) => { e.stopPropagation(); setActivePreviewPost(post); }}
                       >
                         {designDocument ? (
                           <DesignDocumentRenderer document={designDocument} mode="cover" hideNav />
@@ -1312,7 +1572,7 @@ export default function BrandGaleriaPage() {
                     <>
                       <button
                         className={styles.actionBtn}
-                        onClick={(e) => { e.stopPropagation(); setPreviewImage(imageUrl); }}
+                        onClick={(e) => { e.stopPropagation(); setActivePreviewPost(post); }}
                         title="Visualizar"
                       >
                         <Maximize2 size={16} />
@@ -1351,7 +1611,7 @@ export default function BrandGaleriaPage() {
                   {designPages && firstPage && (
                      <button
                       className={styles.actionBtn}
-                      onClick={() => setPreviewDesign({ pages: designPages, width: firstPage.width ?? 1080, height: firstPage.height ?? 1080, document: designDocument })}
+                      onClick={() => setActivePreviewPost(post)}
                       title="Visualizar Apresentação"
                      >
                        <Maximize2 size={16} />

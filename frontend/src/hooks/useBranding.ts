@@ -36,7 +36,7 @@ export function useBranding(slug: string) {
 
     const families = [headingFont, bodyFont]
       .filter((f, index, self) => typeof f === 'string' && f.trim() && self.indexOf(f) === index)
-      .map((f) => `family=${encodeURIComponent(f.trim())}:wght@300;400;500;600;700;800;900`)
+      .map((f) => `family=${encodeURIComponent(f.trim())}:wght@400;500;600;700;800`)
       .join('&');
 
     if (families) {

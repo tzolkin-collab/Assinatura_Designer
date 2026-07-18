@@ -34,12 +34,13 @@ import { uploadFileToR2 } from './r2.js';
 import { createError } from '../middleware/errorHandler.js';
 import { logger } from './logger.js';
 
-export type DeckExportFormat = 'pdf' | 'zip' | 'pptx';
+export type DeckExportFormat = 'pdf' | 'zip' | 'pptx' | 'html';
 
 const MIME_BY_FORMAT: Record<DeckExportFormat, string> = {
   pdf: 'application/pdf',
   zip: 'application/zip',
   pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  html: 'application/zip',
 };
 
 export interface DeckExportParams {
@@ -120,6 +121,31 @@ async function exportarZip(deck: RenderableDeck, onProgress?: OnDeckProgress): P
   return Buffer.concat(pedacos);
 }
 
+async function exportarHtml(deck: RenderableDeck, onProgress?: OnDeckProgress): Promise<Buffer> {
+  // O HTML comprime muito bem, então store: false para usar compressão do archiver
+  const zip = new ZipArchive({ store: false });
+  const pedacos: Buffer[] = [];
+
+  zip.on('data', (c: Buffer) => pedacos.push(c));
+  const fechado = new Promise<void>((resolve, reject) => {
+    zip.on('end', () => resolve());
+    zip.on('error', reject);
+  });
+
+  const largura = String(deck.count).length;
+  for (let i = 0; i < deck.count; i++) {
+    const htmlDoc = deck.docAt(i);
+    zip.append(htmlDoc, { name: `slide-${String(i + 1).padStart(largura, '0')}.html` });
+
+    await onProgress?.(i + 1, deck.count);
+  }
+
+  await zip.finalize();
+  await fechado;
+
+  return Buffer.concat(pedacos);
+}
+
 /**
  * Roda o export e devolve a URL do arquivo no R2. O arquivo sobe para o storage em
  * vez de voltar na resposta porque quem pede é um job: o cliente faz polling e só
@@ -140,6 +166,8 @@ export async function runDeckExport(
     buffer = await exportarPdf(deck, onProgress);
   } else if (format === 'zip') {
     buffer = await exportarZip(deck, onProgress);
+  } else if (format === 'html') {
+    buffer = await exportarHtml(deck, onProgress);
   } else {
     // PPTX editável: scan de DOM → elementos nativos (texto continua texto).
     const docs = Array.from({ length: deck.count }, (_, i) => deck.docAt(i));

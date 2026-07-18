@@ -7,7 +7,7 @@ import { createError } from '../middleware/errorHandler.js';
 import { AuthRequest } from '../middleware/auth.js';
 import { brandMemberFilter, ANY_MEMBER, EDITORS } from '../middleware/brandAccess.js';
 import { renderHtmlToPng } from '../lib/htmlRaster.js';
-import { buildSlideDocument, editHtmlSlide } from '../lib/htmlDesign.js';
+import { buildSlideDocument, editHtmlSlide, sanitizeSlideHtml, sanitizeSlideCss } from '../lib/htmlDesign.js';
 import { GoogleGenAI } from '@google/genai';
 import { config } from '../config.js';
 import { generateWithRetry } from '../lib/geminiRetry.js';
@@ -151,6 +151,66 @@ postsRouter.post('/:id/edit-slide', async (req: AuthRequest, res: Response, next
     });
 
     res.json({ data: { slideIndex: idx, slide: edited } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// PUT /api/posts/:id/slides/:index/code — A PRIMITIVA de edição do produto.
+//
+// O slide É um arquivo html/css. Este endpoint é a única porta de escrita desse
+// arquivo, e TODOS os caminhos convergem nele conceitualmente: o humano editando
+// o código na aba Fonte, a IA via editHtmlSlide (edit-slide/chat) e qualquer
+// automação futura. O código chega CRU e sai SANITIZADO aqui (mesmo DOMPurify
+// da geração — o que passar disto executa no chromium do raster), com versão
+// snapshotada antes: errou, restaura.
+postsRouter.put('/:id/slides/:index/code', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const id = req.params.id as string;
+    const idx = Math.max(0, parseInt(req.params.index as string, 10) || 0);
+    const { html, css } = (req.body ?? {}) as { html?: string; css?: string };
+    if (typeof html !== 'string' || !html.trim()) throw createError(400, 'html é obrigatório');
+
+    const post = await prisma.post.findFirst({
+      where: { id, brand: brandMemberFilter(req.user?.userId, EDITORS) },
+      include: { slides: { orderBy: { position: 'asc' } } },
+    });
+    if (!post) throw createError(404, 'Post não encontrado');
+
+    const content = mergeSlidesIntoPost(post).content as unknown as {
+      kind?: string;
+      width?: number;
+      height?: number;
+      fonts?: string[];
+      slides?: Array<{ html: string; css?: string }>;
+    };
+    if (content?.kind !== 'html-design' || !Array.isArray(content.slides)) {
+      throw createError(400, 'Edição de código disponível apenas para designs html-design');
+    }
+    if (idx >= content.slides.length) throw createError(400, 'slide fora do limite');
+
+    // Sanitização server-side: NUNCA confiar no que veio do cliente.
+    const clean = { html: sanitizeSlideHtml(html), css: css ? sanitizeSlideCss(css) : undefined };
+    if (!clean.html.trim()) throw createError(400, 'html ficou vazio após a sanitização');
+
+    await snapshotPost(post.id, {
+      source: 'EDITOR',
+      label: `Antes da edição de código do slide ${idx + 1}`,
+      userId: req.user?.userId,
+    });
+
+    const existingSlide = post.slides.find((s) => s.position === idx);
+    if (!existingSlide) throw createError(404, 'Slide não encontrado na tabela relacional');
+    await prisma.slide.update({
+      where: { id: existingSlide.id },
+      data: {
+        contentJson: clean as unknown as Prisma.InputJsonValue,
+        htmlRender: buildSlideDocument(clean, content.fonts ?? ['Inter'], content.width ?? 1080, content.height ?? 1080),
+      },
+    });
+    await prisma.post.update({ where: { id: post.id }, data: { updatedAt: new Date() } });
+
+    res.json({ data: { slideIndex: idx, slide: clean } });
   } catch (error) {
     next(error);
   }
@@ -490,8 +550,8 @@ postsRouter.post('/:id/export-file', async (req: AuthRequest, res: Response, nex
     const { format } = (req.body ?? {}) as { format?: string };
     const userId = req.user?.userId;
 
-    if (format !== 'pdf' && format !== 'zip' && format !== 'pptx') {
-      throw createError(400, "format deve ser 'pdf', 'zip' ou 'pptx'");
+    if (format !== 'pdf' && format !== 'zip' && format !== 'pptx' && format !== 'html') {
+      throw createError(400, "format deve ser 'pdf', 'zip', 'pptx' ou 'html'");
     }
 
     // Valida barato ANTES de enfileirar: um job que morre no worker por post

@@ -493,11 +493,24 @@ export function useFabricaWs(brandSlug: string, initialSessionId?: string | null
     send('mode:set', { mode });
   }, [send]);
 
+  // Edição LOCAL de um slide (aba Fonte / código): o servidor já persistiu via
+  // PUT /slides/:idx/code; aqui só espelhamos no preview sem esperar rehydrate.
+  const applySlideLocal = useCallback((index: number, slide: { html: string; css?: string }) => {
+    setCurrentDesign(prev => {
+      const env = prev[0] as (Record<string, unknown> & { kind?: string; slides?: unknown[] }) | undefined;
+      if (!env || env.kind !== 'html-design' || !Array.isArray(env.slides)) return prev;
+      const slides = env.slides.slice();
+      slides[index] = slide;
+      return [{ ...env, slides } as unknown as DesignPage];
+    });
+  }, []);
+
   return {
     sessionId,
     phase,
     messages,
     currentDesign,
+    applySlideLocal,
     workerStatus,
     progress,
     progressLabel,

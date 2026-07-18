@@ -1,0 +1,329 @@
+.container {
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 40px var(--space-4);
+}
+
+.header {
+  margin-bottom: 32px;
+}
+
+.title {
+  font-size: 28px;
+  font-weight: 800;
+  color: var(--color-text);
+  letter-spacing: -0.02em;
+  margin-bottom: 8px;
+}
+
+.desc {
+  font-size: 14px;
+  color: var(--color-text-secondary);
+}
+
+.tabs {
+  display: flex;
+  gap: 8px;
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: 32px;
+  padding-bottom: 2px;
+}
+
+.tabBtn {
+  background: none;
+  border: none;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  padding: 8px 16px;
+  cursor: pointer;
+  position: relative;
+  transition: color var(--transition-fast);
+}
+
+.tabBtn:hover {
+  color: var(--color-text);
+}
+
+.tabBtn[data-active='true'] {
+  color: var(--color-brand);
+  font-weight: 600;
+}
+
+.tabBtn[data-active='true']::after {
+  content: '';
+  position: absolute;
+  bottom: -3px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background-color: var(--color-brand);
+  border-radius: var(--radius-full);
+}
+
+.card {
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  padding: 24px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+  margin-bottom: 24px;
+}
+
+.cardTitle {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-text);
+  margin-bottom: 8px;
+}
+
+.cardDesc {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  margin-bottom: 20px;
+  line-height: var(--leading-relaxed);
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 450px;
+}
+
+.formGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.input {
+  padding: 10px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  background-color: #fafaf9;
+  transition: all var(--transition-fast);
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--color-brand);
+  background-color: #ffffff;
+  box-shadow: 0 0 0 2px var(--color-brand-light);
+}
+
+.submitBtn {
+  align-self: flex-start;
+  padding: 10px 20px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #ffffff;
+  background-color: var(--color-brand);
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+.submitBtn:hover {
+  background-color: #e04b4c;
+}
+
+.submitBtn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Integrations tab */
+.integrationList {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.integrationRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background-color: #fafaf9;
+  transition: background-color var(--transition-fast);
+}
+
+.integrationRow:hover {
+  background-color: #ffffff;
+}
+
+.integrationInfo {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.integrationIconWrapper {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  background-color: #f5f5f4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-secondary);
+}
+
+.integrationName {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-text);
+  margin-bottom: 2px;
+}
+
+.integrationStatus {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.statusConnected {
+  color: #16a34a;
+  font-weight: 600;
+}
+
+.connectBtn {
+  padding: 8px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background-color: #ffffff;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.connectBtn:hover {
+  border-color: var(--color-text-secondary);
+  background-color: #fafaf9;
+}
+
+.disconnectBtn {
+  padding: 8px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid rgba(220, 38, 38, 0.2);
+  color: rgb(220, 38, 38);
+  border-radius: var(--radius-md);
+  background-color: transparent;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.disconnectBtn:hover {
+  background-color: rgb(220, 38, 38);
+  color: #ffffff;
+  border-color: rgb(220, 38, 38);
+}
+
+/* Tenant management tab */
+.tenantTableHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.tenantTable {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 16px;
+}
+
+.tenantTable th {
+  text-align: left;
+  padding: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.tenantTable td {
+  padding: 16px 12px;
+  font-size: 13px;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text);
+}
+
+.tenantRow:hover {
+  background-color: #fafaf9;
+}
+
+.tenantNameCol {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.tenantColorBadge {
+  width: 12px;
+  height: 12px;
+  border-radius: var(--radius-full);
+}
+
+.tenantActionsCol {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.memberBadge {
+  display: inline-block;
+  padding: 2px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  background-color: #f3f4f6;
+  color: #374151;
+  border-radius: var(--radius-sm);
+  margin-right: 4px;
+}
+
+.memberBadge[data-role='OWNER'] {
+  background-color: #fef3c7;
+  color: #d97706;
+}
+
+.memberBadge[data-role='ADMIN'] {
+  background-color: #dbeafe;
+  color: #2563eb;
+}
+
+.msgSuccess {
+  background-color: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: var(--radius-md);
+  padding: 12px;
+  color: #166534;
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+
+.msgError {
+  background-color: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: var(--radius-md);
+  padding: 12px;
+  color: #991b1b;
+  font-size: 13px;
+  margin-bottom: 16px;
+}

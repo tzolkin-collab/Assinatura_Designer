@@ -42,11 +42,13 @@ brandsRouter.get('/', async (req: Request, res: Response, next: NextFunction) =>
       orderBy: { updatedAt: 'desc' },
       include: {
         _count: { select: { posts: true } },
+        config: { select: { logoUrl: true } },
         members: { include: { user: { select: { id: true, name: true, email: true } } } }
       },
     });
     const mapped = brands.map(b => ({
       ...b,
+      logoUrl: b.config?.logoUrl,
       myRole: b.members.find(m => m.userId === userId)?.role,
       user: b.members.find(m => m.role === 'OWNER')?.user
     }));
@@ -65,12 +67,14 @@ brandsRouter.get('/discover', async (req: Request, res: Response, next: NextFunc
       orderBy: { updatedAt: 'desc' },
       include: {
         _count: { select: { posts: true } },
+        config: { select: { logoUrl: true } },
         members: { include: { user: { select: { id: true, name: true, email: true } } } },
         accessRequests: { where: { userId, status: 'PENDING' } }
       },
     });
     const mapped = brands.map(b => ({
       ...b,
+      logoUrl: b.config?.logoUrl,
       user: b.members.find(m => m.role === 'OWNER')?.user,
       pendingRequest: b.accessRequests.length > 0
     }));

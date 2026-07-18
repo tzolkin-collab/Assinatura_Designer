@@ -1,1799 +1,425 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+// O editor, reescrito slim (2026-07-18) — de 1.800 para ~400 linhas.
+//
+// A decisão de produto mudou o trabalho desta página: a edição fina é no CANVA
+// (via PPTX) e pelo CHAT; aqui fica o essencial sobre o ÚNICO formato do
+// produto (html-design): ver o deck, editar com IA, editar o CÓDIGO do slide
+// (a mesma primitiva sanitizada que a IA usa), restaurar versões e baixar.
+//
+// Os ramos ancestrais (modelo Layer/CanvasEditor: 0 posts no banco; editor IR:
+// posts migrados para html-design em 2026-07-18) foram removidos — o histórico
+// vive no git e nos PostVersions.
+
+import React, { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import Link from 'next/link';
 import {
-  ArrowLeft,
-  Layers,
-  Image as ImageIcon,
-  LayoutGrid,
-  ChevronLeft,
-  ChevronRight,
-  FileJson,
-  Save,
-  Check,
-  SlidersHorizontal,
-  Keyboard,
-  Eye,
-  Type,
-  Square,
-  Circle,
-  Triangle,
-  Pentagon,
-  Minus,
-  Plus,
-  Wand2,
-  Undo2,
-  Redo2,
-  History,
-  Bookmark,
-  RotateCcw,
-  X
+  ArrowLeft, Check, ChevronDown, Clock, Download, History, Loader2,
+  MessageSquareText, Presentation, RotateCcw, Sparkles,
 } from 'lucide-react';
-import DesignRenderer, { type DesignPage, type Layer } from '@/components/Fabrica/DesignRenderer';
-import CanvasEditor, { type CanvasEditorHandle } from '@/components/Editor/CanvasEditor';
-import { extractEditablePages, isFabricaDesignContent, withUpdatedFabricaPages, type HybridDesignPostContent, type HtmlDesignPostContent, type IRDesignPostContent } from '@/lib/designContent';
-import HtmlSlideRenderer from '@/components/DesignDocument/HtmlSlideRenderer';
-import IRCanvasEditor, { type IRCanvasEditorHandle } from '@/components/Editor/IRCanvasEditor';
-import AIEditBar from '@/components/Editor/AIEditBar';
-import IRPropertiesPanel from '@/components/Editor/IRPropertiesPanel';
-import { type DesignIR, type IRPatch } from '@/lib/designIR/types';
-import { applyPatch } from '@/lib/designIR/patcher';
-import LayerPropertiesPanel from '@/components/Editor/LayerPropertiesPanel';
-import BackgroundPanel from '@/components/Editor/panels/BackgroundPanel';
-import MultiSelectPanel from '@/components/Editor/panels/MultiSelectPanel';
-import ShortcutsPanel from '@/components/Editor/ShortcutsPanel';
-import AIFixPanel from '@/components/Editor/AIFixPanel';
-import SlideThumbnailPanel from '@/components/Editor/SlideThumbnailPanel';
-import LayerListPanel from '@/components/Editor/LayerListPanel';
-import { useShortcutHandler } from '@/hooks/useShortcutHandler';
-import { useDesignFixer } from '@/hooks/useDesignFixer';
-import { copyLayers, pasteLayers, getClipboardCount } from '@/lib/clipboardStore';
 import { api, getApiErrorMessage } from '@/lib/api';
-import { useBrandPermissions } from '@/hooks/useBrandPermissions';
-import { acompanharExport } from '@/lib/canvaExport';
-import AssetLibrary from '@/components/Editor/AssetLibrary';
-import { useBrandPosts, type Post } from '@/lib/hooks';
 import Button from '@/components/ui/Button';
-import styles from './editor.module.css';
+import HtmlSlideRenderer from '@/components/DesignDocument/HtmlSlideRenderer';
+import SlideCodeEditor, { type SlideCode } from '@/components/DesignDocument/SlideCodeEditor';
+import { baixarSlide, exportarDeck, type DeckFileFormat } from '@/lib/deckFile';
 
-type SidebarTab = 'designs' | 'layers' | 'assets' | 'props';
+// ── Tipos ─────────────────────────────────────────────────────────────────────
 
-function formatPostType(type: string) {
-  switch (type) {
-    case 'CAROUSEL': return 'Carrossel';
-    case 'ANIMATION': return 'Animação';
-    case 'SINGLE_IMAGE': return 'Post Único';
-    default: return type;
-  }
+interface HtmlContent {
+  kind: 'html-design';
+  width?: number;
+  height?: number;
+  fonts?: string[];
+  slides: SlideCode[];
 }
 
-function LayerThumbnail({ layer }: { layer: Layer }) {
-  if (layer.type === 'text') {
-    return (
-      <div className={styles.layerIcon}>
-        <span className={styles.layerIconText}>{layer.content ? layer.content.charAt(0).toUpperCase() : 'T'}</span>
-      </div>
-    );
-  }
-  if (layer.type === 'image' && layer.url) {
-    return (
-      <div className={styles.layerIcon}>
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={layer.url} alt="" className={styles.layerIconImage} />
-      </div>
-    );
-  }
-  return (
-    <div className={styles.layerIcon}>
-      <div
-        className={styles.layerIconShape}
-        style={{
-          backgroundColor: layer.color || 'transparent',
-          borderColor: layer.borderColor || 'currentColor',
-          borderRadius: layer.borderRadius || 0
-        }}
-      />
-    </div>
-  );
+interface Post {
+  id: string;
+  name?: string | null;
+  type?: string;
+  content: unknown;
 }
-
-/** Espelha MAX_VERSIONS_PER_POST do backend — as mais antigas caem. */
-const MAX_VERSIONS_SHOWN = 20;
 
 type VersionSource = 'MANUAL' | 'EDITOR' | 'AI' | 'RESTORE';
 
 interface PostVersion {
   id: string;
-  label: string | null;
+  label?: string | null;
   source: VersionSource;
-  slideCount: number;
+  slideCount?: number;
   createdAt: string;
-  createdBy: { id: string; name: string } | null;
 }
 
 const VERSION_SOURCE_LABEL: Record<VersionSource, string> = {
-  MANUAL: 'Marcada por você',
-  EDITOR: 'Salvamento automático',
-  AI: 'Antes da IA',
-  RESTORE: 'Antes de restaurar',
+  MANUAL: 'Manual',
+  EDITOR: 'Editor',
+  AI: 'IA',
+  RESTORE: 'Restauração',
 };
 
-function formatVersionDate(iso: string) {
-  return new Date(iso).toLocaleString('pt-BR', {
-    day: '2-digit',
-    month: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+function isHtmlContent(c: unknown): c is HtmlContent {
+  return !!c && typeof c === 'object' && (c as { kind?: string }).kind === 'html-design'
+    && Array.isArray((c as { slides?: unknown[] }).slides);
 }
 
-export default function DesignEditorPage() {
-  const params = useParams();
+function formatDate(iso: string): string {
+  try {
+    return new Date(iso).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  } catch {
+    return iso;
+  }
+}
+
+type Painel = 'ia' | 'codigo' | 'versoes';
+
+// ── Página ────────────────────────────────────────────────────────────────────
+
+export default function EditorPage() {
+  const params = useParams<{ marca: string; postId: string }>();
   const router = useRouter();
-  const slug = params.marca as string;
-  const postId = params.postId as string;
+  const marca = params.marca;
+  const postId = params.postId;
+
+  const [post, setPost] = useState<Post | null>(null);
+  const [content, setContent] = useState<HtmlContent | null>(null);
+  const [carregando, setCarregando] = useState(true);
+  const [erro, setErro] = useState<string | null>(null);
+  const [formatoLegado, setFormatoLegado] = useState(false);
 
   const [activeSlide, setActiveSlide] = useState(0);
-  const [sidebarTab, setSidebarTab] = useState<SidebarTab>('layers');
-  const [pages, setPages] = useState<DesignPage[]>([]);
-  const [postType, setPostType] = useState('');
-  const [canvasW, setCanvasW] = useState(1080);
-  const [canvasH, setCanvasH] = useState(1080);
-  const [loading, setLoading] = useState(true);
-  const [loadState, setLoadState] = useState<'ready' | 'hybrid-uncompiled' | 'html' | 'ir' | 'invalid'>('ready');
-  const [htmlPostContent, setHtmlPostContent] = useState<HtmlDesignPostContent | null>(null);
-  const [irPostContent, setIrPostContent] = useState<IRDesignPostContent | null>(null);
-  const [editInstruction, setEditInstruction] = useState('');
+  const [painel, setPainel] = useState<Painel>('ia');
 
-  // Histórico: o undo/redo acima é em memória e morre no reload. Estas versões
-  // vivem no banco e são o que protege o trabalho de uma edição da IA.
-  const [showHistory, setShowHistory] = useState(false);
-  const [versions, setVersions] = useState<PostVersion[]>([]);
-  const [loadingVersions, setLoadingVersions] = useState(false);
-  const [restoringVersionId, setRestoringVersionId] = useState<string | null>(null);
-  const [savingVersion, setSavingVersion] = useState(false);
-  const [editingSlide, setEditingSlide] = useState(false);
+  // IA (mesmo endpoint do chat da Fábrica: editHtmlSlide sanitizado no servidor)
+  const [instrucao, setInstrucao] = useState('');
+  const [editando, setEditando] = useState(false);
   const [editLog, setEditLog] = useState<string[]>([]);
-  const [compileWarnings, setCompileWarnings] = useState<string[]>([]);
-  const [selectedLayerIds, setSelectedLayerIds] = useState<string[]>([]);
-  const [isDirty, setIsDirty] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const [savedAt, setSavedAt] = useState<Date | null>(null);
-  const [showShortcuts, setShowShortcuts] = useState(false);
-  const [isExportingCanva, setIsExportingCanva] = useState(false);
-  const [canvaProgress, setCanvaProgress] = useState<number | null>(null);
-  const [viewMode, setViewMode] = useState<'single' | 'grid'>('single');
-  const [snapEnabled, setSnapEnabled] = useState(true);
+  const [erroEdicao, setErroEdicao] = useState<string | null>(null);
 
-  const [insertMenuOpen, setInsertMenuOpen] = useState(false);
-  const [insertCategory, setInsertCategory] = useState<'shapes' | 'text'>('shapes');
-  const insertMenuRef = useRef<HTMLDivElement>(null);
+  // Versões
+  const [versoes, setVersoes] = useState<PostVersion[]>([]);
+  const [restaurando, setRestaurando] = useState<string | null>(null);
 
-  const [showFixPanel, setShowFixPanel] = useState(false);
-  const fixer = useDesignFixer();
+  // Downloads
+  const [exportando, setExportando] = useState<{ formato: string; done: number; total: number } | null>(null);
+  const [menuBaixar, setMenuBaixar] = useState(false);
 
-  const [previewLayerId, setPreviewLayerId] = useState<string | null>(null);
-  const [previewKey, setPreviewKey] = useState(0);
-
-  const canvasEditorRef = useRef<CanvasEditorHandle>(null);
-  const irCanvasEditorRef = useRef<IRCanvasEditorHandle>(null);
-
-  useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (insertMenuRef.current && !insertMenuRef.current.contains(e.target as Node)) {
-        setInsertMenuOpen(false);
-      }
-    }
-    if (insertMenuOpen) document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [insertMenuOpen]);
-
-  // History (legacy DesignPage pages)
-  const undoStack = useRef<DesignPage[][]>([]);
-  const redoStack = useRef<DesignPage[][]>([]);
-  // History do editor IR (o ir-design não usa `pages`; guarda snapshots do IR).
-  const irUndoStack = useRef<DesignIR[]>([]);
-  const irRedoStack = useRef<DesignIR[]>([]);
-
-  // Always-fresh refs for use inside stable callbacks
-  const pagesRef = useRef(pages);
-  const originalHybridContentRef = useRef<HybridDesignPostContent | null>(null);
-  pagesRef.current = pages;
-  const activeSlideRef = useRef(activeSlide);
-  activeSlideRef.current = activeSlide;
-  const selectedLayerIdsRef = useRef(selectedLayerIds);
-  selectedLayerIdsRef.current = selectedLayerIds;
-  const isDirtyRef = useRef(isDirty);
-  isDirtyRef.current = isDirty;
-  const isSavingRef = useRef(isSaving);
-  isSavingRef.current = isSaving;
-  const postIdRef = useRef(postId);
-  postIdRef.current = postId;
-  const loadStateRef = useRef(loadState);
-  loadStateRef.current = loadState;
-
-  // ── Permissões da marca ──────────────────────────────────────────────────────
-  const { can, readOnly, hint: permHint } = useBrandPermissions();
-  const canEdit = can('edit-design');
-  const canExport = can('export');
-  const canEditRef = useRef(canEdit);
-  canEditRef.current = canEdit;
-  const [saveError, setSaveError] = useState('');
-  const [exportAviso, setExportAviso] = useState('');
-
-  // ── Core mutation ────────────────────────────────────────────────────────────
-
-  const applyChange = useCallback((updater: (prev: DesignPage[]) => DesignPage[]) => {
-    setPages((prev) => {
-      undoStack.current.push(prev);
-      if (undoStack.current.length > 60) undoStack.current.shift();
-      redoStack.current = [];
-      return updater(prev);
-    });
-    setIsDirty(true);
-  }, []);
-
-  // ── Layer mutations ──────────────────────────────────────────────────────────
-
-  const addLayer = useCallback((type: 'text' | 'shape' | 'image', url?: string, overrides?: Partial<Layer>) => {
-    const newId = `layer-${Date.now()}`;
-    const newZ = (pages[activeSlide]?.layers?.length ?? 0) + 1;
-    let base: Layer = { id: newId, type, x: 100, y: 100, width: 200, height: 200, zIndex: newZ };
-
-    if (type === 'text') {
-      base.content = 'Novo Texto';
-      base.fontSize = 48;
-      base.height = 60;
-    }
-    if (type === 'shape') {
-      base.color = '#cccccc';
-    }
-    if (type === 'image' && url) {
-      base.url = url;
-    }
-
-    if (overrides) {
-      base = { ...base, ...overrides };
-    }
-
-    applyChange(prev => prev.map((page, i) => i === activeSlide ? { ...page, layers: [...(page.layers ?? []), base] } : page));
-    setSelectedLayerIds([newId]);
-  }, [pages, activeSlide, applyChange]);
-
-  const undo = useCallback(() => {
-    if (loadStateRef.current === 'ir') {
-      const snapshot = irUndoStack.current.pop();
-      if (!snapshot) return;
-      setIrPostContent((prev) => {
-        if (!prev || !prev.ir) return prev;
-        irRedoStack.current.push(prev.ir as DesignIR);
-        return { ...prev, ir: snapshot };
-      });
-      setIsDirty(true);
-      return;
-    }
-    const snapshot = undoStack.current.pop();
-    if (!snapshot) return;
-    redoStack.current.push(pagesRef.current);
-    setPages(snapshot);
-    setIsDirty(true);
-  }, []);
-
-  const redo = useCallback(() => {
-    if (loadStateRef.current === 'ir') {
-      const snapshot = irRedoStack.current.pop();
-      if (!snapshot) return;
-      setIrPostContent((prev) => {
-        if (!prev || !prev.ir) return prev;
-        irUndoStack.current.push(prev.ir as DesignIR);
-        return { ...prev, ir: snapshot };
-      });
-      setIsDirty(true);
-      return;
-    }
-    const snapshot = redoStack.current.pop();
-    if (!snapshot) return;
-    undoStack.current.push(pagesRef.current);
-    setPages(snapshot);
-    setIsDirty(true);
-  }, []);
-
-  // ── Slide mutations ────────────────────────────────────────────────────────
-
-  const handleAddBlankSlide = useCallback(() => {
-    if (pagesRef.current.length >= 20) return;
-    applyChange(prev => [
-      ...prev,
-      { layers: [], backgroundColor: '#ffffff', width: canvasW, height: canvasH }
-    ]);
-    // Use functional updater — applyChange is async, pagesRef still has old length
-    setActiveSlide(() => pagesRef.current.length);
-  }, [applyChange, canvasW, canvasH]);
-
-  const handleDuplicateSlide = useCallback((index: number) => {
-    if (pagesRef.current.length >= 20) return;
-    applyChange(prev => {
-      const slideToCopy = prev[index];
-      if (!slideToCopy) return prev;
-      
-      const newSlide: DesignPage = {
-        ...slideToCopy,
-        layers: (slideToCopy.layers ?? []).map(layer => ({
-          ...layer,
-          id: crypto.randomUUID()
-        }))
-      };
-      
-      const newPages = [...prev];
-      newPages.splice(index + 1, 0, newSlide);
-      return newPages;
-    });
-    setActiveSlide(index + 1);
-  }, [applyChange]);
-
-  const handleDeleteSlide = useCallback((index: number) => {
-    if (pagesRef.current.length <= 1) return;
-    if (!window.confirm(`Deletar slide ${index + 1}? Esta ação pode ser desfeita com Ctrl+Z.`)) return;
-    
-    applyChange(prev => {
-      const newPages = [...prev];
-      newPages.splice(index, 1);
-      return newPages;
-    });
-    
-    setActiveSlide(current => {
-      if (current === index) {
-        return Math.max(0, index - 1);
-      }
-      if (current > index) {
-        return current - 1;
-      }
-      return current;
-    });
-  }, [applyChange]);
-
-  const handleReorderSlide = useCallback((from: number, to: number) => {
-    if (to < 0 || to >= pagesRef.current.length) return;
-    
-    applyChange(prev => {
-      const newPages = [...prev];
-      const [moved] = newPages.splice(from, 1);
-      newPages.splice(to, 0, moved);
-      return newPages;
-    });
-    
-    setActiveSlide(current => {
-      if (current === from) return to;
-      if (current >= to && current < from) return current + 1;
-      if (current <= to && current > from) return current - 1;
-      return current;
-    });
-  }, [applyChange]);
-
-  // ── Data loading ─────────────────────────────────────────────────────────────
-
-  const { posts } = useBrandPosts(slug);
-
-  // Recarrega o post do banco. Além do load inicial, é o que roda depois de
-  // restaurar uma versão — o editor tem de mostrar o que o banco passou a ter.
-  const loadPost = useCallback(() => {
-    if (!postId) return;
-    setLoading(true);
-    setActiveSlide(0);
-    setSelectedLayerIds([]);
-    setIsDirty(false);
-    setLoadState('ready');
-    setCompileWarnings([]);
-    undoStack.current = [];
-    redoStack.current = [];
-    irUndoStack.current = [];
-    irRedoStack.current = [];
-    originalHybridContentRef.current = null;
-    setHtmlPostContent(null);
-    setIrPostContent(null);
-    api.get<Post>(`/posts/${postId}`)
-      .then((post) => {
-        if (!post) return;
-        const editable = extractEditablePages(post.content);
-        if (post.content && typeof post.content === 'object' && !Array.isArray(post.content) && (post.content as { kind?: unknown }).kind === 'hybrid-design') {
-          originalHybridContentRef.current = post.content as HybridDesignPostContent;
-        }
-        if (editable.status === 'ir') {
-          setIrPostContent(editable.content);
-          setPages([]);
-          setLoadState('ir');
-          setPostType(post.type);
-          const irContent = editable.content.ir;
-          if (typeof irContent.width === 'number') setCanvasW(irContent.width);
-          if (typeof irContent.height === 'number') setCanvasH(irContent.height);
-          return;
-        }
-        if (editable.status === 'html') {
-          setHtmlPostContent(editable.content);
-          setPages([]);
-          setLoadState('html');
-          setPostType(post.type);
-          if (typeof editable.content.width === 'number') setCanvasW(editable.content.width);
-          if (typeof editable.content.height === 'number') setCanvasH(editable.content.height);
-          return;
-        }
-        if (editable.status === 'editable') {
-          setPages(editable.pages);
-          setCompileWarnings(editable.warnings ?? []);
-          setLoadState('ready');
-          const first = editable.pages[0];
-          if (typeof first?.width === 'number') setCanvasW(first.width);
-          if (typeof first?.height === 'number') setCanvasH(first.height);
-          setPostType(post.type);
-          return;
-        }
-        
-        setPages([]);
-        setLoadState(editable.status === 'hybrid-uncompiled' ? 'hybrid-uncompiled' : 'invalid');
-        setPostType(post.type);
-      })
-      .catch(console.error)
-      .finally(() => setLoading(false));
-  }, [postId]);
-
-  useEffect(() => {
-    loadPost();
-  }, [loadPost]);
-
-  const fetchVersions = useCallback(async () => {
-    if (!postId) return;
-    setLoadingVersions(true);
+  const carregar = useCallback(async () => {
+    setCarregando(true);
+    setErro(null);
     try {
-      const data = await api.get<PostVersion[]>(`/posts/${postId}/versions`);
-      setVersions(data ?? []);
-    } catch (err) {
-      console.error('Falha ao carregar o histórico:', err);
+      const p = await api.get<Post>(`/posts/${postId}`);
+      setPost(p);
+      if (isHtmlContent(p.content)) {
+        setContent(p.content);
+        setFormatoLegado(false);
+      } else {
+        setContent(null);
+        setFormatoLegado(true);
+      }
+    } catch (e) {
+      setErro(getApiErrorMessage(e, 'Não consegui carregar o design.'));
     } finally {
-      setLoadingVersions(false);
+      setCarregando(false);
     }
   }, [postId]);
 
-  const openHistory = useCallback(() => {
-    setShowHistory(true);
-    fetchVersions();
-  }, [fetchVersions]);
+  useEffect(() => { void carregar(); }, [carregar]);
 
-  const handleRestoreVersion = useCallback(async (versionId: string) => {
-    if (restoringVersionId) return;
-    if (!confirm('Restaurar esta versão? O estado atual vira uma versão no histórico, então dá para voltar.')) return;
+  const carregarVersoes = useCallback(async () => {
+    try {
+      setVersoes(await api.get<PostVersion[]>(`/posts/${postId}/versions`));
+    } catch { /* silencioso: painel mostra vazio */ }
+  }, [postId]);
 
-    setRestoringVersionId(versionId);
+  useEffect(() => {
+    if (painel === 'versoes') void carregarVersoes();
+  }, [painel, carregarVersoes]);
+
+  const slideCount = content?.slides.length ?? 0;
+  const safeSlide = Math.min(activeSlide, Math.max(0, slideCount - 1));
+  const canvasW = content?.width ?? 1080;
+  const canvasH = content?.height ?? 1080;
+
+  const aplicarSlide = useCallback((idx: number, slide: SlideCode) => {
+    setContent(prev => {
+      if (!prev) return prev;
+      const slides = prev.slides.slice();
+      slides[idx] = slide;
+      return { ...prev, slides };
+    });
+  }, []);
+
+  const editarComIA = useCallback(async () => {
+    const texto = instrucao.trim();
+    if (!texto || editando || !content) return;
+    setEditando(true);
+    setErroEdicao(null);
+    try {
+      const resp = await api.post<{ slideIndex: number; slide: SlideCode }>(
+        `/posts/${postId}/edit-slide`,
+        { slideIndex: safeSlide, instruction: texto },
+      );
+      aplicarSlide(resp.slideIndex, resp.slide);
+      setEditLog(prev => [...prev.slice(-5), texto]);
+      setInstrucao('');
+    } catch (e) {
+      setErroEdicao(getApiErrorMessage(e, 'A edição falhou — o slide continua como estava.'));
+    } finally {
+      setEditando(false);
+    }
+  }, [instrucao, editando, content, postId, safeSlide, aplicarSlide]);
+
+  const restaurar = useCallback(async (versionId: string) => {
+    setRestaurando(versionId);
     try {
       await api.post(`/posts/${postId}/versions/${versionId}/restore`, {});
-      loadPost(); // o banco mudou; recarrega em vez de adivinhar o estado
-      await fetchVersions();
-      setShowHistory(false);
-    } catch (err) {
-      console.error('Falha ao restaurar a versão:', err);
-    } finally {
-      setRestoringVersionId(null);
-    }
-  }, [postId, restoringVersionId, loadPost, fetchVersions]);
-
-  useEffect(() => {
-    setSelectedLayerIds([]);
-    setSidebarTab((prev) => (prev === 'props' ? 'layers' : prev));
-  }, [activeSlide]);
-
-  useEffect(() => {
-    if (selectedLayerIds.length > 0) {
-      setSidebarTab('props');
-      return;
-    }
-    setSidebarTab((prev) => (prev === 'props' ? 'layers' : prev));
-  }, [selectedLayerIds.length]);
-
-  // ── Handlers ─────────────────────────────────────────────────────────────────
-
-  // Edição via chat (html-design): aplica a instrução só ao slide ativo.
-  const handleEditSlide = useCallback(async () => {
-    const instruction = editInstruction.trim();
-    if (!instruction || !htmlPostContent || editingSlide) return;
-    setEditingSlide(true);
-    try {
-      const resp = await api.post<
-        { slideIndex: number; slide: { html: string; css?: string } },
-        { slideIndex: number; instruction: string }
-      >(`/posts/${postId}/edit-slide`, { slideIndex: activeSlide, instruction });
-      setHtmlPostContent((prev) => {
-        if (!prev) return prev;
-        const slides = prev.slides.slice();
-        slides[resp.slideIndex] = resp.slide;
-        return { ...prev, slides };
-      });
-      setEditLog((prev) => [...prev, instruction]);
-      setEditInstruction('');
+      await carregar();
+      await carregarVersoes();
     } catch (e) {
-      console.error('[edit-slide]', e);
+      setErro(getApiErrorMessage(e, 'Não consegui restaurar a versão.'));
     } finally {
-      setEditingSlide(false);
+      setRestaurando(null);
     }
-  }, [editInstruction, htmlPostContent, editingSlide, postId, activeSlide]);
+  }, [postId, carregar, carregarVersoes]);
 
-  const handleIRPatch = useCallback((patch: IRPatch) => {
-    setIrPostContent((prev) => {
-      if (!prev || !prev.ir) return prev;
-      // Empilha o IR anterior para o undo (teto de 60, como o histórico legado).
-      irUndoStack.current.push(prev.ir as DesignIR);
-      if (irUndoStack.current.length > 60) irUndoStack.current.shift();
-      irRedoStack.current = [];
-      const newIr = applyPatch(prev.ir as DesignIR, patch);
-      return { ...prev, ir: newIr };
-    });
-    setIsDirty(true);
-  }, []);
+  const baixarDeck = useCallback(async (formato: DeckFileFormat) => {
+    setMenuBaixar(false);
+    setExportando({ formato, done: 0, total: slideCount });
+    try {
+      await exportarDeck(postId, formato, (done, total) => setExportando({ formato, done, total }));
+    } catch (e) {
+      setErro(getApiErrorMessage(e, `Não consegui gerar o ${formato.toUpperCase()}.`));
+    } finally {
+      setExportando(null);
+    }
+  }, [postId, slideCount]);
 
-  /**
-   * Insere uma imagem da biblioteca da marca no slide atual.
-   *
-   * Precisa cobrir os dois caminhos: o ir-design (elemento no IR, via patch) e o
-   * legado (layer em `pages`). Antes, o "upload" do editor inseria um `blob:` URL
-   * criado com URL.createObjectURL — válido só naquela aba do navegador. O post
-   * era salvo com uma URL morta.
-   */
-  const handleInsertAsset = useCallback(
-    (asset: { url: string; name: string; width?: number | null; height?: number | null }) => {
-      if (!canEditRef.current) return;
+  // ── Render ──────────────────────────────────────────────────────────────────
 
-      if (loadStateRef.current === 'ir') {
-        const ir = irPostContent?.ir as DesignIR | undefined;
-        const slide = ir?.slides?.[activeSlideRef.current];
-        if (!slide) return;
-
-        // Encaixa a imagem dentro do canvas mantendo a proporção quando conhecida.
-        const maxW = Math.round((ir?.width ?? 1080) * 0.5);
-        const ratio = asset.width && asset.height ? asset.height / asset.width : 1;
-        const width = maxW;
-        const height = Math.round(maxW * ratio);
-
-        handleIRPatch({
-          ops: [
-            {
-              op: 'add-element',
-              slideId: slide.id,
-              element: {
-                id: `img-${Date.now()}`,
-                type: 'image',
-                role: 'decoration',
-                name: asset.name,
-                src: asset.url,
-                bounds: { x: 80, y: 80, width, height },
-                zIndex: (slide.elements?.length ?? 0) + 1,
-                style: { objectFit: 'cover' },
-                visible: true,
-              },
-            },
-          ],
-        });
-        return;
-      }
-
-      addLayer('image', asset.url);
-    },
-    [irPostContent, handleIRPatch, addLayer],
-  );
-
-  const handleLayersChange = useCallback(
-    (newLayers: Layer[]) =>
-      applyChange((prev) =>
-        prev.map((page, i) => (i === activeSlide ? { ...page, layers: newLayers } : page))
-      ),
-    [activeSlide, applyChange]
-  );
-
-  const handleBackgroundChange = useCallback(
-    (color: string) =>
-      applyChange((prev) =>
-        prev.map((page, i) => (i === activeSlide ? { ...page, backgroundColor: color } : page))
-      ),
-    [activeSlide, applyChange]
-  );
-
-  const handleBackgroundImageChange = useCallback(
-    (url: string | undefined) =>
-      applyChange((prev) =>
-        prev.map((page, i) => (i === activeSlide ? { ...page, backgroundImage: url } : page))
-      ),
-    [activeSlide, applyChange]
-  );
-
-  const handleLayerPropertyChange = useCallback(
-    (overrides: Partial<Layer>) => {
-      const lid = selectedLayerIdsRef.current[0];
-      if (!lid) return;
-      applyChange((prev) =>
-        prev.map((page, i) => {
-          if (i !== activeSlide) return page;
-          return {
-            ...page,
-            layers: (page.layers ?? []).map((l) =>
-              l.id === lid ? { ...l, ...overrides } : l
-            ),
-          };
-        })
-      );
-    },
-    [activeSlide, applyChange]
-  );
-
-  const updateSpecificLayer = useCallback((id: string, overrides: Partial<Layer>) => {
-    applyChange((prev) =>
-      prev.map((page, i) => {
-        if (i !== activeSlide) return page;
-        return {
-          ...page,
-          layers: (page.layers ?? []).map((l) =>
-            l.id === id ? { ...l, ...overrides } : l
-          ),
-        };
-      })
+  if (carregando) {
+    return (
+      <div style={{ display: 'grid', placeItems: 'center', height: '100dvh', color: 'var(--color-text-muted, #6b7280)' }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Loader2 size={16} /> Carregando design…</span>
+      </div>
     );
-  }, [activeSlide, applyChange]);
+  }
 
-  const handleMultiSelectChange = useCallback(
-    (updates: Map<string, Partial<Layer>>) => {
-      applyChange((prev) =>
-        prev.map((page, i) => {
-          if (i !== activeSlide) return page;
-          return {
-            ...page,
-            layers: (page.layers ?? []).map((l) => {
-              const ov = updates.get(l.id);
-              return ov ? { ...l, ...ov } : l;
-            }),
-          };
-        })
-      );
-    },
-    [activeSlide, applyChange]
+  if (formatoLegado || !content) {
+    return (
+      <div style={{ display: 'grid', placeItems: 'center', height: '100dvh', textAlign: 'center', padding: 24 }}>
+        <div>
+          <h2 style={{ marginBottom: 8 }}>Formato não suportado pelo editor</h2>
+          <p style={{ color: 'var(--color-text-muted, #6b7280)', marginBottom: 16, maxWidth: 480 }}>
+            {erro ?? 'Este design é de um formato legado. O acervo atual foi migrado para html-design — se este post importa, me avise no chat da Fábrica.'}
+          </p>
+          <Button onClick={() => router.push(`/${marca}/galeria`)}>Voltar à galeria</Button>
+        </div>
+      </div>
+    );
+  }
+
+  const painelBtn = (id: Painel, label: string, Icone: typeof Sparkles) => (
+    <button
+      key={id}
+      type="button"
+      onClick={() => setPainel(id)}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', fontSize: 12.5, fontWeight: 500,
+        borderRadius: 999, border: '1px solid transparent', cursor: 'pointer',
+        background: painel === id ? 'rgba(0,0,0,0.07)' : 'transparent',
+        color: painel === id ? 'var(--color-text, #111827)' : 'var(--color-text-muted, #6b7280)',
+      }}
+    >
+      <Icone size={13} /> {label}
+    </button>
   );
-
-  const handleMarqueeSelect = useCallback((ids: string[]) => {
-    setSelectedLayerIds(ids);
-  }, []);
-
-  const handlePreviewAnimation = useCallback(() => {
-    const lid = selectedLayerIdsRef.current[0];
-    if (!lid) return;
-    setPreviewLayerId(lid);
-    setPreviewKey(k => k + 1);
-    // Clear after animation can finish (max duration 3s + max delay 5s + buffer)
-    setTimeout(() => setPreviewLayerId(null), 8500);
-  }, []);
-
-  const handleSave = useCallback(async () => {
-    if (!isDirtyRef.current || isSavingRef.current) return;
-    // Guard central: o botão já vem desabilitado, mas o save também é disparado por
-    // atalho de teclado. Sem isto, um VIEWER apertaria Ctrl+S e tomaria 403 silencioso.
-    if (!canEditRef.current) return;
-    setIsSaving(true);
-    try {
-      let contentToSave: any;
-      if (irPostContent) {
-        contentToSave = irPostContent;
-      } else {
-        const hybrid = originalHybridContentRef.current;
-        const currentContent = posts.find((post) => post.id === postIdRef.current)?.content;
-        contentToSave = hybrid
-          ? { ...hybrid, pages: pagesRef.current }
-          : isFabricaDesignContent(currentContent)
-            ? withUpdatedFabricaPages(currentContent, pagesRef.current)
-            : pagesRef.current;
-        if (hybrid) originalHybridContentRef.current = contentToSave as HybridDesignPostContent;
-      }
-      await api.put(`/posts/${postIdRef.current}`, { content: contentToSave });
-      setIsDirty(false);
-      setSavedAt(new Date());
-      setSaveError('');
-    } catch (err) {
-      // Antes o erro só ia pro console: o usuário achava que tinha salvo.
-      setSaveError(getApiErrorMessage(err, 'Não foi possível salvar.'));
-    } finally {
-      setIsSaving(false);
-    }
-  }, []);
-
-  const handleSaveVersion = useCallback(async () => {
-    if (savingVersion) return;
-    const label = prompt('Nome desta versão (opcional):');
-    if (label === null) return; // cancelou
-
-    setSavingVersion(true);
-    try {
-      // Grava o trabalho atual ANTES de marcá-lo: a versão é feita do que está no
-      // banco, então sem isto o ponto de retorno seria o estado anterior à edição.
-      await handleSave();
-      await api.post(`/posts/${postId}/versions`, { label: label.trim() || undefined });
-      await fetchVersions();
-    } catch (err) {
-      console.error('Falha ao salvar a versão:', err);
-    } finally {
-      setSavingVersion(false);
-    }
-  }, [postId, savingVersion, handleSave, fetchVersions]);
-
-  // ── Shortcut action builders (read state from refs → no stale closures) ──────
-
-  const nudge = useCallback((dx: number, dy: number) => {
-    const layerIds = selectedLayerIdsRef.current;
-    const slide = activeSlideRef.current;
-    if (layerIds.length === 0) return;
-    setPages((prev) => {
-      undoStack.current.push(prev);
-      redoStack.current = [];
-      return prev.map((page, i) =>
-        i !== slide
-          ? page
-          : {
-              ...page,
-              layers: (page.layers ?? []).map((l) =>
-                layerIds.includes(l.id) ? { ...l, x: l.x + dx, y: l.y + dy } : l
-              ),
-            }
-      );
-    });
-    setIsDirty(true);
-  }, []);
-
-  const shiftZIndex = useCallback((delta: number) => {
-    const layerIds = selectedLayerIdsRef.current;
-    const slide = activeSlideRef.current;
-    if (layerIds.length === 0) return;
-    setPages((prev) => {
-      undoStack.current.push(prev);
-      redoStack.current = [];
-      return prev.map((page, i) =>
-        i !== slide
-          ? page
-          : {
-              ...page,
-              layers: (page.layers ?? []).map((l) =>
-                layerIds.includes(l.id) ? { ...l, zIndex: (l.zIndex ?? 0) + delta } : l
-              ),
-            }
-      );
-    });
-    setIsDirty(true);
-  }, []);
-
-  const deleteSelected = useCallback(() => {
-    const layerIds = selectedLayerIdsRef.current;
-    const slide = activeSlideRef.current;
-    if (layerIds.length === 0) return;
-    setPages((prev) => {
-      undoStack.current.push(prev);
-      redoStack.current = [];
-      return prev.map((page, i) =>
-        i !== slide
-          ? page
-          : { ...page, layers: (page.layers ?? []).filter((l) => !layerIds.includes(l.id)) }
-      );
-    });
-    setIsDirty(true);
-    setSelectedLayerIds([]);
-  }, []);
-
-  const duplicateSelected = useCallback(() => {
-    const layerIds = selectedLayerIdsRef.current;
-    const slide = activeSlideRef.current;
-    if (layerIds.length === 0) return;
-    const toDup = pagesRef.current[slide]?.layers?.filter(l => layerIds.includes(l.id)) ?? [];
-    if (toDup.length === 0) return;
-    const newIds: string[] = [];
-    const copies: Layer[] = toDup.map((layer, i) => {
-      const newId = `${layer.id}-copy-${Date.now()}-${i}`;
-      newIds.push(newId);
-      return { ...layer, id: newId, x: layer.x + 20, y: layer.y + 20 };
-    });
-    setPages((prev) => {
-      undoStack.current.push(prev);
-      redoStack.current = [];
-      return prev.map((page, i) =>
-        i !== slide ? page : { ...page, layers: [...(page.layers ?? []), ...copies] }
-      );
-    });
-    setIsDirty(true);
-    setSelectedLayerIds(newIds);
-  }, []);
-
-  const handleCopySelected = useCallback(() => {
-    const layerIds = selectedLayerIdsRef.current;
-    const slide = activeSlideRef.current;
-    if (layerIds.length === 0) return;
-    const toCopy = pagesRef.current[slide]?.layers?.filter(l => layerIds.includes(l.id)) ?? [];
-    copyLayers(toCopy);
-  }, []);
-
-  const handlePasteLayers = useCallback(() => {
-    if (getClipboardCount() === 0) return;
-    const slide = activeSlideRef.current;
-    
-    // For simplicity, we just use the default +20px offset from the store function,
-    // but if we were pasting on a different slide we might want to center it.
-    // ADR-0003 specifies +20px for same slide, center for different slide.
-    // To know if it's the same slide, we would need to store the source slide index in clipboardStore,
-    // but since we only have one simple pasteLayers method, let's just use the default offset for now.
-    const copies = pasteLayers(20, 20);
-    const newIds = copies.map(l => l.id);
-
-    setPages((prev) => {
-      undoStack.current.push(prev);
-      redoStack.current = [];
-      return prev.map((page, i) =>
-        i !== slide ? page : { ...page, layers: [...(page.layers ?? []), ...copies] }
-      );
-    });
-    setIsDirty(true);
-    setSelectedLayerIds(newIds);
-  }, []);
-
-  const handleCutSelected = useCallback(() => {
-    handleCopySelected();
-    deleteSelected();
-  }, [handleCopySelected, deleteSelected]);
-
-  const handleCenterH = useCallback(() => {
-    const layerIds = selectedLayerIdsRef.current;
-    if (layerIds.length === 0) return;
-    const slide = activeSlideRef.current;
-    setPages((prev) => {
-      undoStack.current.push(prev);
-      redoStack.current = [];
-      return prev.map((page, i) =>
-        i !== slide ? page : {
-          ...page,
-          layers: (page.layers ?? []).map((l) =>
-            layerIds.includes(l.id) ? { ...l, x: canvasW / 2 - l.width / 2 } : l
-          ),
-        }
-      );
-    });
-    setIsDirty(true);
-  }, [canvasW]);
-
-  const handleCenterV = useCallback(() => {
-    const layerIds = selectedLayerIdsRef.current;
-    if (layerIds.length === 0) return;
-    const slide = activeSlideRef.current;
-    setPages((prev) => {
-      undoStack.current.push(prev);
-      redoStack.current = [];
-      return prev.map((page, i) =>
-        i !== slide ? page : {
-          ...page,
-          layers: (page.layers ?? []).map((l) =>
-            layerIds.includes(l.id) ? { ...l, y: canvasH / 2 - l.height / 2 } : l
-          ),
-        }
-      );
-    });
-    setIsDirty(true);
-  }, [canvasH]);
-
-  const handleSelectAll = useCallback(() => {
-    const slide = activeSlideRef.current;
-    const page = pagesRef.current[slide];
-    if (page && page.layers) {
-      setSelectedLayerIds(page.layers.map(l => l.id));
-    }
-  }, []);
-
-  const handleZIndexFront = useCallback(() => {
-    const layerIds = selectedLayerIdsRef.current;
-    if (layerIds.length === 0) return;
-    const slide = activeSlideRef.current;
-    const page = pagesRef.current[slide];
-    if (!page || !page.layers) return;
-    const maxZ = Math.max(...page.layers.map(l => l.zIndex ?? 0));
-    applyChange(prev => prev.map((p, i) =>
-      i !== slide ? p : {
-        ...p,
-        layers: (p.layers ?? []).map(l =>
-          layerIds.includes(l.id) ? { ...l, zIndex: maxZ + 1 } : l
-        ),
-      }
-    ));
-  }, [applyChange]);
-
-  const handleZIndexBackAll = useCallback(() => {
-    const layerIds = selectedLayerIdsRef.current;
-    if (layerIds.length === 0) return;
-    const slide = activeSlideRef.current;
-    const page = pagesRef.current[slide];
-    if (!page || !page.layers) return;
-    const minZ = Math.min(...page.layers.map(l => l.zIndex ?? 0));
-    applyChange(prev => prev.map((p, i) =>
-      i !== slide ? p : {
-        ...p,
-        layers: (p.layers ?? []).map(l =>
-          layerIds.includes(l.id) ? { ...l, zIndex: minZ - 1 } : l
-        ),
-      }
-    ));
-  }, [applyChange]);
-
-  const handleToggleVisibility = useCallback(() => {
-    const layerIds = selectedLayerIdsRef.current;
-    if (layerIds.length === 0) return;
-    const slide = activeSlideRef.current;
-    const page = pagesRef.current[slide];
-    if (!page || !page.layers) return;
-    const selectedLayers = page.layers.filter(l => layerIds.includes(l.id));
-    const newVisible = selectedLayers.some(l => l.visible === false);
-    applyChange(prev => prev.map((p, i) =>
-      i !== slide ? p : {
-        ...p,
-        layers: (p.layers ?? []).map(l =>
-          layerIds.includes(l.id) ? { ...l, visible: newVisible } : l
-        ),
-      }
-    ));
-  }, [applyChange]);
-
-  const handleToggleLock = useCallback(() => {
-    const layerIds = selectedLayerIdsRef.current;
-    if (layerIds.length === 0) return;
-    const slide = activeSlideRef.current;
-    const page = pagesRef.current[slide];
-    if (!page || !page.layers) return;
-    const selectedLayers = page.layers.filter(l => layerIds.includes(l.id));
-    const newLocked = selectedLayers.some(l => !l.locked);
-    applyChange(prev => prev.map((p, i) =>
-      i !== slide ? p : {
-        ...p,
-        layers: (p.layers ?? []).map(l =>
-          layerIds.includes(l.id) ? { ...l, locked: newLocked } : l
-        ),
-      }
-    ));
-  }, [applyChange]);
-
-  const handleTextFormatting = useCallback((field: 'fontWeight' | 'italic' | 'textDecoration') => {
-    const layerIds = selectedLayerIdsRef.current;
-    if (layerIds.length === 0) return;
-    const slide = activeSlideRef.current;
-    const page = pagesRef.current[slide];
-    if (!page || !page.layers) return;
-    const textLayers = page.layers.filter(l => layerIds.includes(l.id) && l.type === 'text');
-    if (textLayers.length === 0) return;
-    const first = textLayers[0];
-    let targetVal: any;
-    if (field === 'fontWeight') {
-      targetVal = (first.fontWeight === 'bold') ? 'normal' : 'bold';
-    } else if (field === 'italic') {
-      targetVal = !first.italic;
-    } else if (field === 'textDecoration') {
-      targetVal = (first.textDecoration === 'underline') ? 'none' : 'underline';
-    }
-    applyChange(prev => prev.map((p, i) =>
-      i !== slide ? p : {
-        ...p,
-        layers: (p.layers ?? []).map(l =>
-          (layerIds.includes(l.id) && l.type === 'text') ? { ...l, [field]: targetVal } : l
-        ),
-      }
-    ));
-  }, [applyChange]);
-
-  // ── Keyboard shortcut registration ───────────────────────────────────────────
-
-  const { shortcuts, updateShortcut, resetAll } = useShortcutHandler({
-    save: handleSave,
-    undo,
-    redo,
-    shortcuts: () => setShowShortcuts((v) => !v),
-    deselect: () => { setSelectedLayerIds([]); setShowShortcuts(false); },
-    delete: deleteSelected,
-    duplicate: duplicateSelected,
-    copy: handleCopySelected,
-    paste: handlePasteLayers,
-    cut: handleCutSelected,
-    'center-h': handleCenterH,
-    'center-v': handleCenterV,
-    'select-all': handleSelectAll,
-    'zindex-forward': () => shiftZIndex(+1),
-    'zindex-back': () => shiftZIndex(-1),
-    'zindex-front': handleZIndexFront,
-    'zindex-back-all': handleZIndexBackAll,
-    'toggle-visibility': handleToggleVisibility,
-    'toggle-lock': handleToggleLock,
-    'text-bold': () => handleTextFormatting('fontWeight'),
-    'text-italic': () => handleTextFormatting('italic'),
-    'text-underline': () => handleTextFormatting('textDecoration'),
-    'zoom-in':     () => canvasEditorRef.current?.zoomIn(),
-    'zoom-out':    () => canvasEditorRef.current?.zoomOut(),
-    'zoom-fit':    () => canvasEditorRef.current?.zoomFit(),
-    'zoom-actual': () => canvasEditorRef.current?.zoomActual(),
-    'move-left':    () => nudge(-1, 0),
-    'move-right':   () => nudge(+1, 0),
-    'move-up':      () => nudge(0, -1),
-    'move-down':    () => nudge(0, +1),
-    'move-left-10': () => nudge(-10, 0),
-    'move-right-10':() => nudge(+10, 0),
-    'move-up-10':   () => nudge(0, -10),
-    'move-down-10': () => nudge(0, +10),
-  });
-
-  // ── Export ───────────────────────────────────────────────────────────────────
-
-  // Exporta a FONTE do que está aberto. `pages` só existe no editor clássico: num
-  // deck ir-design (o que a Fábrica gera hoje) ele fica vazio, e este botão baixava
-  // um `[]` — um arquivo sem nada dentro, sem dizer nada a ninguém.
-  const exportJson = () => {
-    const fonte = irPostContent ?? htmlPostContent ?? pages;
-    const blob = new Blob([JSON.stringify(fonte, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `design-${postId}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const handleExportCanva = useCallback(async () => {
-    try {
-      const status = await api.get<{ connected: boolean }>(`/canva/${slug}/status`);
-      if (!status.connected) {
-        const { authUrl } = await api.get<{ authUrl: string }>(`/canva/${slug}/auth-url`);
-        // Open OAuth in a centered popup window
-        const width = 600;
-        const height = 700;
-        const left = window.screen.width / 2 - width / 2;
-        const top = window.screen.height / 2 - height / 2;
-        const popup = window.open(
-          authUrl,
-          'Conectar Canva',
-          `width=${width},height=${height},left=${left},top=${top}`
-        );
-
-        const interval = setInterval(async () => {
-          if (popup?.closed) {
-            clearInterval(interval);
-            const check = await api.get<{ connected: boolean }>(`/canva/${slug}/status`);
-            if (check.connected) {
-              alert('Canva conectado com sucesso! Clique em Exportar novamente.');
-            }
-          }
-        }, 1000);
-        return;
-      }
-
-      setIsExportingCanva(true);
-      setCanvaProgress(0);
-
-      // Uma requisição só: o backend enfileira e devolve o jobId na hora. Antes o
-      // navegador fazia um POST por slide, em série, cada um segurando um render
-      // full-res no servidor — um deck grande estourava o timeout.
-      const { jobId } = await api.post<{ jobId: string; total: number }>(
-        `/posts/${postId}/export-canva`,
-        {},
-      );
-
-      const resultado = await acompanharExport(postId, jobId, (done, total) => {
-        setCanvaProgress(total > 0 ? Math.round((done / total) * 100) : 0);
-      });
-
-      if (resultado.designUrl) {
-        window.open(resultado.designUrl, '_blank', 'noopener');
-      }
-
-      setSaveError('');
-      setExportAviso(
-        resultado.mergeFallback
-          ? `Exportado: ${resultado.slides} design(s) criados no Canva (não foi possível juntá-los num só).`
-          : `Exportado para o Canva: ${resultado.slides} página(s) num design.`,
-      );
-    } catch (err) {
-      setSaveError(getApiErrorMessage(err, 'Erro ao exportar para o Canva.'));
-    } finally {
-      setIsExportingCanva(false);
-      setCanvaProgress(null);
-    }
-  }, [slug, postId]);
-
-  // ── Derived state ────────────────────────────────────────────────────────────
-
-  const currentPage = pages[activeSlide];
-  const currentLayers = [...(currentPage?.layers ?? [])]
-    .filter(Boolean)
-    .sort((a, b) => (b.zIndex ?? 0) - (a.zIndex ?? 0));
-  const selectedLayer = selectedLayerIds.length === 1
-    ? currentPage?.layers?.find((l) => l.id === selectedLayerIds[0]) ?? null
-    : null;
-  const selectedLayersForPanel = (currentPage?.layers ?? []).filter(l => selectedLayerIds.includes(l.id));
-  const designPosts = posts.filter((p) => {
-    const status = extractEditablePages(p.content).status;
-    return status === 'editable' || status === 'html';
-  });
-  const allImageLayers = pages.flatMap((page, slideIdx) =>
-    [...(page.layers ?? [])].filter(Boolean).filter((l) => l.type === 'image' && l.url).map((l) => ({ ...l, slideIdx }))
-  );
-  const canvasAr = canvasW / canvasH;
-
-  // ── Render ───────────────────────────────────────────────────────────────────
 
   return (
-    <div className={styles.editor}>
-      {isExportingCanva && (
-        <div style={{
-          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-          background: 'rgba(0,0,0,0.6)', display: 'flex', flexDirection: 'column',
-          alignItems: 'center', justifyContent: 'center', zIndex: 9999, color: '#fff'
-        }}>
-          <div style={{ background: '#fff', color: '#333', padding: 24, borderRadius: 16, width: 340, textAlign: 'center', boxShadow: '0 10px 25px rgba(0,0,0,0.2)' }}>
-            <h3 style={{ marginBottom: 12, fontSize: 16, fontWeight: 600 }}>Exportando para o Canva</h3>
-            <div style={{ height: 10, background: '#f0f0f0', borderRadius: 999, overflow: 'hidden', marginBottom: 12 }}>
-              <div style={{ width: `${canvaProgress ?? 0}%`, height: '100%', background: '#7c3aed', transition: 'width 0.4s ease', borderRadius: 999 }}></div>
-            </div>
-            <p style={{ fontSize: 14, color: '#555', fontWeight: 500 }}>{canvaProgress ?? 0}% Concluído</p>
-            <p style={{ fontSize: 11, color: '#999', marginTop: 6 }}>Processando e enviando as páginas para sua biblioteca Canva...</p>
-          </div>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh', background: 'var(--color-bg, #faf8f5)' }}>
+      {/* ── Header ─────────────────────────────────────────────────────────── */}
+      <header style={{
+        display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', flexWrap: 'wrap',
+        borderBottom: '1px solid var(--color-border, rgba(0,0,0,0.08))', background: 'var(--color-surface, #fff)',
+        position: 'relative', zIndex: 30,
+      }}>
+        <button
+          type="button"
+          onClick={() => router.push(`/${marca}/galeria`)}
+          style={{ display: 'flex', alignItems: 'center', gap: 6, border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 13 }}
+        >
+          <ArrowLeft size={15} /> Galeria
+        </button>
+        <div style={{ fontWeight: 600, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '38vw' }}>
+          {post?.name?.trim() || `Design ${postId.slice(0, 8)}`}
         </div>
-      )}
-      {showShortcuts && (
-        <ShortcutsPanel
-          shortcuts={shortcuts}
-          onClose={() => setShowShortcuts(false)}
-          onUpdate={updateShortcut}
-          onResetAll={resetAll}
-        />
-      )}
+        <span style={{ fontSize: 11, color: 'var(--color-text-muted, #6b7280)' }}>
+          {slideCount} slide{slideCount > 1 ? 's' : ''} · {canvasW}×{canvasH}
+        </span>
 
-      {showFixPanel && (
-        <AIFixPanel
-          phase={fixer.phase}
-          issues={fixer.issues}
-          fixList={fixer.fixList}
-          selectedFixIds={fixer.selectedFixIds}
-          remainingIssues={fixer.remainingIssues}
-          verifyWarning={fixer.verifyWarning}
-          correctedPages={fixer.correctedPages}
-          iteration={fixer.iteration}
-          errorMessage={fixer.errorMessage}
-          toggleFix={fixer.toggleFix}
-          selectAll={fixer.selectAll}
-          selectNone={fixer.selectNone}
-          onApplySelected={() => fixer.applySelected(pages, slug)}
-          onAutoFix={() => fixer.startFix(pages, slug)}
-          onApply={(corrected) => {
-            applyChange(() => corrected);
-            setShowFixPanel(false);
-            fixer.reset();
-          }}
-          onClose={() => {
-            fixer.abort();
-            fixer.reset();
-            setShowFixPanel(false);
-          }}
-        />
-      )}
-
-      {/* Header */}
-      <header className={styles.header}>
-        <Link href={`/${slug}/galeria`} className={styles.backBtn}>
-          <ArrowLeft size={15} />
-          Galeria
-        </Link>
-        <div className={styles.headerInfo}>
-          {postType && <span className={styles.headerTitle}>{formatPostType(postType)}</span>}
-          {pages.length > 0 && (
-            <span className={styles.headerMeta}>
-              {pages.length} slide{pages.length !== 1 ? 's' : ''} · {canvasW}×{canvasH}px
-            </span>
-          )}
-        </div>
-
-        {viewMode === 'single' && (
-          <div className={styles.insertWrapper} ref={insertMenuRef}>
-            <button
-              className={`${styles.toolbarBtn} ${insertMenuOpen ? styles.toolbarBtnActive : ''}`}
-              onClick={() => setInsertMenuOpen(!insertMenuOpen)}
-            >
-              <Plus size={14} /> Inserir
-            </button>
-
-            {insertMenuOpen && (
-              <div className={styles.insertPopover}>
-                <div className={styles.insertSidebar}>
-                  <button
-                    className={`${styles.insertTab} ${insertCategory === 'shapes' ? styles.insertTabActive : ''}`}
-                    onClick={() => setInsertCategory('shapes')}
-                  >
-                    Formas
-                  </button>
-                  <button
-                    className={`${styles.insertTab} ${insertCategory === 'text' ? styles.insertTabActive : ''}`}
-                    onClick={() => setInsertCategory('text')}
-                  >
-                    Texto
-                  </button>
-                </div>
-                <div className={styles.insertContent}>
-                  {insertCategory === 'shapes' && (
-                    <>
-                      <button key="insert-rect" className={styles.insertOption} onClick={() => { addLayer('shape'); setInsertMenuOpen(false); }}>
-                        <Square size={24} strokeWidth={1.5} />
-                        <span>Retângulo</span>
-                      </button>
-                      <button key="insert-circle" className={styles.insertOption} onClick={() => { addLayer('shape', undefined, { borderRadius: 999 }); setInsertMenuOpen(false); }}>
-                        <Circle size={24} strokeWidth={1.5} />
-                        <span>Círculo</span>
-                      </button>
-                      <button key="insert-tri" className={styles.insertOption} onClick={() => { addLayer('shape', undefined, { shapeType: 'triangle' }); setInsertMenuOpen(false); }}>
-                        <Triangle size={24} strokeWidth={1.5} />
-                        <span>Triângulo</span>
-                      </button>
-                      <button key="insert-poly" className={styles.insertOption} onClick={() => { addLayer('shape', undefined, { shapeType: 'polygon' }); setInsertMenuOpen(false); }}>
-                        <Pentagon size={24} strokeWidth={1.5} />
-                        <span>Polígono</span>
-                      </button>
-                      <button key="insert-line" className={styles.insertOption} onClick={() => { addLayer('shape', undefined, { shapeType: 'line', height: 4 }); setInsertMenuOpen(false); }}>
-                        <Minus size={24} strokeWidth={1.5} />
-                        <span>Linha</span>
-                      </button>
-                    </>
-                  )}
-                  {insertCategory === 'text' && (
-                    <>
-                      <button key="insert-text" className={styles.insertOption} onClick={() => { addLayer('text'); setInsertMenuOpen(false); }}>
-                        <Type size={24} strokeWidth={1.5} />
-                        <span>Título</span>
-                      </button>
-                    </>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        <div className={styles.headerActions}>
-          <div style={{ display: 'flex', gap: '4px', marginRight: '8px' }}>
-            <button
-              className={styles.toolbarBtn}
-              onClick={undo}
-              title="Desfazer (Ctrl+Z)"
-            >
-              <Undo2 size={16} />
-            </button>
-            <button
-              className={styles.toolbarBtn}
-              onClick={redo}
-              title="Refazer (Ctrl+Y)"
-            >
-              <Redo2 size={16} />
-            </button>
-            <button
-              className={styles.toolbarBtn}
-              onClick={openHistory}
-              title="Histórico de versões — desfazer/refazer não sobrevive ao reload; isto sobrevive"
-            >
-              <History size={16} />
-            </button>
-          </div>
-
-          {pages.length > 0 && (
-            <button
-              className={styles.toolbarBtn}
-              style={{ color: 'var(--color-accent)' }}
-              onClick={() => {
-                setShowFixPanel(true);
-                fixer.startPlanOnly(pages, slug);
-              }}
-              title="Corrigir design com IA — selecione as correções antes de aplicar"
-            >
-              <Wand2 size={13} />
-              Corrigir IA
-            </button>
-          )}
+        <div style={{ marginLeft: 'auto', position: 'relative' }}>
           <button
-            className={styles.exportBtn}
-            onClick={() => setViewMode(v => v === 'single' ? 'grid' : 'single')}
-            title={viewMode === 'single' ? "Visão Geral (Todos os Slides)" : "Modo de Edição"}
-          >
-            <LayoutGrid size={13} />
-            {viewMode === 'single' ? 'Grade' : 'Editar'}
-          </button>
-          <button
-            className={styles.exportBtn}
-            onClick={() => setSnapEnabled((v) => !v)}
-            title={`Snap (Ímã): ${snapEnabled ? 'Ligado' : 'Desligado'}`}
-            style={{ opacity: snapEnabled ? 1 : 0.5 }}
-          >
-            Snap
-          </button>
-          <button
-            className={styles.exportBtn}
-            onClick={() => setShowShortcuts((v) => !v)}
-            title="Atalhos de teclado (?)"
-          >
-            <Keyboard size={13} />
-          </button>
-          {savedAt && !isDirty && !saveError && (
-            <span className={styles.saveStatus}>
-              <Check size={11} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 3 }} />
-              Salvo
-            </span>
-          )}
-          {saveError && (
-            <span className={styles.saveStatus} style={{ color: '#ef4444' }} role="alert" title={saveError}>
-              {saveError}
-            </span>
-          )}
-          {exportAviso && !saveError && (
-            <span className={styles.saveStatus} style={{ color: '#22c55e' }} title={exportAviso}>
-              {exportAviso}
-            </span>
-          )}
-          {readOnly && (
-            <span className={styles.saveStatus} title={permHint}>
-              <Eye size={11} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 3 }} />
-              Somente leitura
-            </span>
-          )}
-          <Button
-            size="sm"
-            variant={isDirty ? 'primary' : 'secondary'}
-            onClick={handleSave}
-            disabled={!isDirty || isSaving || !canEdit}
-            title={canEdit ? undefined : permHint}
-          >
-            <Save size={13} />
-            {isSaving ? 'Salvando...' : 'Salvar'}
-          </Button>
-          <button
-            className={styles.exportBtn}
-            onClick={handleExportCanva}
-            disabled={!canExport}
-            title={canExport ? 'Exportar para o Canva' : permHint}
+            type="button"
+            onClick={() => setMenuBaixar(v => !v)}
+            disabled={exportando !== null}
             style={{
-              backgroundColor: canExport ? '#7c3aed' : 'var(--color-bg-elevated)',
-              color: '#fff',
-              border: 'none',
-              padding: '0 12px',
-              borderRadius: 6,
-              fontSize: 12,
-              fontWeight: 600,
-              cursor: canExport ? 'pointer' : 'not-allowed',
-              opacity: canExport ? 1 : 0.5,
-              height: 32,
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              marginLeft: 4
+              display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', fontSize: 12.5, fontWeight: 500,
+              borderRadius: 999, border: '1px solid var(--color-border, rgba(0,0,0,0.12))',
+              background: 'transparent', cursor: exportando ? 'wait' : 'pointer',
             }}
           >
-            Canva
+            {exportando
+              ? <><Loader2 size={13} /> {exportando.formato.toUpperCase()} {exportando.done}/{exportando.total}</>
+              : <><Download size={13} /> Baixar <ChevronDown size={12} /></>}
           </button>
-          <button className={styles.exportBtn} onClick={exportJson} title="Exportar JSON">
-            <FileJson size={14} />
-            JSON
-          </button>
+          {menuBaixar && (
+            <div style={{
+              position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 40,
+              width: 'min(250px, calc(100vw - 24px))', padding: '4px 0', background: 'var(--color-surface, #fff)',
+              border: '1px solid var(--color-border, rgba(0,0,0,0.12))', borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+            }}>
+              {([
+                ['pptx', 'PPTX editável', 'Visual fiel + textos editáveis'],
+                ['pdf', 'PDF do deck', 'Uma página por slide'],
+                ['zip', 'ZIP com PNGs', 'Imagens em alta'],
+              ] as Array<[DeckFileFormat, string, string]>).map(([f, label, hint]) => (
+                <button key={f} type="button" onClick={() => void baixarDeck(f)}
+                  style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 12px', border: 'none', background: 'transparent', cursor: 'pointer' }}>
+                  <span style={{ display: 'block', fontSize: 13, fontWeight: 500 }}>{label}</span>
+                  <span style={{ display: 'block', fontSize: 11, color: 'var(--color-text-muted, #6b7280)' }}>{hint}</span>
+                </button>
+              ))}
+              <div style={{ height: 1, background: 'rgba(0,0,0,0.08)', margin: '4px 0' }} />
+              <button type="button" onClick={() => { setMenuBaixar(false); void baixarSlide(postId, safeSlide, 'png'); }}
+                style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 12px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 13 }}>
+                PNG deste slide
+              </button>
+              <button type="button" onClick={() => { setMenuBaixar(false); void baixarSlide(postId, safeSlide, 'html'); }}
+                style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 12px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 13 }}>
+                HTML deste slide
+              </button>
+            </div>
+          )}
         </div>
       </header>
 
-      {/* Body */}
-      <div className={styles.body}>
-        <aside className={styles.sidebar}>
-          <div className={styles.tabs}>
-            {([
-              { id: 'designs', icon: <LayoutGrid size={13} />, label: 'Designs' },
-              { id: 'layers',  icon: <Layers size={13} />,     label: 'Camadas' },
-              { id: 'assets',  icon: <ImageIcon size={13} />,  label: 'Assets' },
-              { id: 'props',   icon: <SlidersHorizontal size={13} />, label: 'Propriedades' },
-            ] as const).map(({ id, icon, label }) => (
-              <button
-                key={id}
-                className={`${styles.tab} ${sidebarTab === id ? styles.tabActive : ''}`}
-                onClick={() => setSidebarTab(id)}
-                title={label}
-                style={{ position: 'relative' }}
-              >
-                {icon}
-                {id === 'props' && selectedLayerIds.length > 0 && (
-                  <span style={{
-                    position: 'absolute', top: 6, right: 6,
-                    width: 5, height: 5, borderRadius: '50%',
-                    background: 'var(--color-accent)',
-                  }} />
-                )}
-              </button>
-            ))}
+      {erro && (
+        <div style={{ padding: '8px 16px', fontSize: 12.5, color: '#b91c1c', background: '#fef2f2' }}>{erro}</div>
+      )}
+
+      {/* ── Corpo: viewer + painel ─────────────────────────────────────────── */}
+      <div style={{ display: 'flex', flex: 1, minHeight: 0, gap: 14, padding: 14, flexWrap: 'wrap', overflowY: 'auto' }}>
+        {/* Viewer */}
+        <div style={{ flex: '1 1 480px', minWidth: 320, display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0 }}>
+          <div style={{ borderRadius: 12, overflow: 'hidden', border: '1px solid var(--color-border, rgba(0,0,0,0.1))', background: '#fff', aspectRatio: `${canvasW} / ${canvasH}`, maxHeight: '68vh' }}>
+            <HtmlSlideRenderer content={content} activeSlide={safeSlide} onSlideChange={setActiveSlide} hideNav />
           </div>
-
-          <div className={styles.tabContent}>
-            {/* Designs — kept mounted to preserve scroll position */}
-            <div style={{ display: sidebarTab === 'designs' ? 'block' : 'none' }} className={styles.designList}>
-              {designPosts.length === 0 ? (
-                <p className={styles.emptyList}>Nenhum design encontrado.</p>
-              ) : (
-                designPosts.map((p) => {
-                  const editable = extractEditablePages(p.content);
-                  const isHtml = editable.status === 'html';
-                  const dp = editable.status === 'editable' ? editable.pages : [];
-                  const slideCount = isHtml ? editable.content.slides.length : dp.length;
-                  const first = dp[0];
-                  return (
-                    <button key={p.id} className={`${styles.designItem} ${p.id === postId ? styles.designItemActive : ''}`} onClick={() => router.push(`/${slug}/editor/${p.id}`)}>
-                      <div className={styles.designThumb} style={{ backgroundColor: isHtml ? '#1a1a1a' : (first?.backgroundColor ?? '#111') }}>
-                        {isHtml && p.previewUrl ? (
-                          <img src={p.previewUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                        ) : first ? (
-                          <DesignRenderer pages={[first]} canvasWidth={first.width ?? 1080} canvasHeight={first.height ?? 1080} hideNav mode="cover" />
-                        ) : (
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#666', fontSize: 10 }}>Sem Preview</div>
-                        )}
-                      </div>
-                      <div className={styles.designMeta}>
-                        <span className={styles.designType}>{formatPostType(p.type)}</span>
-                        <span className={styles.designSlides}>{slideCount} slides</span>
-                      </div>
-                    </button>
-                  );
-                })
-              )}
-            </div>
-
-            {/* Layers — kept mounted to preserve state */}
-            <div style={{ display: sidebarTab === 'layers' ? 'block' : 'none' }} className={styles.layerList}>
-              <p className={styles.layerSlideLabel}>Slide {activeSlide + 1}</p>
-              <LayerListPanel
-                layers={currentLayers}
-                selectedLayerIds={selectedLayerIds}
-                onSelect={(id, multi) => {
-                  if (multi) {
-                    setSelectedLayerIds((prev) => prev.includes(id) ? prev.filter((pid) => pid !== id) : [...prev, id]);
-                  } else {
-                    setSelectedLayerIds((prev) => (prev.length === 1 && prev[0] === id ? [] : [id]));
-                  }
-                }}
-                onChange={updateSpecificLayer}
-                onReorder={(fromIndex, toIndex) => {
-                  // Reorder is handled inside the panel by mutating zIndex
-                }}
-              />
-            </div>
-
-            {/* Properties — kept mounted so uncommitted inputs survive tab switches */}
-            <div style={{ display: sidebarTab === 'props' ? 'block' : 'none' }}>
-              {selectedLayerIds.length > 1 ? (
-                <MultiSelectPanel
-                  selectedLayers={selectedLayersForPanel}
-                  canvasWidth={canvasW}
-                  canvasHeight={canvasH}
-                  onChange={handleMultiSelectChange}
-                />
-              ) : selectedLayer ? (
-                <LayerPropertiesPanel
-                  layer={selectedLayer}
-                  canvasWidth={canvasW}
-                  canvasHeight={canvasH}
-                  onChange={handleLayerPropertyChange}
-                  onPreviewAnimation={handlePreviewAnimation}
-                />
-              ) : (
-                <BackgroundPanel
-                  color={currentPage?.backgroundColor ?? '#ffffff'}
-                  backgroundImage={currentPage?.backgroundImage}
-                  onChange={handleBackgroundChange}
-                  onBgImageChange={handleBackgroundImageChange}
-                />
-              )}
-            </div>
-
-            {/* Assets — kept mounted */}
-            <div style={{ display: sidebarTab === 'assets' ? 'block' : 'none' }} className={styles.assetList}>
-              <div style={{ padding: '0 var(--space-2) var(--space-3)' }}>
-                <AssetLibrary slug={slug} onSelect={handleInsertAsset} actionLabel="Inserir" compact />
-              </div>
-
-              <div style={{ padding: '0 var(--space-2)' }}>
-                <p style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--color-text-dim)', margin: '4px 0 8px' }}>
-                  Imagens usadas neste design
-                </p>
-              </div>
-              {allImageLayers.length === 0 ? (
-                <p className={styles.emptyList}>Nenhum asset de imagem nos slides.</p>
-              ) : (
-                allImageLayers.map((l, i) => (
-                  <div key={`${l.id}-${i}`} className={styles.assetItem}>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={l.url} alt="" className={styles.assetThumb} />
-                    <div className={styles.assetInfo}>
-                      <span className={styles.assetSlide}>Slide {l.slideIdx + 1}</span>
-                      <span className={styles.assetId}>Imagem</span>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </aside>
-
-        {viewMode === 'single' && postType !== 'SINGLE_IMAGE' && (
-          <SlideThumbnailPanel
-            pages={pages}
-            activeSlide={activeSlide}
-            canvasW={canvasW}
-            canvasH={canvasH}
-            onSelectSlide={setActiveSlide}
-            onAddSlide={handleAddBlankSlide}
-            onDuplicateSlide={handleDuplicateSlide}
-            onDeleteSlide={handleDeleteSlide}
-            onReorderSlide={handleReorderSlide}
-          />
-        )}
-
-        {/* Canvas */}
-        <main className={`${styles.canvas} ${viewMode === 'grid' ? styles.canvasGridMode : ''}`}>
-          {!loading && compileWarnings.length > 0 && (
-            <div style={{ marginBottom: 12, padding: '10px 12px', border: '1px solid rgba(245, 158, 11, 0.35)', borderRadius: 10, background: 'rgba(245, 158, 11, 0.08)', color: '#92400e', fontSize: 12 }}>
-              {compileWarnings.slice(0, 3).join(' • ')}
+          {slideCount > 1 && (
+            <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4 }}>
+              {content.slides.map((_, i) => (
+                <button key={i} type="button" onClick={() => setActiveSlide(i)}
+                  style={{
+                    flexShrink: 0, padding: '5px 12px', fontSize: 12, borderRadius: 8, cursor: 'pointer',
+                    border: i === safeSlide ? '1px solid var(--color-brand, #FF6B35)' : '1px solid var(--color-border, rgba(0,0,0,0.12))',
+                    background: i === safeSlide ? 'rgba(255,107,53,0.08)' : 'transparent',
+                    fontWeight: i === safeSlide ? 600 : 400,
+                  }}>
+                  {i + 1}
+                </button>
+              ))}
             </div>
           )}
-          {loading ? (
-            <span className={styles.canvasMsg}>Carregando design...</span>
-          ) : loadState === 'ir' && irPostContent && irPostContent.ir ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 16, width: '100%', maxWidth: 900, margin: '0 auto', height: '100%' }}>
-              {irPostContent.ir.slides.length > 1 && (
-                <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 8 }}>
-                  {irPostContent.ir.slides.map((s: any, idx: number) => (
-                    <button
-                      key={s.id}
-                      onClick={() => {
-                        setActiveSlide(idx);
-                        setSelectedLayerIds([]);
-                      }}
-                      style={{
-                        padding: '4px 12px',
-                        borderRadius: 20,
-                        background: activeSlide === idx ? '#4f46e5' : '#f3f4f6',
-                        color: activeSlide === idx ? '#fff' : '#4b5563',
-                        border: 'none',
-                        cursor: 'pointer',
-                        fontSize: 12,
-                        fontWeight: 500,
-                        flexShrink: 0
-                      }}
-                    >
-                      Slide {idx + 1}
-                    </button>
-                  ))}
-                </div>
-              )}
-              
-              <div style={{ display: 'flex', gap: 16, flex: 1, minHeight: 0 }}>
-                {/* Visual Canvas (Center) */}
-                <div style={{ flex: 1, position: 'relative', borderRadius: 12, overflow: 'hidden', border: '1px solid var(--color-border)' }}>
-                  <IRCanvasEditor
-                    ref={irCanvasEditorRef}
-                    ir={irPostContent.ir}
-                    activeSlideIndex={activeSlide}
-                    selectedElementIds={selectedLayerIds}
-                    onSelect={(id, multi) => {
-                      if (!id) {
-                        setSelectedLayerIds([]);
-                      } else if (multi) {
-                        setSelectedLayerIds(prev => prev.includes(id) ? prev.filter(p => p !== id) : [...prev, id]);
-                      } else {
-                        setSelectedLayerIds([id]);
-                      }
-                    }}
-                    onPatch={handleIRPatch}
-                  />
-                  
-                  {/* AI Edit Bar directly on canvas */}
-                  <AIEditBar
-                    ir={irPostContent.ir}
-                    activeSlide={irPostContent.ir.slides[activeSlide]}
-                    slideIndex={activeSlide}
-                    selectedElementIds={selectedLayerIds}
-                    slug={slug}
-                    postId={postId}
-                    onPatch={handleIRPatch}
-                  />
-                </div>
+        </div>
 
-                {/* Right Panel: Contextual Properties */}
-                <div style={{ width: 280, flexShrink: 0, background: '#fff', border: '1px solid var(--color-border)', borderRadius: 12, overflowY: 'auto' }}>
-                  <IRPropertiesPanel
-                    slide={irPostContent.ir.slides[activeSlide]}
-                    selectedElements={
-                      selectedLayerIds
-                        .map(id => irPostContent.ir?.slides[activeSlide]?.elements?.find((e: any) => e.id === id))
-                        .filter(Boolean)
-                    }
-                    onPatch={handleIRPatch}
-                  />
-                </div>
-              </div>
-            </div>
-          ) : loadState === 'html' && htmlPostContent ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 16, width: '100%', maxWidth: 900, margin: '0 auto' }}>
-              <div className={styles.rendererWrapper} style={{ aspectRatio: `${canvasW} / ${canvasH}` }}>
-                <HtmlSlideRenderer
-                  content={htmlPostContent}
-                  activeSlide={activeSlide}
-                  onSlideChange={setActiveSlide}
-                />
-              </div>
-              <div style={{ border: '1px solid var(--color-border, rgba(0,0,0,0.12))', borderRadius: 12, padding: 14, background: 'var(--color-bg-secondary, #fff)' }}>
-                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Editar com IA — slide {activeSlide + 1}</div>
+        {/* Painel: IA | Código | Versões */}
+        <div style={{ flex: '1 1 360px', minWidth: 300, maxWidth: 560, display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0 }}>
+          <div style={{ display: 'flex', gap: 4 }}>
+            {painelBtn('ia', 'Editar com IA', Sparkles)}
+            {painelBtn('codigo', 'Código', MessageSquareText)}
+            {painelBtn('versoes', 'Versões', History)}
+          </div>
+
+          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', border: '1px solid var(--color-border, rgba(0,0,0,0.1))', borderRadius: 12, background: 'var(--color-surface, #fff)', padding: 14 }}>
+            {painel === 'ia' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div style={{ fontSize: 13, fontWeight: 600 }}>Editar slide {safeSlide + 1} com IA</div>
+                <p style={{ fontSize: 12, color: 'var(--color-text-muted, #6b7280)', margin: 0 }}>
+                  Mesma edição do chat da Fábrica: a IA altera só o que você pedir e preserva o resto do slide. Cada edição cria uma versão.
+                </p>
                 {editLog.length > 0 && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 8 }}>
-                    {editLog.slice(-4).map((m, i) => (
-                      <div key={i} style={{ fontSize: 12, color: 'var(--color-text-secondary, #666)' }}>✓ {m}</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    {editLog.map((m, i) => (
+                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--color-text-secondary, #555)' }}>
+                        <Check size={11} /> {m}
+                      </div>
                     ))}
                   </div>
                 )}
-                <div style={{ display: 'flex', gap: 8 }}>
-                  <input
-                    value={editInstruction}
-                    onChange={(e) => setEditInstruction(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleEditSlide(); } }}
-                    placeholder='Ex: "deixe o título maior", "troque a cor de destaque", "mude a foto"'
-                    disabled={editingSlide}
-                    style={{ flex: 1, padding: '10px 12px', borderRadius: 8, border: '1px solid var(--color-border, rgba(0,0,0,0.15))', fontSize: 13 }}
-                  />
-                  <Button onClick={handleEditSlide} disabled={editingSlide || !editInstruction.trim()}>
-                    {editingSlide ? 'Editando…' : 'Aplicar'}
-                  </Button>
-                </div>
-                <div style={{ fontSize: 11, color: 'var(--color-text-tertiary, #999)', marginTop: 6 }}>
-                  A IA ajusta só este slide, preservando o resto. Enter envia.
-                </div>
+                {erroEdicao && (
+                  <div style={{ fontSize: 12, color: '#b91c1c', background: '#fef2f2', borderRadius: 8, padding: '6px 10px' }}>{erroEdicao}</div>
+                )}
+                <textarea
+                  value={instrucao}
+                  onChange={(e) => setInstrucao(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void editarComIA(); } }}
+                  placeholder='Ex: "deixa o título maior", "troca o fundo para o verde da marca", "resume o parágrafo"'
+                  rows={3}
+                  disabled={editando}
+                  style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid var(--color-border, rgba(0,0,0,0.15))', fontSize: 13, resize: 'vertical' }}
+                />
+                <Button onClick={() => void editarComIA()} disabled={editando || !instrucao.trim()}>
+                  {editando ? 'Editando…' : 'Aplicar no slide'}
+                </Button>
               </div>
-            </div>
-          ) : pages.length === 0 ? (
-            <div className={styles.canvasEmptyState}>
-              <strong>
-                {loadState === 'hybrid-uncompiled'
-                  ? 'Preview por código ainda não compilado para edição.'
-                  : 'Este post não possui dados de design editáveis.'}
-              </strong>
-              <span>
-                {loadState === 'hybrid-uncompiled'
-                  ? 'O DesignDocument foi preservado, mas ainda precisa gerar pages compatíveis com o editor visual.'
-                  : 'O conteúdo foi mantido em segurança e não será aberto como canvas vazio.'}
-              </span>
-            </div>
-          ) : viewMode === 'grid' ? (
-            <div className={styles.slidesGrid}>
-              {pages.map((page, idx) => (
-                <div key={idx} className={styles.gridSlideWrapper}>
-                  <span className={styles.gridSlideLabel}>Slide {idx + 1}</span>
-                  <div
-                    className={`${styles.gridSlideCanvas} ${idx === activeSlide ? styles.gridSlideCanvasActive : ''}`}
-                    style={{ aspectRatio: `${canvasW} / ${canvasH}` }}
-                    onClick={() => {
-                      setActiveSlide(idx);
-                      setViewMode('single');
-                    }}
-                  >
-                    <DesignRenderer
-                      pages={[page]}
-                      canvasWidth={canvasW}
-                      canvasHeight={canvasH}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : currentPage ? (
-            <div
-              className={styles.rendererWrapper}
-              style={{
-                aspectRatio: `${canvasW} / ${canvasH}`,
-                ['--canvas-ar' as string]: canvasAr,
-              }}
-            >
-              <CanvasEditor
-                key={`${canvasW}x${canvasH}`}
-                ref={canvasEditorRef}
-                layers={currentPage.layers ?? []}
-                backgroundColor={currentPage.backgroundColor}
-                backgroundImage={currentPage.backgroundImage}
-                canvasWidth={canvasW}
-                canvasHeight={canvasH}
-                selectedLayerIds={selectedLayerIds}
-                onLayerSelect={(layer, e) => {
-                  if (!layer) {
-                    setSelectedLayerIds([]);
-                    return;
-                  }
-                  if (e?.ctrlKey || e?.metaKey) {
-                    setSelectedLayerIds(prev =>
-                      prev.includes(layer.id)
-                        ? prev.filter(id => id !== layer.id)
-                        : [...prev, layer.id]
-                    );
-                    return;
-                  }
-                  
-                  setSelectedLayerIds([layer.id]);
-                }}
-                onLayersChange={handleLayersChange}
-                onMarqueeSelect={handleMarqueeSelect}
-                previewLayerId={previewLayerId}
-                previewKey={previewKey}
-                snapEnabled={snapEnabled}
-              />
-            </div>
-          ) : null}
-        </main>
-      </div>
-
-      {showHistory && (
-        <div className={styles.historyOverlay} onClick={() => setShowHistory(false)}>
-          <aside className={styles.historyPanel} onClick={(e) => e.stopPropagation()}>
-            <header className={styles.historyHeader}>
-              <div>
-                <h3 className={styles.historyTitle}>Histórico de versões</h3>
-                <p className={styles.historyHint}>
-                  As {MAX_VERSIONS_SHOWN} versões mais recentes. Restaurar guarda o estado atual antes.
-                </p>
-              </div>
-              <button className={styles.toolbarBtn} onClick={() => setShowHistory(false)} title="Fechar">
-                <X size={16} />
-              </button>
-            </header>
-
-            <button
-              className={styles.historySaveBtn}
-              onClick={handleSaveVersion}
-              disabled={savingVersion}
-            >
-              <Bookmark size={14} />
-              {savingVersion ? 'Salvando...' : 'Marcar versão atual'}
-            </button>
-
-            {loadingVersions ? (
-              <p className={styles.historyEmpty}>Carregando...</p>
-            ) : versions.length === 0 ? (
-              <p className={styles.historyEmpty}>
-                Nenhuma versão ainda. Uma é criada sozinha antes de cada edição da IA.
-              </p>
-            ) : (
-              <ul className={styles.historyList}>
-                {versions.map((version) => (
-                  <li key={version.id} className={styles.historyItem}>
-                    <div className={styles.historyItemHead}>
-                      <span className={`${styles.historyBadge} ${version.source === 'AI' ? styles.historyBadgeAi : ''}`}>
-                        {VERSION_SOURCE_LABEL[version.source]}
-                      </span>
-                      <time className={styles.historyDate}>{formatVersionDate(version.createdAt)}</time>
-                    </div>
-
-                    {version.label && <p className={styles.historyLabel}>{version.label}</p>}
-
-                    <div className={styles.historyItemFoot}>
-                      <span className={styles.historyMeta}>
-                        {version.slideCount} slide{version.slideCount === 1 ? '' : 's'}
-                        {version.createdBy ? ` · ${version.createdBy.name}` : ''}
-                      </span>
-                      <button
-                        className={styles.historyRestoreBtn}
-                        onClick={() => handleRestoreVersion(version.id)}
-                        disabled={restoringVersionId !== null}
-                      >
-                        <RotateCcw size={13} />
-                        {restoringVersionId === version.id ? 'Restaurando...' : 'Restaurar'}
-                      </button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
             )}
-          </aside>
+
+            {painel === 'codigo' && content.slides[safeSlide] && (
+              <SlideCodeEditor
+                postId={postId}
+                slideIndex={safeSlide}
+                slide={content.slides[safeSlide]}
+                onSaved={aplicarSlide}
+                maxAreaHeight={340}
+              />
+            )}
+
+            {painel === 'versoes' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{ fontSize: 13, fontWeight: 600 }}>Histórico de versões</div>
+                {versoes.length === 0 && (
+                  <p style={{ fontSize: 12, color: 'var(--color-text-muted, #6b7280)' }}>Nenhuma versão ainda — elas nascem a cada edição de IA ou de código.</p>
+                )}
+                {versoes.map((v) => (
+                  <div key={v.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 8, border: '1px solid var(--color-border, rgba(0,0,0,0.08))' }}>
+                    <Clock size={13} style={{ flexShrink: 0, color: 'var(--color-text-muted, #6b7280)' }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12.5, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {v.label?.trim() || VERSION_SOURCE_LABEL[v.source]}
+                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--color-text-muted, #6b7280)' }}>
+                        {formatDate(v.createdAt)}{typeof v.slideCount === 'number' ? ` · ${v.slideCount} slides` : ''}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void restaurar(v.id)}
+                      disabled={restaurando !== null}
+                      title="Restaurar esta versão (o estado atual vira versão antes)"
+                      style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, padding: '5px 10px', borderRadius: 8, border: '1px solid var(--color-border, rgba(0,0,0,0.12))', background: 'transparent', cursor: 'pointer' }}
+                    >
+                      {restaurando === v.id ? <Loader2 size={12} /> : <RotateCcw size={12} />} Restaurar
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: 'var(--color-text-muted, #6b7280)' }}>
+            <Presentation size={12} />
+            Para edição visual completa, baixe o PPTX e abra no Canva/PowerPoint — o texto continua editável.
+          </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }

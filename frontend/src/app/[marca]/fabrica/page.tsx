@@ -4,14 +4,15 @@ import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef,
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { ArrowUp, Paperclip, Sparkles, Wifi, WifiOff, X, ChevronDown, ChevronRight, MessageSquarePlus, Check, Loader2 } from 'lucide-react';
 import DesignRenderer from '@/components/Fabrica/DesignRenderer';
-import HtmlSlideRenderer from '@/components/DesignDocument/HtmlSlideRenderer';
-import IRSlideRenderer from '@/components/DesignDocument/IRSlideRenderer';
+import dynamic from 'next/dynamic';
+const HtmlSlideRenderer = dynamic(() => import('@/components/DesignDocument/HtmlSlideRenderer'), { ssr: false });
+const IRSlideRenderer = dynamic(() => import('@/components/DesignDocument/IRSlideRenderer'), { ssr: false });
 import { type HtmlDesignPostContent } from '@/lib/designContent';
-import { AsanaPopup } from '@/components/Fabrica/AsanaPopup';
+const AsanaPopup = dynamic(() => import('@/components/Fabrica/AsanaPopup').then(mod => ({ default: mod.AsanaPopup })), { ssr: false });
 import { NotificationCard } from '@/components/Fabrica/NotificationCard';
-import FolderPicker from '@/components/Fabrica/FolderPicker';
-import { ArtifactPanel } from '@/components/Fabrica/ArtifactPanel';
-import AiSpendBadge from '@/components/AiUsage/AiSpendBadge';
+const FolderPicker = dynamic(() => import('@/components/Fabrica/FolderPicker'), { ssr: false });
+const ArtifactPanel = dynamic(() => import('@/components/Fabrica/ArtifactPanel').then(mod => ({ default: mod.ArtifactPanel })), { ssr: false });
+const AiSpendBadge = dynamic(() => import('@/components/AiUsage/AiSpendBadge'), { ssr: false });
 import { useFabricaWs } from '@/hooks/useFabricaWs';
 import { API_BASE } from '@/lib/api';
 import { useBrandPermissions } from '@/hooks/useBrandPermissions';
@@ -104,6 +105,7 @@ export default function FabricaPage() {
     setReviewMode,
     resetSession,
     clearNotification,
+    applySlideLocal,
   } = useFabricaWs(marca, initialSessionId);
 
   // Persiste a sessão atual no sessionStorage para não perder ao trocar de aba
@@ -752,6 +754,7 @@ export default function FabricaPage() {
             slideIndex={safeSlide}
             slideCount={slideCount}
             gerando={workerStatus === 'running'}
+            onSlideCodeSaved={applySlideLocal}
           >
           <div className={s.previewContent}>
             {/* Progress overlay during update */}

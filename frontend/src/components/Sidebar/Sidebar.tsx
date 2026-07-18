@@ -36,6 +36,7 @@ interface NavItem {
 const mainNav: NavItem[] = [
   { label: 'Minhas Marcas', href: '/galeria', icon: <LayoutGrid size={18} /> },
   { label: 'Projetos da Equipe', href: '/projetos', icon: <Globe size={18} /> },
+  { label: 'Configurações Gerais', href: '/configuracoes', icon: <Settings size={18} /> },
 ];
 
 const extrasNav: NavItem[] = [
@@ -112,7 +113,7 @@ export default function Sidebar() {
 
   // Detect if we're inside a brand context
   const segments = pathname.split('/').filter(Boolean);
-  const knownRoots = ['galeria', 'fabrica', 'editor', 'extras', 'login', 'equipe', 'onboarding'];
+  const knownRoots = ['galeria', 'fabrica', 'editor', 'extras', 'login', 'equipe', 'onboarding', 'configuracoes'];
   const marca = segments.length > 0 && !knownRoots.includes(segments[0]) ? segments[0] : null;
 
   return (
