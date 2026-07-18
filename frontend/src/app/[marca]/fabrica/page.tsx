@@ -16,6 +16,7 @@ const AiSpendBadge = dynamic(() => import('@/components/AiUsage/AiSpendBadge'), 
 import { useFabricaWs } from '@/hooks/useFabricaWs';
 import { API_BASE } from '@/lib/api';
 import { useBrandPermissions } from '@/hooks/useBrandPermissions';
+import ReactMarkdown from 'react-markdown';
 import s from './fabrica.module.css';
 
 // ── Components ────────────────────────────────────────────────────────────────
@@ -383,13 +384,15 @@ export default function FabricaPage() {
             <button
               className={s.newConvBtn}
               onClick={handleNewConversation}
-              title="Iniciar uma nova conversa"
+              disabled={!canGenerate}
+              title={canGenerate ? "Iniciar uma nova conversa" : permHint}
               aria-label="Iniciar nova conversa"
             >
               <MessageSquarePlus size={14} /> Nova
             </button>
             <div className={s.connectionBadge} role="status" title={connected ? 'Conectado' : 'Reconectando...'}>
               <span className={`${s.connectionDot} ${connected ? s.connectionOnline : s.connectionOffline}`} />
+              <span className={s.connectionLabel}>{connected ? 'Online' : 'Reconectando...'}</span>
             </div>
           </div>
         </div>
@@ -423,7 +426,10 @@ export default function FabricaPage() {
                   <button
                     key={i}
                     className={s.suggestChip}
-                    onClick={() => setInput(sug)}
+                    onClick={() => {
+                      setInput(sug);
+                      inputRef.current?.focus();
+                    }}
                   >
                     {sug}
                   </button>
@@ -469,6 +475,8 @@ export default function FabricaPage() {
                   </div>
                 );
               }
+              const isLastAiMsg = msg.role === 'assistant' && msg.id === messages[messages.length - 1]?.id;
+              const isStreamingMsg = isStreaming && isLastAiMsg;
               return (
                 <div key={msg.id} className={s.aiRow}>
                   <div className={s.aiAvatar}>
@@ -476,11 +484,8 @@ export default function FabricaPage() {
                   </div>
                   <div className={s.aiBubble}>
                     {msg.thinking && <ThinkingBlock thinking={msg.thinking} />}
-                    <div className={s.aiText}>
-                      {msg.content}
-                      {isStreaming && msg.id === messages[messages.length - 1]?.id && (
-                        <span className={s.cursor} />
-                      )}
+                    <div className={`${s.aiText} ${isStreamingMsg ? s.aiTextStreaming : ''}`}>
+                      <ReactMarkdown>{msg.content}</ReactMarkdown>
                     </div>
                   </div>
                 </div>
@@ -657,14 +662,15 @@ export default function FabricaPage() {
 
             {/* Destino do deck, escolhido ANTES de gerar — sem isto ele nascia solto
                 na raiz e só era achado caçando na galeria. */}
-            <FolderPicker marca={marca} sessionId={sessionId} disabled={isStreaming} />
+            <FolderPicker marca={marca} sessionId={sessionId} disabled={isStreaming || !canGenerate} />
 
-            <div className={s.inputBar}>
+            <div className={`${s.inputBar} ${!canGenerate ? s.inputBarDisabled : ''}`}>
               <button
                 className={s.iconBtn}
                 onClick={() => fileRef.current?.click()}
-                title="Anexar arquivo"
+                title={canGenerate ? "Anexar arquivo" : permHint}
                 aria-label="Anexar arquivo"
+                disabled={!canGenerate}
               >
                 <Paperclip size={15} />
               </button>
@@ -684,14 +690,16 @@ export default function FabricaPage() {
                 aria-label="Mensagem para a fábrica"
                 aria-describedby="fabricaInputHint"
                 placeholder={
-                  isStreaming
+                  !canGenerate
+                    ? 'Você não tem permissão para interagir com a fábrica nesta marca.'
+                    : isStreaming
                     ? 'Gerando... digite algo para adicionar contexto em tempo real'
                     : messages.length === 0
                     ? 'Descreva o que você quer criar...'
                     : 'Refine ou peça ajustes... use / para comandos'
                 }
                 rows={1}
-                disabled={false}
+                disabled={!canGenerate}
               />
               <button
                 className={`${s.sendBtn} ${canSend ? s.sendActive : ''}`}

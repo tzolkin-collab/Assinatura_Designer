@@ -673,6 +673,15 @@ export interface EditHtmlSlideInput {
   width: number;
   height: number;
   isolate?: boolean;
+  /** Elemento selecionado pelo usuário no preview (seletor estilo "inspecionar"):
+   *  a instrução deve ser aplicada NELE. Elimina a ambiguidade de "o título" num
+   *  slide com três títulos. */
+  targetElement?: {
+    identifier?: string;
+    path?: string;
+    text?: string;
+    outerHTML?: string;
+  };
 }
 
 export async function editHtmlSlide(
@@ -706,6 +715,17 @@ Regras invioláveis:
     ? `\nInstruções Específicas da Marca: ${input.brand.agentPrompt}`
     : '';
 
+  // Alvo selecionado no preview (inspecionar): tira a ambiguidade de "o título"
+  // num slide com três títulos — a instrução se aplica NESTE elemento.
+  const t = input.targetElement;
+  const targetBlock = t && (t.identifier || t.outerHTML)
+    ? `\nELEMENTO ALVO (o usuário CLICOU neste elemento no preview — aplique a instrução NELE, e só nele, salvo menção explícita a outros):
+- Identificador: ${t.identifier ?? '—'}
+- Caminho no slide: ${t.path ?? '—'}
+${t.text ? `- Texto atual: "${t.text}"` : ''}
+${t.outerHTML ? `- Trecho exato no HTML:\n${t.outerHTML}` : ''}\n`
+    : '';
+
   const userPrompt = `Marca: ${input.brand.name}
 Cores: ${input.brand.colors.join(', ') || 'livre'}
 Fontes: ${input.brand.primaryFonts.join(', ') || 'livre'}${guidelinesBlock}${agentPromptBlock}
@@ -715,7 +735,7 @@ ${input.slide.html}
 
 CSS atual:
 ${input.slide.css ?? ''}
-
+${targetBlock}
 Instrução do usuário: "${input.instruction}"
 
 Retorne o slide editado (apenas o que mudou aplicado sobre o atual).`;

@@ -14,8 +14,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import {
-  ArrowLeft, Check, ChevronDown, Clock, Download, History, Loader2,
-  MessageSquareText, Presentation, RotateCcw, Sparkles,
+  ArrowLeft, Check, ChevronDown, Clock, Crosshair, Download, History, Loader2,
+  MessageSquareText, Presentation, RotateCcw, Sparkles, X,
 } from 'lucide-react';
 import { api, getApiErrorMessage } from '@/lib/api';
 import Button from '@/components/ui/Button';
@@ -95,6 +95,27 @@ export default function EditorPage() {
   const [editLog, setEditLog] = useState<string[]>([]);
   const [erroEdicao, setErroEdicao] = useState<string | null>(null);
 
+  // Seletor "inspecionar": clica no elemento do preview e a instrução de IA
+  // passa a mirar EXATAMENTE nele (identifier + caminho + trecho de HTML).
+  interface ElementoAlvo { identifier?: string; path?: string; text?: string; outerHTML?: string }
+  const [inspecionando, setInspecionando] = useState(false);
+  const [alvo, setAlvo] = useState<ElementoAlvo | null>(null);
+
+  useEffect(() => {
+    const onMessage = (e: MessageEvent) => {
+      const msg = e.data as { type?: string; data?: ElementoAlvo } | null;
+      if (msg?.type !== 'ELEMENT_SELECTED' || !msg.data) return;
+      setAlvo(msg.data);
+      setInspecionando(false); // pick único, como no DevTools
+      setPainel('ia');
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, []);
+
+  // Trocou de slide: o alvo do slide anterior não vale mais.
+  useEffect(() => { setAlvo(null); setInspecionando(false); }, [activeSlide]);
+
   // Versões
   const [versoes, setVersoes] = useState<PostVersion[]>([]);
   const [restaurando, setRestaurando] = useState<string | null>(null);
@@ -157,17 +178,18 @@ export default function EditorPage() {
     try {
       const resp = await api.post<{ slideIndex: number; slide: SlideCode }>(
         `/posts/${postId}/edit-slide`,
-        { slideIndex: safeSlide, instruction: texto },
+        { slideIndex: safeSlide, instruction: texto, ...(alvo ? { target: alvo } : {}) },
       );
       aplicarSlide(resp.slideIndex, resp.slide);
-      setEditLog(prev => [...prev.slice(-5), texto]);
+      setEditLog(prev => [...prev.slice(-5), alvo?.identifier ? `[${alvo.identifier}] ${texto}` : texto]);
       setInstrucao('');
+      setAlvo(null); // alvo consumido — o elemento pode nem existir mais após a edição
     } catch (e) {
       setErroEdicao(getApiErrorMessage(e, 'A edição falhou — o slide continua como estava.'));
     } finally {
       setEditando(false);
     }
-  }, [instrucao, editando, content, postId, safeSlide, aplicarSlide]);
+  }, [instrucao, editando, content, postId, safeSlide, aplicarSlide, alvo]);
 
   const restaurar = useCallback(async (versionId: string) => {
     setRestaurando(versionId);
@@ -310,8 +332,29 @@ export default function EditorPage() {
       <div style={{ display: 'flex', flex: 1, minHeight: 0, gap: 14, padding: 14, flexWrap: 'wrap', overflowY: 'auto' }}>
         {/* Viewer */}
         <div style={{ flex: '1 1 480px', minWidth: 320, display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0 }}>
-          <div style={{ borderRadius: 12, overflow: 'hidden', border: '1px solid var(--color-border, rgba(0,0,0,0.1))', background: '#fff', aspectRatio: `${canvasW} / ${canvasH}`, maxHeight: '68vh' }}>
-            <HtmlSlideRenderer content={content} activeSlide={safeSlide} onSlideChange={setActiveSlide} hideNav />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button
+              type="button"
+              onClick={() => setInspecionando(v => !v)}
+              title="Clique em um elemento do slide para mirar a edição de IA nele"
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6, padding: '5px 12px', fontSize: 12, fontWeight: 500,
+                borderRadius: 999, cursor: 'pointer',
+                border: inspecionando ? '1px solid var(--color-brand, #FF6B35)' : '1px solid var(--color-border, rgba(0,0,0,0.12))',
+                background: inspecionando ? 'rgba(255,107,53,0.1)' : 'transparent',
+                color: inspecionando ? 'var(--color-brand, #FF6B35)' : 'var(--color-text, #111827)',
+              }}
+            >
+              <Crosshair size={13} /> {inspecionando ? 'Clique em um elemento do slide…' : 'Selecionar elemento'}
+            </button>
+            {alvo && !inspecionando && (
+              <span style={{ fontSize: 11.5, color: 'var(--color-text-muted, #6b7280)' }}>
+                alvo: <code style={{ fontSize: 11 }}>{alvo.identifier}</code>
+              </span>
+            )}
+          </div>
+          <div style={{ borderRadius: 12, overflow: 'hidden', border: inspecionando ? '2px solid var(--color-brand, #FF6B35)' : '1px solid var(--color-border, rgba(0,0,0,0.1))', background: '#fff', aspectRatio: `${canvasW} / ${canvasH}`, maxHeight: '68vh' }}>
+            <HtmlSlideRenderer content={content} activeSlide={safeSlide} onSlideChange={setActiveSlide} hideNav inspectorMode={inspecionando} />
           </div>
           {slideCount > 1 && (
             <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4 }}>
@@ -344,7 +387,24 @@ export default function EditorPage() {
                 <div style={{ fontSize: 13, fontWeight: 600 }}>Editar slide {safeSlide + 1} com IA</div>
                 <p style={{ fontSize: 12, color: 'var(--color-text-muted, #6b7280)', margin: 0 }}>
                   Mesma edição do chat da Fábrica: a IA altera só o que você pedir e preserva o resto do slide. Cada edição cria uma versão.
+                  {!alvo && ' Dica: use "Selecionar elemento" no preview para mirar a edição.'}
                 </p>
+                {alvo && (
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', borderRadius: 8,
+                    border: '1px solid rgba(255,107,53,0.4)', background: 'rgba(255,107,53,0.06)',
+                  }}>
+                    <Crosshair size={13} style={{ flexShrink: 0, color: 'var(--color-brand, #FF6B35)' }} />
+                    <div style={{ flex: 1, minWidth: 0, fontSize: 12 }}>
+                      <code style={{ fontSize: 11.5 }}>{alvo.identifier}</code>
+                      {alvo.text && <span style={{ color: 'var(--color-text-muted, #6b7280)' }}> — “{alvo.text.slice(0, 48)}{(alvo.text.length ?? 0) > 48 ? '…' : ''}”</span>}
+                    </div>
+                    <button type="button" onClick={() => setAlvo(null)} title="Remover alvo (a instrução volta a valer para o slide todo)"
+                      style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--color-text-muted, #6b7280)', display: 'flex' }}>
+                      <X size={13} />
+                    </button>
+                  </div>
+                )}
                 {editLog.length > 0 && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                     {editLog.map((m, i) => (

@@ -327,12 +327,12 @@ export function AsanaPopup({ onClose, onInject }: Props) {
 // ── Styles ───────────────────────────────────────────────────────────────────
 
 const OVERLAY: React.CSSProperties = {
-  position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.2)', zIndex: 200,
-  display: 'flex', alignItems: 'flex-end', justifyContent: 'flex-start',
-  padding: '0 0 72px 12px',
+  position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 1000,
+  display: 'flex', alignItems: 'center', justifyContent: 'center',
+  padding: '16px',
 };
 const POPUP: React.CSSProperties = {
-  width: 300, maxHeight: 440, background: '#ffffff',
+  width: '100%', maxWidth: 320, maxHeight: 440, background: '#ffffff',
   border: '1px solid rgba(0,0,0,0.08)', borderRadius: 12,
   display: 'flex', flexDirection: 'column', overflow: 'hidden',
   boxShadow: '0 8px 30px rgba(0,0,0,0.12)',

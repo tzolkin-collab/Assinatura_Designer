@@ -66,29 +66,53 @@ function buildSlideDoc(slide: HtmlSlide, fonts: string[], width: number, height:
     e.target.style.outline = e.target.dataset.originalOutline || '';
     e.target.style.cursor = e.target.dataset.originalCursor || '';
   });
+  // Caminho único do elemento a partir do .slide-root (tag.classe:nth-of-type),
+  // para a IA localizar o elemento EXATO mesmo quando classes se repetem.
+  function pathOf(el) {
+    const parts = [];
+    let cur = el;
+    while (cur && !cur.classList.contains('slide-root') && cur !== document.body) {
+      let seg = cur.tagName.toLowerCase();
+      if (cur.id) { parts.unshift(seg + '#' + cur.id); break; }
+      const cls = typeof cur.className === 'string' ? cur.className.trim().split(/\\s+/).filter(Boolean) : [];
+      if (cls.length) seg += '.' + cls.slice(0, 2).join('.');
+      const parent = cur.parentElement;
+      if (parent) {
+        const siblings = Array.from(parent.children).filter((c) => c.tagName === cur.tagName);
+        if (siblings.length > 1) seg += ':nth-of-type(' + (siblings.indexOf(cur) + 1) + ')';
+      }
+      parts.unshift(seg);
+      cur = parent;
+    }
+    return parts.join(' > ');
+  }
+
   document.addEventListener('click', (e) => {
     if (e.target === document.body || e.target.classList.contains('slide-root')) return;
     e.preventDefault();
     e.stopPropagation();
-    
+
     const target = e.target;
     let identifier = target.tagName.toLowerCase();
     if (target.id) {
       identifier += '#' + target.id;
     } else if (target.className && typeof target.className === 'string') {
-      identifier += '.' + target.className.split(' ').join('.');
+      identifier += '.' + target.className.trim().split(/\\s+/).filter(Boolean).join('.');
     }
-    
+
     const data = {
       tagName: target.tagName.toLowerCase(),
       id: target.id,
       className: typeof target.className === 'string' ? target.className : '',
-      text: target.textContent?.slice(0, 50).trim(),
+      text: target.textContent?.slice(0, 80).trim(),
       src: target.src,
       href: target.href,
-      identifier
+      identifier,
+      // O contexto que a IA precisa para acertar o elemento EXATO no arquivo:
+      path: pathOf(target),
+      outerHTML: target.outerHTML ? target.outerHTML.slice(0, 800) : ''
     };
-    
+
     window.parent.postMessage({ type: 'ELEMENT_SELECTED', data }, '*');
   }, true);
 </script>

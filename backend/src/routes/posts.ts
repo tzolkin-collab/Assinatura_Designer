@@ -70,8 +70,24 @@ postsRouter.post('/render-batch', async (req: AuthRequest, res: Response, next: 
 postsRouter.post('/:id/edit-slide', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const id = req.params.id as string;
-    const { slideIndex, instruction, isolate } = (req.body ?? {}) as { slideIndex?: number; instruction?: string; isolate?: boolean };
+    const { slideIndex, instruction, isolate, target } = (req.body ?? {}) as {
+      slideIndex?: number;
+      instruction?: string;
+      isolate?: boolean;
+      /** Elemento clicado no preview (seletor "inspecionar" do editor). */
+      target?: { identifier?: string; path?: string; text?: string; outerHTML?: string };
+    };
     if (typeof instruction !== 'string' || !instruction.trim()) throw createError(400, 'instruction é obrigatória');
+
+    // Só strings, truncadas: o target vai para um prompt, não para o banco.
+    const targetElement = target && typeof target === 'object'
+      ? {
+          identifier: typeof target.identifier === 'string' ? target.identifier.slice(0, 200) : undefined,
+          path: typeof target.path === 'string' ? target.path.slice(0, 400) : undefined,
+          text: typeof target.text === 'string' ? target.text.slice(0, 200) : undefined,
+          outerHTML: typeof target.outerHTML === 'string' ? target.outerHTML.slice(0, 1000) : undefined,
+        }
+      : undefined;
 
     const post = await prisma.post.findFirst({
       where: { id, brand: brandMemberFilter(req.user?.userId, EDITORS) },
@@ -128,6 +144,7 @@ postsRouter.post('/:id/edit-slide', async (req: AuthRequest, res: Response, next
         width: content.width ?? 1080,
         height: content.height ?? 1080,
         isolate: isolate !== false,
+        targetElement,
       },
       extractJsonObject,
     );

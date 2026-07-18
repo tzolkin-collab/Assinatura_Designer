@@ -31,6 +31,15 @@ export function NotificationCard({
   const [showDecline, setShowDecline] = useState(false);
   const [declineText, setDeclineText] = useState('');
   const declineRef = useRef<HTMLTextAreaElement>(null);
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleResize = () => setIsMobile(window.innerWidth < 640);
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   useEffect(() => {
     if (notification) {
@@ -62,7 +71,7 @@ export function NotificationCard({
   const accentText = isDone ? '#166534' : isReview ? '#92400e' : '#991b1b';
 
   return (
-    <div style={{ ...CARD, borderTop: `2px solid ${accent}` }}>
+    <div style={{ ...(isMobile ? MOBILE_CARD : CARD), borderTop: `2px solid ${accent}` }}>
 
       {/* Header row */}
       <div style={HEADER_ROW}>
@@ -175,7 +184,16 @@ const CARD: React.CSSProperties = {
   borderRight: '1px solid rgba(0,0,0,0.08)',
   borderBottom: '1px solid rgba(0,0,0,0.08)',
   borderLeft: '1px solid rgba(0,0,0,0.08)',
-  borderRadius: 12, zIndex: 100,
+  borderRadius: 12, zIndex: 1000,
+  boxShadow: '0 8px 30px rgba(0,0,0,0.1)',
+};
+const MOBILE_CARD: React.CSSProperties = {
+  position: 'fixed', bottom: 12, left: 12, right: 12, width: 'auto',
+  background: '#ffffff',
+  borderRight: '1px solid rgba(0,0,0,0.08)',
+  borderBottom: '1px solid rgba(0,0,0,0.08)',
+  borderLeft: '1px solid rgba(0,0,0,0.08)',
+  borderRadius: 12, zIndex: 1000,
   boxShadow: '0 8px 30px rgba(0,0,0,0.1)',
 };
 const HEADER_ROW: React.CSSProperties = {
