@@ -13,8 +13,19 @@ import { assertBrandAccess, ANY_MEMBER, EDITORS } from '../middleware/brandAcces
 import { createError } from '../middleware/errorHandler.js';
 import { config as appConfig } from '../config.js';
 import { AuthRequest } from '../middleware/auth.js';
+import { z } from 'zod';
+import { parseBody } from '../lib/validate.js';
 
 export const settingsRouter = Router();
+
+const referenciaSchema = z.object({
+  name: z.string({ required_error: 'Reference name is required' }).trim().min(1, 'Reference name is required'),
+  analysisUrl: z
+    .string({ required_error: 'Reference URL is required for analysis' })
+    .trim()
+    .min(1, 'Reference URL is required for analysis'),
+  sourceType: z.string().optional(),
+});
 
 const s3 = new S3Client({
   region: 'auto',
@@ -153,10 +164,10 @@ settingsRouter.post('/:slug/referencias', async (req: AuthRequest, res: Response
   try {
     const slug = req.params.slug as string;
     const brandId = await getBrandId(slug, req.user?.userId);
-    const { name, analysisUrl, sourceType } = req.body;
+    const { name, analysisUrl, sourceType } = parseBody(referenciaSchema, req.body);
 
-    if (!name) throw createError(400, 'Reference name is required');
-    if (!analysisUrl) throw createError(400, 'Reference URL is required for analysis');
+    // Guard de SSRF: só http(s) público. Fica fora do zod porque é mais que formato
+    // de URL — resolve o host e barra IPs privados/loopback.
     if (!isPublicHttpUrl(analysisUrl)) throw createError(400, 'URL inválida ou não permitida (apenas http(s) público)');
 
     const validSourceType = sourceType === 'INSTAGRAM' ? 'INSTAGRAM' : 'WEBSITE';

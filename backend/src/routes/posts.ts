@@ -18,6 +18,16 @@ import { mergeSlidesIntoPost, syncPostSlides } from '../lib/postHelper.js';
 import { snapshotPost, restorePostVersion } from '../lib/postVersions.js';
 import { enrichAiContext } from '../lib/aiContext.js';
 import { enqueueCanvaExport, canvaExportQueue, enqueueDeckExport, deckExportQueue } from '../lib/queue.js';
+import { z } from 'zod';
+import { parseBody } from '../lib/validate.js';
+
+const exportFileSchema = z.object({
+  format: z.enum(['pdf', 'zip', 'pptx', 'html'], {
+    errorMap: () => ({ message: "format deve ser 'pdf', 'zip', 'pptx' ou 'html'" }),
+  }),
+});
+const createVersionSchema = z.object({ label: z.string().optional() });
+const exportCanvaSchema = z.object({ slideIndex: z.number().int().nonnegative().optional() });
 import { resolveRenderableDeck } from '../lib/renderableDeck.js';
 import { generateIRPatchForSlide } from '../lib/designIR/aiPatch.js';
 import type { SlideNode as IRSlideNode } from '../lib/designIR/types.js';
@@ -500,7 +510,7 @@ postsRouter.get('/:id/versions', async (req: AuthRequest, res: Response, next: N
 postsRouter.post('/:id/versions', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const id = req.params.id as string;
-    const { label } = req.body as { label?: string };
+    const { label } = parseBody(createVersionSchema, req.body ?? {});
     await findPostForUser(id, req.user?.userId);
 
     const version = await snapshotPost(id, {
@@ -564,12 +574,8 @@ postsRouter.delete('/:id', async (req: AuthRequest, res: Response, next: NextFun
 postsRouter.post('/:id/export-file', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const id = req.params.id as string;
-    const { format } = (req.body ?? {}) as { format?: string };
+    const { format } = parseBody(exportFileSchema, req.body ?? {});
     const userId = req.user?.userId;
-
-    if (format !== 'pdf' && format !== 'zip' && format !== 'pptx' && format !== 'html') {
-      throw createError(400, "format deve ser 'pdf', 'zip', 'pptx' ou 'html'");
-    }
 
     // Valida barato ANTES de enfileirar: um job que morre no worker por post
     // inexistente ou formato não-renderizável é péssima experiência.
@@ -681,7 +687,7 @@ postsRouter.get('/:id/export-file/:jobId/download', async (req: AuthRequest, res
 postsRouter.post('/:id/export-canva', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const id = req.params.id as string;
-    const { slideIndex } = (req.body ?? {}) as { slideIndex?: number };
+    const { slideIndex } = parseBody(exportCanvaSchema, req.body ?? {});
     const userId = req.user?.userId;
 
     // Valida tudo o que dá pra validar de forma barata ANTES de enfileirar: um job
