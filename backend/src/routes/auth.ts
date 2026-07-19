@@ -7,8 +7,32 @@ import { createError } from '../middleware/errorHandler.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { ensureInternalTeamMemberships } from '../lib/internalTeam.js';
 import { hashInviteToken } from '../lib/invites.js';
+import { z } from 'zod';
+import { parseBody } from '../lib/validate.js';
 
 export const authRouter = Router();
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const registerSchema = z.object({
+  email: z.string().trim().regex(EMAIL_RE, 'Email inválido'),
+  password: z.string().min(8, 'A senha deve ter ao menos 8 caracteres'),
+  name: z.string().trim().min(1, 'Nome é obrigatório'),
+});
+
+const loginSchema = z.object({
+  email: z.string().trim().min(1, 'Email é obrigatório'),
+  password: z.string().min(1, 'Senha é obrigatória'),
+});
+
+const asanaTokenSchema = z.object({
+  token: z.string().min(1, 'Asana token is required'),
+});
+
+const acceptInviteSchema = z.object({
+  name: z.string().trim().min(1, 'Nome é obrigatório.'),
+  password: z.string().min(8, 'A senha deve ter ao menos 8 caracteres'),
+});
 
 // Hash "descartável" para igualar o custo do bcrypt quando o email não existe —
 // sem ele, o login responde na hora para email inexistente e ~100ms para email
@@ -17,17 +41,7 @@ const DUMMY_PASSWORD_HASH = bcrypt.hashSync('timing-equalizer-not-a-real-passwor
 
 authRouter.post('/register', rateLimit({ windowSec: 3600, max: 5, keyPrefix: 'register' }), async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { email, password, name } = req.body;
-
-    if (!email || !password || !name) {
-      throw createError(400, 'Email, password, and name are required');
-    }
-    if (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      throw createError(400, 'Email inválido');
-    }
-    if (typeof password !== 'string' || password.length < 8) {
-      throw createError(400, 'A senha deve ter ao menos 8 caracteres');
-    }
+    const { email, password, name } = parseBody(registerSchema, req.body);
 
     const exist = await prisma.user.findUnique({ where: { email } });
     if (exist) throw createError(409, 'Email already in use');
@@ -57,8 +71,7 @@ authRouter.post('/register', rateLimit({ windowSec: 3600, max: 5, keyPrefix: 're
 // POST /api/auth/connections/asana - Configure Asana PAT
 authRouter.post('/connections/asana', requireAuth, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { token } = req.body;
-    if (!token) throw createError(400, 'Asana token is required');
+    const { token } = parseBody(asanaTokenSchema, req.body);
 
     await prisma.user.update({
       where: { id: req.user!.userId },
@@ -124,14 +137,7 @@ authRouter.get('/invite/:token', rateLimit({ windowSec: 900, max: 30, keyPrefix:
 authRouter.post('/invite/:token/accept', rateLimit({ windowSec: 3600, max: 10, keyPrefix: 'invite-accept' }), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const rawToken = req.params.token as string;
-    const { name, password } = req.body as { name?: unknown; password?: unknown };
-
-    if (typeof name !== 'string' || name.trim().length === 0) {
-      throw createError(400, 'Nome é obrigatório.');
-    }
-    if (typeof password !== 'string' || password.length < 8) {
-      throw createError(400, 'A senha deve ter ao menos 8 caracteres');
-    }
+    const { name, password } = parseBody(acceptInviteSchema, req.body);
 
     const invite = await findUsableInvite(rawToken);
 
@@ -177,8 +183,7 @@ authRouter.post('/invite/:token/accept', rateLimit({ windowSec: 3600, max: 10, k
 // máquina (todo mundo é o mesmo IP). O freio anti-brute-force é para produção.
 authRouter.post('/login', rateLimit({ windowSec: 900, max: config.isDev ? 200 : 10, keyPrefix: 'login' }), async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { email, password } = req.body;
-    if (!email || !password) throw createError(400, 'Email and password required');
+    const { email, password } = parseBody(loginSchema, req.body);
 
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user) {
