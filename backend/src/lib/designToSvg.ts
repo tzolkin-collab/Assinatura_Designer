@@ -161,7 +161,7 @@ function renderNode(node: DesignNode, parent: Box, tokens: DesignTokens, defs: s
       const fill = fillFor(bg, tokens, defs, tokens.colors.surface);
       const r = node.style?.borderRadius ?? 0;
       out.push(
-        `<rect x="${box.x}" y="${box.y}" width="${box.width}" height="${box.height}" rx="${r}" fill="${fill}" opacity="${node.style?.opacity ?? 1}"/>`,
+        `<rect x="${box.x}" y="${box.y}" width="${box.width}" height="${box.height}" rx="${r}" fill="${esc(fill)}" opacity="${node.style?.opacity ?? 1}"/>`,
       );
     }
     const pad = getPadding(node.layout);
@@ -182,7 +182,7 @@ function renderNode(node: DesignNode, parent: Box, tokens: DesignTokens, defs: s
     const circle = node.style?.shape === 'circle';
     const r = circle ? Math.min(box.width, box.height) / 2 : node.style?.shape === 'pill' ? box.height / 2 : (node.style?.borderRadius ?? 0);
     out.push(
-      `<rect x="${box.x}" y="${box.y}" width="${box.width}" height="${box.height}" rx="${r}" fill="${fill}" opacity="${node.style?.opacity ?? 1}"/>`,
+      `<rect x="${box.x}" y="${box.y}" width="${box.width}" height="${box.height}" rx="${r}" fill="${esc(fill)}" opacity="${node.style?.opacity ?? 1}"/>`,
     );
     return;
   }
@@ -195,7 +195,7 @@ function renderNode(node: DesignNode, parent: Box, tokens: DesignTokens, defs: s
         `<image x="${box.x}" y="${box.y}" width="${box.width}" height="${box.height}" href="${esc(src)}" preserveAspectRatio="xMidYMid slice"/>`,
       );
     } else {
-      out.push(`<rect x="${box.x}" y="${box.y}" width="${box.width}" height="${box.height}" fill="${tokens.colors.surface}"/>`);
+      out.push(`<rect x="${box.x}" y="${box.y}" width="${box.width}" height="${box.height}" fill="${esc(tokens.colors.surface)}"/>`);
     }
     return;
   }
@@ -215,7 +215,7 @@ function renderNode(node: DesignNode, parent: Box, tokens: DesignTokens, defs: s
       .map((ln, i) => `<tspan x="${tx}" dy="${i === 0 ? fontSize : lineH}">${esc(ln)}</tspan>`)
       .join('');
     out.push(
-      `<text y="${box.y}" font-family="${esc(family)}, Inter, Arial, sans-serif" font-size="${fontSize}" font-weight="${weight}" fill="${color}" text-anchor="${anchor}">${tspans}</text>`,
+      `<text y="${box.y}" font-family="${esc(family)}, Inter, Arial, sans-serif" font-size="${fontSize}" font-weight="${weight}" fill="${esc(color)}" text-anchor="${anchor}">${tspans}</text>`,
     );
     return;
   }
@@ -226,7 +226,7 @@ export function designPageToSvg(page: DesignPageNode, tokens: DesignTokens, widt
   const out: string[] = [];
   const pageBox: Box = { x: 0, y: 0, width, height };
   const bgFill = fillFor(page.background, tokens, defs, tokens.colors.background);
-  out.push(`<rect x="0" y="0" width="${width}" height="${height}" fill="${bgFill}"/>`);
+  out.push(`<rect x="0" y="0" width="${width}" height="${height}" fill="${esc(bgFill)}"/>`);
   for (const node of page.children) renderNode(node, pageBox, tokens, defs, out);
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">` +
     (defs.length ? `<defs>${defs.join('')}</defs>` : '') +
