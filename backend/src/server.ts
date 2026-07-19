@@ -4,6 +4,7 @@ import { config, validateConfig } from './config.js';
 import { redis } from './lib/redis.js';
 import { initWebSocket } from './lib/websocket.js';
 import { startPipelineWorker, startCanvaExportWorker, startDeckExportWorker, closeQueue } from './lib/queue.js';
+import { closeEventBus } from './lib/eventBus.js';
 import { ensureInternalTeamMemberships } from './lib/internalTeam.js';
 
 const start = async () => {
@@ -29,7 +30,7 @@ const start = async () => {
   console.log(`  ├─ Redis:        ${config.redisUrl}`);
 
   const server = http.createServer(app);
-  initWebSocket(server);
+  await initWebSocket(server);
 
   // Ferramenta interna: toda conta é membro de toda marca. Auto-cura na subida
   // (novas contas/marcas também são cobertas nos pontos de criação).
@@ -55,6 +56,7 @@ const start = async () => {
     console.log(`\n[Server] ${signal} recebido — encerrando...`);
     server.close();
     try { await closeQueue(); } catch (err) { console.error('[Server] closeQueue:', err); }
+    try { await closeEventBus(); } catch { /* já desconectado */ }
     try { await redis.quit(); } catch { /* já desconectado */ }
     process.exit(0);
   };

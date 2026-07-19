@@ -7,6 +7,7 @@
 
 import { config, validateConfig } from './config.js';
 import { redis } from './lib/redis.js';
+import { initEventBus, closeEventBus } from './lib/eventBus.js';
 import { startPipelineWorker, startCanvaExportWorker, startDeckExportWorker, closeQueue } from './lib/queue.js';
 
 const start = async () => {
@@ -23,6 +24,11 @@ const start = async () => {
   console.log(`\n  ⚙️  Assinatura Worker`);
   console.log(`  ├─ Environment: ${config.nodeEnv}`);
   console.log(`  ├─ Redis:        ${config.redisUrl}`);
+
+  // O worker precisa do EventBus publisher para que chamadas como
+  // ws.progress(sessionId, ...) cheguem ao processo da API via Redis Pub/Sub.
+  await initEventBus();
+  console.log('  ├─ EventBus:     publisher inicializado');
   startPipelineWorker();
   startCanvaExportWorker();
   startDeckExportWorker();
@@ -31,6 +37,7 @@ const start = async () => {
   const shutdown = async (signal: string) => {
     console.log(`\n[Worker] ${signal} recebido — encerrando...`);
     try { await closeQueue(); } catch (err) { console.error('[Worker] closeQueue:', err); }
+    try { await closeEventBus(); } catch { /* já desconectado */ }
     try { await redis.quit(); } catch { /* já desconectado */ }
     process.exit(0);
   };

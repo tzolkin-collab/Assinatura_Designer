@@ -3,6 +3,8 @@ import type { Server } from 'http';
 import jwt from 'jsonwebtoken';
 import { config } from '../config.js';
 import type { DesignPage } from './designTypes.js';
+import { publish, sessionChannel, onEvent, subscribe, initEventBus, type BusEvent } from './eventBus.js';
+import { logger } from './logger.js';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -83,9 +85,39 @@ export function onWsMessage(type: WsInboundType, handler: MessageHandler) {
   handlers.set(type, handler);
 }
 
+// ── Distribuição local de eventos do EventBus para WS ─────────────────────────
+//
+// O EventBus entrega eventos de QUALQUER processo via Redis Pub/Sub. Este
+// listener pega cada evento e distribui para os clientes WS deste processo.
+// Antes, `broadcast()` era a única forma de alcançar os clientes — agora ela
+// publica no EventBus, e o subscriber local é quem entrega para o WS.
+
+function deliverToLocalClients(sessionId: string, event: WsEvent): void {
+  const clients = sessionClients.get(sessionId);
+  if (!clients) return;
+  const data = JSON.stringify(event);
+  for (const { ws: socket } of clients) {
+    if (socket.readyState === WebSocket.OPEN) socket.send(data);
+  }
+}
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 
-export function initWebSocket(server: Server): WebSocketServer {
+export async function initWebSocket(server: Server): Promise<WebSocketServer> {
+  // Inicializa o EventBus e subscreve ao pattern de sessões.
+  // O subscriber recebe eventos de TODOS os processos (API + workers) e entrega
+  // para os clientes WS conectados a ESTE processo.
+  await initEventBus();
+  await subscribe('session:*');
+
+  onEvent((channel, event) => {
+    // channel = "session:<sessionId>"
+    const prefix = 'session:';
+    if (!channel.startsWith(prefix)) return;
+    const sessionId = channel.slice(prefix.length);
+    deliverToLocalClients(sessionId, event as WsEvent);
+  });
+
   const wss = new WebSocketServer({
     server,
     path: '/ws',
@@ -94,7 +126,7 @@ export function initWebSocket(server: Server): WebSocketServer {
     handleProtocols: (protocols) => (protocols.has('bearer') ? 'bearer' : false),
   });
 
-  wss.on('connection', (ws: WebSocket, req) => {
+  wss.on('connection', (wsConn: WebSocket, req) => {
     const url = new URL(req.url ?? '/', `http://localhost`);
     const sessionId = url.searchParams.get('sessionId');
 
@@ -104,7 +136,7 @@ export function initWebSocket(server: Server): WebSocketServer {
     const token = protoHeader.split(',').map((s) => s.trim()).find((p) => p && p !== 'bearer') ?? null;
 
     if (!token || !sessionId) {
-      ws.close(1008, 'Missing token or sessionId');
+      wsConn.close(1008, 'Missing token or sessionId');
       return;
     }
 
@@ -113,14 +145,14 @@ export function initWebSocket(server: Server): WebSocketServer {
       const payload = jwt.verify(token, config.jwtSecret) as { userId: string };
       userId = payload.userId;
     } catch {
-      ws.close(1008, 'Invalid token');
+      wsConn.close(1008, 'Invalid token');
       return;
     }
 
-    const meta: ClientMeta = { ws, userId, sessionId };
+    const meta: ClientMeta = { ws: wsConn, userId, sessionId };
     register(meta);
 
-    ws.on('message', async (raw) => {
+    wsConn.on('message', async (raw) => {
       let msg: WsInbound;
       try {
         msg = JSON.parse(raw.toString()) as WsInbound;
@@ -128,26 +160,29 @@ export function initWebSocket(server: Server): WebSocketServer {
         return;
       }
       const handler = handlers.get(msg.type);
-      if (handler) await handler(sessionId, userId, msg.data).catch(console.error);
+      if (handler) await handler(sessionId, userId, msg.data).catch((e) =>
+        logger.error('[WS handler error]', { type: msg.type, error: (e as Error).message }),
+      );
     });
 
-    ws.on('close', () => unregister(meta));
-    ws.on('error', (err) => console.error('[WS client error]', err.message));
+    wsConn.on('close', () => unregister(meta));
+    wsConn.on('error', (err) => logger.error('[WS client error]', { error: err.message }));
   });
 
-  wss.on('error', (err) => console.error('[WS server error]', err.message));
+  wss.on('error', (err) => logger.error('[WS server error]', { error: err.message }));
   return wss;
 }
 
 // ── Broadcast helpers ─────────────────────────────────────────────────────────
+//
+// A API pública (`ws.*`) NÃO MUDA — callers continuam usando `ws.token(sessionId, ...)`
+// como antes. A diferença: agora `broadcast()` publica no EventBus via Redis,
+// e o subscriber local distribui para os clientes WS deste processo. Isso
+// significa que um worker em processo separado chamando `ws.progress(...)` agora
+// funciona — o evento viaja pelo Redis até o processo da API que tem os WS.
 
 export function broadcast(sessionId: string, event: WsEvent): void {
-  const clients = sessionClients.get(sessionId);
-  if (!clients) return;
-  const data = JSON.stringify(event);
-  for (const { ws } of clients) {
-    if (ws.readyState === WebSocket.OPEN) ws.send(data);
-  }
+  publish(sessionChannel(sessionId), event as BusEvent);
 }
 
 export const ws = {
