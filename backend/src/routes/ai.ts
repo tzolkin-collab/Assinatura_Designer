@@ -25,6 +25,13 @@ import {
   type GenerationJob,
   type GenerationMode,
 } from '../lib/generationJobStore.js';
+import {
+  CREATE_PLAN,
+  type CreateEvent,
+  type ConsultQuestion,
+  type CreatePlanStep,
+  type VisualRef,
+} from '../lib/generationEvents.js';
 import { z } from 'zod';
 
 export const aiRouter = Router();
@@ -950,26 +957,6 @@ REGRAS DE QUALIDADE:
 
 // ── /create shared types ─────────────────────────────────────────────────────
 
-interface ConsultQuestion {
-  id: string;
-  text: string;
-  options: string[];
-}
-
-interface CreatePlanStep {
-  id: string;
-  text: string;
-  status: 'pending' | 'active' | 'done' | 'error';
-}
-
-interface VisualRef {
-  id: string;
-  title: string;
-  style: string;
-  palette: string[];
-  relevance: string;
-}
-
 type GenerateImageReference = {
   id?: string;
   title: string;
@@ -1134,21 +1121,6 @@ REGRAS:
   throw lastError instanceof Error ? lastError : new Error('Falha ao gerar imagem com Nano Banana');
 }
 
-type CreateEvent =
-  | { type: 'text'; text: string }
-  | { type: 'questions'; questions: ConsultQuestion[] }
-  | { type: 'plan'; steps: CreatePlanStep[] }
-  | { type: 'plan-step'; stepId: string; status: 'active' | 'done' | 'error' }
-  | { type: 'reference'; item: VisualRef }
-  | { type: 'status'; text: string }
-  | { type: 'started'; jobId: string; status?: string }
-  | { type: 'thinking'; text: string }
-  | { type: 'slide-ready'; index: number; page: unknown }
-  | { type: 'slide-update'; index: number; page: unknown }
-  | { type: 'hybrid-document'; document: unknown; postId: string }
-  | { type: 'done'; postId?: string; mode?: GenerationMode }
-  | { type: 'error'; message: string };
-
 // ── Phase 1: Ask clarifying questions ────────────────────────────────────────
 
 async function consultDesign(
@@ -1264,14 +1236,7 @@ Retorne APENAS JSON:
 
 // ── Phase 2: Execute plan + generate design ───────────────────────────────────
 
-const CREATE_PLAN: CreatePlanStep[] = [
-  { id: 'p1', text: 'Buscando referências visuais',   status: 'pending' },
-  { id: 'p2', text: 'Criando roteiro dos slides',     status: 'pending' },
-  { id: 'p3', text: 'Gerando design visual',          status: 'pending' },
-  { id: 'p4', text: 'Validando qualidade',            status: 'pending' },
-];
-
-async function createHybridDesign(
+export async function createHybridDesign(
   {
     message: prompt,
     answers,
