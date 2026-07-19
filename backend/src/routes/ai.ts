@@ -1,6 +1,5 @@
 import { Router, Response, NextFunction } from 'express';
 import type { Prisma } from '@prisma/client';
-import { randomUUID } from 'crypto';
 import { GoogleGenAI } from '@google/genai';
 import { config } from '../config.js';
 import prisma from '../lib/prisma.js';
@@ -17,6 +16,15 @@ import { requireBrandRole, EDITORS, type BrandRequest } from '../middleware/bran
 import { MAX_SLIDES } from '../agents/planner/index.js';
 import { logger } from '../lib/logger.js';
 import { deduplicateLayerIds, finalizeSlideContrast } from '../lib/generationUtils.js';
+import {
+  createGenerationJob,
+  getGenerationJob,
+  broadcastGenerationEvent,
+  addGenerationSseClient,
+  completeGenerationJob,
+  type GenerationJob,
+  type GenerationMode,
+} from '../lib/generationJobStore.js';
 import { z } from 'zod';
 
 export const aiRouter = Router();
@@ -28,100 +36,16 @@ aiRouter.param('slug', (req, res, next) =>
   requireBrandRole(EDITORS)(req as BrandRequest, res as Response, next as NextFunction),
 );
 
-// ── In-memory job store for background generation resilience ──────────────────
-type GenerationJobStatus = 'pending' | 'running' | 'done' | 'error';
-
-type GenerationMode = 'legacy' | 'hybrid';
-
-interface GenerationJob {
-  id: string;
-  slug: string;
-  userId?: string;
-  status: GenerationJobStatus;
-  postId?: string;
-  pages?: unknown[];
-  mode?: GenerationMode;
-  error?: string;
-  events: CreateEvent[];
-  sseClients: Set<Response>;
-  expiresAt: number;
-}
-
-const jobStore = new Map<string, GenerationJob>();
-
-function createGenerationJob(slug: string, userId?: string): GenerationJob {
-  const job: GenerationJob = {
-    id: randomUUID(),
-    slug,
-    userId,
-    status: 'pending',
-    events: [],
-    sseClients: new Set(),
-    expiresAt: Date.now() + 2 * 60 * 60 * 1000,
-  };
-  jobStore.set(job.id, job);
-  return job;
-}
-
-function getGenerationJob(jobId: string, userId?: string): GenerationJob | undefined {
-  const job = jobStore.get(jobId);
-  if (!job || job.expiresAt < Date.now()) return undefined;
-  if (job.userId && userId && job.userId !== userId) return undefined;
-  return job;
-}
-
-function broadcastGenerationEvent(job: GenerationJob, event: CreateEvent): void {
-  job.events.push(event);
-  const data = `data: ${JSON.stringify(event)}\n\n`;
-  for (const client of job.sseClients) {
-    if (!client.writableEnded) client.write(data);
-  }
-}
-
-function addGenerationSseClient(job: GenerationJob, res: Response, fromEventIndex = 0): void {
-  for (let i = fromEventIndex; i < job.events.length; i++) {
-    const event = job.events[i];
-    if (event && !res.writableEnded) res.write(`data: ${JSON.stringify(event)}\n\n`);
-  }
-  if (job.status === 'done' || job.status === 'error') {
-    if (!res.writableEnded) {
-      res.write('data: [DONE]\n\n');
-      res.end();
-    }
-    return;
-  }
-  job.sseClients.add(res);
-  res.on('close', () => job.sseClients.delete(res));
-}
-
-function completeGenerationJob(job: GenerationJob): void {
-  job.status = 'done';
-  for (const client of job.sseClients) {
-    if (!client.writableEnded) {
-      client.write('data: [DONE]\n\n');
-      client.end();
-    }
-  }
-  job.sseClients.clear();
-}
-
-function failGenerationJob(job: GenerationJob, message: string): void {
+// O job store in-memory de geração vive em lib/generationJobStore.ts (genérico
+// sobre o evento). failGenerationJob fica aqui porque constrói o evento de erro
+// específico do contrato CreateEvent, que é da camada de rotas.
+function failGenerationJob(job: GenerationJob<CreateEvent>, message: string): void {
   job.status = 'error';
   job.error = message;
   broadcastGenerationEvent(job, { type: 'error', message });
   completeGenerationJob(job);
   job.status = 'error';
 }
-
-setInterval(() => {
-  const now = Date.now();
-  for (const [k, j] of jobStore) {
-    if (j.expiresAt < now) {
-      for (const client of j.sseClients) if (!client.writableEnded) client.end();
-      jobStore.delete(k);
-    }
-  }
-}, 5 * 60 * 1000);
 
 // ── Gemini text-layer generator (step 2 of the design pipeline) ──────────────
 async function generateTextLayers(
@@ -599,7 +523,7 @@ aiRouter.post('/:slug/generate-design', async (req: AuthRequest, res: Response, 
   const send = (data: object) => { if (!res.destroyed) res.write(`data: ${JSON.stringify(data)}\n\n`); };
   const done = () => { if (!res.destroyed) { res.write('data: [DONE]\n\n'); res.end(); } };
 
-  const job = createGenerationJob(slug, req.user?.userId);
+  const job = createGenerationJob<CreateEvent>(slug, req.user?.userId);
   const jobId = job.id;
   send({ type: 'started', jobId });
 
@@ -759,7 +683,7 @@ Garanta COERÊNCIA visual entre slides (mesma paleta, linguagem visual consisten
 
     const postType = normalizedFormat === 'carousel' ? 'CAROUSEL' : normalizedFormat === 'story' ? 'ANIMATION' : 'SINGLE_IMAGE';
 
-    const job = jobStore.get(jobId);
+    const job = getGenerationJob<CreateEvent>(jobId);
 
     const post = await prisma.post.create({
       data: {
@@ -782,7 +706,7 @@ Garanta COERÊNCIA visual entre slides (mesma paleta, linguagem visual consisten
 
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : 'Erro ao gerar apresentação';
-    const job = jobStore.get(jobId);
+    const job = getGenerationJob<CreateEvent>(jobId);
     if (job) {
       job.status = 'error';
       job.error = msg;
@@ -1829,7 +1753,7 @@ aiRouter.post('/:slug/create-job', async (req: AuthRequest, res: Response, next:
     const payload = await resolveCreatePayload(req.body as CreateRequestBody, slug);
     const { message, answers, slideCount, width, height, generateImages, mode, brand, brandCtx, validProjectAssets, validReferenceAsset, sessionId, chatHistory } = payload;
     const prompt = typeof message === 'string' ? message : '';
-    const job = createGenerationJob(slug, req.user?.userId);
+    const job = createGenerationJob<CreateEvent>(slug, req.user?.userId);
 
     res.status(202).json({ data: { jobId: job.id, status: job.status } });
 
