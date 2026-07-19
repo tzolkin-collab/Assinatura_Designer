@@ -2,16 +2,33 @@ import { Router, Request, Response, NextFunction } from 'express';
 import prisma from '../lib/prisma.js';
 import { config } from '../config.js';
 import { createError } from '../middleware/errorHandler.js';
+import type { BrandRole } from '@prisma/client';
 import { requireBrandRole, ANY_MEMBER, ADMINS, type BrandRequest } from '../middleware/brandAccess.js';
 import {
   generateInviteToken,
   inviteExpiry,
   buildInviteUrl,
-  isInvitableRole,
   INVITABLE_ROLES,
 } from '../lib/invites.js';
+import { z } from 'zod';
+import { parseBody } from '../lib/validate.js';
 
 export const teamRouter = Router({ mergeParams: true });
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// O role vinha do body direto pro create: dava pra convidar alguém como OWNER (ou
+// gravar lixo). O enum é a allowlist — OWNER fora, então nem chega ao banco.
+const inviteSchema = z.object({
+  email: z.string().trim().regex(EMAIL_RE, 'Email inválido.'),
+  role: z.enum([...INVITABLE_ROLES] as [BrandRole, ...BrandRole[]]),
+});
+
+// Mudança de role aceita qualquer papel válido (inclusive OWNER, guardado depois
+// pela checagem de hierarquia); garante que não chegue lixo ao update do Prisma.
+const patchRoleSchema = z.object({
+  role: z.enum([...ANY_MEMBER] as [BrandRole, ...BrandRole[]]),
+});
 
 // GET /api/brands/:slug/members
 teamRouter.get('/', requireBrandRole(ANY_MEMBER), async (req: Request, res: Response, next: NextFunction) => {
@@ -41,21 +58,7 @@ teamRouter.post('/invite', requireBrandRole(ADMINS), async (req: BrandRequest, r
     const brandId = brand.id;
     const invitedById = req.user?.userId;
 
-    const { email, role } = req.body as { email?: unknown; role?: unknown };
-
-    if (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      throw createError(400, 'Email inválido.');
-    }
-    // O role vinha do body direto pro create: dava pra convidar alguém como OWNER
-    // (ou gravar lixo). Agora só passa o que está na allowlist.
-    if (!isInvitableRole(role)) {
-      throw createError(400, `Role inválida. Use uma de: ${INVITABLE_ROLES.join(', ')}.`);
-    }
-
-    const brandRole = req.brandRole!;
-    if (brandRole === 'ADMIN' && role === 'OWNER') {
-      throw createError(403, 'Apenas proprietários podem convidar ou promover outros proprietários.');
-    }
+    const { email, role } = parseBody(inviteSchema, req.body);
 
     const user = await prisma.user.findUnique({ where: { email }, select: { id: true } });
 
@@ -100,8 +103,8 @@ teamRouter.patch('/:targetUserId', requireBrandRole(ADMINS), async (req: Request
     const brandId = brand.id;
 
     const targetUserId = req.params.targetUserId as string;
-    const { role } = req.body;
-    
+    const { role } = parseBody(patchRoleSchema, req.body);
+
     // Verificação de hierarquia do requerente
     const requesterRole = (req as any).brandRole || 'ADMIN';
     if (requesterRole === 'ADMIN' && role === 'OWNER') {

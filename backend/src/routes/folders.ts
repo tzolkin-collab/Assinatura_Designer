@@ -9,8 +9,24 @@ import {
   EDITORS,
   type BrandRequest,
 } from '../middleware/brandAccess.js';
+import { z } from 'zod';
+import { parseBody } from '../lib/validate.js';
 
 export const foldersRouter = Router();
+
+const createFolderSchema = z.object({
+  name: z.string().trim().min(1, 'Folder name is required'),
+  parentId: z.string().nullish(),
+});
+
+const patchFolderSchema = z
+  .object({
+    name: z.string().trim().min(1, 'Folder name is required').optional(),
+    parentId: z.string().nullable().optional(),
+  })
+  .refine((d) => d.name !== undefined || d.parentId !== undefined, {
+    message: 'Informe ao menos um campo: name ou parentId.',
+  });
 
 const FOLDER_FIELDS = { id: true, name: true, parentId: true, createdAt: true } as const;
 
@@ -71,9 +87,7 @@ foldersRouter.get('/:slug', requireBrandRole(ANY_MEMBER), async (req: BrandReque
 // POST /api/folders/:brandSlug — cria pasta, opcionalmente dentro de outra.
 foldersRouter.post('/:slug', requireBrandRole(EDITORS), async (req: BrandRequest, res: Response, next: NextFunction) => {
   try {
-    const { name, parentId } = req.body as { name?: string; parentId?: string | null };
-
-    if (!name) throw createError(400, 'Folder name is required');
+    const { name, parentId } = parseBody(createFolderSchema, req.body);
 
     const brand = req.brand!;
 
@@ -94,14 +108,7 @@ foldersRouter.post('/:slug', requireBrandRole(EDITORS), async (req: BrandRequest
 foldersRouter.patch('/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const id = req.params.id as string;
-    const { name, parentId } = req.body as { name?: string; parentId?: string | null };
-
-    if (name === undefined && parentId === undefined) {
-      throw createError(400, 'Informe ao menos um campo: name ou parentId.');
-    }
-    if (name !== undefined && !name.trim()) {
-      throw createError(400, 'Folder name is required');
-    }
+    const { name, parentId } = parseBody(patchFolderSchema, req.body);
 
     const folder = await prisma.folder.findFirst({
       where: { id, brand: brandMemberFilter(req.user?.userId, EDITORS) },
