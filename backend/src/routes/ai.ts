@@ -16,6 +16,7 @@ import { buildBrandAssistantInstruction, buildBrandContextSummary, resolveBrandC
 import { requireBrandRole, EDITORS, type BrandRequest } from '../middleware/brandAccess.js';
 import { MAX_SLIDES } from '../agents/planner/index.js';
 import { logger } from '../lib/logger.js';
+import { z } from 'zod';
 
 export const aiRouter = Router();
 
@@ -1767,6 +1768,40 @@ type CreateRequestBody = {
   chatHistory?: unknown;
 };
 
+// Validação de contrato do corpo. O objetivo aqui é rejeitar cedo, com 400 claro,
+// os campos ESCALARES malformados (slideCount não-numérico, mode desconhecido,
+// generateImages não-booleano) — que antes viravam erro obscuro ou default
+// silencioso lá adiante. As coleções (answers, projectAssets, referenceAsset,
+// chatHistory) ficam propositalmente frouxas: os normalizadores abaixo já
+// FILTRAM entradas inválidas item a item, e endurecê-las aqui rejeitaria um array
+// só porque um elemento veio torto — regressão de comportamento. slideCount/width/
+// height não têm teto aqui de propósito: o clamp (MAX_SLIDES, 256–4096) é feito
+// depois; validamos só o tipo.
+const createRequestSchema = z
+  .object({
+    message: z.unknown().optional(),
+    answers: z.unknown().optional(),
+    slideCount: z.number().int().positive().optional(),
+    width: z.number().positive().optional(),
+    height: z.number().positive().optional(),
+    projectAssets: z.array(z.unknown()).optional(),
+    referenceAsset: z.unknown().optional(),
+    generateImages: z.boolean().optional(),
+    mode: z.enum(['legacy', 'hybrid']).optional(),
+    sessionId: z.string().optional(),
+    chatHistory: z.array(z.unknown()).optional(),
+  })
+  .passthrough();
+
+function assertValidCreateBody(body: unknown): void {
+  const parsed = createRequestSchema.safeParse(body);
+  if (parsed.success) return;
+  const detail = parsed.error.issues
+    .map((i) => `${i.path.join('.') || 'body'}: ${i.message}`)
+    .join('; ');
+  throw createError(400, `Corpo da requisição inválido — ${detail}`);
+}
+
 function normalizeHybridChatHistory(value: unknown): HybridDesignChatMessage[] | undefined {
   if (!Array.isArray(value)) return undefined;
 
@@ -1807,6 +1842,7 @@ function normalizeHybridChatHistory(value: unknown): HybridDesignChatMessage[] |
 }
 
 async function resolveCreatePayload(body: CreateRequestBody, slug: string) {
+  assertValidCreateBody(body);
   const { message, answers, slideCount = 6, width = 1920, height = 1080, projectAssets, referenceAsset, generateImages, mode, sessionId, chatHistory } = body;
   const prompt = typeof message === 'string' ? message : '';
 
