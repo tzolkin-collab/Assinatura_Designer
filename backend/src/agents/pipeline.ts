@@ -370,6 +370,18 @@ async function runPipelineInner(
       }
 
 
+      // Guarda o review na sessão MESMO quando aprovado: se o usuário recusar
+      // (review:decline), o brain usa estas deviations para montar um [EDIT]
+      // cirúrgico — sem isto a recusa só tinha o texto solto do chat e a única
+      // saída era regenerar o deck inteiro. O brain limpa no approve/decline.
+      await updateSession(sessionId, {
+        pendingReview: {
+          score: reviewResult.score,
+          feedback: reviewResult.feedback,
+          deviations: reviewResult.deviations ?? [],
+        },
+      });
+
       // Sem auto-regeneração: se o revisor não aprovou, mantemos ESTE design e
       // mostramos a análise para o usuário decidir o próximo passo no chat.
       if (!reviewResult.approved) {

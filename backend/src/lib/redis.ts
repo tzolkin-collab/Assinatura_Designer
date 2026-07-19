@@ -99,6 +99,23 @@ export interface FabricaSession {
     sourceCopy?: string;
     brief: string;
   } | null;
+  /**
+   * Resultado do último review automático, guardado pelo pipeline para o
+   * `review:decline` virar um [EDIT] cirúrgico (só os slides com deviation) em vez
+   * de regenerar o deck inteiro. Limpo pelo brain no approve/decline.
+   * Estrutural (não importa o tipo do reviewer) para não acoplar o Redis aos agents.
+   */
+  pendingReview?: {
+    score: number;
+    feedback: string;
+    deviations: Array<{
+      type?: string;
+      severity?: string;
+      slideIndex: number;
+      description?: string;
+      fix?: string;
+    }>;
+  } | null;
   messages: ChatMessage[];
   currentDesign: DesignPage[];
   workerStatus: WorkerStatus;
@@ -165,6 +182,7 @@ export async function createSession(
     phase: 'listening',
     reviewMode,
     activeQuestion: null,
+    pendingReview: null,
     messages: [],
     currentDesign: [],
     workerStatus: 'idle',

@@ -30,15 +30,18 @@ import { applyPatchToSlide } from '../../lib/designIR/patcher.js';
 import type { SlideNode as IRSlideNode } from '../../lib/designIR/types.js';
 import { runPlanner, type SlideSkeletonItem } from '../planner/index.js';
 import { parseRequestedSlideCount } from '../pipeline.js';
+import { extractBracketedJson, stripBracketedJson, mapDeviationsToEdits } from '../../lib/tagExtract.js';
 
 const ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
 
 function parseQuestionTag(response: string, mode: ReviewMode): FabricaQuestion | null {
-  const match = response.match(/\[QUESTION:\s*(\{[\s\S]*?\})\s*\]/);
+  // Extrator balanceado: a regex lazy antiga truncava no primeiro `}` seguido de
+  // `]`, o que quebrava a tag sempre que uma opção era objeto (`{label, ...}`).
+  const match = extractBracketedJson(response, 'QUESTION');
   if (!match) return null;
 
   try {
-    const parsed = JSON.parse(match[1]) as {
+    const parsed = JSON.parse(match.json) as {
       q?: string;
       options?: unknown;
       kind?: string;
@@ -96,11 +99,15 @@ function parseQuestionTag(response: string, mode: ReviewMode): FabricaQuestion |
 function stripQuestionTag(content: string): string {
   // Remove tags de controle (QUESTION/EDIT/DISPATCH) da mensagem exibida ao usuário.
   // A detecção de despacho/edição usa o texto cru (fullResponse), então isto é seguro.
-  return content
-    .replace(/\[QUESTION:\s*(\{[\s\S]*?\})\s*\]/g, '')
-    .replace(/\[EDIT:\s*(\{[\s\S]*?\})\s*\]/gi, '')
-    .replace(/\[DISPATCH:(presentation|carousel)\]/gi, '')
-    .trim();
+  // QUESTION/EDIT passam pelo extrator balanceado — a regex lazy antiga deixava
+  // resíduo de JSON aninhado (opções-objeto, payload do [EDIT]) vazar para o chat.
+  return stripBracketedJson(
+    stripBracketedJson(
+      content.replace(/\[DISPATCH:(presentation|carousel)\]/gi, ''),
+      'QUESTION',
+    ),
+    'EDIT',
+  );
 }
 
 function emitSessionState(sessionId: string, session: NonNullable<Awaited<ReturnType<typeof getSession>>>) {
@@ -300,27 +307,98 @@ export function initBrainHandlers(): void {
 
   // Aprovação manual do resultado
   onWsMessage('review:approve', async (sessionId) => {
-    await updateSession(sessionId, { phase: 'done', activeQuestion: null });
+    // Limpa o pendingReview junto: a decisão foi tomada, as deviations guardadas
+    // não podem vazar para um decline FUTURO de um deck diferente.
+    await updateSession(sessionId, { phase: 'done', activeQuestion: null, pendingReview: null });
     const updated = await getSession(sessionId);
     if (updated) emitSessionState(sessionId, updated);
     ws.token(sessionId, '\n\nPerfeito! O design foi aprovado e está na galeria.');
   });
 
-  // Rejeição manual com instruções de correção
+  // Rejeição manual com instruções de correção.
+  //
+  // Com arte existente + deviations do último review (session.pendingReview), o
+  // decline vira um [EDIT] cirúrgico — só os slides apontados são refeitos e o
+  // resto do deck sobrevive. Antes a recusa sempre regenerava TUDO: recusar por
+  // 2 slides ruins destruía os outros 13 bons. Sem arte ou sem deviations úteis,
+  // cai no comportamento legado (regeneração total com o brief).
   onWsMessage('review:decline', async (sessionId, userId, data) => {
     const { reason } = (data ?? {}) as { reason?: string };
     const session = await getSession(sessionId);
     if (!session) return;
 
-    await updateSession(sessionId, { phase: 'revising', workerStatus: 'running', activeQuestion: null });
-    const updated = await getSession(sessionId);
-    if (updated) emitSessionState(sessionId, updated);
-    ws.token(sessionId, '\n\nEntendido, vou corrigir. Um momento...');
-    await enqueuePipeline({
-      sessionId,
-      brief: reason ?? 'Refazer com melhorias gerais',
-      format: 'presentation',
+    // Ownership check no mesmo padrão do handleUserMessage: sem isto, quem tivesse
+    // o sessionId de outra pessoa poderia rejeitar e REGENERAR o deck dela.
+    if (userId && session.userId && session.userId !== userId) return;
+
+    const pending = session.pendingReview ?? null;
+
+    // Comportamento legado: regeneração total. O pendingReview morre aqui também —
+    // qualquer que seja o caminho do decline, a decisão sobre aquele review foi
+    // tomada e ele não pode vazar para o próximo deck.
+    const regenerarTudo = async (brief: string) => {
+      await updateSession(sessionId, {
+        phase: 'revising',
+        workerStatus: 'running',
+        activeQuestion: null,
+        pendingReview: null,
+      });
+      const updated = await getSession(sessionId);
+      if (updated) emitSessionState(sessionId, updated);
+      ws.token(sessionId, '\n\nEntendido, vou corrigir. Um momento...');
+      await enqueuePipeline({
+        sessionId,
+        brief,
+        format: 'presentation',
+      });
+    };
+
+    // Fonte de verdade da arte é o Post (mesmo padrão do applySlideEdits): o
+    // currentDesign do Redis expira e volta vazio na reconexão — decidir "não há
+    // arte" por ele regeneraria um deck que existe.
+    const postRow = await prisma.post.findFirst({
+      where: { content: { path: ['sessionId'], equals: sessionId } },
+      include: { slides: { orderBy: { position: 'asc' } } },
+      orderBy: { createdAt: 'desc' },
     });
+
+    const arte = (postRow ? mergeSlidesIntoPost(postRow).content : null) as {
+      kind?: string;
+      ir?: { slides?: unknown[] };
+      slides?: unknown[];
+    } | null;
+    const totalSlides = arte?.kind === 'ir-design' && Array.isArray(arte.ir?.slides)
+      ? arte.ir.slides.length
+      : arte?.kind === 'html-design' && Array.isArray(arte.slides)
+        ? arte.slides.length
+        : 0;
+    const temArte = postRow !== null && totalSlides > 0;
+
+    if (temArte) {
+      const edits = mapDeviationsToEdits(pending?.deviations ?? [], reason, totalSlides);
+      if (edits.length > 0) {
+        // Edição cirúrgica: applySlideEdits já snapshot, emite progresso, persiste
+        // e atualiza o preview ao vivo — aqui só tratamos o desfecho.
+        const resultado = await applySlideEdits(sessionId, session, JSON.stringify({ edits }));
+        if (resultado.outcome === 'editado') {
+          const slides = [...new Set(edits.map((e) => e.index + 1))].sort((a, b) => a - b).join(', ');
+          ws.token(sessionId, `\n\nAjustei os slides ${slides} com base na revisão e mantive o resto do design intacto.`);
+          await updateSession(sessionId, { pendingReview: null });
+          return;
+        }
+        if (resultado.outcome === 'falhou') {
+          // Diz a verdade antes de regenerar: a cirurgia falhou, então o que resta
+          // é o que o decline sempre fez.
+          ws.token(sessionId, `\n\n*Não consegui aplicar os ajustes pontuais (${resultado.motivo}) — vou refazer a peça inteira.*`);
+        }
+        // 'sem-arte' aqui = a arte sumiu entre a checagem e a edição; cai no legado.
+      }
+    }
+
+    // Brief do legado: o motivo da pessoa primeiro; sem ele, o feedback do revisor
+    // (quando há arte — as deviations viraram texto útil); senão o default de sempre.
+    const brief = reason ?? (temArte ? pending?.feedback : undefined) ?? 'Refazer com melhorias gerais';
+    await regenerarTudo(brief);
   });
 
   // Trocar modo auto/manual
@@ -605,9 +683,11 @@ async function detectAndDispatch(
   let semArteParaEditar = false;
 
   // [EDIT:{...}] — ajuste cirúrgico de uma arte existente, SEM regenerar tudo.
-  const editMatch = response.match(/\[EDIT:\s*(\{[\s\S]*?\})\s*\]/i);
+  // Extrator balanceado: a regex lazy antiga truncava o JSON no primeiro `}` seguido
+  // de `]`, então o payload documentado do [EDIT] SEMPRE falhava no JSON.parse.
+  const editMatch = extractBracketedJson(response, 'EDIT');
   if (editMatch) {
-    const resultado = await applySlideEdits(sessionId, session, editMatch[1] as string);
+    const resultado = await applySlideEdits(sessionId, session, editMatch.json);
 
     // Editou preservando o resto: acabou aqui.
     if (resultado.outcome === 'editado') return;
