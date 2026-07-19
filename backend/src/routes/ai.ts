@@ -1653,7 +1653,7 @@ function assertValidCreateBody(body: unknown): void {
   throw createError(400, `Corpo da requisição inválido — ${detail}`);
 }
 
-function normalizeHybridChatHistory(value: unknown): HybridDesignChatMessage[] | undefined {
+export function normalizeHybridChatHistory(value: unknown): HybridDesignChatMessage[] | undefined {
   if (!Array.isArray(value)) return undefined;
 
   const messages = value
