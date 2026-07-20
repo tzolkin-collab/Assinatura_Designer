@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
-import { ArrowUp, Paperclip, Sparkles, Wifi, WifiOff, X, ChevronDown, ChevronRight, MessageSquarePlus, Check, Loader2 } from 'lucide-react';
+import { ArrowUp, Paperclip, Sparkles, Wifi, WifiOff, X, MessageSquarePlus, Check, Loader2 } from 'lucide-react';
 import DesignRenderer from '@/components/Fabrica/DesignRenderer';
 import dynamic from 'next/dynamic';
 const HtmlSlideRenderer = dynamic(() => import('@/components/DesignDocument/HtmlSlideRenderer'), { ssr: false });
@@ -13,33 +13,11 @@ import { NotificationCard } from '@/components/Fabrica/NotificationCard';
 const FolderPicker = dynamic(() => import('@/components/Fabrica/FolderPicker'), { ssr: false });
 const ArtifactPanel = dynamic(() => import('@/components/Fabrica/ArtifactPanel').then(mod => ({ default: mod.ArtifactPanel })), { ssr: false });
 const AiSpendBadge = dynamic(() => import('@/components/AiUsage/AiSpendBadge'), { ssr: false });
+import { ChatMessageRow } from '@/components/Fabrica/ChatMessageRow';
 import { useFabricaWs } from '@/hooks/useFabricaWs';
 import { API_BASE } from '@/lib/api';
 import { useBrandPermissions } from '@/hooks/useBrandPermissions';
-import ReactMarkdown from 'react-markdown';
 import s from './fabrica.module.css';
-
-// ── Components ────────────────────────────────────────────────────────────────
-function ThinkingBlock({ thinking }: { thinking: string }) {
-  const [expanded, setExpanded] = useState(false);
-  const bodyId = useId();
-  return (
-    <div className={s.thinkingBlock}>
-      <button
-        type="button"
-        className={s.thinkingHeader}
-        onClick={() => setExpanded(!expanded)}
-        aria-expanded={expanded}
-        aria-controls={bodyId}
-      >
-        <Sparkles size={11} />
-        <span>{expanded ? 'Ocultar raciocínio' : 'Mostrar raciocínio'}</span>
-        {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-      </button>
-      {expanded && <div id={bodyId} className={s.thinkingBody}>{thinking}</div>}
-    </div>
-  );
-}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -438,57 +416,13 @@ export default function FabricaPage() {
             </div>
           ) : (
             displayMessages.map(msg => {
-              if (msg.role === 'user') {
-                const asanaSplit = msg.content.split('\n\n[Contexto Asana]\n');
-                const mainText = asanaSplit[0];
-                const asanaBlock = asanaSplit[1];
-                return (
-                  <div key={msg.id} className={s.userRow}>
-                    <div className={s.userBubble}>
-                      <span>{mainText}</span>
-                      {msg.attachments && msg.attachments.length > 0 && (
-                        <div className={s.messageAttachments}>
-                          {msg.attachments.map((attachment, attachmentIndex) => (
-                            <span key={`${attachment.name}-${attachmentIndex}`} className={s.messageAttachmentPill}>
-                              {attachmentPreviewLabel(attachment)}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                      {asanaBlock && (
-                        <div className={s.asanaBlock}>
-                          <div className={s.asanaBlockHeader}>
-                            <img src="/asana-logo.svg" width={11} height={11} alt="" />
-                            <span>Contexto Asana</span>
-                          </div>
-                          <pre className={s.asanaBlockBody}>{asanaBlock}</pre>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              }
-              if (msg.role === 'system') {
-                return (
-                  <div key={msg.id} className={s.systemRow}>
-                    <span>{msg.content}</span>
-                  </div>
-                );
-              }
               const isLastAiMsg = msg.role === 'assistant' && msg.id === messages[messages.length - 1]?.id;
-              const isStreamingMsg = isStreaming && isLastAiMsg;
               return (
-                <div key={msg.id} className={s.aiRow}>
-                  <div className={s.aiAvatar}>
-                    <Sparkles size={11} />
-                  </div>
-                  <div className={s.aiBubble}>
-                    {msg.thinking && <ThinkingBlock thinking={msg.thinking} />}
-                    <div className={`${s.aiText} ${isStreamingMsg ? s.aiTextStreaming : ''}`}>
-                      <ReactMarkdown>{msg.content}</ReactMarkdown>
-                    </div>
-                  </div>
-                </div>
+                <ChatMessageRow
+                  key={msg.id}
+                  message={msg}
+                  isStreamingMsg={isStreaming && isLastAiMsg}
+                />
               );
             })
           )}
