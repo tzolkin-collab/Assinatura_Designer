@@ -4,9 +4,17 @@ import type { NextRequest } from 'next/server';
 // /convite/:token é público de propósito: quem aceita um convite ainda não tem conta.
 // A prova de acesso é o token do link. Repare que ele NÃO entra em
 // RESERVED_TOP_LEVEL_ROUTES — aquela lista redireciona /x/y para /x, o que jogaria o
-// token fora.
+// token fora. Pelo mesmo motivo, /registro/teamate e /configuracoes/* também ficam de
+// fora: são sub-rotas globais REAIS (não [marca]/algo) que não podem ser cortadas.
+//
+// Bug real encontrado 2026-07-20 (mesma classe do fix no Sidebar): esta lista
+// existe para impedir que uma palavra reservada (rota global) seja tratada como se
+// FOSSE o slug de uma marca — ex. sem 'projetos' aqui, /projetos/fabrica batia direto
+// no [marca]/fabrica com marca="projetos" (inexistente) em vez de normalizar para
+// /projetos. 'projetos' estava faltando; sincronizado com as rotas globais reais de
+// src/app/ que não têm sub-rota própria.
 const PUBLIC_ROUTES = ['/login', '/convite'];
-const RESERVED_TOP_LEVEL_ROUTES = new Set(['equipe', 'extras', 'galeria', 'login', 'onboarding']);
+const RESERVED_TOP_LEVEL_ROUTES = new Set(['equipe', 'extras', 'galeria', 'login', 'onboarding', 'projetos']);
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
