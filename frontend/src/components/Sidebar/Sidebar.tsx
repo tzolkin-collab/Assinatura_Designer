@@ -1,7 +1,7 @@
 'use client';
 import Image from 'next/image';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
@@ -123,7 +123,26 @@ export default function Sidebar() {
     // Sub-rotas de marca cujo nome poderia colidir com o slug de uma marca homônima.
     'fabrica', 'editor', 'equipe',
   ];
-  const marca = segments.length > 0 && !knownRoots.includes(segments[0]) ? segments[0] : null;
+  const urlMarca = segments.length > 0 && !knownRoots.includes(segments[0]) ? segments[0] : null;
+
+  // A seção da marca NUNCA pode sumir da sidebar ao navegar para uma página
+  // GLOBAL (Minhas Marcas, Projetos da Equipe, Configurações Gerais, etc.) —
+  // pedido explícito do usuário (2026-07-20): o projeto/chat aberto deve
+  // continuar visível/acessível até ele de fato entrar em OUTRA marca ou
+  // começar outra apresentação. Persistido em localStorage (sobrevive a
+  // reload e nova aba) para "lembrar" a última marca visitada quando a URL
+  // atual não tem marca nenhuma.
+  const [lastBrand, setLastBrand] = useState<string | null>(null);
+  useEffect(() => {
+    if (urlMarca) {
+      localStorage.setItem('sidebar_last_brand', urlMarca);
+      setLastBrand(urlMarca);
+    } else {
+      setLastBrand(localStorage.getItem('sidebar_last_brand'));
+    }
+  }, [urlMarca]);
+
+  const marca = urlMarca ?? lastBrand;
 
   return (
     <>
