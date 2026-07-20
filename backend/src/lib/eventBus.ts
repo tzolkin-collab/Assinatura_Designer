@@ -40,29 +40,36 @@ const listeners: BusListener[] = [];
 // Pattern subscriptions ativas — para resubscrever no reconnect.
 const activePatterns = new Set<string>();
 
+// Backoff exponencial SEM teto de tentativas — teto de 3s no delay.
+//
+// Bug real observado (2026-07-20): com `times > 20 ? null : ...`, um Redis
+// remoto (proxy que mata conexão ociosa) resetava a conexão (ECONNRESET)
+// e, se os retries esgotassem o teto, o ioredis desistia de vez — sem log
+// de erro nenhum (só o handler de 'error' via ECONNRESET, não um evento de
+// "desisti"). Resultado: PUBSUB NUMPAT ficava 0 pro resto da vida do
+// processo — WS parava de entregar QUALQUER evento (chat ao vivo, geração,
+// reconexão) até reiniciar o servidor. EventBus é infra de longa duração;
+// nunca deve desistir de reconectar sozinho.
+function backoff(times: number): number {
+  return Math.min(times * 150, 3000);
+}
+
 function ensureConnections(): { sub: Redis; pub: Redis } {
   if (!sub) {
     sub = new Redis(config.redisUrl, {
       lazyConnect: true,
       maxRetriesPerRequest: null,
-      // Backoff exponencial com teto de 3s (mesmo padrão do client principal)
-      retryStrategy: (times) => {
-        if (times > 20) return null;
-        return Math.min(times * 150, 3000);
-      },
+      retryStrategy: backoff,
     });
 
     sub.on('error', (err) => logger.error('EventBus subscriber com erro', { error: err.message }));
+    sub.on('reconnecting', (delay: number) => logger.warn('EventBus subscriber reconectando', { delay }));
+    sub.on('end', () => logger.error('EventBus subscriber conexão ENCERRADA — sem retry automático até o próximo psubscribeAll()'));
 
-    // Resubscrever patterns ativos no reconnect (Redis dropa subscriptions ao cair)
-    sub.on('connect', () => {
-      for (const pattern of activePatterns) {
-        sub!.psubscribe(pattern).catch((e) =>
-          logger.error('EventBus resubscribe falhou', { pattern, error: (e as Error).message }),
-        );
-      }
-      logger.info('EventBus subscriber conectado', { patterns: activePatterns.size });
-    });
+    // Resubscrever patterns ativos no reconnect (Redis dropa subscriptions ao cair).
+    // 'ready' (não só 'connect'): é o ponto em que a conexão aceita comandos de
+    // verdade — mais confiável para reemitir o psubscribe.
+    sub.on('ready', () => { void psubscribeAll('reconnect (ready)'); });
 
     // Mensagens de pattern subscription chegam aqui
     sub.on('pmessage', (_pattern: string, channel: string, message: string) => {
@@ -85,15 +92,51 @@ function ensureConnections(): { sub: Redis; pub: Redis } {
     pub = new Redis(config.redisUrl, {
       lazyConnect: true,
       maxRetriesPerRequest: 5,
-      retryStrategy: (times) => {
-        if (times > 20) return null;
-        return Math.min(times * 150, 3000);
-      },
+      retryStrategy: backoff,
     });
     pub.on('error', (err) => logger.error('EventBus publisher com erro', { error: err.message }));
+    pub.on('reconnecting', (delay: number) => logger.warn('EventBus publisher reconectando', { delay }));
   }
 
   return { sub, pub };
+}
+
+async function psubscribeAll(motivo: string): Promise<void> {
+  if (!sub || activePatterns.size === 0) return;
+  for (const pattern of activePatterns) {
+    try {
+      await sub.psubscribe(pattern);
+    } catch (e) {
+      logger.error('EventBus resubscribe falhou', { pattern, motivo, error: (e as Error).message });
+    }
+  }
+  logger.info('EventBus subscriber (re)inscrito', { patterns: activePatterns.size, motivo });
+}
+
+// ── Watchdog: reconciliação periódica ────────────────────────────────────────
+// Rede-de-segurança contra QUALQUER forma de "inscrição perdida silenciosa"
+// (o bug real acima, ou outra que apareça): confere a cada 30s se o Redis
+// enxerga as inscrições que deveriam existir e reemite psubscribe se não.
+// psubscribe é idempotente — reemitir sem necessidade não tem efeito colateral.
+let watchdog: ReturnType<typeof setInterval> | null = null;
+
+function startWatchdog(): void {
+  if (watchdog) return;
+  watchdog = setInterval(() => {
+    if (!sub || sub.status !== 'ready' || activePatterns.size === 0) return;
+    sub.call('PUBSUB', 'NUMPAT')
+      .then((numpat) => {
+        if (Number(numpat) < activePatterns.size) {
+          logger.warn('EventBus watchdog: inscrição divergente do esperado — reemitindo', {
+            numpatRedis: numpat,
+            esperado: activePatterns.size,
+          });
+          void psubscribeAll('watchdog');
+        }
+      })
+      .catch(() => { /* checagem best-effort; próximo tick tenta de novo */ });
+  }, 30_000);
+  watchdog.unref?.(); // não segura o processo vivo sozinho (ex.: em testes)
 }
 
 // ── API pública ───────────────────────────────────────────────────────────────
@@ -131,6 +174,7 @@ export async function subscribe(pattern: string): Promise<void> {
   activePatterns.add(pattern);
   if (s.status === 'wait') await s.connect();
   await s.psubscribe(pattern);
+  startWatchdog();
 }
 
 /**
@@ -145,6 +189,7 @@ export function onEvent(listener: BusListener): void {
  * Fecha conexões do EventBus (shutdown limpo).
  */
 export async function closeEventBus(): Promise<void> {
+  if (watchdog) { clearInterval(watchdog); watchdog = null; }
   if (sub) {
     try { await sub.quit(); } catch { /* já desconectado */ }
     sub = null;
