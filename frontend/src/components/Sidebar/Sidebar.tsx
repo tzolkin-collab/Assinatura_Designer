@@ -109,9 +109,20 @@ export default function Sidebar() {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  // Detect if we're inside a brand context
+  // Detect if we're inside a brand context ([marca]/...) vs. numa rota GLOBAL
+  // (sem marca). Bug real encontrado 2026-07-20: esta lista estava incompleta
+  // ('projetos' faltava) — em /projetos, o Sidebar tratava "projetos" como se
+  // FOSSE o slug de uma marca e montava uma seção "Galeria/Fábrica" fantasma
+  // apontando para /projetos/galeria e /projetos/fabrica (rotas inexistentes).
+  // Clicar nesse "Fábrica" fantasma não voltava para a sessão real — parecia
+  // "perder o chat" ao navegar pela sidebar. Lista sincronizada com TODOS os
+  // segmentos de 1º nível fora de [marca] em src/app/.
   const segments = pathname.split('/').filter(Boolean);
-  const knownRoots = ['galeria', 'fabrica', 'editor', 'extras', 'login', 'equipe', 'onboarding', 'configuracoes'];
+  const knownRoots = [
+    'galeria', 'projetos', 'configuracoes', 'convite', 'registro', 'extras', 'login', 'onboarding',
+    // Sub-rotas de marca cujo nome poderia colidir com o slug de uma marca homônima.
+    'fabrica', 'editor', 'equipe',
+  ];
   const marca = segments.length > 0 && !knownRoots.includes(segments[0]) ? segments[0] : null;
 
   return (
