@@ -2,8 +2,8 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { Search, Plus, Filter, Loader2, X, Trash2, Edit3, Lock, Check } from 'lucide-react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Search, Plus, Filter, Loader2, X, Trash2, Edit3, Lock, Check, TriangleAlert } from 'lucide-react';
 import PageHeader from '@/components/ui/PageHeader';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
@@ -29,9 +29,24 @@ interface Brand {
 
 export default function GaleriaPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [brands, setBrands] = useState<Brand[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+
+  // Aviso de "caiu aqui porque a marca não existe/você não tem acesso" —
+  // useBrandPermissions redireciona pra cá com ?erro=marca-invalida em vez de
+  // deixar a página da marca presa numa tela quebrada. Lido uma vez do query
+  // param (não precisa reagir a mudanças) e a URL é limpa em seguida, senão
+  // um refresh da página repetiria o aviso indefinidamente.
+  const [erroMarcaInvalida, setErroMarcaInvalida] = useState(false);
+  useEffect(() => {
+    if (searchParams?.get('erro') === 'marca-invalida') {
+      setErroMarcaInvalida(true);
+      router.replace('/galeria');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   
   // Filtros
   const [filterMode, setFilterMode] = useState<'my' | 'discover'>('my');
@@ -151,6 +166,28 @@ export default function GaleriaPage() {
           </Link>
         }
       />
+
+      {erroMarcaInvalida && (
+        <div
+          role="alert"
+          style={{
+            display: 'flex', alignItems: 'center', gap: 10, margin: '0 0 16px',
+            padding: '10px 14px', borderRadius: 10, fontSize: 13.5,
+            background: '#fef3c7', border: '1px solid #fde68a', color: '#92400e',
+          }}
+        >
+          <TriangleAlert size={16} style={{ flexShrink: 0 }} />
+          <span>Essa marca não existe ou você não tem acesso a ela. Escolha uma marca abaixo.</span>
+          <button
+            type="button"
+            onClick={() => setErroMarcaInvalida(false)}
+            aria-label="Fechar aviso"
+            style={{ marginLeft: 'auto', border: 'none', background: 'transparent', cursor: 'pointer', color: 'inherit', display: 'flex' }}
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
 
       {/* Search & Filters */}
       <div className={styles.toolbar}>

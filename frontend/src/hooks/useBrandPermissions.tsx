@@ -1,7 +1,8 @@
 'use client';
 
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
-import { api } from '@/lib/api';
+import { useRouter } from 'next/navigation';
+import { api, ApiError } from '@/lib/api';
 import {
   can as canDo,
   isReadOnly as roleIsReadOnly,
@@ -37,6 +38,7 @@ export function BrandPermissionsProvider({
 }) {
   const [role, setRole] = useState<BrandRole | undefined>(undefined);
   const [loading, setLoading] = useState(true);
+  const router = useRouter();
 
   useEffect(() => {
     if (!slug) return;
@@ -48,9 +50,18 @@ export function BrandPermissionsProvider({
       .then((brand) => {
         if (!cancelled) setRole(brand.myRole);
       })
-      .catch(() => {
-        // 403/404 aqui significa "não é membro": sem papel, tudo fica bloqueado.
-        if (!cancelled) setRole(undefined);
+      .catch((err) => {
+        if (cancelled) return;
+        setRole(undefined);
+        // 403 (sem acesso) e 404 (marca não existe) são definitivos — nenhuma
+        // página de marca funciona sem isto, e antes o usuário ficava preso
+        // numa tela quebrada (ex.: Fábrica presa em "Reconectando..." pra
+        // sempre). Erro de rede/servidor (status 0 ou 5xx) NÃO redireciona:
+        // pode ser transitório, e chutar o usuário pra fora por um blip de
+        // conexão seria pior do que a tela ficar carregando mais um pouco.
+        if (err instanceof ApiError && (err.status === 403 || err.status === 404)) {
+          router.replace('/galeria?erro=marca-invalida');
+        }
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -59,7 +70,7 @@ export function BrandPermissionsProvider({
     return () => {
       cancelled = true;
     };
-  }, [slug]);
+  }, [slug, router]);
 
   const value = useMemo<BrandPermissions>(
     () => ({
