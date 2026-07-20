@@ -58,7 +58,7 @@ fabricaRouter.post('/sessions', async (req: AuthRequest, res, next) => {
       brandSlug,
       userId,
       brandContextSummary: buildBrandContextSummary(brand),
-      presentationConfig: brand.presentationConfig,
+      presentationConfig: brand.presentationConfig ?? undefined,
       folderId: pastaDestino,
     });
 

@@ -12,7 +12,7 @@ import { generateHtmlDesignBatched } from '../lib/htmlDesign.js';
 import { syncPostSlides } from '../lib/postHelper.js';
 import { researchBrand, type VisualRef } from '../lib/fabricaLegacy.js';
 import { humanizeGeminiError } from '../lib/geminiRetry.js';
-import { extractJsonObject } from '../lib/designDocument.js';
+import { extractJsonObject } from '../lib/jsonHelper.js';
 import { GoogleGenAI } from '@google/genai';
 import { config } from '../config.js';
 import { generateWithRetry } from '../lib/geminiRetry.js';
@@ -95,6 +95,13 @@ async function runPipelineInner(
   }
 
   let currentPages = session.currentDesign;
+
+  const checkCancelled = async () => {
+    const s = await getSession(sessionId);
+    if (!s || s.workerStatus !== 'running') {
+      throw new Error('Generation cancelled by user');
+    }
+  };
   let reviewResult: ReviewResult | null = null;
   let researchedRefs: VisualRef[] = [];
   let researchSummary = '';
@@ -105,6 +112,7 @@ async function runPipelineInner(
   // a apresentação inteira. A análise do revisor é mostrada ao usuário, que
   // decide se aceita o design ou pede ajustes/refação no chat.
   {
+    await checkCancelled();
     // ── 1. Planner ────────────────────────────────────────────────────────────
     ws.progress(sessionId, 10, 'Planejando estrutura (Manager)...');
 
@@ -127,6 +135,7 @@ async function runPipelineInner(
     // Sem ela, o planner escolhe dentro da faixa heurística.
     const requestedCount = parseRequestedSlideCount(planBrief);
 
+    await checkCancelled();
     ws.progress(sessionId, 20, 'Planejando estrutura lógica...');
     // Roteiro pré-aprovado (fluxo copy-first): o usuário JÁ viu e confirmou esta
     // estrutura no chat — replanejar aqui jogaria fora a aprovação.
@@ -153,6 +162,7 @@ async function runPipelineInner(
     const width = format === 'presentation' ? 1920 : 1080;
     const height = 1080;
 
+    await checkCancelled();
     ws.progress(sessionId, 25, 'Inicializando design no banco de dados...');
     try {
       await prisma.post.create({
@@ -200,6 +210,7 @@ async function runPipelineInner(
     }
 
     // ── 2. Geração HTML/CSS (modo nativo do modelo) ───────────────────────────
+    await checkCancelled();
     ws.progress(sessionId, 30, 'Gerando design...');
 
     try {
@@ -224,6 +235,7 @@ async function runPipelineInner(
 
       const design = await generateHtmlDesignBatched(
         async (systemInstruction, userPrompt) => {
+          await checkCancelled();
           const response = await generateWithRetry(ai, {
             model: preferredModel,
             contents: userPrompt,
@@ -263,6 +275,7 @@ async function runPipelineInner(
         // progresso na faixa 30%→80%. Com lotes paralelos os slides chegam fora
         // de ordem — por isso o progresso usa `completed` (monotônico), não index.
         async (partial, index, totalSlides, completed) => {
+          await checkCancelled();
           const slide = partial.slides[index];
 
           // Envelope LEVE (sem o array de slides) — o front acumula os deltas e
@@ -345,6 +358,7 @@ async function runPipelineInner(
       currentPages = await executeTool('set_design', { pages: [content] }, sessionId, currentPages);
 
       // ── 3. Reviewer (visão sobre render fiel em chromium) ─────────────────────
+      await checkCancelled();
       ws.progress(sessionId, 85, 'Revisando resultado...');
 
       await updateSession(sessionId, { phase: 'reviewing', workerStatus: 'running' });
@@ -395,6 +409,16 @@ async function runPipelineInner(
       }
 
     } catch (err) {
+      const isCancellation = err instanceof Error && err.message === 'Generation cancelled by user';
+      if (isCancellation) {
+        logger.info('Geração interrompida pelo usuário durante o design/review', { sessionId, postId });
+        await prisma.post.update({
+          where: { id: postId },
+          data: { status: 'FAILED' },
+        }).catch(() => {});
+        throw err;
+      }
+
       logger.error('Erro no DesignDocument', {
         postId,
         slideCount,

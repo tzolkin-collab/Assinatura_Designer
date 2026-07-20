@@ -14,6 +14,8 @@ import { config } from '../config.js';
 import { ws } from './websocket.js';
 import { runPipeline, type PipelineParams } from '../agents/pipeline.js';
 import { runCanvaExport, type CanvaExportParams } from './canvaExport.js';
+import { CanvaSessionExpiredError } from './canvaClient.js';
+import { getCanvaDesignName } from './canvaSync.js';
 import { runDeckExport, type DeckExportParams } from './deckExport.js';
 import { logger } from './logger.js';
 
@@ -147,11 +149,29 @@ export function startCanvaExportWorker(): Worker<CanvaExportParams> {
   exportWorker = new Worker<CanvaExportParams>(
     EXPORT_QUEUE_NAME,
     async (job: Job<CanvaExportParams>) => {
-      return runCanvaExport(job.data, async (done, total) => {
+      const result = await runCanvaExport(job.data, async (done, total) => {
         // O progresso vive no próprio job: o cliente lê via GET do status, sem
         // precisar de sessão de WebSocket (o editor não tem uma).
         await job.updateProgress({ done, total });
       });
+
+      // Salva os dados do design no banco após o export ter sucesso
+      try {
+        const designName = await getCanvaDesignName(job.data.userId, result.designId).catch(() => null);
+        await prisma.post.update({
+          where: { id: job.data.postId },
+          data: {
+            canvaDesignId: result.designId,
+            canvaExportUrl: result.designUrl,
+            canvaDesignName: designName,
+            canvaLastSyncedAt: new Date(),
+          },
+        });
+      } catch (dbErr) {
+        logger.error('Falha ao atualizar post com dados do Canva após export', { error: (dbErr as Error).message });
+      }
+
+      return result;
     },
     {
       connection: makeConnection(),
@@ -162,7 +182,16 @@ export function startCanvaExportWorker(): Worker<CanvaExportParams> {
   );
 
   exportWorker.on('failed', (job, err) => {
-    logger.error('Job de export do Canva falhou', { jobId: job?.id, error: err.message });
+    if (err instanceof CanvaSessionExpiredError) {
+      logger.error('Job de export do Canva falhou: sessão expirada', {
+        jobId: job?.id,
+        userId: job?.data.userId,
+        postId: job?.data.postId,
+        error: err.message,
+      });
+    } else {
+      logger.error('Job de export do Canva falhou', { jobId: job?.id, error: err.message });
+    }
   });
   exportWorker.on('error', (err) => logger.error('Worker de export com erro', { error: err.message }));
 
@@ -182,7 +211,16 @@ export function startPipelineWorker(): Worker<PipelineParams> {
   worker = new Worker<PipelineParams>(
     QUEUE_NAME,
     async (job: Job<PipelineParams>) => {
-      await runPipeline(job.data);
+      try {
+        await runPipeline(job.data);
+      } catch (err) {
+        const isCancellation = err instanceof Error && err.message === 'Generation cancelled by user';
+        if (isCancellation) {
+          logger.info('Job de pipeline interrompido pelo usuário no worker.', { jobId: job.id, sessionId: job.data.sessionId });
+          return;
+        }
+        throw err;
+      }
     },
     {
       connection: makeConnection(),

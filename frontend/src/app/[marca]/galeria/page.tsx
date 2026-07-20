@@ -16,7 +16,6 @@ import { useBrandPermissions } from '@/hooks/useBrandPermissions';
 import { extractChatHistory, extractPreviewSource, extractSessionId, type FabricaChatHistoryMessage, type HtmlDesignPostContent, type IRDesignPostContent } from '@/lib/designContent';
 import DesignRenderer, { type DesignPage } from '@/components/Fabrica/DesignRenderer';
 import dynamic from 'next/dynamic';
-const DesignDocumentRenderer = dynamic(() => import('@/components/DesignDocument/DesignDocumentRenderer'), { ssr: false });
 const HtmlSlideRenderer = dynamic(() => import('@/components/DesignDocument/HtmlSlideRenderer'), { ssr: false });
 const IRSlideRenderer = dynamic(() => import('@/components/DesignDocument/IRSlideRenderer'), { ssr: false });
 const AiSpendBadge = dynamic(() => import('@/components/AiUsage/AiSpendBadge'), { ssr: false });
@@ -546,7 +545,6 @@ export default function BrandGaleriaPage() {
         const preview = extractPreviewSource(activePreviewPost.content, null);
         const imageUrl = activePreviewPost.previewUrl || (preview?.kind === 'image' ? preview.url : null);
         const designPages = preview?.kind === 'design' ? preview.pages : null;
-        const designDocument = (preview?.kind === 'design' || preview?.kind === 'hybrid-document') ? preview.document : undefined;
         const htmlContent = preview?.kind === 'html-design' ? preview.content : null;
         const irContent = preview?.kind === 'ir-design' ? preview.content : null;
         const firstPage = designPages?.[0];
@@ -625,18 +623,11 @@ export default function BrandGaleriaPage() {
                           Slide {idx + 1} {page.name ? `— ${page.name}` : ''}
                         </div>
                         <div className={styles.adobePreviewSlideContent} style={{ aspectRatio }}>
-                          {designDocument ? (
-                            <DesignDocumentRenderer
-                              document={{ ...designDocument, pages: [page] }}
-                              mode="contain"
-                            />
-                          ) : (
-                            <DesignRenderer
-                              pages={[page]}
-                              canvasWidth={(preview?.kind === 'design' ? preview.width : null) ?? 1080}
-                              canvasHeight={(preview?.kind === 'design' ? preview.height : null) ?? 1080}
-                            />
-                          )}
+                          <DesignRenderer
+                            pages={[page]}
+                            canvasWidth={(preview?.kind === 'design' ? preview.width : null) ?? 1080}
+                            canvasHeight={(preview?.kind === 'design' ? preview.height : null) ?? 1080}
+                          />
                         </div>
                       </div>
                     ))
@@ -857,7 +848,6 @@ export default function BrandGaleriaPage() {
         const preview = extractPreviewSource(activeCanvaExportPost.content, null);
         const imageUrl = activeCanvaExportPost.previewUrl || (preview?.kind === 'image' ? preview.url : null);
         const designPages = preview?.kind === 'design' ? preview.pages : null;
-        const designDocument = (preview?.kind === 'design' || preview?.kind === 'hybrid-document') ? preview.document : undefined;
         const htmlContent = preview?.kind === 'html-design' ? preview.content : null;
         const irContent = preview?.kind === 'ir-design' ? preview.content : null;
         
@@ -941,15 +931,11 @@ export default function BrandGaleriaPage() {
                       <div key={page.id || idx} className={styles.adobePreviewSlideContainer}>
                         <div className={styles.adobePreviewSlideHeader}>Slide {idx + 1} {page.name ? `— ${page.name}` : ''}</div>
                         <div className={styles.adobePreviewSlideContent} style={{ aspectRatio }}>
-                          {designDocument ? (
-                            <DesignDocumentRenderer document={{ ...designDocument, pages: [page] }} mode="contain" />
-                          ) : (
-                            <DesignRenderer
-                              pages={[page]}
-                              canvasWidth={(preview?.kind === 'design' ? preview.width : null) ?? 1080}
-                              canvasHeight={(preview?.kind === 'design' ? preview.height : null) ?? 1080}
-                            />
-                          )}
+                          <DesignRenderer
+                            pages={[page]}
+                            canvasWidth={(preview?.kind === 'design' ? preview.width : null) ?? 1080}
+                            canvasHeight={(preview?.kind === 'design' ? preview.height : null) ?? 1080}
+                          />
                         </div>
                       </div>
                     ))
@@ -963,15 +949,15 @@ export default function BrandGaleriaPage() {
               <div className={styles.adobePanelArea} style={{ width: '420px' }}>
                 <div className={styles.adobePanelHeader}>
                   <div className={styles.adobeMetaBadge}>Canva Connect</div>
-                  <h3 className={styles.adobePostTitle}>Exportar para o Canva</h3>
+                  <h3 className={styles.adobePostTitle}>Exportar / Baixar Design</h3>
                   <p style={{ fontSize: '13px', color: 'var(--color-text-secondary)', margin: '4px 0 0 0' }}>
-                    Escolha o formato de entrega ideal para o seu design.
+                    Envie a arte para o Canva ou baixe o arquivo para editar localmente.
                   </p>
                 </div>
 
                 <div className={styles.adobePanelBody}>
                   <div className={styles.adobePanelSection}>
-                    <h4 className={styles.adobeSectionTitle}>Formato de Exportação</h4>
+                    <h4 className={styles.adobeSectionTitle}>Enviar para o Canva</h4>
                     
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                       {/* PNG Card */}
@@ -990,58 +976,66 @@ export default function BrandGaleriaPage() {
                         <div>
                           <div className={styles.canvaFormatCardTitle}>Imagem PNG (Automático)</div>
                           <div className={styles.canvaFormatCardDesc}>
-                            Mantém 100% de fidelidade visual. Envia os slides renderizados como imagens de alta resolução direto para sua conta do Canva.
+                            Envia os slides renderizados como imagens de alta resolução direto para a sua conta do Canva, unidos num design multipágina.
                           </div>
                         </div>
                       </div>
-
-                      {/* PPTX Card */}
-                      {(htmlContent || irContent || (designPages && designPages.length > 0)) && (
-                        <div 
-                          className={styles.canvaFormatCard}
-                          data-selected={canvaFormat === 'pptx'}
-                          onClick={() => { if (!isRunningExport) { setCanvaFormat('pptx'); setMostrarCanvaInstrucoes(false); } }}
-                        >
-                          <input 
-                            type="radio" 
-                            className={styles.canvaFormatCardRadio} 
-                            checked={canvaFormat === 'pptx'}
-                            onChange={() => {}}
-                            disabled={isRunningExport}
-                          />
-                          <div>
-                            <div className={styles.canvaFormatCardTitle}>Apresentação PPTX (Editável)</div>
-                            <div className={styles.canvaFormatCardDesc}>
-                              Exporta slides com caixas de texto editáveis e fontes nativas. Ideal para importação direta de apresentações no Canva.
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* HTML Card */}
-                      {htmlContent && (
-                        <div 
-                          className={styles.canvaFormatCard}
-                          data-selected={canvaFormat === 'html'}
-                          onClick={() => { if (!isRunningExport) { setCanvaFormat('html'); setMostrarCanvaInstrucoes(false); } }}
-                        >
-                          <input 
-                            type="radio" 
-                            className={styles.canvaFormatCardRadio} 
-                            checked={canvaFormat === 'html'}
-                            onChange={() => {}}
-                            disabled={isRunningExport}
-                          />
-                          <div>
-                            <div className={styles.canvaFormatCardTitle}>Código Fonte HTML (Editável)</div>
-                            <div className={styles.canvaFormatCardDesc}>
-                              Gera um ZIP com os arquivos de slides HTML/CSS isolados e buildados, prontos para a nova importação de HTML editável do Canva.
-                            </div>
-                          </div>
-                        </div>
-                      )}
                     </div>
                   </div>
+
+                  {(htmlContent || irContent || (designPages && designPages.length > 0)) && (
+                    <div className={styles.adobePanelSection} style={{ marginTop: '16px' }}>
+                      <h4 className={styles.adobeSectionTitle}>Baixar arquivo</h4>
+                      
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                        {/* PPTX Card */}
+                        {(htmlContent || irContent || (designPages && designPages.length > 0)) && (
+                          <div 
+                            className={styles.canvaFormatCard}
+                            data-selected={canvaFormat === 'pptx'}
+                            onClick={() => { if (!isRunningExport) { setCanvaFormat('pptx'); setMostrarCanvaInstrucoes(false); } }}
+                          >
+                            <input 
+                              type="radio" 
+                              className={styles.canvaFormatCardRadio} 
+                              checked={canvaFormat === 'pptx'}
+                              onChange={() => {}}
+                              disabled={isRunningExport}
+                            />
+                            <div>
+                              <div className={styles.canvaFormatCardTitle}>Apresentação PPTX (Editável)</div>
+                              <div className={styles.canvaFormatCardDesc}>
+                                Baixa um arquivo PowerPoint com texto e formas editáveis. Você pode importá-lo manualmente no Canva depois.
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* HTML Card */}
+                        {htmlContent && (
+                          <div 
+                            className={styles.canvaFormatCard}
+                            data-selected={canvaFormat === 'html'}
+                            onClick={() => { if (!isRunningExport) { setCanvaFormat('html'); setMostrarCanvaInstrucoes(false); } }}
+                          >
+                            <input 
+                              type="radio" 
+                              className={styles.canvaFormatCardRadio} 
+                              checked={canvaFormat === 'html'}
+                              onChange={() => {}}
+                              disabled={isRunningExport}
+                            />
+                            <div>
+                              <div className={styles.canvaFormatCardTitle}>Código Fonte HTML (Editável)</div>
+                              <div className={styles.canvaFormatCardDesc}>
+                                Baixa um ZIP com os arquivos HTML/CSS dos slides. Útil para desenvolvedores ou importação manual em outras ferramentas.
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Progresso ou Instruções */}
                   {isRunningExport && (
@@ -1093,7 +1087,11 @@ export default function BrandGaleriaPage() {
                       onClick={handleExecutarCanvaExport}
                       disabled={isRunningExport}
                     >
-                      {isRunningExport ? 'Processando...' : 'Exportar agora'}
+                      {isRunningExport
+                        ? 'Processando...'
+                        : canvaFormat === 'png'
+                          ? 'Exportar para o Canva'
+                          : 'Baixar arquivo'}
                     </button>
                   </div>
                 </div>
@@ -1325,11 +1323,9 @@ export default function BrandGaleriaPage() {
             const preview = extractPreviewSource(post.content, null);
             const imageUrl = post.previewUrl || (preview?.kind === 'image' ? preview.url : null);
             const designPages = preview?.kind === 'design' ? preview.pages : null;
-            const designDocument = (preview?.kind === 'design' || preview?.kind === 'hybrid-document') ? preview.document : undefined;
             const htmlContent = preview?.kind === 'html-design' ? preview.content : null;
             const irContent = preview?.kind === 'ir-design' ? preview.content : null;
             const firstPage = designPages?.[0];
-            const isHybridUncompiled = preview?.kind === 'hybrid-document';
 
             return (
               <div
@@ -1365,26 +1361,15 @@ export default function BrandGaleriaPage() {
                       <div className={styles.thumbDesign}>
                         <IRSlideRenderer content={irContent} mode="cover" hideNav />
                       </div>
-                    ) : (designPages && firstPage) || isHybridUncompiled ? (
+                    ) : (designPages && firstPage) ? (
                       <div className={styles.thumbDesign}>
-                        {designDocument ? (
-                          <DesignDocumentRenderer document={designDocument} mode="cover" hideNav />
-                        ) : designPages && firstPage ? (
-                          <DesignRenderer
-                            pages={[firstPage]}
-                            canvasWidth={firstPage.width ?? 1080}
-                            canvasHeight={firstPage.height ?? 1080}
-                            hideNav
-                            mode="cover"
-                          />
-                        ) : (
-                          <div className={styles.thumbEmpty}>
-                            <Sparkles size={24} style={{ color: 'var(--color-brand)', marginBottom: 8 }} />
-                            <span style={{ color: 'var(--color-text-secondary)', fontSize: '12px', textAlign: 'center', padding: '0 12px' }}>
-                              Preview não compilado
-                            </span>
-                          </div>
-                        )}
+                        <DesignRenderer
+                          pages={[firstPage]}
+                          canvasWidth={firstPage.width ?? 1080}
+                          canvasHeight={firstPage.height ?? 1080}
+                          hideNav
+                          mode="cover"
+                        />
                       </div>
                     ) : (
                       <div className={styles.thumbEmpty}>
@@ -1436,11 +1421,9 @@ export default function BrandGaleriaPage() {
             const preview = extractPreviewSource(post.content, null);
             const imageUrl = post.previewUrl || (preview?.kind === 'image' ? preview.url : null);
             const designPages = preview?.kind === 'design' ? preview.pages : null;
-            const designDocument = preview?.kind === 'design' ? preview.document : undefined;
             const htmlContent = preview?.kind === 'html-design' ? preview.content : null;
             const irContent = preview?.kind === 'ir-design' ? preview.content : null;
             const firstPage = designPages?.[0];
-            const isHybridUncompiled = preview?.kind === 'hybrid-document';
             const chatHistory = extractChatHistory(post.content);
             const sessionId = extractSessionId(post.content);
 
@@ -1495,21 +1478,13 @@ export default function BrandGaleriaPage() {
                         style={{ backgroundColor: firstPage.backgroundColor ?? '#111', cursor: 'pointer' }}
                         onClick={(e) => { e.stopPropagation(); setActivePreviewPost(post); }}
                       >
-                        {designDocument ? (
-                          <DesignDocumentRenderer document={designDocument} mode="cover" hideNav />
-                        ) : (
-                          <DesignRenderer
-                            pages={[firstPage]}
-                            canvasWidth={firstPage.width ?? 1080}
-                            canvasHeight={firstPage.height ?? 1080}
-                            hideNav
-                            mode="cover"
-                          />
-                        )}
-                      </div>
-                    ) : isHybridUncompiled ? (
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%', color: 'var(--color-brand)', backgroundColor: 'var(--color-bg-secondary)' }}>
-                        <Sparkles size={20} />
+                        <DesignRenderer
+                          pages={[firstPage]}
+                          canvasWidth={firstPage.width ?? 1080}
+                          canvasHeight={firstPage.height ?? 1080}
+                          hideNav
+                          mode="cover"
+                        />
                       </div>
                     ) : (
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%', color: 'var(--color-text-tertiary)', backgroundColor: 'var(--color-bg-secondary)' }}>
@@ -1601,7 +1576,7 @@ export default function BrandGaleriaPage() {
                       className={styles.actionBtn}
                       onClick={(e) => handleExportCanva(e, post.id)}
                       disabled={exportandoCanva !== null}
-                      title="Exportar para o Canva"
+                      title="Exportar / Baixar design"
                     >
                       {exportandoCanva?.postId === post.id
                         ? <Loader2 size={16} className={styles.spin} />

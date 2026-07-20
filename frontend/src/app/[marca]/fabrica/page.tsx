@@ -9,6 +9,8 @@ const HtmlSlideRenderer = dynamic(() => import('@/components/DesignDocument/Html
 const IRSlideRenderer = dynamic(() => import('@/components/DesignDocument/IRSlideRenderer'), { ssr: false });
 import { type HtmlDesignPostContent } from '@/lib/designContent';
 const AsanaPopup = dynamic(() => import('@/components/Fabrica/AsanaPopup').then(mod => ({ default: mod.AsanaPopup })), { ssr: false });
+const CanvaPopup = dynamic(() => import('@/components/Fabrica/CanvaPopup').then(mod => ({ default: mod.CanvaPopup })), { ssr: false });
+const DrivePopup = dynamic(() => import('@/components/Fabrica/DrivePopup').then(mod => ({ default: mod.DrivePopup })), { ssr: false });
 import { NotificationCard } from '@/components/Fabrica/NotificationCard';
 const FolderPicker = dynamic(() => import('@/components/Fabrica/FolderPicker'), { ssr: false });
 const ArtifactPanel = dynamic(() => import('@/components/Fabrica/ArtifactPanel').then(mod => ({ default: mod.ArtifactPanel })), { ssr: false });
@@ -31,6 +33,8 @@ function attachmentPreviewLabel(attachment: Attachment): string {
 const SLASH_COMMANDS = [
   { id: 'btw',   label: '/btw',   desc: 'Contexto extra sem interromper' },
   { id: 'asana', label: '/asana', desc: 'Abrir painel do Asana' },
+  { id: 'canva', label: '/canva', desc: 'Abrir painel do Canva' },
+  { id: 'drive', label: '/drive', desc: 'Abrir painel do Google Drive' },
   { id: 'editor', label: '/editor', desc: 'Abrir o editor atual' },
 ] as const;
 
@@ -83,6 +87,7 @@ export default function FabricaPage() {
     decline,
     setReviewMode,
     resetSession,
+    cancelGeneration,
     clearNotification,
     applySlideLocal,
   } = useFabricaWs(marca, initialSessionId);
@@ -112,12 +117,15 @@ export default function FabricaPage() {
   const [questionFreeform, setQuestionFreeform] = useState('');
   const [btwContext, setBtwContext] = useState<string[]>([]);
   const [asanaContext, setAsanaContext] = useState<string[]>([]);
+  const [asanaAttachments, setAsanaAttachments] = useState<Attachment[]>([]);
 
   // UI state
   const [showSlash, setShowSlash] = useState(false);
   const [slashSearch, setSlashSearch] = useState('');
   const [slashIdx, setSlashIdx] = useState(0);
   const [showAsana, setShowAsana] = useState(false);
+  const [showCanva, setShowCanva] = useState(false);
+  const [showDrive, setShowDrive] = useState(false);
   const [previewSlide, setPreviewSlide] = useState(0);
 
   const threadRef = useRef<HTMLDivElement>(null);
@@ -172,6 +180,22 @@ export default function FabricaPage() {
     }
     if (id === 'asana') {
       setShowAsana(true);
+      setShowSlash(false);
+      setSlashSearch('');
+      // Clear the slash command from input
+      setInput(v => v.replace(/(\/[a-zA-Z0-9-]*)$/, ''));
+      return;
+    }
+    if (id === 'canva') {
+      setShowCanva(true);
+      setShowSlash(false);
+      setSlashSearch('');
+      // Clear the slash command from input
+      setInput(v => v.replace(/(\/[a-zA-Z0-9-]*)$/, ''));
+      return;
+    }
+    if (id === 'drive') {
+      setShowDrive(true);
       setShowSlash(false);
       setSlashSearch('');
       // Clear the slash command from input
@@ -235,16 +259,20 @@ export default function FabricaPage() {
       fullMessage += `\n\n[Contexto adicional]\n${btwContext.map(c => `• ${c}`).join('\n')}`;
     }
     if (asanaContext.length > 0) {
-      fullMessage += `\n\n[Contexto Asana]\n${asanaContext.join('\n\n')}`;
+      fullMessage += `\n\n[Contexto Externo]\n${asanaContext.join('\n\n')}`;
     }
-    const outboundAttachments = attachment ? [attachment] : undefined;
+    
+    const outboundAttachments: Attachment[] = [];
+    if (attachment) outboundAttachments.push(attachment);
+    if (asanaAttachments.length > 0) outboundAttachments.push(...asanaAttachments);
 
-    sendMessage(fullMessage, outboundAttachments);
+    sendMessage(fullMessage, outboundAttachments.length > 0 ? outboundAttachments : undefined);
     setInput('');
     setAttachment(null);
+    setAsanaAttachments([]);
     setBtwContext([]);
     setAsanaContext([]);
-  }, [input, isStreaming, btwContext, asanaContext, attachment, sendMessage, postId, router, marca]);
+  }, [input, isStreaming, btwContext, asanaContext, asanaAttachments, attachment, sendMessage, postId, router, marca]);
 
   const handleKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (showSlash && filteredSlash.length > 0) {
@@ -330,9 +358,37 @@ export default function FabricaPage() {
       {showAsana && (
         <AsanaPopup
           onClose={() => setShowAsana(false)}
+          onInject={(text, atts) => {
+            setAsanaContext(prev => [...prev, text]);
+            if (atts && atts.length > 0) {
+              setAsanaAttachments(prev => [...prev, ...atts]);
+            }
+            setShowAsana(false);
+          }}
+        />
+      )}
+
+      {/* Canva popup */}
+      {showCanva && (
+        <CanvaPopup
+          onClose={() => setShowCanva(false)}
           onInject={text => {
             setAsanaContext(prev => [...prev, text]);
-            setShowAsana(false);
+            setShowCanva(false);
+          }}
+        />
+      )}
+
+      {/* Google Drive popup */}
+      {showDrive && (
+        <DrivePopup
+          onClose={() => setShowDrive(false)}
+          onInject={(text, atts) => {
+            setAsanaContext(prev => [...prev, text]);
+            if (atts && atts.length > 0) {
+              setAsanaAttachments(prev => [...prev, ...atts]);
+            }
+            setShowDrive(false);
           }}
         />
       )}
@@ -515,7 +571,17 @@ export default function FabricaPage() {
             <div className={s.progressRow} role="status">
               <div className={s.progressHeader}>
                 <span className={s.progressEyebrow}>Fábrica em execução</span>
-                <span className={s.progressValue}>{progress}%</span>
+                <div className={s.progressRight}>
+                  <span className={s.progressValue}>{progress}%</span>
+                  <button
+                    type="button"
+                    className={s.cancelBtn}
+                    onClick={cancelGeneration}
+                    title="Parar geração"
+                  >
+                    Parar
+                  </button>
+                </div>
               </div>
               <p className={s.progressLabel}>{progressLabel || 'Gerando...'}</p>
               <div
@@ -571,6 +637,18 @@ export default function FabricaPage() {
               <Paperclip size={11} />
               <span>{attachmentPreviewLabel(attachment)}</span>
               <button className={s.attachRemove} onClick={() => setAttachment(null)}><X size={11} /></button>
+            </div>
+          )}
+
+          {asanaAttachments.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '8px' }}>
+              {asanaAttachments.map((att, idx) => (
+                <div key={idx} className={s.attachStrip}>
+                  <Paperclip size={11} style={{ color: '#8b5cf6' }} />
+                  <span>{att.name}</span>
+                  <button className={s.attachRemove} onClick={() => setAsanaAttachments(prev => prev.filter((_, i) => i !== idx))}><X size={11} /></button>
+                </div>
+              ))}
             </div>
           )}
 
@@ -675,6 +753,14 @@ export default function FabricaPage() {
                     <div className={s.previewProgressBar} style={{ width: `${Math.max(4, progress)}%` }} />
                   </div>
                   <p className={s.previewProgressLabel}>{progressLabel || 'Preparando...'} · {progress}%</p>
+                  <button
+                    type="button"
+                    className={s.previewCancelBtn}
+                    onClick={cancelGeneration}
+                    title="Parar geração"
+                  >
+                    Parar Geração
+                  </button>
                   <div className={s.buildFilmstrip}>
                     {Array.from({ length: 4 }).map((_, i) => (
                       <div key={i} className={s.buildFilmCard} />

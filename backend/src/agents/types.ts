@@ -1,4 +1,5 @@
-import type { DesignFormat, DesignTokens } from '../lib/designDocument.js';
+export type DesignFormat = 'single' | 'carousel' | 'story' | 'presentation';
+export type DesignTokens = any;
 import type { WorkerStatus } from '../lib/fabricaSession.js';
 
 // ── Protocolo de comunicação Cérebro ↔ Worker ─────────────────────────────────

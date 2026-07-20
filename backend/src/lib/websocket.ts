@@ -33,7 +33,8 @@ export type WsInboundType =
   | 'question:answer'
   | 'review:approve'
   | 'review:decline'
-  | 'mode:set';
+  | 'mode:set'
+  | 'generation:cancel';
 
 export interface WsAttachment {
   name: string;

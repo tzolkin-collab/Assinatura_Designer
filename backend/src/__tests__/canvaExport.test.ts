@@ -6,21 +6,25 @@ vi.mock('../lib/htmlRaster', () => ({
   renderHtmlToPng: vi.fn(async () => Buffer.from('png-falso')),
 }));
 
-vi.mock('../lib/canvaClient', () => ({
-  uploadAsset: vi.fn(),
-  uploadAssetAndWait: vi.fn(),
-  createDesign: vi.fn(),
-  createDesignMerge: vi.fn(),
-  parseDesignResponse: (raw: unknown) => {
-    const d = (raw ?? {}) as { id?: string; design?: { id?: string; urls?: { edit_url?: string } } };
-    const design = d.design ?? d;
-    return { id: (design as { id?: string }).id!, url: (design as { urls?: { edit_url?: string } }).urls?.edit_url };
-  },
-}));
+vi.mock('../lib/canvaClient', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/canvaClient')>();
+  return {
+    ...actual,
+    uploadAsset: vi.fn(),
+    uploadAssetAndWait: vi.fn(),
+    createDesign: vi.fn(),
+    createDesignMerge: vi.fn(),
+    parseDesignResponse: (raw: unknown) => {
+      const d = (raw ?? {}) as { id?: string; design?: { id?: string; urls?: { edit_url?: string } } };
+      const design = d.design ?? d;
+      return { id: (design as { id?: string }).id!, url: (design as { urls?: { edit_url?: string } }).urls?.edit_url };
+    },
+  };
+});
 
 import { runCanvaExport } from '../lib/canvaExport';
 import { renderHtmlToPng } from '../lib/htmlRaster';
-import { uploadAssetAndWait, createDesign, createDesignMerge } from '../lib/canvaClient';
+import { uploadAssetAndWait, createDesign, createDesignMerge, CanvaSessionExpiredError } from '../lib/canvaClient';
 
 const deckDe = (n: number) => ({
   kind: 'ir-design',
@@ -154,5 +158,15 @@ describe('Export para o Canva (job da fila)', () => {
     await expect(
       runCanvaExport({ postId: 'post-1', userId: 'u1', slideIndex: 9 }),
     ).rejects.toThrow(/limite/i);
+  });
+
+  it('não faz fallback quando o merge falha por sessão expirada', async () => {
+    prismaMock.post.findUnique.mockResolvedValue(postCom(2));
+    (createDesign as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({ design: { id: 'd1' } })
+      .mockResolvedValueOnce({ design: { id: 'd2' } });
+    (createDesignMerge as ReturnType<typeof vi.fn>).mockRejectedValue(new CanvaSessionExpiredError());
+
+    await expect(runCanvaExport({ postId: 'post-1', userId: 'u1' })).rejects.toThrow(CanvaSessionExpiredError);
   });
 });

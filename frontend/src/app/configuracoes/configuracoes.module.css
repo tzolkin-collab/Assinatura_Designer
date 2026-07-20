@@ -180,6 +180,13 @@
   align-items: center;
   justify-content: center;
   color: var(--color-text-secondary);
+  overflow: hidden;
+}
+
+.integrationLogo {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
 }
 
 .integrationName {

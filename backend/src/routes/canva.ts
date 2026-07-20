@@ -3,6 +3,7 @@ import { config } from '../config.js';
 import prisma from '../lib/prisma.js';
 import { createError } from '../middleware/errorHandler.js';
 import { AuthRequest } from '../middleware/auth.js';
+import { rateLimit } from '../middleware/rateLimit.js';
 import {
   generateCodeVerifier,
   generateCodeChallenge,
@@ -10,7 +11,10 @@ import {
   buildAuthorizationUrl,
   exchangeCodeForTokens,
   getCanvaUser,
+  getDesign,
+  canvaFetch,
 } from '../lib/canvaClient.js';
+import { encryptToken } from '../lib/tokenCrypto.js';
 
 // O Canva é conector do DESIGNER (por usuário), como o Asana e o Drive: é a pessoa
 // que edita a arte, então a exportação cai na conta Canva DELA. Antes isto era
@@ -25,26 +29,38 @@ export const canvaPublicRouter = Router();
 
 // ── GET /api/canva/auth-url ──
 // Gera a URL de autorização do Canva e guarda PKCE verifier + state no usuário.
+// Rate limit de 10/min por IP evita spam do início do OAuth.
 canvaRouter.get('/auth-url', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const userId = req.user?.userId;
-    if (!userId) throw createError(401, 'Não autenticado');
+    await rateLimit({ windowSec: 60, max: 10, keyPrefix: 'canva-auth-url' })(req, res, async (err) => {
+      if (err) return next(err);
+      try {
+        const userId = req.user?.userId;
+        if (!userId) throw createError(401, 'Não autenticado');
 
-    if (!config.canvaClientId || !config.canvaClientSecret) {
-      throw createError(500, 'Canva API credentials are not configured');
-    }
+        if (!config.canvaClientId || !config.canvaClientSecret) {
+          throw createError(500, 'Canva API credentials are not configured');
+        }
 
-    const codeVerifier = generateCodeVerifier();
-    const codeChallenge = generateCodeChallenge(codeVerifier);
-    const state = generateOAuthState();
+        const codeVerifier = generateCodeVerifier();
+        const codeChallenge = generateCodeChallenge(codeVerifier);
+        const state = generateOAuthState();
 
-    await prisma.user.update({
-      where: { id: userId },
-      data: { canvaCodeVerifier: codeVerifier, canvaOauthState: state },
+        await prisma.user.update({
+          where: { id: userId },
+          data: {
+            canvaCodeVerifier: codeVerifier,
+            canvaOauthState: state,
+            canvaOauthStateAt: new Date(),
+          },
+        });
+
+        const authUrl = buildAuthorizationUrl(codeChallenge, state);
+        res.json({ data: { authUrl, state } });
+      } catch (innerError) {
+        next(innerError);
+      }
     });
-
-    const authUrl = buildAuthorizationUrl(codeChallenge, state);
-    res.json({ data: { authUrl, state } });
   } catch (error) {
     next(error);
   }
@@ -54,7 +70,12 @@ canvaRouter.get('/auth-url', async (req: AuthRequest, res: Response, next: NextF
 // OAuth callback — troca o authorization code pelos tokens e grava no usuário.
 canvaPublicRouter.get('/callback', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { code, state } = req.query;
+    const { code, state, error: canvaError, error_description: canvaErrorDescription } = req.query;
+    console.log('[Canva OAuth callback]', req.originalUrl, { code: !!code, state: !!state, canvaError, canvaErrorDescription });
+
+    if (canvaError) {
+      throw createError(400, `Canva OAuth error: ${canvaError}${canvaErrorDescription ? ` - ${canvaErrorDescription}` : ''}`);
+    }
 
     if (!code || typeof code !== 'string') {
       throw createError(400, 'Missing authorization code');
@@ -73,6 +94,14 @@ canvaPublicRouter.get('/callback', async (req: AuthRequest, res: Response, next:
       throw createError(500, 'Code verifier not found. Please restart the connection process.');
     }
 
+    // State expire após 10 minutos para mitigar replay.
+    const stateAgeMs = user.canvaOauthStateAt
+      ? Date.now() - user.canvaOauthStateAt.getTime()
+      : Number.POSITIVE_INFINITY;
+    if (stateAgeMs > 10 * 60 * 1000) {
+      throw createError(400, 'OAuth state expired. Please restart the connection process.');
+    }
+
     // Exchange code for tokens
     const tokens = await exchangeCodeForTokens(code, user.canvaCodeVerifier);
     const expiresAt = new Date(Date.now() + tokens.expires_in * 1000);
@@ -80,11 +109,12 @@ canvaPublicRouter.get('/callback', async (req: AuthRequest, res: Response, next:
     await prisma.user.update({
       where: { id: user.id },
       data: {
-        canvaAccessToken: tokens.access_token,
-        canvaRefreshToken: tokens.refresh_token,
+        canvaAccessToken: encryptToken(tokens.access_token),
+        canvaRefreshToken: encryptToken(tokens.refresh_token),
         canvaTokenExpiry: expiresAt,
         canvaCodeVerifier: null, // limpa dado sensível transitório
         canvaOauthState: null,
+        canvaOauthStateAt: null,
       },
     });
 
@@ -134,3 +164,94 @@ canvaRouter.get('/status', async (req: AuthRequest, res: Response, next: NextFun
     next(error);
   }
 });
+
+// ── GET /api/canva/designs ──
+// Lista os designs do usuário no Canva
+canvaRouter.get('/designs', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) throw createError(401, 'Não autenticado');
+
+    const response = await canvaFetch(userId, '/designs?limit=20');
+    if (!response.ok) {
+      const text = await response.text();
+      throw createError(response.status, `Falha ao listar designs do Canva: ${text}`);
+    }
+
+    const json = (await response.json()) as { items?: unknown[]; continuation?: string };
+    res.json({
+      designs: json.items ?? [],
+      continuation: json.continuation,
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── POST /api/canva/sync/:postId/fetch ──
+// Sincronização manual (Canva -> Designer) de metadados
+canvaRouter.post('/sync/:postId/fetch', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) throw createError(401, 'Não autenticado');
+    const postId = req.params.postId as string;
+
+    const post = await prisma.post.findUnique({ where: { id: postId } });
+    if (!post) throw createError(404, 'Post não encontrado');
+    if (!post.canvaDesignId) throw createError(400, 'Este post não possui um design do Canva associado');
+
+    const designInfo = (await getDesign(userId, post.canvaDesignId)) as {
+      design?: { title?: string; url?: string };
+    };
+    const title = designInfo.design?.title || post.canvaDesignName;
+    const url = designInfo.design?.url || post.canvaExportUrl;
+
+    const updatedPost = await prisma.post.update({
+      where: { id: postId },
+      data: {
+        canvaDesignName: title,
+        canvaExportUrl: url,
+        canvaLastSyncedAt: new Date(),
+      },
+    });
+
+    res.json({
+      data: {
+        canvaDesignId: updatedPost.canvaDesignId,
+        canvaDesignName: updatedPost.canvaDesignName,
+        canvaExportUrl: updatedPost.canvaExportUrl,
+        canvaLastSyncedAt: updatedPost.canvaLastSyncedAt,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── POST /api/canva/sync/:postId/toggle ──
+// Ativa/desativa sincronização automática (cron)
+canvaRouter.post('/sync/:postId/toggle', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) throw createError(401, 'Não autenticado');
+    const postId = req.params.postId as string;
+    const { enabled } = req.body as { enabled: boolean };
+
+    const post = await prisma.post.findUnique({ where: { id: postId } });
+    if (!post) throw createError(404, 'Post não encontrado');
+
+    const updatedPost = await prisma.post.update({
+      where: { id: postId },
+      data: { canvaSyncEnabled: enabled },
+    });
+
+    res.json({
+      data: {
+        canvaSyncEnabled: updatedPost.canvaSyncEnabled,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+

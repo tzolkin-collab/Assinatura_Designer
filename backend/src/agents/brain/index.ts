@@ -15,7 +15,7 @@ import {
 import type { FabricaQuestion, PresentationConfig, ReviewMode } from '../../lib/fabricaSession.js';
 import { ws, onWsMessage, type WsAttachment } from '../../lib/websocket.js';
 import { generateStreamWithRetry, generateWithRetry, humanizeGeminiError } from '../../lib/geminiRetry.js';
-import { extractJsonObject } from '../../lib/designDocument.js';
+import { extractJsonObject } from '../../lib/jsonHelper.js';
 import { editHtmlSlide, type HtmlDesignSlide } from '../../lib/htmlDesign.js';
 import { enqueuePipeline } from '../../lib/queue.js';
 import { BRAIN_SYSTEM_PROMPT } from './prompts.js';
@@ -414,6 +414,40 @@ export function initBrainHandlers(): void {
     });
     const latest = await getSession(sessionId);
     if (latest) emitSessionState(sessionId, latest);
+  });
+
+  // Cancelar geração da IA
+  onWsMessage('generation:cancel', async (sessionId, userId) => {
+    const session = await getSession(sessionId);
+    if (!session) return;
+
+    // Validação de ownership
+    if (userId && session.userId && session.userId !== userId) return;
+
+    // Atualiza o estado da sessão para interromper a execução no pipeline
+    await updateSession(sessionId, {
+      workerStatus: 'idle',
+      phase: 'listening',
+    });
+
+    const latest = await getSession(sessionId);
+    if (latest) emitSessionState(sessionId, latest);
+
+    // Emite mensagem no chat informando o cancelamento
+    ws.token(sessionId, '\n\nGeração interrompida pelo usuário.');
+
+    // Cancela/remove os jobs correspondentes na fila do BullMQ
+    try {
+      const { pipelineQueue } = await import('../../lib/queue.js');
+      const jobs = await pipelineQueue.getJobs(['active', 'waiting', 'delayed']);
+      for (const job of jobs) {
+        if (job.id?.startsWith(`${sessionId}-`)) {
+          await job.remove().catch(() => {});
+        }
+      }
+    } catch (err) {
+      logger.error('Erro ao cancelar jobs do pipeline no BullMQ', { sessionId, error: (err as Error).message });
+    }
   });
 }
 

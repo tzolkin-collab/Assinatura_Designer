@@ -3,8 +3,9 @@
 import { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, Loader2, PlugZap } from 'lucide-react';
+import Image from 'next/image';
 import { useSearchParams } from 'next/navigation';
-import { api } from '@/lib/api';
+import { api, getApiErrorMessage } from '@/lib/api';
 import PageHeader from '@/components/ui/PageHeader';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
@@ -31,6 +32,7 @@ function IntegracoesContent() {
 
   const searchParams = useSearchParams();
   const connected = searchParams.get('connected');
+  const canvaError = searchParams.get('canva_error');
 
   const loadProfile = async () => {
     try {
@@ -52,8 +54,13 @@ function IntegracoesContent() {
       setSuccessMsg('Integração com o Asana realizada com sucesso!');
     } else if (connected === 'canva') {
       setSuccessMsg('Integração com o Canva realizada com sucesso!');
+    } else if (connected === 'google') {
+      setSuccessMsg('Integração com o Google Drive realizada com sucesso!');
     }
-  }, [connected]);
+    if (canvaError === 'session_expired') {
+      setErrorMsg('Sua sessão do Canva expirou. Conecte novamente para continuar exportando.');
+    }
+  }, [connected, canvaError]);
 
   const handleDisconnect = async (provider: 'asana' | 'google' | 'canva') => {
     if (!confirm(`Deseja desconectar a integração do ${provider.toUpperCase()}?`)) return;
@@ -89,7 +96,17 @@ function IntegracoesContent() {
       window.location.href = authUrl;
     } catch (err) {
       console.error(err);
-      alert('Falha ao iniciar conexão com Canva.');
+      setErrorMsg(getApiErrorMessage(err, 'Falha ao iniciar conexão com Canva.'));
+    }
+  };
+
+  const handleConnectDrive = async () => {
+    try {
+      const { url } = await api.get<{ url: string }>('/google/auth-url');
+      window.location.href = url;
+    } catch (err) {
+      console.error(err);
+      alert('Falha ao iniciar conexão com Google Drive.');
     }
   };
 
@@ -123,13 +140,15 @@ function IntegracoesContent() {
             {/* Asana Integration */}
             <div className={styles.integrationRow}>
               <div className={styles.integrationInfo}>
-                <div className={styles.integrationIconWrapper} style={{ backgroundColor: 'rgba(244, 63, 94, 0.1)', color: '#f43f5e' }}>A</div>
+                <div className={styles.integrationIconWrapper}>
+                  <Image src="/icons/asana.svg" alt="Asana" width={24} height={24} className={styles.integrationLogo} />
+                </div>
                 <div>
                   <div className={styles.integrationName}>Asana</div>
                   <div className={styles.integrationStatus}>
                     Status:{' '}
                     {profile?.connections.asana ? (
-                      <span className={styles.statusConnected}>Conectado via OAuth</span>
+                      <span className={styles.statusConnected}>Conectado</span>
                     ) : (
                       'Não conectado'
                     )}
@@ -152,7 +171,9 @@ function IntegracoesContent() {
             {/* Google Drive Integration */}
             <div className={styles.integrationRow}>
               <div className={styles.integrationInfo}>
-                <div className={styles.integrationIconWrapper} style={{ backgroundColor: 'rgba(59, 130, 246, 0.1)', color: '#3b82f6' }}>G</div>
+                <div className={styles.integrationIconWrapper}>
+                  <Image src="/icons/google-drive.svg" alt="Google Drive" width={24} height={24} className={styles.integrationLogo} />
+                </div>
                 <div>
                   <div className={styles.integrationName}>Google Drive</div>
                   <div className={styles.integrationStatus}>
@@ -171,7 +192,7 @@ function IntegracoesContent() {
                     Desconectar
                   </button>
                 ) : (
-                  <button onClick={() => alert('Integração simulada do Google Drive')} className={styles.connectBtn} disabled={actionLoading}>
+                  <button onClick={handleConnectDrive} className={styles.connectBtn} disabled={actionLoading}>
                     Conectar Drive
                   </button>
                 )}
@@ -181,7 +202,9 @@ function IntegracoesContent() {
             {/* Canva User Integration */}
             <div className={styles.integrationRow}>
               <div className={styles.integrationInfo}>
-                <div className={styles.integrationIconWrapper} style={{ backgroundColor: 'rgba(139, 92, 246, 0.1)', color: '#8b5cf6' }}>C</div>
+                <div className={styles.integrationIconWrapper}>
+                  <Image src="/icons/canva.svg" alt="Canva" width={24} height={24} className={styles.integrationLogo} />
+                </div>
                 <div>
                   <div className={styles.integrationName}>Canva Individual</div>
                   <div className={styles.integrationStatus}>

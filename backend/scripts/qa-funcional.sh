@@ -75,7 +75,7 @@ check "slides/code (PUT idempotente)" 200 "$RES"
 # ── Notificações / equipe / canva ──
 check "notifications"      200 "$(code $API/notifications -H "$A")"
 check "team/members"       200 "$(code "$API/brands/tzolkin/members" -H "$A" || echo 000)"
-check "canva/status"       200 "$(code $API/canva/tzolkin/status -H "$A")"
+check "canva/status"       200 "$(code $API/canva/status -H "$A")"
 
 # ── Fábrica: sessão nova ──
 check "fabrica/session"    200 "$(code -X POST $API/fabrica/sessions -H "$A" -H "Content-Type: application/json" -d '{"brandSlug":"tzolkin"}')"

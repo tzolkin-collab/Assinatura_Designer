@@ -81,8 +81,136 @@ asanaPublicRouter.get('/callback', async (req: AuthRequest, res: Response, next:
       data: { asanaToken: tokens.access_token },
     });
 
-    res.redirect(`${config.corsOrigin}/configuracoes?connected=asana`);
+    // Redirect back to the brand's integrations settings page
+    res.redirect(`${config.corsOrigin}/configuracoes/integracoes?connected=asana`);
   } catch (error) {
     next(error);
   }
 });
+
+const ASANA_API_BASE = 'https://app.asana.com/api/1.0';
+
+async function getAsanaToken(userId: string): Promise<string> {
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { asanaToken: true } });
+  if (!user?.asanaToken) throw createError(403, 'Asana não configurado para este usuário');
+  return user.asanaToken;
+}
+
+async function asanaFetch<T = unknown>(token: string, path: string): Promise<T> {
+  const res = await fetch(`${ASANA_API_BASE}${path}`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    if (res.status === 401) throw createError(401, 'Token do Asana inválido ou expirado');
+    throw createError(502, `Falha ao consultar o Asana (${res.status}): ${text.slice(0, 200)}`);
+  }
+  return res.json() as Promise<T>;
+}
+
+// ── GET /api/asana/status — verifica se token está configurado ────────────────
+
+asanaRouter.get('/status', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) throw createError(401, 'Não autenticado');
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { asanaToken: true } });
+    res.json({ connected: !!user?.asanaToken });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── GET /api/asana/projects ───────────────────────────────────────────────────
+
+asanaRouter.get('/projects', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) throw createError(401, 'Não autenticado');
+    const token = await getAsanaToken(userId);
+
+    const me = await asanaFetch<{ data?: { workspaces?: { gid: string }[] } }>(token, '/users/me?opt_fields=workspaces');
+    const workspaces = me.data?.workspaces ?? [];
+
+    const allProjects: unknown[] = [];
+    for (const ws of workspaces) {
+      const r = await asanaFetch<{ data?: unknown[] }>(
+        token,
+        `/workspaces/${encodeURIComponent(ws.gid)}/projects?limit=50&archived=false&opt_fields=name`,
+      );
+      allProjects.push(...(r.data ?? []));
+    }
+
+    res.json({ data: allProjects });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── GET /api/asana/projects/:projectId/tasks ──────────────────────────────────
+
+asanaRouter.get('/projects/:projectId/tasks', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) throw createError(401, 'Não autenticado');
+    const token = await getAsanaToken(userId);
+
+    const projectId = req.params.projectId as string;
+    const opts = 'limit=100&opt_fields=name,completed,due_on,assignee.name,notes,permalink_url';
+    const result = await asanaFetch<{ data?: unknown[] }>(
+      token,
+      `/projects/${encodeURIComponent(projectId)}/tasks?${opts}`,
+    );
+
+    res.json({ data: result.data ?? [] });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ── GET /api/asana/tasks/:taskGid/attachments ──
+asanaRouter.get('/tasks/:taskGid/attachments', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.user?.userId;
+    if (!userId) throw createError(401, 'Não autenticado');
+    const token = await getAsanaToken(userId);
+    const taskGid = req.params.taskGid as string;
+
+    const result = await asanaFetch<{
+      data?: Array<{ gid: string; name: string; mime_type?: string; download_url?: string }>
+    }>(token, `/tasks/${encodeURIComponent(taskGid)}/attachments?opt_fields=name,mime_type,download_url`);
+
+    const attachments = result.data ?? [];
+    const base64Attachments: Array<{ name: string; mimeType: string; dataBase64: string }> = [];
+
+    for (const att of attachments) {
+      if (!att.download_url) continue;
+      const mime = att.mime_type || 'application/octet-stream';
+      const isImg = mime.startsWith('image/');
+      const isVid = mime.startsWith('video/');
+
+      if (isImg || isVid) {
+        try {
+          const fileRes = await fetch(att.download_url);
+          if (fileRes.ok) {
+            const arrayBuffer = await fileRes.arrayBuffer();
+            const buffer = Buffer.from(arrayBuffer);
+            base64Attachments.push({
+              name: att.name,
+              mimeType: mime,
+              dataBase64: buffer.toString('base64'),
+            });
+          }
+        } catch (err) {
+          console.warn(`[AsanaSync] Falha ao baixar anexo ${att.name}:`, err);
+        }
+      }
+    }
+
+    res.json({ data: base64Attachments });
+  } catch (err) {
+    next(err);
+  }
+});
+
+

@@ -36,7 +36,7 @@ durável, reviewer religado, anti-SSRF, rate-limit, WS autenticado).
 | 03 Agendamento | ⚫ **CANCELADA** |
 | 04 Cobrança | ⚫ **CANCELADA** |
 | 05 Histórico/versionamento | ✅ `PostVersion` + histórico no editor (ver Fase 2) |
-| Export Canva | 🟡 OAuth PKCE + upload OK, mas não cria design (ver Fase 1.1) |
+| Export Canva | ✅ OAuth PKCE, cria design multipágina via Merge API, tokens criptografados, sessão com reconexão e testes de OAuth |
 
 ---
 

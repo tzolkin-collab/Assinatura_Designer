@@ -7,6 +7,7 @@ import {
   createDesign,
   createDesignMerge,
   parseDesignResponse,
+  CanvaSessionExpiredError,
 } from './canvaClient.js';
 
 /**
@@ -127,6 +128,10 @@ export async function runCanvaExport(
     );
     return { designId: id, designUrl: url, slides: perSlideDesignIds.length };
   } catch (error) {
+    // Sessão expirada: não faz fallback, propaga para o usuário reconectar.
+    if (error instanceof CanvaSessionExpiredError) {
+      throw error;
+    }
     // O merge é a cereja, não a entrega: se ele falhar (indisponível na conta,
     // limite de operações), os designs por slide já estão no Canva do usuário.
     // Derrubar o job aqui apagaria um trabalho que de fato foi concluído.

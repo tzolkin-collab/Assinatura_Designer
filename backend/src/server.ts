@@ -6,6 +6,7 @@ import { initWebSocket } from './lib/websocket.js';
 import { startPipelineWorker, startCanvaExportWorker, startDeckExportWorker, closeQueue } from './lib/queue.js';
 import { closeEventBus } from './lib/eventBus.js';
 import { ensureInternalTeamMemberships } from './lib/internalTeam.js';
+import { runAutoSync } from './lib/canvaSync.js';
 
 const start = async () => {
   // Valida segredos/env obrigatórios antes de tudo — aborta em produção se faltar.
@@ -46,6 +47,17 @@ const start = async () => {
     startDeckExportWorker();
   }
 
+  // Canva Auto-Sync periódica (roda a cada 30 minutos)
+  const SYNC_INTERVAL = 30 * 60 * 1000;
+  const syncTimer = setInterval(() => {
+    runAutoSync().catch((err) => console.error('[Server] Canva Auto-Sync periódica falhou:', err));
+  }, SYNC_INTERVAL);
+
+  // Executa uma primeira vez após 1 minuto de boot para não sobrecarregar a inicialização
+  const startupSyncTimeout = setTimeout(() => {
+    runAutoSync().catch((err) => console.error('[Server] Canva Auto-Sync inicial falhou:', err));
+  }, 60_000);
+
   server.listen(config.port, () => {
     console.log(`  ├─ HTTP:         http://localhost:${config.port}`);
     console.log(`  └─ WebSocket:    ws://localhost:${config.port}/ws\n`);
@@ -54,6 +66,8 @@ const start = async () => {
   // Shutdown limpo: fecha fila/worker e Redis antes de sair.
   const shutdown = async (signal: string) => {
     console.log(`\n[Server] ${signal} recebido — encerrando...`);
+    clearInterval(syncTimer);
+    clearTimeout(startupSyncTimeout);
     server.close();
     try { await closeQueue(); } catch (err) { console.error('[Server] closeQueue:', err); }
     try { await closeEventBus(); } catch { /* já desconectado */ }

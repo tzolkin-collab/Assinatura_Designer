@@ -16,7 +16,7 @@
 import { GoogleGenAI } from '@google/genai';
 import { config } from '../../config.js';
 import { generateWithRetry } from '../geminiRetry.js';
-import { extractJsonObject } from '../designDocument.js';
+import { extractJsonObject } from '../jsonHelper.js';
 import type { SlideNode, IRPatch } from './types.js';
 
 const ai = new GoogleGenAI({ apiKey: config.geminiApiKey });

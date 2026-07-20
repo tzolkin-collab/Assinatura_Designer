@@ -60,7 +60,7 @@ vi.mock('../lib/prisma', () => {
       update: vi.fn(),
       delete: vi.fn(),
     },
-    user: { findUnique: vi.fn(), create: vi.fn() },
+    user: { findUnique: vi.fn(), findFirst: vi.fn(), create: vi.fn(), update: vi.fn() },
     notification: { create: vi.fn() },
     asset: {
       findMany: vi.fn(),

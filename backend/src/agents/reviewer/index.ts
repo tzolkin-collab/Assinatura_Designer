@@ -3,9 +3,7 @@ import { config } from '../../config.js';
 import { generateWithRetry } from '../../lib/geminiRetry.js';
 import type { DesignPage } from '../../lib/designTypes.js';
 import type { PlannerOutput } from '../planner/index.js';
-import { designDocumentToSvgs } from '../../lib/designToSvg.js';
-import { rasterizeSvgToBase64 } from '../../lib/raster.js';
-import { extractJsonObject, type DesignDocument } from '../../lib/designDocument.js';
+import { extractJsonObject } from '../../lib/jsonHelper.js';
 import { renderHtmlToBase64 } from '../../lib/htmlRaster.js';
 import { buildSlideDocument, type HtmlDesignContent } from '../../lib/htmlDesign.js';
 import type { DesignIR, SlideNode, ElementNode } from '../../lib/designIR/types.js';
@@ -61,36 +59,7 @@ export async function runReviewer(params: {
 }): Promise<ReviewResult> {
   const { pages, plan, brandContext } = params;
 
-  const isHybrid = pages.length === 1 && pages[0]?.kind === 'hybrid-design';
-
-  if (isHybrid) {
-    return runVisualReviewer(pages[0].document as DesignDocument, plan, brandContext);
-  }
-
   return runLegacyReviewer(pages as DesignPage[], plan, brandContext);
-}
-
-// ── Crítico multimodal: o modelo VÊ o slide renderizado ─────────────────────────
-async function runVisualReviewer(
-  document: DesignDocument,
-  plan: PlannerOutput,
-  brandContext: string,
-): Promise<ReviewResult> {
-  // Rasteriza cada página para PNG (até 8 slides, para limitar custo).
-  let images: string[] = [];
-  try {
-    const svgs = designDocumentToSvgs(document).slice(0, 8);
-    images = await Promise.all(svgs.map((svg) => rasterizeSvgToBase64(svg, { maxDim: 768 })));
-  } catch (err) {
-    console.error('[Reviewer] Rasterization failed, aprovando por segurança:', err);
-    return { approved: true, score: 70, deviations: [], feedback: 'Revisão visual indisponível', correctionInstructions: undefined };
-  }
-
-  if (images.length === 0) {
-    return { approved: true, score: 70, deviations: [], feedback: 'Sem slides para revisar', correctionInstructions: undefined };
-  }
-
-  return critiqueRenderedSlides(images, brandContext, plan.objective || 'não especificado');
 }
 
 // ── Núcleo da crítica visual: recebe PNGs já renderizados e o modelo os avalia ──

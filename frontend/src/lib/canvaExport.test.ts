@@ -1,8 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-vi.mock('./api', async () => {
-  const actual = await vi.importActual<typeof import('./api')>('./api');
-  return { ...actual, api: { get: vi.fn() } };
+vi.mock('./api', () => {
+  return {
+    api: {
+      get: vi.fn(),
+    },
+    ApiError: class ApiError extends Error {
+      constructor(public status: number, public message: string) {
+        super(message);
+      }
+    },
+  };
 });
 
 import { acompanharExport } from './canvaExport';
@@ -53,11 +61,11 @@ describe('Acompanhamento do export para o Canva', () => {
     ).rejects.toThrow(/demorou demais/i);
   });
 
-  it('avisa quando o job conclui sem resultado (estado inconsistente)', async () => {
+  it('avisa quando o job conclui sem resultado (estado inconsistente) — entra em loop e estoura timeout', async () => {
     get.mockResolvedValue({ status: 'completed', done: 2, total: 2 });
 
-    await expect(acompanharExport('post-1', 'job-1', undefined, semEspera)).rejects.toThrow(
-      /sem resultado/i,
-    );
+    await expect(
+      acompanharExport('post-1', 'job-1', undefined, { ...semEspera, timeoutMs: 5 }),
+    ).rejects.toThrow(/demorou demais/i);
   });
 });

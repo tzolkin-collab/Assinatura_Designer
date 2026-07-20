@@ -2,7 +2,10 @@
 
 > **Objetivo:** decidir se implementamos um segundo caminho de entrega para o Canva: PPTX editável (via Design Imports by URL), em paralelo ao PNG atual.
 > **Descoberta-chave:** o PPTX de teste (`teste-canva-editable.pptx`) importou com sucesso no Canva e produziu design editável.
-> **Estado:** em investigação. Nenhuma alteração de produto foi feita ainda.
+> **Estado da entrega hoje:**
+> - **PNG** → exporta diretamente para o Canva via Connect API (design multipágina).
+> - **PPTX / HTML** → geram arquivo local para download; o usuário pode importar manualmente no Canva se quiser.
+> A implementação automatizada de PPTX/HTML para o Canva via `POST /url-imports` ainda depende do spike descrito abaixo.
 
 ---
 

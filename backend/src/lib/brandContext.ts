@@ -1,10 +1,28 @@
 import { createError } from '../middleware/errorHandler.js';
-import type { DesignDocumentBrandContext } from './designDocument.js';
 import type { PresentationConfig } from './fabricaSession.js';
 import prisma from './prisma.js';
 
+export type DesignDocumentBrandContext = {
+  name: string;
+  slug: string;
+  guidelines: string;
+  agentPrompt: string;
+  colors: string[];
+  primaryFonts: string[];
+  logoUrl?: string | null;
+  presentationConfig?: PresentationConfig | null;
+};
+
 export type ResolvedBrandContext = DesignDocumentBrandContext & {
   id: string;
+  references: Array<{
+    name: string;
+    archetype: string | null;
+    toneOfVoice: string | null;
+    density: string | null;
+    palette: string[];
+    insightsText: string | null;
+  }>;
 };
 
 function normalizePresentationConfig(value: unknown): PresentationConfig | undefined {

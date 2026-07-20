@@ -1516,3 +1516,66 @@
 
   .saveBadgeSpin { animation: none; }
 }
+
+/* ── Cancellation Buttons ────────────────────────────────────────────────────── */
+
+.progressRight {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cancelBtn {
+  font-size: 11px;
+  font-weight: 600;
+  color: #ef4444;
+  background: color-mix(in srgb, #ef4444 10%, white);
+  border: 1px solid rgba(239, 68, 68, 0.18);
+  padding: 3px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  line-height: 1;
+}
+
+.cancelBtn:hover {
+  background: #ef4444;
+  color: white;
+  border-color: #ef4444;
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.2);
+}
+
+.cancelBtn:active {
+  transform: scale(0.96);
+}
+
+.previewCancelBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: #ef4444;
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  padding: 8px 18px;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  margin-top: 14px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
+}
+
+.previewCancelBtn:hover {
+  background: #ef4444;
+  color: white;
+  border-color: #ef4444;
+  box-shadow: 0 6px 16px rgba(239, 68, 68, 0.25);
+  transform: translateY(-1px);
+}
+
+.previewCancelBtn:active {
+  transform: translateY(0) scale(0.98);
+}

@@ -1,9 +1,11 @@
 import crypto from 'crypto';
 import { config } from '../config.js';
 import prisma from './prisma.js';
+import { encryptToken, tryDecryptToken } from './tokenCrypto.js';
 
 const CANVA_API_BASE = 'https://api.canva.com/rest/v1';
 const CANVA_AUTH_BASE = 'https://www.canva.com/api/oauth';
+const CANVA_TOKEN_URL = 'https://api.canva.com/rest/v1/oauth/token';
 
 // ── PKCE Helpers ──
 
@@ -62,7 +64,7 @@ export async function exchangeCodeForTokens(
     redirect_uri: config.canvaRedirectUri,
   });
 
-  const response = await fetch(`${CANVA_AUTH_BASE}/token`, {
+  const response = await fetch(CANVA_TOKEN_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
@@ -85,7 +87,7 @@ export async function refreshAccessToken(refreshToken: string): Promise<CanvaTok
     refresh_token: refreshToken,
   });
 
-  const response = await fetch(`${CANVA_AUTH_BASE}/token`, {
+  const response = await fetch(CANVA_TOKEN_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
@@ -102,11 +104,23 @@ export async function refreshAccessToken(refreshToken: string): Promise<CanvaTok
   return response.json() as Promise<CanvaTokenResponse>;
 }
 
+// ── Session Errors ──
+
+export class CanvaSessionExpiredError extends Error {
+  public readonly code = 'CANVA_SESSION_EXPIRED';
+  public readonly statusCode = 401;
+  constructor(message = 'Sessão do Canva expirada. Reconecte a integração.') {
+    super(message);
+    this.name = 'CanvaSessionExpiredError';
+  }
+}
+
 // ── Authenticated API Client ──
 
 /**
  * Gets a valid access token for a user (the designer's own Canva account),
  * refreshing if expired. Returns null if the user has no Canva connection.
+ * Throws CanvaSessionExpiredError if the refresh token is invalid/revoked.
  */
 export async function getValidAccessToken(userId: string): Promise<string | null> {
   const user = await prisma.user.findUnique({
@@ -114,21 +128,23 @@ export async function getValidAccessToken(userId: string): Promise<string | null
     select: { canvaAccessToken: true, canvaRefreshToken: true, canvaTokenExpiry: true },
   });
 
-  if (!user?.canvaAccessToken || !user.canvaRefreshToken) return null;
+  const accessToken = tryDecryptToken(user?.canvaAccessToken);
+  const refreshToken = tryDecryptToken(user?.canvaRefreshToken);
+  if (!accessToken || !refreshToken) return null;
 
   // If token expires within 5 minutes (ou expiração desconhecida), refresh it
   const bufferMs = 5 * 60 * 1000;
-  const expiresAtMs = user.canvaTokenExpiry?.getTime() ?? 0;
+  const expiresAtMs = user?.canvaTokenExpiry?.getTime() ?? 0;
   if (expiresAtMs - bufferMs < Date.now()) {
     try {
-      const tokens = await refreshAccessToken(user.canvaRefreshToken);
+      const tokens = await refreshAccessToken(refreshToken);
       const expiresAt = new Date(Date.now() + tokens.expires_in * 1000);
 
       await prisma.user.update({
         where: { id: userId },
         data: {
-          canvaAccessToken: tokens.access_token,
-          canvaRefreshToken: tokens.refresh_token,
+          canvaAccessToken: encryptToken(tokens.access_token),
+          canvaRefreshToken: encryptToken(tokens.refresh_token),
           canvaTokenExpiry: expiresAt,
         },
       });
@@ -136,15 +152,25 @@ export async function getValidAccessToken(userId: string): Promise<string | null
       return tokens.access_token;
     } catch (error) {
       console.error('[Canva] Token refresh failed:', error);
-      return null;
+      // Sessão expirada ou revogada: limpa tokens para forçar reconexão.
+      await prisma.user.update({
+        where: { id: userId },
+        data: {
+          canvaAccessToken: null,
+          canvaRefreshToken: null,
+          canvaTokenExpiry: null,
+          canvaUserId: null,
+        },
+      });
+      throw new CanvaSessionExpiredError();
     }
   }
 
-  return user.canvaAccessToken;
+  return accessToken;
 }
 
 /**
- * Makes an authenticated request to the Canva Connect API.
+ * Faz requisição autenticada à API do Canva com retry em erros transitórios.
  */
 export async function canvaFetch(
   userId: string,
@@ -157,20 +183,46 @@ export async function canvaFetch(
   }
 
   const url = `${CANVA_API_BASE}${path}`;
-  const headers: Record<string, string> = {
+  const baseHeaders: Record<string, string> = {
     Authorization: `Bearer ${accessToken}`,
     ...(options.headers as Record<string, string> || {}),
   };
 
   // Set Content-Type for JSON bodies if not already set
-  if (options.body && typeof options.body === 'string' && !headers['Content-Type']) {
-    headers['Content-Type'] = 'application/json';
+  if (options.body && typeof options.body === 'string' && !baseHeaders['Content-Type']) {
+    baseHeaders['Content-Type'] = 'application/json';
   }
 
-  return fetch(url, {
-    ...options,
-    headers,
-  });
+  const maxAttempts = 3;
+  let lastError: Error | undefined;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const response = await fetch(url, {
+      ...options,
+      headers: baseHeaders,
+    });
+
+    if (response.ok || response.status === 401 || response.status === 403) {
+      return response;
+    }
+
+    if (response.status === 429) {
+      const retryAfter = response.headers.get('Retry-After');
+      const delayMs = retryAfter ? parseInt(retryAfter, 10) * 1000 : 1000 * 2 ** attempt;
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      continue;
+    }
+
+    if (response.status >= 500 && response.status < 600) {
+      const delayMs = 1000 * 2 ** attempt;
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      continue;
+    }
+
+    // 4xx não-recuperável: retorna sem retry.
+    return response;
+  }
+
+  throw lastError || new Error(`Canva API request failed after ${maxAttempts} attempts: ${path}`);
 }
 
 // ── High-Level API Methods ──

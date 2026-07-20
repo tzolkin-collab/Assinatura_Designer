@@ -142,7 +142,14 @@ export const config = {
   canvaClientId: process.env.CANVA_CLIENT_ID || '',
   canvaClientSecret: process.env.CANVA_CLIENT_SECRET || '',
   canvaRedirectUri: process.env.CANVA_REDIRECT_URI || 'http://localhost:4000/api/canva/callback',
-  canvaScopes: 'design:content:read design:content:write design:meta:read asset:read asset:write folder:read folder:write profile:read',
+  canvaTokenEncryptionKey: process.env.CANVA_TOKEN_ENCRYPTION_KEY || '',
+  // Scopes cadastrados no app do Canva. Apenas os explicitamente habilitados no portal.
+  // design:meta:read  → listar/obter designs
+  // design:content:read → exportar designs
+  // design:content:write → criar designs, autofill, merge
+  // asset:write → upload de assets
+  // profile:read → identificar o usuário Canva
+  canvaScopes: 'design:meta:read design:content:read design:content:write asset:write profile:read',
   // ── Asana API ──
   asanaClientId: process.env.ASANA_CLIENT_ID || '',
   asanaClientSecret: process.env.ASANA_CLIENT_SECRET || '',
@@ -166,6 +173,9 @@ export function validateConfig(): void {
   }
   if (!config.geminiApiKey) {
     problems.push('GEMINI_API_KEY ausente (nenhuma geração de design funcionará)');
+  }
+  if (!config.canvaClientId || !config.canvaClientSecret) {
+    problems.push('CANVA_CLIENT_ID e/ou CANVA_CLIENT_SECRET ausentes (integração com Canva não funcionará)');
   }
 
   if (problems.length === 0) return;

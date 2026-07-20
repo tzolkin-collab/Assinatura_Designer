@@ -18,7 +18,7 @@ interface AsanaTask {
 
 interface Props {
   onClose: () => void;
-  onInject: (text: string) => void;
+  onInject: (text: string, attachments?: Array<{ name: string; mimeType: string; dataBase64: string }>) => void;
 }
 
 const getToken = () =>
@@ -80,9 +80,10 @@ export function AsanaPopup({ onClose, onInject }: Props) {
     });
   };
 
-  const injectSelected = () => {
+  const injectSelected = async () => {
     const selected = tasks.filter(t => selectedTasks.has(t.gid));
     if (selected.length === 0) return;
+    
     const text = selected.map(t => {
       const parts = [`• ${t.name}`];
       if (t.due_on) parts.push(`  Prazo: ${t.due_on}`);
@@ -90,7 +91,26 @@ export function AsanaPopup({ onClose, onInject }: Props) {
       if (t.notes?.trim()) parts.push(`  Notas: ${t.notes.slice(0, 200)}`);
       return parts.join('\n');
     }).join('\n\n');
-    onInject(`[Contexto Asana]\n${text}`);
+
+    setLoadingTasks(true);
+    const allAttachments: Array<{ name: string; mimeType: string; dataBase64: string }> = [];
+    try {
+      for (const t of selected) {
+        const res = await fetch(`${API_BASE}/asana/tasks/${t.gid}/attachments`, { headers: authHeaders() });
+        if (res.ok) {
+          const body = await res.json() as { data?: Array<{ name: string; mimeType: string; dataBase64: string }> };
+          if (body.data) {
+            allAttachments.push(...body.data);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[AsanaPopup] Falha ao buscar anexos:', err);
+    } finally {
+      setLoadingTasks(false);
+    }
+
+    onInject(`[Contexto Asana]\n${text}`, allAttachments);
     onClose();
   };
 

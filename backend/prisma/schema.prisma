@@ -25,6 +25,7 @@ model User {
   // PKCE transitório do OAuth do Canva: gravados no auth-url, limpos no callback.
   canvaCodeVerifier  String?
   canvaOauthState    String?
+  canvaOauthStateAt  DateTime?
   brandMemberships   BrandMember[]
   invitesSent        Invite[]        @relation("InvitesSent")
   assets             Asset[]
@@ -159,6 +160,9 @@ model Post {
   createdById    String?
   canvaDesignId  String?
   canvaExportUrl String?
+  canvaDesignName String?
+  canvaSyncEnabled Boolean    @default(false)
+  canvaLastSyncedAt DateTime?
   brand          Brand      @relation(fields: [brandId], references: [id], onDelete: Cascade)
   folder         Folder?    @relation(fields: [folderId], references: [id])
   createdBy      User?      @relation(fields: [createdById], references: [id], onDelete: SetNull)

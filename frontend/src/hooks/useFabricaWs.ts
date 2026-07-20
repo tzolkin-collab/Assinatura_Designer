@@ -493,6 +493,10 @@ export function useFabricaWs(brandSlug: string, initialSessionId?: string | null
     send('mode:set', { mode });
   }, [send]);
 
+  const cancelGeneration = useCallback(() => {
+    send('generation:cancel');
+  }, [send]);
+
   // Edição LOCAL de um slide (aba Fonte / código): o servidor já persistiu via
   // PUT /slides/:idx/code; aqui só espelhamos no preview sem esperar rehydrate.
   const applySlideLocal = useCallback((index: number, slide: { html: string; css?: string }) => {
@@ -526,6 +530,7 @@ export function useFabricaWs(brandSlug: string, initialSessionId?: string | null
     decline,
     setReviewMode,
     resetSession,
+    cancelGeneration,
     clearNotification: () => setNotification(null),
   };
 }

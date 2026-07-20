@@ -34,7 +34,7 @@ Seis revisores especializados leram integralmente os 17,3 mil line-items de cód
 
 1. **XSS/injeção server-side** — sanitização de HTML por regex bypassável (`htmlDesign.ts:45`) antes do Chromium; o comentário prometia DOMPurify inexistente
 2. **Regex `[EDIT]` quebrada** — edição cirúrgica inalcançável (`brain/index.ts`) — **CORRIGIDA nesta sessão** (ver §5)
-3. **Callback OAuth do Canva → 401** — mount público é código morto (`app.ts:63-65`), reproduzido no Express 5.1
+3. **~~Callback OAuth do Canva → 401~~ CORRIGIDO** — mount público separado em `app.ts` e fluxo OAuth PKCE funcional; tokens criptografados no banco e sessão invalidada em refresh falho.
 4. **DoS de cota/custo** — `slideCount`/`width`/`height` sem teto em `ai.ts`
 5. **Autenticação nunca testada de verdade** — JWT mockado para sucesso em 100% dos testes HTTP; nenhum teste de 401, upload ou rate limit
 
