@@ -110,31 +110,35 @@ async function psubscribeAll(motivo: string): Promise<void> {
       logger.error('EventBus resubscribe falhou', { pattern, motivo, error: (e as Error).message });
     }
   }
-  logger.info('EventBus subscriber (re)inscrito', { patterns: activePatterns.size, motivo });
+  // Silencioso no tique de rotina do watchdog (a cada 30s, para sempre) — só
+  // teria valor de diagnóstico numa reconexão de verdade ('ready') ou na
+  // primeira inscrição. Erro acima continua sempre logado.
+  if (motivo !== 'watchdog') {
+    logger.info('EventBus subscriber (re)inscrito', { patterns: activePatterns.size, motivo });
+  }
 }
 
 // ── Watchdog: reconciliação periódica ────────────────────────────────────────
 // Rede-de-segurança contra QUALQUER forma de "inscrição perdida silenciosa"
-// (o bug real acima, ou outra que apareça): confere a cada 30s se o Redis
-// enxerga as inscrições que deveriam existir e reemite psubscribe se não.
-// psubscribe é idempotente — reemitir sem necessidade não tem efeito colateral.
+// — a original (retry esgotado, corrigida acima) ou uma nova (ex.: proxy na
+// frente do Redis que reseta o estado de pub/sub sem derrubar o TCP, então o
+// cliente nunca vê 'close'/'error'/'end'; consegui bater nessa exata janela
+// ao vivo depois do primeiro fix). Reemite psubscribe a cada 30s SEM checar
+// PUBSUB NUMPAT antes — psubscribe é idempotente, então reemitir à toa não
+// tem custo, e evita dois problemas do "checar antes": (1) NUMPAT só pode
+// ser consultado numa conexão QUE NÃO ESTÁ em modo subscriber — rodar na
+// própria `sub` (que ESTÁ em modo subscriber) sempre falhava com
+// "ERR only (P)SUBSCRIBE ... allowed" e o catch(()=>{}) escondia isso, que
+// foi exatamente o bug do primeiro watchdog; (2) NUMPAT é contagem GLOBAL do
+// Redis (outros apps no mesmo Redis também contam), então nem seria um sinal
+// confiável do nosso estado específico.
 let watchdog: ReturnType<typeof setInterval> | null = null;
 
 function startWatchdog(): void {
   if (watchdog) return;
   watchdog = setInterval(() => {
     if (!sub || sub.status !== 'ready' || activePatterns.size === 0) return;
-    sub.call('PUBSUB', 'NUMPAT')
-      .then((numpat) => {
-        if (Number(numpat) < activePatterns.size) {
-          logger.warn('EventBus watchdog: inscrição divergente do esperado — reemitindo', {
-            numpatRedis: numpat,
-            esperado: activePatterns.size,
-          });
-          void psubscribeAll('watchdog');
-        }
-      })
-      .catch(() => { /* checagem best-effort; próximo tick tenta de novo */ });
+    void psubscribeAll('watchdog');
   }, 30_000);
   watchdog.unref?.(); // não segura o processo vivo sozinho (ex.: em testes)
 }
