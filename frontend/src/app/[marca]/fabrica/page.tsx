@@ -380,7 +380,7 @@ export default function FabricaPage() {
             <span className={s.chatTitle}>{brandName || marca}</span>
           </div>
           <div className={s.chatHeaderRight}>
-            <AiSpendBadge slug={marca} />
+            <AiSpendBadge slug={marca} compact />
             <button
               className={s.newConvBtn}
               onClick={handleNewConversation}

@@ -54,6 +54,24 @@
 .miniBarFillWarn { background: #d97706; }
 .miniBarFillDanger { background: var(--color-error); }
 
+/* Modo compacto (prop `compact`, não media query): usado onde o container é
+   LARGURA FIXA e apertada por design — ex. o cabeçalho da Fábrica
+   (chatPanel: clamp(340px, 38vw, 460px), com overflow:hidden). Lá, mesmo em
+   viewport largo, o painel nunca passa de 460px — o texto
+   "27,2 mil / 5 M tok · US$ 0,09" (nowrap, sem limite de largura) empurrava o
+   título, o botão Nova e o indicador de conexão para fora, escondidos pelo
+   overflow do painel. Uma media query por VIEWPORT erraria o alvo aqui (o
+   gargalo é o container, não a tela); o modo compacto tira a barrinha de
+   teto (reforço visual, não a informação principal) e o texto de
+   tokens/custo, que seguem disponíveis no popover ao clicar. */
+.compact .miniBar,
+.compact .badgeMeta {
+  display: none;
+}
+.compact .badge {
+  padding: var(--space-2) var(--space-3);
+}
+
 /* Popover com a quebra por modelo. */
 .popover {
   position: absolute;

@@ -66,6 +66,14 @@
   flex-shrink: 0;
   position: relative;
   z-index: 10;
+  /* Rede de segurança: .chatPanel tem overflow:hidden e largura
+     clamp(340px, 38vw, 460px) — entre ~900-1210px de viewport ela fica
+     estreita o bastante para o badge de gasto de IA (que não encolhe)
+     estourar e ESCONDER o título, o botão Nova e o indicador de conexão
+     (cortados pelo overflow:hidden do painel). Com wrap, o pior caso vira
+     2 linhas no cabeçalho — nunca mais some nada. */
+  flex-wrap: wrap;
+  row-gap: 6px;
 }
 
 .chatHeaderLeft {

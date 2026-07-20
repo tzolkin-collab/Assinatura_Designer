@@ -13,7 +13,7 @@ import styles from './AiSpendBadge.module.css';
  * popover. O teto de gasto existia mas era invisível: só se descobria que ele existe
  * quando cortava. Aqui ele fica à vista.
  */
-export default function AiSpendBadge({ slug }: { slug: string }) {
+export default function AiSpendBadge({ slug, compact }: { slug: string; compact?: boolean }) {
   const { usage, loading } = useAiUsage(slug);
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -39,7 +39,7 @@ export default function AiSpendBadge({ slug }: { slug: string }) {
   const costLabel = formatCost(usage.cost);
 
   return (
-    <div className={styles.wrap} ref={wrapRef}>
+    <div className={`${styles.wrap} ${compact ? styles.compact : ''}`} ref={wrapRef}>
       <button
         type="button"
         className={styles.badge}
