@@ -45,20 +45,25 @@ export async function runCanvaExport(
   params: CanvaExportParams,
   onProgress?: ExportProgress,
 ): Promise<CanvaExportResult> {
-  const { postId, slideIndex } = params;
+  const { postId, userId, slideIndex } = params;
 
   const post = await prisma.post.findUnique({
     where: { id: postId },
     include: {
-      brand: { include: { canvaIntegration: true } },
       slides: { orderBy: { position: 'asc' } },
     },
   });
   if (!post) throw new Error('Post não encontrado');
 
-  const brand = post.brand;
-  if (!brand.canvaIntegration?.canvaAccessToken) {
-    throw new Error('Canva não conectado para esta marca');
+  // O Canva é a conta do designer que pediu o export (params.userId), não da marca.
+  // Fail-fast antes de renderizar: o token real é resolvido (e renovado) dentro do
+  // canvaFetch a cada chamada.
+  const requester = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { canvaAccessToken: true },
+  });
+  if (!requester?.canvaAccessToken) {
+    throw new Error('Canva não conectado para este usuário');
   }
 
   const deck = resolveRenderableDeck(mergeSlidesIntoPost(post).content);
@@ -89,13 +94,13 @@ export async function runCanvaExport(
     });
 
     const assetId = await uploadAssetAndWait(
-      brand.id,
+      userId,
       png,
       `${titleBase} - slide ${idx + 1}.png`,
       'image/png',
     );
 
-    const created = await createDesign(brand.id, {
+    const created = await createDesign(userId, {
       design_type: { type: 'custom', width: deck.width, height: deck.height },
       asset_id: assetId,
       title: indices.length > 1 ? `${titleBase} - ${idx + 1}` : titleBase,
@@ -113,7 +118,7 @@ export async function runCanvaExport(
 
   // Deck: junta as páginas num design só.
   try {
-    const merged = await createDesignMerge(brand.id, perSlideDesignIds, titleBase);
+    const merged = await createDesignMerge(userId, perSlideDesignIds, titleBase);
     const { id, url } = parseDesignResponse(
       (merged as { design?: unknown; design_id?: string }).design ??
         ((merged as { design_id?: string }).design_id

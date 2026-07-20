@@ -78,7 +78,6 @@ vi.mock('../lib/prisma', () => {
       delete: vi.fn(),
     },
     brandConfig: { findUnique: vi.fn(), upsert: vi.fn() },
-    canvaIntegration: { upsert: vi.fn(), delete: vi.fn() },
     post: { findFirst: vi.fn(), findMany: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
     postVersion: {
       findFirst: vi.fn(),

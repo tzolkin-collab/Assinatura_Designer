@@ -20,7 +20,6 @@ import {
   Users,
   Globe,
   BarChart3,
-  PlugZap,
   Image as ImageIcon,
 } from 'lucide-react';
 import styles from './Sidebar.module.css';
@@ -57,7 +56,6 @@ function getBrandNav(marca: string): NavItem[] {
         { label: 'Agente IA', href: `/${marca}/configuracoes/agent`, icon: <Bot size={16} /> },
         { label: 'Branding', href: `/${marca}/configuracoes/branding`, icon: <Palette size={16} /> },
         { label: 'Referências', href: `/${marca}/configuracoes/referencias`, icon: <Eye size={16} /> },
-        { label: 'Integração Canva', href: `/${marca}/configuracoes/canva`, icon: <PlugZap size={16} /> },
         { label: 'Equipe', href: `/${marca}/configuracoes/equipe`, icon: <Users size={16} /> },
         { label: 'Mídia e Fontes', href: `/${marca}/configuracoes/midia`, icon: <ImageIcon size={16} /> },
         { label: 'Gastos de IA', href: `/${marca}/configuracoes/billing`, icon: <BarChart3 size={16} /> },

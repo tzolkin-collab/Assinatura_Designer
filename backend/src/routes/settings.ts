@@ -485,6 +485,10 @@ settingsRouter.delete('/connections/:provider', async (req: AuthRequest, res: Re
     } else if (provider === 'canva') {
       updateData.canvaAccessToken = null;
       updateData.canvaRefreshToken = null;
+      updateData.canvaTokenExpiry = null;
+      updateData.canvaUserId = null;
+      updateData.canvaCodeVerifier = null;
+      updateData.canvaOauthState = null;
     } else {
       throw createError(400, 'Provedor de conexão inválido');
     }

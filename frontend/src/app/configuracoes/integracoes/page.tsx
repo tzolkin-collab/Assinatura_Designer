@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
 import { ArrowLeft, Loader2, PlugZap } from 'lucide-react';
+import { useSearchParams } from 'next/navigation';
 import { api } from '@/lib/api';
 import PageHeader from '@/components/ui/PageHeader';
 import Card from '@/components/ui/Card';
@@ -21,12 +22,15 @@ interface UserProfile {
   };
 }
 
-export default function IntegracoesPage() {
+function IntegracoesContent() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+
+  const searchParams = useSearchParams();
+  const connected = searchParams.get('connected');
 
   const loadProfile = async () => {
     try {
@@ -44,7 +48,12 @@ export default function IntegracoesPage() {
 
   useEffect(() => {
     loadProfile();
-  }, []);
+    if (connected === 'asana') {
+      setSuccessMsg('Integração com o Asana realizada com sucesso!');
+    } else if (connected === 'canva') {
+      setSuccessMsg('Integração com o Canva realizada com sucesso!');
+    }
+  }, [connected]);
 
   const handleDisconnect = async (provider: 'asana' | 'google' | 'canva') => {
     if (!confirm(`Deseja desconectar a integração do ${provider.toUpperCase()}?`)) return;
@@ -71,6 +80,16 @@ export default function IntegracoesPage() {
     } catch (err) {
       console.error(err);
       alert('Falha ao iniciar conexão com Asana.');
+    }
+  };
+
+  const handleConnectCanva = async () => {
+    try {
+      const { authUrl } = await api.get<{ authUrl: string }>('/canva/auth-url');
+      window.location.href = authUrl;
+    } catch (err) {
+      console.error(err);
+      alert('Falha ao iniciar conexão com Canva.');
     }
   };
 
@@ -181,7 +200,7 @@ export default function IntegracoesPage() {
                     Desconectar
                   </button>
                 ) : (
-                  <button onClick={() => alert('Para conectar o Canva, conecte na aba de integração de um dos seus projetos.')} className={styles.connectBtn} disabled={actionLoading}>
+                  <button onClick={handleConnectCanva} className={styles.connectBtn} disabled={actionLoading}>
                     Conectar Canva
                   </button>
                 )}
@@ -194,3 +213,17 @@ export default function IntegracoesPage() {
     </div>
   );
 }
+
+export default function IntegracoesPage() {
+  return (
+    <Suspense fallback={
+      <div className={styles.container} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '60vh' }}>
+        <Loader2 size={32} className={styles.spin} style={{ color: 'var(--color-brand)' }} />
+        <p style={{ marginTop: '16px', color: 'var(--color-text-secondary)' }}>Carregando integrações...</p>
+      </div>
+    }>
+      <IntegracoesContent />
+    </Suspense>
+  );
+}
+

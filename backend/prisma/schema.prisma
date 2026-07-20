@@ -20,6 +20,11 @@ model User {
   googleTokenExpiry  DateTime?
   canvaAccessToken   String?
   canvaRefreshToken  String?
+  canvaTokenExpiry   DateTime?
+  canvaUserId        String?
+  // PKCE transitório do OAuth do Canva: gravados no auth-url, limpos no callback.
+  canvaCodeVerifier  String?
+  canvaOauthState    String?
   brandMemberships   BrandMember[]
   invitesSent        Invite[]        @relation("InvitesSent")
   assets             Asset[]
@@ -27,6 +32,9 @@ model User {
   createdPosts       Post[]
   accessRequests     AccessRequest[]
   postVersions       PostVersion[]
+
+  // Achamos o usuário pelo state no callback do OAuth — sem índice seria full scan.
+  @@index([canvaOauthState])
 }
 
 enum BrandRole {
@@ -93,7 +101,6 @@ model Brand {
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
   config           BrandConfig?
-  canvaIntegration CanvaIntegration?
   folders          Folder[]
   posts            Post[]
   refs             Reference[]
@@ -114,20 +121,6 @@ model BrandConfig {
   brandId            String   @unique
   presentationConfig Json?
   brand              Brand    @relation(fields: [brandId], references: [id], onDelete: Cascade)
-}
-
-model CanvaIntegration {
-  id                String   @id @default(uuid())
-  canvaAccessToken  String
-  canvaRefreshToken String
-  canvaUserId       String?
-  tokenExpiresAt    DateTime
-  codeVerifier      String?
-  oauthState        String?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-  brandId           String   @unique
-  brand             Brand    @relation(fields: [brandId], references: [id], onDelete: Cascade)
 }
 
 model Reference {

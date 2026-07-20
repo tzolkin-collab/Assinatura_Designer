@@ -52,11 +52,6 @@ describe('Autorização por marca (RBAC)', () => {
       expect(prismaMock.brandConfig.findUnique).not.toHaveBeenCalled();
     });
 
-    it('bloqueia conexão do Canva (403)', async () => {
-      const res = await auth(request(app).get('/api/canva/marca-alheia/auth-url'));
-      expect(res.status).toBe(403);
-    });
-
     it('bloqueia listagem de pastas (403)', async () => {
       const res = await auth(request(app).get('/api/folders/marca-alheia'));
       expect(res.status).toBe(403);

@@ -11,7 +11,7 @@ import { buildSlideDocument, editHtmlSlide, sanitizeSlideHtml, sanitizeSlideCss 
 import { GoogleGenAI } from '@google/genai';
 import { config } from '../config.js';
 import { generateWithRetry } from '../lib/geminiRetry.js';
-import { extractJsonObject } from '../lib/designDocument.js';
+import { extractJsonObject } from '../lib/jsonHelper.js';
 import { resolveBrandContext } from '../lib/brandContext.js';
 import { uploadPngToR2 } from '../lib/r2.js';
 import { mergeSlidesIntoPost, syncPostSlides } from '../lib/postHelper.js';
@@ -691,20 +691,24 @@ postsRouter.post('/:id/export-canva', async (req: AuthRequest, res: Response, ne
     const userId = req.user?.userId;
 
     // Valida tudo o que dá pra validar de forma barata ANTES de enfileirar: um job
-    // que morre no worker por marca sem Canva é péssima experiência.
+    // que morre no worker por Canva desconectado é péssima experiência.
     const post = await prisma.post.findFirst({
       where: { id, brand: brandMemberFilter(userId, EDITORS) },
       include: {
-        brand: { include: { canvaIntegration: true } },
         slides: { orderBy: { position: 'asc' } },
       },
     });
 
     if (!post) throw createError(404, 'Post não encontrado');
 
-    if (!post.brand.canvaIntegration?.canvaAccessToken) {
+    // Canva é a conta do DESIGNER que pediu o export (userId), não da marca.
+    const requester = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { canvaAccessToken: true },
+    });
+    if (!requester?.canvaAccessToken) {
       return res.status(401).json({
-        error: { code: 'CANVA_NOT_CONNECTED', message: 'Canva não conectado para esta marca' },
+        error: { code: 'CANVA_NOT_CONNECTED', message: 'Canva não conectado para este usuário' },
       });
     }
 

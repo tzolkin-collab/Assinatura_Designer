@@ -105,29 +105,31 @@ export async function refreshAccessToken(refreshToken: string): Promise<CanvaTok
 // ── Authenticated API Client ──
 
 /**
- * Gets a valid access token for a brand, refreshing if expired.
- * Returns null if the brand has no Canva integration.
+ * Gets a valid access token for a user (the designer's own Canva account),
+ * refreshing if expired. Returns null if the user has no Canva connection.
  */
-export async function getValidAccessToken(brandId: string): Promise<string | null> {
-  const integration = await prisma.canvaIntegration.findUnique({
-    where: { brandId },
+export async function getValidAccessToken(userId: string): Promise<string | null> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { canvaAccessToken: true, canvaRefreshToken: true, canvaTokenExpiry: true },
   });
 
-  if (!integration) return null;
+  if (!user?.canvaAccessToken || !user.canvaRefreshToken) return null;
 
-  // If token expires within 5 minutes, refresh it
+  // If token expires within 5 minutes (ou expiração desconhecida), refresh it
   const bufferMs = 5 * 60 * 1000;
-  if (integration.tokenExpiresAt.getTime() - bufferMs < Date.now()) {
+  const expiresAtMs = user.canvaTokenExpiry?.getTime() ?? 0;
+  if (expiresAtMs - bufferMs < Date.now()) {
     try {
-      const tokens = await refreshAccessToken(integration.canvaRefreshToken);
+      const tokens = await refreshAccessToken(user.canvaRefreshToken);
       const expiresAt = new Date(Date.now() + tokens.expires_in * 1000);
 
-      await prisma.canvaIntegration.update({
-        where: { brandId },
+      await prisma.user.update({
+        where: { id: userId },
         data: {
           canvaAccessToken: tokens.access_token,
           canvaRefreshToken: tokens.refresh_token,
-          tokenExpiresAt: expiresAt,
+          canvaTokenExpiry: expiresAt,
         },
       });
 
@@ -138,20 +140,20 @@ export async function getValidAccessToken(brandId: string): Promise<string | nul
     }
   }
 
-  return integration.canvaAccessToken;
+  return user.canvaAccessToken;
 }
 
 /**
  * Makes an authenticated request to the Canva Connect API.
  */
 export async function canvaFetch(
-  brandId: string,
+  userId: string,
   path: string,
   options: RequestInit = {}
 ): Promise<Response> {
-  const accessToken = await getValidAccessToken(brandId);
+  const accessToken = await getValidAccessToken(userId);
   if (!accessToken) {
-    throw new Error('Canva integration not connected for this brand');
+    throw new Error('Canva não conectado para este usuário');
   }
 
   const url = `${CANVA_API_BASE}${path}`;
@@ -173,8 +175,8 @@ export async function canvaFetch(
 
 // ── High-Level API Methods ──
 
-export async function getCanvaUser(brandId: string) {
-  const response = await canvaFetch(brandId, '/users/me');
+export async function getCanvaUser(userId: string) {
+  const response = await canvaFetch(userId, '/users/me');
   if (!response.ok) {
     const text = await response.text();
     throw new Error(`Canva /users/me failed (${response.status}): ${text}`);
@@ -183,14 +185,14 @@ export async function getCanvaUser(brandId: string) {
 }
 
 export async function createDesign(
-  brandId: string,
+  userId: string,
   options: {
     design_type?: { type: string; width?: number; height?: number };
     title?: string;
     asset_id?: string;
   }
 ) {
-  const response = await canvaFetch(brandId, '/designs', {
+  const response = await canvaFetch(userId, '/designs', {
     method: 'POST',
     body: JSON.stringify(options),
   });
@@ -201,8 +203,8 @@ export async function createDesign(
   return response.json();
 }
 
-export async function getDesign(brandId: string, designId: string) {
-  const response = await canvaFetch(brandId, `/designs/${designId}`);
+export async function getDesign(userId: string, designId: string) {
+  const response = await canvaFetch(userId, `/designs/${designId}`);
   if (!response.ok) {
     const text = await response.text();
     throw new Error(`Canva get design failed (${response.status}): ${text}`);
@@ -211,7 +213,7 @@ export async function getDesign(brandId: string, designId: string) {
 }
 
 export async function uploadAsset(
-  brandId: string,
+  userId: string,
   buffer: Buffer,
   name: string,
   mimeType: string
@@ -239,7 +241,7 @@ export async function uploadAsset(
     Buffer.from(ending),
   ]);
 
-  const response = await canvaFetch(brandId, '/asset-uploads', {
+  const response = await canvaFetch(userId, '/asset-uploads', {
     method: 'POST',
     headers: {
       'Content-Type': `multipart/form-data; boundary=${boundary}`,
@@ -263,8 +265,8 @@ interface CanvaAssetUploadJob {
   job?: { id?: string; status?: string; asset?: { id?: string }; error?: { message?: string } };
 }
 
-export async function getAssetUploadJob(brandId: string, jobId: string): Promise<CanvaAssetUploadJob> {
-  const response = await canvaFetch(brandId, `/asset-uploads/${jobId}`);
+export async function getAssetUploadJob(userId: string, jobId: string): Promise<CanvaAssetUploadJob> {
+  const response = await canvaFetch(userId, `/asset-uploads/${jobId}`);
   if (!response.ok) {
     const text = await response.text();
     throw new Error(`Canva get asset upload failed (${response.status}): ${text}`);
@@ -274,13 +276,13 @@ export async function getAssetUploadJob(brandId: string, jobId: string): Promise
 
 /** Sobe o buffer e espera o job de upload concluir. Devolve o assetId. */
 export async function uploadAssetAndWait(
-  brandId: string,
+  userId: string,
   buffer: Buffer,
   name: string,
   mimeType: string,
   { timeoutMs = 120_000, intervalMs = 1500 }: { timeoutMs?: number; intervalMs?: number } = {},
 ): Promise<string> {
-  const created = (await uploadAsset(brandId, buffer, name, mimeType)) as CanvaAssetUploadJob;
+  const created = (await uploadAsset(userId, buffer, name, mimeType)) as CanvaAssetUploadJob;
 
   // Alguns retornos já vêm com o asset pronto; nesse caso não há o que esperar.
   const immediate = created.job?.asset?.id;
@@ -291,7 +293,7 @@ export async function uploadAssetAndWait(
 
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const current = await getAssetUploadJob(brandId, jobId);
+    const current = await getAssetUploadJob(userId, jobId);
     const status = current.job?.status;
 
     if (status === 'success') {
@@ -329,11 +331,11 @@ export function parseDesignResponse(raw: unknown): { id: string; url?: string } 
 // carrossel de 10 slides viraria 10 designs soltos.
 
 export async function createDesignMerge(
-  brandId: string,
+  userId: string,
   sourceDesignIds: string[],
   title: string,
 ) {
-  const response = await canvaFetch(brandId, '/merges', {
+  const response = await canvaFetch(userId, '/merges', {
     method: 'POST',
     body: JSON.stringify({
       type: 'create_new_design',
@@ -353,7 +355,7 @@ export async function createDesignMerge(
 }
 
 export async function exportDesign(
-  brandId: string,
+  userId: string,
   designId: string,
   format: 'png' | 'jpg' | 'pdf' | 'mp4' | 'gif' = 'png'
 ) {
@@ -367,7 +369,7 @@ export async function exportDesign(
     (body.format as Record<string, unknown>).quality = 'regular';
   }
 
-  const response = await canvaFetch(brandId, '/exports', {
+  const response = await canvaFetch(userId, '/exports', {
     method: 'POST',
     body: JSON.stringify(body),
   });
@@ -379,8 +381,8 @@ export async function exportDesign(
   return response.json();
 }
 
-export async function getExportStatus(brandId: string, exportId: string) {
-  const response = await canvaFetch(brandId, `/exports/${exportId}`);
+export async function getExportStatus(userId: string, exportId: string) {
+  const response = await canvaFetch(userId, `/exports/${exportId}`);
   if (!response.ok) {
     const text = await response.text();
     throw new Error(`Canva export status failed (${response.status}): ${text}`);
@@ -393,13 +395,13 @@ export async function getExportStatus(brandId: string, exportId: string) {
  * Returns the final export data with download URLs.
  */
 export async function waitForExport(
-  brandId: string,
+  userId: string,
   exportId: string,
   maxAttempts = 30,
   intervalMs = 2000
 ): Promise<Record<string, unknown>> {
   for (let i = 0; i < maxAttempts; i++) {
-    const result = await getExportStatus(brandId, exportId) as Record<string, unknown>;
+    const result = await getExportStatus(userId, exportId) as Record<string, unknown>;
     const job = result.job as Record<string, unknown> | undefined;
 
     if (job?.status === 'success') return result;
@@ -411,7 +413,7 @@ export async function waitForExport(
 }
 
 export async function autofillDesign(
-  brandId: string,
+  userId: string,
   brandTemplateId: string,
   data: Record<string, unknown>,
   title?: string
@@ -422,7 +424,7 @@ export async function autofillDesign(
   };
   if (title) body.title = title;
 
-  const response = await canvaFetch(brandId, '/autofills', {
+  const response = await canvaFetch(userId, '/autofills', {
     method: 'POST',
     body: JSON.stringify(body),
   });

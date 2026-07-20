@@ -51,12 +51,13 @@ const postCom = (n: number) => ({
     position: i,
     contentJson: { id: `s${i}`, background: { type: 'solid', color: '#fff' }, elements: [] },
   })),
-  brand: { id: 'brand-1', canvaIntegration: { canvaAccessToken: 'token-valido' } },
 });
 
 describe('Export para o Canva (job da fila)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Canva é a conta do designer que pediu: o export lê o token do próprio usuário.
+    prismaMock.user.findUnique.mockResolvedValue({ canvaAccessToken: 'token-valido' });
     (uploadAssetAndWait as ReturnType<typeof vi.fn>).mockImplementation(async () => 'asset-x');
     (createDesign as ReturnType<typeof vi.fn>).mockImplementation(async () => ({ design: { id: 'design-x' } }));
   });
@@ -79,7 +80,7 @@ describe('Export para o Canva (job da fila)', () => {
     expect(res.mergeFallback).toBeUndefined();
 
     // As páginas entram na ORDEM dos slides — um merge fora de ordem embaralha o deck.
-    expect(createDesignMerge).toHaveBeenCalledWith('brand-1', ['d1', 'd2', 'd3'], 'Deck de Teste');
+    expect(createDesignMerge).toHaveBeenCalledWith('u1', ['d1', 'd2', 'd3'], 'Deck de Teste');
   });
 
   it('espera o job de upload antes de criar o design (o asset_id só existe depois)', async () => {
@@ -99,7 +100,7 @@ describe('Export para o Canva (job da fila)', () => {
 
     expect(ordem).toEqual(['upload', 'createDesign']);
     expect(createDesign).toHaveBeenCalledWith(
-      'brand-1',
+      'u1',
       expect.objectContaining({ asset_id: 'asset-1' }),
     );
   });
@@ -140,11 +141,9 @@ describe('Export para o Canva (job da fila)', () => {
     expect(progresso).toEqual([[1, 3], [2, 3], [3, 3]]);
   });
 
-  it('recusa marca sem Canva conectado antes de renderizar', async () => {
-    prismaMock.post.findUnique.mockResolvedValue({
-      ...postCom(2),
-      brand: { id: 'brand-1', canvaIntegration: null },
-    });
+  it('recusa usuário sem Canva conectado antes de renderizar', async () => {
+    prismaMock.post.findUnique.mockResolvedValue(postCom(2));
+    prismaMock.user.findUnique.mockResolvedValue({ canvaAccessToken: null });
 
     await expect(runCanvaExport({ postId: 'post-1', userId: 'u1' })).rejects.toThrow(/não conectado/i);
     expect(renderHtmlToPng).not.toHaveBeenCalled();
