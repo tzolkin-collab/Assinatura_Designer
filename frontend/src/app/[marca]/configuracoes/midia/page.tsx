@@ -135,17 +135,17 @@ export default function MidiaPage() {
     }
   };
 
+  // Não fecha o popup nem engole o erro aqui: o CanvaPopup espera esta Promise
+  // pra mostrar o spinner NO card clicado, e só fecha sozinho se der certo —
+  // em erro, o card mostra o aviso e o usuário tenta de novo sem reabrir tudo.
   const handleSelectCanvaDesign = async (design: CanvaDesign) => {
-    setPopupAberto(null);
-    setImportando(true);
     setErro('');
     try {
       await api.post(`/brands/${slug}/assets/import-canva/${design.id}`, { title: design.title });
       fetchAssets();
     } catch (error) {
       setErro(getApiErrorMessage(error, 'Não consegui importar o design do Canva.'));
-    } finally {
-      setImportando(false);
+      throw error;
     }
   };
 

@@ -412,6 +412,17 @@
   transform: translateY(-1px);
 }
 
+.gridItem:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.gridItem:disabled:hover {
+  border-color: var(--color-border);
+  box-shadow: none;
+  transform: none;
+}
+
 .gridItemSelected {
   border-color: var(--color-brand);
   box-shadow: 0 0 0 2px var(--color-brand-light);

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { ExternalLink, Loader2, X, HardDrive, Check, Square, Search, ChevronLeft, Folder, File } from 'lucide-react';
+import { ExternalLink, Loader2, X, Check, Square, Search, ChevronLeft, Folder, File } from 'lucide-react';
 import { API_BASE } from '@/lib/api';
 import styles from './connectorPopup.module.css';
 
@@ -174,7 +174,7 @@ export function DrivePopup({ onClose, onInject }: Props) {
         <div className={styles.header}>
           <div className={styles.headerTitleGroup}>
             <div className={styles.headerIconBadge} style={{ background: '#e8f0fe' }}>
-              <HardDrive size={14} style={{ color: '#1a73e8' }} />
+              <img src="/icons/google-drive.svg" width={15} height={15} alt="" />
             </div>
             <span className={styles.headerTitle}>Google Drive</span>
           </div>
@@ -199,7 +199,7 @@ export function DrivePopup({ onClose, onInject }: Props) {
 
         {status === 'disconnected' && (
           <div className={styles.center}>
-            <HardDrive size={32} style={{ color: 'var(--color-text-tertiary)', opacity: 0.5 }} />
+            <img src="/icons/google-drive.svg" width={32} height={32} alt="" style={{ opacity: 0.6 }} />
             <p className={styles.centerText}>
               Para trazer mídias e contextos de marcas diretamente do Google Drive, conecte sua conta do Google.
             </p>

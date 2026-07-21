@@ -170,7 +170,13 @@ canvaRouter.get('/designs', async (req: AuthRequest, res: Response, next: NextFu
     const userId = req.user?.userId;
     if (!userId) throw createError(401, 'Não autenticado');
 
-    const response = await canvaFetch(userId, '/designs?limit=20');
+    const params = new URLSearchParams({ limit: '20' });
+    const query = typeof req.query.query === 'string' ? req.query.query.trim().slice(0, 255) : '';
+    if (query) params.set('query', query);
+    const continuation = typeof req.query.continuation === 'string' ? req.query.continuation : '';
+    if (continuation) params.set('continuation', continuation);
+
+    const response = await canvaFetch(userId, `/designs?${params.toString()}`);
     if (!response.ok) {
       const text = await response.text();
       throw createError(response.status, `Falha ao listar designs do Canva: ${text}`);
