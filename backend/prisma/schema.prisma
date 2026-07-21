@@ -81,13 +81,24 @@ model Asset {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  // De onde o asset veio — filtro estratégico na biblioteca de mídia.
+  source String   @default("upload") // upload | drive | asana | canva | ai-generated
+  tags   String[] @default([])
+
   brandId String
   brand   Brand  @relation(fields: [brandId], references: [id], onDelete: Cascade)
 
   uploadedBy String?
   user       User?   @relation(fields: [uploadedBy], references: [id], onDelete: SetNull)
 
+  // Post de origem quando o asset nasceu de uma geração (source='ai-generated').
+  // SetNull: apagar o post não deve apagar o asset — a imagem continua útil na biblioteca.
+  postId String?
+  post   Post?   @relation(fields: [postId], references: [id], onDelete: SetNull)
+
   @@index([brandId])
+  @@index([source])
+  @@index([postId])
 }
 
 model Notification {
@@ -178,6 +189,7 @@ model Post {
   createdBy      User?      @relation(fields: [createdById], references: [id], onDelete: SetNull)
   slides         Slide[]
   versions       PostVersion[]
+  generatedAssets Asset[]
 
   @@index([brandId])
   @@index([folderId])

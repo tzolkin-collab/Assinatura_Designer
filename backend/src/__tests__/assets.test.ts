@@ -20,7 +20,13 @@ vi.mock('../lib/r2', () => ({
   r2KeyFromUrl: vi.fn(),
 }));
 
+vi.mock('../lib/canvaClient', () => ({
+  exportDesign: vi.fn(),
+  waitForExport: vi.fn(),
+}));
+
 import { deleteFromR2, uploadFileToR2 } from '../lib/r2';
+import { exportDesign, waitForExport } from '../lib/canvaClient';
 
 describe('Biblioteca de mídia (assets)', () => {
   const mockedVerify = jwt.verify as unknown as Mock;
@@ -110,6 +116,56 @@ describe('Biblioteca de mídia (assets)', () => {
     it('recusa lote vazio', async () => {
       const res = await auth(request(app).post('/api/brands/marca/assets/import-base64').send({ attachments: [] }));
       expect(res.status).toBe(400);
+      expect(prismaMock.asset.create).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('POST /import-canva/:designId (Canva → pool de assets)', () => {
+    const mockFetch = vi.fn();
+
+    beforeEach(() => {
+      vi.stubGlobal('fetch', mockFetch);
+      (exportDesign as Mock).mockResolvedValue({ job: { id: 'export-job-1' } });
+    });
+
+    it('exporta o design como PNG, baixa cada página e cria um Asset por página', async () => {
+      (waitForExport as Mock).mockResolvedValue({
+        job: { status: 'success', urls: ['https://canva-export.com/p1.png', 'https://canva-export.com/p2.png'] },
+      });
+      mockFetch.mockResolvedValue({ ok: true, arrayBuffer: async () => new ArrayBuffer(8) });
+      (prismaMock.asset.create as Mock)
+        .mockResolvedValueOnce({ id: 'a1' })
+        .mockResolvedValueOnce({ id: 'a2' });
+
+      const res = await auth(request(app).post('/api/brands/marca/assets/import-canva/design-x').send({ title: 'Meu Design' }));
+
+      expect(res.status).toBe(201);
+      expect(res.body.data).toHaveLength(2);
+      expect(exportDesign).toHaveBeenCalledWith('u1', 'design-x', 'png');
+      expect(uploadFileToR2).toHaveBeenCalledTimes(2);
+    });
+
+    it('página que falha ao baixar é pulada sem derrubar as outras', async () => {
+      (waitForExport as Mock).mockResolvedValue({
+        job: { status: 'success', urls: ['https://canva-export.com/p1.png', 'https://canva-export.com/p2.png'] },
+      });
+      mockFetch
+        .mockResolvedValueOnce({ ok: false })
+        .mockResolvedValueOnce({ ok: true, arrayBuffer: async () => new ArrayBuffer(8) });
+      (prismaMock.asset.create as Mock).mockResolvedValueOnce({ id: 'a1' });
+
+      const res = await auth(request(app).post('/api/brands/marca/assets/import-canva/design-x').send({}));
+
+      expect(res.status).toBe(201);
+      expect(res.body.data).toHaveLength(1);
+    });
+
+    it('propaga erro claro quando o export do Canva falha', async () => {
+      (waitForExport as Mock).mockRejectedValue(new Error('Canva export job failed'));
+
+      const res = await auth(request(app).post('/api/brands/marca/assets/import-canva/design-x').send({}));
+
+      expect(res.status).toBe(502);
       expect(prismaMock.asset.create).not.toHaveBeenCalled();
     });
   });

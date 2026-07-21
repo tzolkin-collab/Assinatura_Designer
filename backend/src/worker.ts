@@ -8,7 +8,7 @@
 import { config, validateConfig } from './config.js';
 import { redis } from './lib/redis.js';
 import { initEventBus, closeEventBus } from './lib/eventBus.js';
-import { startPipelineWorker, startCanvaExportWorker, startDeckExportWorker, closeQueue } from './lib/queue.js';
+import { startPipelineWorker, startCanvaExportWorker, startDeckExportWorker, startAssetCaptureWorker, closeQueue } from './lib/queue.js';
 
 const start = async () => {
   validateConfig();
@@ -32,6 +32,7 @@ const start = async () => {
   startPipelineWorker();
   startCanvaExportWorker();
   startDeckExportWorker();
+  startAssetCaptureWorker();
   console.log('  └─ Aguardando jobs...\n');
 
   const shutdown = async (signal: string) => {

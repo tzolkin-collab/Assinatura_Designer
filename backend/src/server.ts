@@ -3,7 +3,7 @@ import { app } from './app.js';
 import { config, validateConfig } from './config.js';
 import { redis } from './lib/redis.js';
 import { initWebSocket } from './lib/websocket.js';
-import { startPipelineWorker, startCanvaExportWorker, startDeckExportWorker, closeQueue } from './lib/queue.js';
+import { startPipelineWorker, startCanvaExportWorker, startDeckExportWorker, startAssetCaptureWorker, closeQueue } from './lib/queue.js';
 import { closeEventBus } from './lib/eventBus.js';
 import { ensureInternalTeamMemberships } from './lib/internalTeam.js';
 import { runAutoSync } from './lib/canvaSync.js';
@@ -45,6 +45,7 @@ const start = async () => {
     startPipelineWorker();
     startCanvaExportWorker();
     startDeckExportWorker();
+    startAssetCaptureWorker();
   }
 
   // Canva Auto-Sync periódica (roda a cada 30 minutos)

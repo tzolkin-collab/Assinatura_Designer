@@ -7,6 +7,7 @@ import { uploadFileToR2, deleteFromR2 } from '../lib/r2.js';
 import { createError } from '../middleware/errorHandler.js';
 import { requireBrandRole, ANY_MEMBER, EDITORS, type BrandRequest } from '../middleware/brandAccess.js';
 import { parseBody } from '../lib/validate.js';
+import { exportDesign, waitForExport } from '../lib/canvaClient.js';
 
 export const assetsRouter = Router({ mergeParams: true });
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -19,6 +20,9 @@ const importBase64Schema = z.object({
     mimeType: z.string().min(1),
     dataBase64: z.string().min(1),
   })).min(1).max(20),
+  // De onde os attachments vieram — o frontend sabe (é o popup que chamou),
+  // o backend não tem como inferir. 'upload' cobriria import genérico futuro.
+  source: z.enum(['drive', 'asana', 'upload']).default('upload'),
 });
 
 
@@ -95,7 +99,7 @@ assetsRouter.post('/import-base64', requireBrandRole(EDITORS), async (req: Brand
   try {
     const { userId } = req.user!;
     const brand = req.brand!;
-    const { attachments } = parseBody(importBase64Schema, req.body ?? {});
+    const { attachments, source } = parseBody(importBase64Schema, req.body ?? {});
 
     const created = [];
     for (const att of attachments) {
@@ -131,12 +135,87 @@ assetsRouter.post('/import-base64', requireBrandRole(EDITORS), async (req: Brand
           sizeBytes: buffer.length,
           width,
           height,
+          source,
+          tags: [source],
         },
       });
       created.push(asset);
     }
 
     if (created.length === 0) throw createError(400, 'Nenhum arquivo pôde ser importado.');
+
+    res.status(201).json({ data: created });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/brands/:slug/assets/import-canva/:designId — exporta um design do
+// Canva do usuário (PNG) e importa pro pool de assets da marca. O Canva é
+// conector por-usuário (não por-marca): quem exporta é sempre o requester
+// (req.user), o pool que recebe é a marca da URL.
+assetsRouter.post('/import-canva/:designId', requireBrandRole(EDITORS), async (req: BrandRequest, res: Response, next: NextFunction) => {
+  try {
+    const { userId } = req.user!;
+    const brand = req.brand!;
+    const designId = req.params.designId as string;
+    const title = typeof req.body?.title === 'string' && req.body.title.trim() ? req.body.title.trim() : `Canva ${designId.slice(0, 8)}`;
+
+    let exportJob: { job?: { id?: string } };
+    try {
+      exportJob = (await exportDesign(userId, designId, 'png')) as { job?: { id?: string } };
+    } catch (err) {
+      throw createError(502, `Falha ao iniciar export do Canva: ${(err as Error).message}`);
+    }
+    const exportId = exportJob.job?.id;
+    if (!exportId) throw createError(502, 'Canva não retornou o id do job de export');
+
+    let exported: Record<string, unknown>;
+    try {
+      exported = await waitForExport(userId, exportId);
+    } catch (err) {
+      throw createError(502, `Export do Canva falhou: ${(err as Error).message}`);
+    }
+    const urls = ((exported.job as Record<string, unknown> | undefined)?.urls as string[] | undefined) ?? [];
+    if (urls.length === 0) throw createError(502, 'Canva não retornou nenhum arquivo exportado.');
+
+    const created = [];
+    for (let i = 0; i < urls.length; i++) {
+      const fileRes = await fetch(urls[i]!);
+      if (!fileRes.ok) continue; // uma página falhar não derruba o design inteiro
+      const buffer = Buffer.from(await fileRes.arrayBuffer());
+
+      let width: number | undefined;
+      let height: number | undefined;
+      try {
+        const meta = await sharp(buffer).metadata();
+        width = meta.width;
+        height = meta.height;
+      } catch {
+        // segue sem dimensões
+      }
+
+      const name = urls.length > 1 ? `${title} - página ${i + 1}.png` : `${title}.png`;
+      const url = await uploadFileToR2(buffer, name, 'image/png', `brands/${brand.id}`);
+
+      const asset = await prisma.asset.create({
+        data: {
+          brandId: brand.id,
+          uploadedBy: userId,
+          name,
+          url,
+          fileType: 'image/png',
+          sizeBytes: buffer.length,
+          width,
+          height,
+          source: 'canva',
+          tags: ['canva'],
+        },
+      });
+      created.push(asset);
+    }
+
+    if (created.length === 0) throw createError(502, 'Nenhuma página do design pôde ser importada.');
 
     res.status(201).json({ data: created });
   } catch (error) {

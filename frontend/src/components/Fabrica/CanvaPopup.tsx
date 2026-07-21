@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { ExternalLink, Loader2, X, FileImage } from 'lucide-react';
 import { API_BASE } from '@/lib/api';
 
-interface CanvaDesign {
+export interface CanvaDesign {
   id: string;
   title?: string;
   urls?: {
@@ -19,6 +19,10 @@ interface CanvaDesign {
 interface Props {
   onClose: () => void;
   onInject: (text: string) => void;
+  /** Quando fornecido, o clique num design chama isto em vez de injetar texto
+   *  no chat — usado fora da Fábrica (ex: biblioteca de mídia, que importa o
+   *  design escolhido pro pool de assets em vez de referenciá-lo em conversa). */
+  onSelectDesign?: (design: CanvaDesign) => void;
 }
 
 const getToken = () =>
@@ -29,7 +33,7 @@ const authHeaders = (): Record<string, string> => {
   return t ? { Authorization: `Bearer ${t}` } : {};
 };
 
-export function CanvaPopup({ onClose, onInject }: Props) {
+export function CanvaPopup({ onClose, onInject, onSelectDesign }: Props) {
   const [status, setStatus] = useState<'loading' | 'connected' | 'disconnected' | 'error'>('loading');
   const [designs, setDesigns] = useState<CanvaDesign[]>([]);
   const [loadingDesigns, setLoadingDesigns] = useState(false);
@@ -70,6 +74,10 @@ export function CanvaPopup({ onClose, onInject }: Props) {
   };
 
   const handleSelectDesign = (design: CanvaDesign) => {
+    if (onSelectDesign) {
+      onSelectDesign(design);
+      return;
+    }
     const editUrl = design.urls?.edit_url || design.urls?.view_url || '';
     const text = `[Contexto Canva]\nDesign: "${design.title || 'Sem título'}"\nID: ${design.id}\nLink: ${editUrl}`;
     onInject(text);

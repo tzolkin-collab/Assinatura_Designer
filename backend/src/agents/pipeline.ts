@@ -479,6 +479,13 @@ async function runPipelineInner(
         { id: postId, title: brief.slice(0, 60), templateIds: [], createdAt: Date.now() },
       ].slice(-20),
     });
+    // Captura os slides gerados como assets da marca (fila própria, best-effort
+    // — não atrasa nem arrisca a resposta que o usuário já está vendo na tela).
+    // Import dinâmico: queue.ts importa este módulo para o worker do pipeline,
+    // um import estático aqui criaria ciclo.
+    import('../lib/queue.js')
+      .then((m) => m.enqueueAssetCapture({ postId }))
+      .catch((err) => logger.error('Falha ao enfileirar captura de assets', { postId, error: (err as Error).message }));
   } catch (err) {
     logger.error('Falha ao salvar o post', { error: (err as Error).message });
   }

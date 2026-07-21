@@ -17,6 +17,7 @@ import { runCanvaExport, runCanvaPptxExport, type CanvaExportParams } from './ca
 import { CanvaSessionExpiredError } from './canvaClient.js';
 import { getCanvaDesignName } from './canvaSync.js';
 import { runDeckExport, type DeckExportParams } from './deckExport.js';
+import { runAssetCapture, type AssetCaptureParams } from './assetCapture.js';
 import { logger } from './logger.js';
 
 const QUEUE_NAME = 'pipeline';
@@ -110,6 +111,29 @@ export async function enqueueDeckExport(params: DeckExportParams): Promise<strin
   return job.id!;
 }
 
+// ── Fila de captura de assets (slides gerados → pool de mídia) ────────────────
+// Best-effort e desacoplada da resposta ao usuário: a geração já terminou
+// (post READY) quando isto roda. Ninguém espera o resultado, por isso não tem
+// endpoint de progresso — só loga e segue.
+
+const ASSET_CAPTURE_QUEUE_NAME = 'asset-capture';
+
+export const assetCaptureQueue = new Queue<AssetCaptureParams>(ASSET_CAPTURE_QUEUE_NAME, {
+  connection: makeConnection(),
+  defaultJobOptions: {
+    attempts: 2,
+    backoff: { type: 'exponential', delay: 5000 },
+    removeOnComplete: { count: 50, age: 24 * 3600 },
+    removeOnFail: { count: 100, age: 24 * 3600 },
+  },
+});
+
+assetCaptureQueue.on('error', (err) => logger.error('Fila de captura de assets com erro', { error: err.message }));
+
+export async function enqueueAssetCapture(params: AssetCaptureParams): Promise<void> {
+  await assetCaptureQueue.add('capture', params);
+}
+
 let deckWorker: Worker<DeckExportParams> | null = null;
 
 export function startDeckExportWorker(): Worker<DeckExportParams> {
@@ -139,6 +163,31 @@ export function startDeckExportWorker(): Worker<DeckExportParams> {
 
   console.log(`  ├─ Worker:       fila "${DECK_EXPORT_QUEUE_NAME}" (concorrência 1)`);
   return deckWorker;
+}
+
+let assetCaptureWorker: Worker<AssetCaptureParams> | null = null;
+
+export function startAssetCaptureWorker(): Worker<AssetCaptureParams> {
+  if (assetCaptureWorker) return assetCaptureWorker;
+
+  assetCaptureWorker = new Worker<AssetCaptureParams>(
+    ASSET_CAPTURE_QUEUE_NAME,
+    async (job: Job<AssetCaptureParams>) => runAssetCapture(job.data),
+    {
+      connection: makeConnection(),
+      // Mesmo raciocínio dos outros workers de render: 1 por processo, o
+      // gargalo é o chromium, não a fila.
+      concurrency: 1,
+    },
+  );
+
+  assetCaptureWorker.on('failed', (job, err) => {
+    logger.error('Job de captura de assets falhou', { jobId: job?.id, postId: job?.data.postId, error: err.message });
+  });
+  assetCaptureWorker.on('error', (err) => logger.error('Worker de captura de assets com erro', { error: err.message }));
+
+  console.log(`  ├─ Worker:       fila "${ASSET_CAPTURE_QUEUE_NAME}" (concorrência 1)`);
+  return assetCaptureWorker;
 }
 
 let exportWorker: Worker<CanvaExportParams> | null = null;
@@ -266,7 +315,9 @@ export async function closeQueue(): Promise<void> {
   await worker?.close();
   await exportWorker?.close();
   await deckWorker?.close();
+  await assetCaptureWorker?.close();
   await pipelineQueue.close();
   await canvaExportQueue.close();
   await deckExportQueue.close();
+  await assetCaptureQueue.close();
 }
