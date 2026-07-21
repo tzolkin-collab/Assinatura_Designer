@@ -3,13 +3,17 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Upload, Image as ImageIcon, FileType2, Trash2, Loader2, X } from 'lucide-react';
+import dynamic from 'next/dynamic';
+import { ArrowLeft, Upload, Image as ImageIcon, FileType2, Trash2, Loader2, X, HardDrive, CheckSquare } from 'lucide-react';
 import PageHeader from '@/components/ui/PageHeader';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import styles from '../configuracoes.module.css';
 import { api, getApiErrorMessage } from '@/lib/api';
 import { useBrandPermissions } from '@/hooks/useBrandPermissions';
+
+const DrivePopup = dynamic(() => import('@/components/Fabrica/DrivePopup').then((m) => ({ default: m.DrivePopup })), { ssr: false });
+const AsanaPopup = dynamic(() => import('@/components/Fabrica/AsanaPopup').then((m) => ({ default: m.AsanaPopup })), { ssr: false });
 
 interface Asset {
   id: string;
@@ -27,11 +31,32 @@ export default function MidiaPage() {
   
   const [uploading, setUploading] = useState(false);
   const [erro, setErro] = useState('');
+  const [importando, setImportando] = useState(false);
+  const [popupAberto, setPopupAberto] = useState<'drive' | 'asana' | null>(null);
 
   const { can, hint } = useBrandPermissions();
   const canManageAssets = can('manage-assets');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleImportAttachments = async (
+    _text: string,
+    attachments?: Array<{ name: string; mimeType: string; dataBase64: string }>,
+  ) => {
+    setPopupAberto(null);
+    if (!attachments || attachments.length === 0) return;
+
+    setImportando(true);
+    setErro('');
+    try {
+      await api.post(`/brands/${slug}/assets/import-base64`, { attachments });
+      fetchAssets();
+    } catch (error) {
+      setErro(getApiErrorMessage(error, 'Não consegui importar os arquivos selecionados.'));
+    } finally {
+      setImportando(false);
+    }
+  };
 
   const fetchAssets = async () => {
     try {
@@ -96,17 +121,35 @@ export default function MidiaPage() {
           title="Biblioteca de Mídia"
           description="Imagens, vetores e fontes disponíveis para todos os usuários desta marca."
         />
-        <div>
-          <input 
-            type="file" 
-            ref={fileInputRef} 
-            style={{ display: 'none' }} 
-            onChange={handleFileUpload} 
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <input
+            type="file"
+            ref={fileInputRef}
+            style={{ display: 'none' }}
+            onChange={handleFileUpload}
             accept="image/*,font/*,.svg"
           />
           <Button
+            variant="secondary"
+            onClick={() => setPopupAberto('drive')}
+            disabled={uploading || importando || !canManageAssets}
+            title={canManageAssets ? undefined : hint}
+          >
+            <HardDrive size={16} />
+            Importar do Drive
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={() => setPopupAberto('asana')}
+            disabled={uploading || importando || !canManageAssets}
+            title={canManageAssets ? undefined : hint}
+          >
+            <CheckSquare size={16} />
+            Importar do Asana
+          </Button>
+          <Button
             onClick={() => fileInputRef.current?.click()}
-            disabled={uploading || !canManageAssets}
+            disabled={uploading || importando || !canManageAssets}
             title={canManageAssets ? undefined : hint}
           >
             {uploading ? <Loader2 className="animate-spin" size={16} /> : <Upload size={16} />}
@@ -114,6 +157,19 @@ export default function MidiaPage() {
           </Button>
         </div>
       </div>
+
+      {importando && (
+        <p style={{ fontSize: '13px', color: 'var(--color-text-dim)', marginTop: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <Loader2 className="animate-spin" size={14} /> Importando arquivos selecionados...
+        </p>
+      )}
+
+      {popupAberto === 'drive' && (
+        <DrivePopup onClose={() => setPopupAberto(null)} onInject={handleImportAttachments} />
+      )}
+      {popupAberto === 'asana' && (
+        <AsanaPopup onClose={() => setPopupAberto(null)} onInject={handleImportAttachments} />
+      )}
 
       {erro && (
         <p style={{ fontSize: '13px', color: '#ef4444', marginTop: '12px' }} role="alert">

@@ -33,6 +33,8 @@ export interface GenerateHtmlDesignInput {
     guidelines?: string;
     agentPrompt?: string;
     logoUrl?: string | null;
+    /** URLs reais do pool de assets da marca — o artista prefere estas a inventar fotos de banco. */
+    assetUrls?: string[];
   };
   skeleton?: Array<{ title: string; goal: string; layout_type: string; order: number; copy?: string }>;
 }
@@ -177,6 +179,14 @@ PROIBIDO TERMINANTEMENTE: data: URLs ou base64 inline em qualquer <img>, backgro
 Faça uma crítica interna antes de responder: a peça parece premium e intencional, ou parece template? Se parece template, refaça.`;
 }
 
+// Lista as imagens REAIS da marca (upload/Drive/Asana) pro artista preferir a
+// elas em vez de inventar URL de banco de imagem. Teto de 8: o prompt já é
+// grande e o essencial é sinalizar que existe acervo, não despejar tudo.
+function assetsBlock(assetUrls: string[] | undefined): string {
+  if (!assetUrls || assetUrls.length === 0) return '';
+  return `Imagens reais da marca (prefira estas a fotos de banco quando fizer sentido no layout):\n${assetUrls.slice(0, 8).map((u) => `- ${u}`).join('\n')}`;
+}
+
 function buildUserPrompt(input: GenerateHtmlDesignInput): string {
   const b = input.brand;
   return `Marca: ${b.name}
@@ -185,6 +195,7 @@ Fontes sugeridas: ${b.primaryFonts.length ? b.primaryFonts.join(', ') : 'escolha
 Diretrizes: ${b.guidelines || 'não definidas'}
 ${b.agentPrompt ? `Instruções do agente: ${b.agentPrompt}` : ''}
 ${b.logoUrl ? `Logo: ${b.logoUrl}` : ''}
+${assetsBlock(b.assetUrls)}
 
 Briefing:
 ${input.prompt.slice(0, 6000)}
@@ -277,6 +288,7 @@ Fontes sugeridas: ${b.primaryFonts.length ? b.primaryFonts.join(', ') : 'escolha
 Diretrizes: ${b.guidelines || 'não definidas'}
 ${b.agentPrompt ? `Instruções do agente: ${b.agentPrompt}` : ''}
 ${b.logoUrl ? `Logo: ${b.logoUrl}` : ''}
+${assetsBlock(b.assetUrls)}
 ${skeletonPrompt}${directionBlock}${priorBlock}
  
 Briefing:
@@ -462,6 +474,7 @@ Fontes sugeridas: ${b.primaryFonts.length ? b.primaryFonts.join(', ') : 'escolha
 Diretrizes: ${b.guidelines || 'não definidas'}
 ${b.agentPrompt ? `Instruções do agente: ${b.agentPrompt}` : ''}
 ${b.logoUrl ? `Logo: ${b.logoUrl}` : ''}
+${assetsBlock(b.assetUrls)}
 ${skeletonPrompt}
 ${renderStyleBible(bible)}${refBlock}
 

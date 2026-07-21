@@ -20,7 +20,7 @@ vi.mock('../lib/r2', () => ({
   r2KeyFromUrl: vi.fn(),
 }));
 
-import { deleteFromR2 } from '../lib/r2';
+import { deleteFromR2, uploadFileToR2 } from '../lib/r2';
 
 describe('Biblioteca de mídia (assets)', () => {
   const mockedVerify = jwt.verify as unknown as Mock;
@@ -69,5 +69,48 @@ describe('Biblioteca de mídia (assets)', () => {
     // "não some". O arquivo órfão fica registrado no log para limpeza posterior.
     expect(res.status).toBe(200);
     expect(prismaMock.asset.delete).toHaveBeenCalled();
+  });
+
+  describe('POST /import-base64 (Drive/Asana → pool de assets)', () => {
+    it('importa cada attachment: sobe no R2 e cria o Asset', async () => {
+      (prismaMock.asset.create as Mock)
+        .mockResolvedValueOnce({ id: 'a1', name: 'foto1.png' })
+        .mockResolvedValueOnce({ id: 'a2', name: 'foto2.jpg' });
+
+      const res = await auth(request(app).post('/api/brands/marca/assets/import-base64').send({
+        attachments: [
+          { name: 'foto1.png', mimeType: 'image/png', dataBase64: Buffer.from('a').toString('base64') },
+          { name: 'foto2.jpg', mimeType: 'image/jpeg', dataBase64: Buffer.from('b').toString('base64') },
+        ],
+      }));
+
+      expect(res.status).toBe(201);
+      expect(res.body.data).toHaveLength(2);
+      expect(prismaMock.asset.create).toHaveBeenCalledTimes(2);
+      expect(uploadFileToR2).toHaveBeenCalledTimes(2);
+    });
+
+    it('pula item maior que o teto (10MB) em vez de derrubar o lote inteiro', async () => {
+      (prismaMock.asset.create as Mock).mockResolvedValueOnce({ id: 'a1', name: 'ok.png' });
+
+      const grande = Buffer.alloc(11 * 1024 * 1024, 1).toString('base64'); // 11MB > teto de 10MB
+
+      const res = await auth(request(app).post('/api/brands/marca/assets/import-base64').send({
+        attachments: [
+          { name: 'ok.png', mimeType: 'image/png', dataBase64: Buffer.from('ok').toString('base64') },
+          { name: 'gigante.png', mimeType: 'image/png', dataBase64: grande },
+        ],
+      }));
+
+      expect(res.status).toBe(201);
+      expect(res.body.data).toHaveLength(1);
+      expect(prismaMock.asset.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('recusa lote vazio', async () => {
+      const res = await auth(request(app).post('/api/brands/marca/assets/import-base64').send({ attachments: [] }));
+      expect(res.status).toBe(400);
+      expect(prismaMock.asset.create).not.toHaveBeenCalled();
+    });
   });
 });

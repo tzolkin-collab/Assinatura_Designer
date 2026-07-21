@@ -1,13 +1,25 @@
 import { Router, Response, NextFunction } from 'express';
+import { z } from 'zod';
 import prisma from '../lib/prisma.js';
 import multer from 'multer';
 import sharp from 'sharp';
 import { uploadFileToR2, deleteFromR2 } from '../lib/r2.js';
 import { createError } from '../middleware/errorHandler.js';
 import { requireBrandRole, ANY_MEMBER, EDITORS, type BrandRequest } from '../middleware/brandAccess.js';
+import { parseBody } from '../lib/validate.js';
 
 export const assetsRouter = Router({ mergeParams: true });
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+
+const MAX_IMPORT_BYTES = 10 * 1024 * 1024;
+
+const importBase64Schema = z.object({
+  attachments: z.array(z.object({
+    name: z.string().min(1),
+    mimeType: z.string().min(1),
+    dataBase64: z.string().min(1),
+  })).min(1).max(20),
+});
 
 
 // GET /api/brands/:slug/assets
@@ -70,6 +82,63 @@ assetsRouter.post('/', requireBrandRole(EDITORS), upload.single('file'), async (
       }
     });
     res.status(201).json({ data: asset });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/brands/:slug/assets/import-base64 — importa arquivos já baixados em
+// base64 (Drive/Asana) pro pool de assets da marca. O frontend reaproveita os
+// mesmos popups da Fábrica (DrivePopup/AsanaPopup), que já resolvem OAuth e
+// devolvem `attachments` nesse formato — aqui só falta persistir no R2 + Asset.
+assetsRouter.post('/import-base64', requireBrandRole(EDITORS), async (req: BrandRequest, res: Response, next: NextFunction) => {
+  try {
+    const { userId } = req.user!;
+    const brand = req.brand!;
+    const { attachments } = parseBody(importBase64Schema, req.body ?? {});
+
+    const created = [];
+    for (const att of attachments) {
+      let buffer: Buffer;
+      try {
+        buffer = Buffer.from(att.dataBase64, 'base64');
+      } catch {
+        continue; // base64 inválido: pula este item, não derruba o lote inteiro
+      }
+      if (buffer.length === 0 || buffer.length > MAX_IMPORT_BYTES) continue;
+
+      let width: number | undefined;
+      let height: number | undefined;
+      if (att.mimeType.startsWith('image/')) {
+        try {
+          const meta = await sharp(buffer).metadata();
+          width = meta.width;
+          height = meta.height;
+        } catch {
+          // segue sem dimensões
+        }
+      }
+
+      const url = await uploadFileToR2(buffer, att.name, att.mimeType, `brands/${brand.id}`);
+
+      const asset = await prisma.asset.create({
+        data: {
+          brandId: brand.id,
+          uploadedBy: userId,
+          name: att.name,
+          url,
+          fileType: att.mimeType,
+          sizeBytes: buffer.length,
+          width,
+          height,
+        },
+      });
+      created.push(asset);
+    }
+
+    if (created.length === 0) throw createError(400, 'Nenhum arquivo pôde ser importado.');
+
+    res.status(201).json({ data: created });
   } catch (error) {
     next(error);
   }

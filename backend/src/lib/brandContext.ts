@@ -23,6 +23,9 @@ export type ResolvedBrandContext = DesignDocumentBrandContext & {
     palette: string[];
     insightsText: string | null;
   }>;
+  /** URLs de imagens do pool de assets da marca (upload/Drive/Asana) — o artista
+   *  as usa em vez de inventar fotos de banco quando fizer sentido para o layout. */
+  assetUrls: string[];
 };
 
 function normalizePresentationConfig(value: unknown): PresentationConfig | undefined {
@@ -48,6 +51,14 @@ export async function resolveBrandContext(slug: string): Promise<ResolvedBrandCo
         orderBy: { updatedAt: 'desc' },
         take: 8,
       },
+      // Teto de 12: o prompt já é grande, e o artista não precisa do acervo
+      // inteiro — só do suficiente para não inventar foto de banco à toa.
+      assets: {
+        where: { fileType: { startsWith: 'image/' } },
+        orderBy: { createdAt: 'desc' },
+        take: 12,
+        select: { url: true },
+      },
     },
   });
 
@@ -71,6 +82,7 @@ export async function resolveBrandContext(slug: string): Promise<ResolvedBrandCo
       palette: ref.palette,
       insightsText: ref.insightsText,
     })),
+    assetUrls: brand.assets.map((a) => a.url),
   };
 }
 

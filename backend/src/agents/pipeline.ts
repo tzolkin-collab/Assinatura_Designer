@@ -267,6 +267,7 @@ async function runPipelineInner(
             guidelines: brand.guidelines,
             agentPrompt: brand.agentPrompt,
             logoUrl: brand.logoUrl,
+            assetUrls: brand.assetUrls,
           },
           skeleton,
         },
