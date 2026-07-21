@@ -26,6 +26,8 @@ const referenciaSchema = z.object({
     .trim()
     .min(1, 'Reference URL is required for analysis'),
   sourceType: z.string().optional(),
+  autoSyncEnabled: z.boolean().optional(),
+  autoSyncInterval: z.number().optional(),
 });
 
 const s3 = new S3Client({
@@ -106,13 +108,15 @@ settingsRouter.post('/:slug/referencias', async (req: AuthRequest, res: Response
   try {
     const slug = req.params.slug as string;
     const brandId = await getBrandId(slug, req.user?.userId);
-    const { name, analysisUrl, sourceType, autoSyncEnabled, autoSyncInterval } = req.body;
+    const parsed = referenciaSchema.safeParse(req.body);
+    if (!parsed.success) throw createError(400, parsed.error.errors[0]?.message ?? 'Corpo da requisição inválido');
+    const { name, analysisUrl, sourceType, autoSyncEnabled, autoSyncInterval } = parsed.data;
 
     // Guard de SSRF: só http(s) público. Fica fora do zod porque é mais que formato
     // de URL — resolve o host e barra IPs privados/loopback.
     if (!isPublicHttpUrl(analysisUrl)) throw createError(400, 'URL inválida ou não permitida (apenas http(s) público)');
 
-    let validSourceType = sourceType === 'INSTAGRAM' ? 'INSTAGRAM' : 'WEBSITE';
+    let validSourceType: 'WEBSITE' | 'INSTAGRAM' = sourceType === 'INSTAGRAM' ? 'INSTAGRAM' : 'WEBSITE';
     if (analysisUrl.toLowerCase().includes('instagram.com')) {
       validSourceType = 'INSTAGRAM';
     }
@@ -173,6 +177,7 @@ settingsRouter.post('/:slug/referencias/:id/sync', async (req: AuthRequest, res:
 
     const ref = await prisma.reference.findFirst({ where: { id, brandId } });
     if (!ref) throw createError(404, 'Reference not found');
+    if (!ref.analysisUrl) throw createError(400, 'Referência sem URL de análise configurada');
 
     const updated = await prisma.reference.update({
       where: { id },

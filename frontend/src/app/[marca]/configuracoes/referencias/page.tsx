@@ -143,7 +143,7 @@ export default function ReferenciasPage() {
       if (selectedRef?.id === refId) {
         setSelectedRef({ ...selectedRef, status: 'PENDING' });
       }
-      await api.post(`/settings/${slug}/referencias/${refId}/sync`);
+      await api.post(`/settings/${slug}/referencias/${refId}/sync`, {});
     } catch (error) {
       console.error('Failed to force sync', error);
       alert('Não foi possível iniciar a atualização.');
