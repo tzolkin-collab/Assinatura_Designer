@@ -64,7 +64,6 @@ export const config = {
   // "did not contain valid JSON"). Limitar o thinking deixa a maior parte do
   // orçamento para o output. -1 = dinâmico/ilimitado, 0 = sem thinking.
   geminiThinkingBudget: parseInt(process.env.GEMINI_THINKING_BUDGET || '12288', 10),
-  nanoBananaApiKey: process.env.NANO_BANANA_API_KEY || '',
   // ── Teto de gasto de IA (por dia, em tokens) ──
   // Não existia teto nenhum: um deck grande dispara dezenas de chamadas simultâneas
   // ao Gemini, e um brief mal formado queimava caixa sem ninguém ver. Contamos em
