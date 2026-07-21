@@ -425,6 +425,22 @@
   flex-shrink: 0;
 }
 
+.progressLabelBox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+  color: var(--color-brand);
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 .progressLabel {
   font-size: 13px;
   color: var(--color-text-secondary);

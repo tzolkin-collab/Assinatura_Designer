@@ -201,14 +201,51 @@ Objetivo: o botão "Exportar para Canva" entregar **design editável**, não fot
 - [ ] Religar o botão: **gerar PPTX** (`htmlToPptx.ts`, já existe) → subir no R2 (URL pública) →
   `POST /url-imports` com mime PPTX → poll `GET /url-imports/{jobId}` → devolver `edit_url`.
 - [ ] Garantir que `htmlDocsToPptx` **embute as imagens** (`<img>` por URL → imagem no PPTX). 🟡 verificar.
-- [ ] Aposentar / enxugar o caminho PNG (`asset→design→merge`) e o sprawl do `canvaSync`
-  (fetch/toggle/cron) se não entregar valor.
+- [ ] Aposentar / enxugar o caminho PNG (`asset→design→merge`) — 3 chamadas de API sequenciais
+  por slide (upload assíncrono + create + merge), custa rate limit (20 req/min documentado) em
+  deck grande. Aposentar depois que o PPTX estabilizar.
 - [ ] Expor a escolha ao usuário: PNG (fiel, não editável) × PPTX→Canva (editável, perde efeitos).
 
 **Ressalva de fidelidade:** PPTX de HTML/CSS livre pode perder gradientes/sombras/posição
 absoluta/fonte do Google. Texto continua texto. É trade-off de produto (editabilidade × fidelidade).
 
 **Pronto quando:** clicar "Exportar para Canva" abre no Canva um design com texto editável.
+
+#### 4.1 — Modo Template (Brand Templates + Autofill) — opcional, para formato recorrente
+
+`autofillDesign(userId, brandTemplateId, data, title)` **já existe** em `canvaClient.ts` mas
+**nunca é chamado** — capacidade morta. É a API de Brand Template Autofill: o designer desenha o
+template **uma vez dentro do Canva** (campos nomeados: título, corpo, imagem), a API só
+**preenche os campos** com dados — zero conversão HTML→PPTX, zero perda de fidelidade, porque não
+há tradução nenhuma envolvida.
+
+- [ ] Trade-off a decidir: só funciona para **estrutura fixa** (um template por formato), o que
+  conflita com o "cada slide é único, varie o layout" do prompt do artista (`htmlDesign.ts:169`).
+  Não substitui o PPTX — é um **modo adicional**, bom pra quem publica o mesmo formato toda
+  semana (ex.: "post semanal" — encaixa direto na proposta de assinatura mensal do produto).
+- [ ] Se aprovado: UI para o designer registrar/linkar um `brandTemplateId` por marca+formato; a
+  IA gera só o conteúdo (textos/imagem), não o layout; `autofillDesign` no lugar do PPTX.
+
+**Pronto quando:** uma marca com template registrado consegue gerar conteúdo e ver ele preenchido
+no Canva, no layout exato do template, sem passar pelo caminho PPTX.
+
+#### 4.2 — Watchlist: HTML import nativo do Canva (Canva Code 2.0, lançado 14/07/2026)
+
+🟡 **Não é ação — é algo a reverificar periodicamente.** O Canva lançou importação de HTML como
+produto (upload manual de `.html` dentro do app, converte em elementos editáveis). **Confirmado
+que ainda NÃO está no Connect API** — `create-design-import-job` e `create-url-import-job`
+(canva.dev, verificado 2026-07-20) só aceitam os 19 formatos de sempre (PPTX/DOCX/PDF/Keynote
+etc.), sem `text/html`. Como o recurso é do mesmo mês desta investigação, a API pode ganhar
+suporte a HTML em breve.
+
+- [ ] **Se/quando `text/html` aparecer no Connect API:** troca o PPTX inteiro por import direto do
+  HTML que o pipeline já gera — zero conversão, zero perda de fidelidade. Isso tornaria o
+  `htmlToPptx.ts` e o Modo Template menos necessários para o caso geral.
+- [ ] **Ganho imediato, sem esperar API, sem código:** o designer já pode testar hoje importar um
+  `.html` de slide **direto pela UI do Canva** (baixar via `ArtifactPanel` → importar manualmente)
+  — pode ter mais fidelidade que o caminho PPTX atual. Vale validar na prática antes da Fase 4.1/4.
+- [ ] Ação concreta: **reconferir a lista de mime types do Connect API a cada ~4-6 semanas**
+  enquanto o recurso for novo, antes de investir mais tempo no conversor PPTX.
 
 ---
 
@@ -227,7 +264,10 @@ absoluta/fonte do Google. Texto continua texto. É trade-off de produto (editabi
 - Base64 inline / SVG gigante **não** foram a causa do "arquivo ilegível".
 - O OAuth do Canva **não** é o "podre" — é o mais robusto dos três. O problema do Canva é o
   deliverable (PNG chapado, BUG 2).
-- Mandar **HTML** pro Canva **não** funciona via API — o caminho editável é PPTX.
+- Mandar **HTML** pro Canva **não** funciona via API **hoje** — o Canva lançou import de HTML
+  como produto (Canva Code 2.0, 14/07/2026), mas confirmado que ainda não está no Connect API
+  (ver §3 Fase 4.2). O caminho automatizável continua sendo PPTX — HTML é watchlist, não solução
+  disponível agora.
 
 ---
 
@@ -268,14 +308,22 @@ sessões anteriores, **não re-verificado** (confirmar ao vivo antes de agir).
    perda e de a Fase 0 partir de base instável.
    → **Escopo:** pré-requisito de tudo. **Ação:** commitar/revisar a branch antes de abrir a Fase 0.
 
+5. **✅ `canvaSync` é polling raso sem necessidade.** `runAutoSync` (`canvaSync.ts:22`) varre todo
+   post com `canvaSyncEnabled` e busca só **título e URL** do design via cron — não detecta edição
+   de conteúdo, não usa webhook (Canva Connect API suporta webhook de eventos de design; não
+   usado). Custo de API real (1 req por post ativo por tick) por pouco valor — o botão manual
+   "Atualizar" (`canva.ts:193`) já cobre o caso de uso.
+   → **Escopo:** Fase 4. **Correção sugerida:** trocar por webhook, ou aposentar o cron e manter
+   só o botão manual.
+
 ### Qualidade / escala / resiliência (tangenciais à consolidação, mas são pontos frágeis)
 
-5. **🟡 Reviewer visual amostra poucos slides (~8, espalhados).** Deck grande passa quase todo sem
+6. **🟡 Reviewer visual amostra poucos slides (~8, espalhados).** Deck grande passa quase todo sem
    revisão real. Da memória — confirmar cobertura atual antes de agir.
 
-6. **🟡 Escala p/ ~200 slides.** Pontos pendentes citados na memória (amostragem do reviewer, chave
+7. **🟡 Escala p/ ~200 slides.** Pontos pendentes citados na memória (amostragem do reviewer, chave
    de design no Redis). Confirmar o que já foi resolvido (a sessão foi fatiada em 3 keys em 07-13).
 
-7. **🟡 Resiliência do Gemini.** 429 de créditos e "modelo lento" (responde em ~70s sem erro) já
+8. **🟡 Resiliência do Gemini.** 429 de créditos e "modelo lento" (responde em ~70s sem erro) já
    derrubaram gerações antes. Há tratamento (`lib/geminiRetry.ts`), mas é histórico que reincide —
    monitorar, não assumir resolvido.

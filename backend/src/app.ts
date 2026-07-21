@@ -20,6 +20,7 @@ import { googleRouter, googlePublicRouter } from './routes/google.js';
 import { teamRouter } from './routes/team.js';
 import { assetsRouter } from './routes/assets.js';
 import { notificationsRouter } from './routes/notifications.js';
+import { memoryRoutes } from './routes/memory.js';
 
 const app = express();
 
@@ -65,6 +66,7 @@ app.use('/api/google', googlePublicRouter);
 app.use('/api/google', requireAuth, googleRouter);
 app.use('/api/brands/:brandId/members', requireAuth, teamRouter);
 app.use('/api/brands/:brandId/assets', requireAuth, assetsRouter);
+app.use('/api/brands/:brandSlug/memory', requireAuth, memoryRoutes);
 app.use('/api/notifications', requireAuth, notificationsRouter);
 
 // ── Canva Routes ──

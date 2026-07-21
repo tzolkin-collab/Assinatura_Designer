@@ -105,13 +105,12 @@ teamRouter.patch('/:targetUserId', requireBrandRole(ADMINS), async (req: Request
     const targetUserId = req.params.targetUserId as string;
     const { role } = parseBody(patchRoleSchema, req.body);
 
-    // Verificação de hierarquia do requerente
-    const requesterRole = (req as any).brandRole || 'ADMIN';
-    if (requesterRole === 'ADMIN' && role === 'OWNER') {
-      throw createError(403, 'Apenas proprietários podem promover outros proprietários.');
+    // O mesmo projeto não pode ter 2 donos.
+    if ((role as string) === 'OWNER') {
+      throw createError(400, 'Um projeto não pode ter mais de um dono. Para transferir a titularidade, contate o suporte.');
     }
 
-    if (role !== 'OWNER') {
+    if ((role as string) !== 'OWNER') {
       const currentMembership = await prisma.brandMember.findUnique({
         where: { userId_brandId: { userId: targetUserId, brandId } }
       });

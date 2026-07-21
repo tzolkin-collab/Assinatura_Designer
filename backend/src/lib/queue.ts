@@ -18,6 +18,7 @@ import { CanvaSessionExpiredError } from './canvaClient.js';
 import { getCanvaDesignName } from './canvaSync.js';
 import { runDeckExport, type DeckExportParams } from './deckExport.js';
 import { runAssetCapture, type AssetCaptureParams } from './assetCapture.js';
+import { analyzeReferenceBackground } from './referenceSync.js';
 import { logger } from './logger.js';
 
 const QUEUE_NAME = 'pipeline';
@@ -310,14 +311,70 @@ export function startPipelineWorker(): Worker<PipelineParams> {
   return worker;
 }
 
+const REF_SYNC_QUEUE_NAME = 'reference-sync';
+
+export const referenceSyncQueue = new Queue<{ refId: string; slug: string; name: string; analysisUrl: string; sourceType: 'WEBSITE' | 'INSTAGRAM' }>(REF_SYNC_QUEUE_NAME, {
+  connection: makeConnection(),
+  defaultJobOptions: {
+    attempts: 2,
+    removeOnComplete: { count: 100 },
+    removeOnFail: { count: 100 },
+  },
+});
+
+referenceSyncQueue.on('error', (err) => logger.error('Fila de reference sync com erro', { error: err.message }));
+
+let refSyncWorker: Worker | null = null;
+export function startReferenceSyncWorker(): Worker {
+  if (refSyncWorker) return refSyncWorker;
+  refSyncWorker = new Worker(
+    REF_SYNC_QUEUE_NAME,
+    async (job) => {
+      if (job.name === 'sync-cron') {
+        const dueRefs = await prisma.reference.findMany({
+          where: { autoSyncEnabled: true },
+          include: { brand: true }
+        });
+        const now = Date.now();
+        for (const ref of dueRefs) {
+          const lastSynced = ref.lastSyncedAt ? ref.lastSyncedAt.getTime() : ref.createdAt.getTime();
+          const daysSinceSync = (now - lastSynced) / (1000 * 60 * 60 * 24);
+          if (daysSinceSync >= ref.autoSyncInterval) {
+            await referenceSyncQueue.add('sync-single', {
+              refId: ref.id,
+              slug: ref.brand.slug,
+              name: ref.name,
+              analysisUrl: ref.analysisUrl ?? '',
+              sourceType: ref.sourceType
+            });
+          }
+        }
+      } else if (job.name === 'sync-single') {
+        await analyzeReferenceBackground(job.data.refId, job.data.slug, job.data.name, job.data.analysisUrl, job.data.sourceType);
+      }
+    },
+    { connection: makeConnection(), concurrency: 1 }
+  );
+
+  referenceSyncQueue.add('sync-cron', {} as any, {
+    repeat: { pattern: '0 4 * * *' },
+    jobId: 'daily-reference-sync-cron'
+  });
+
+  console.log(`  ├─ Worker:       fila "${REF_SYNC_QUEUE_NAME}" (concorrência 1) + Cron (4am)`);
+  return refSyncWorker;
+}
+
 /** Fecha filas e workers de forma limpa (shutdown). */
 export async function closeQueue(): Promise<void> {
   await worker?.close();
   await exportWorker?.close();
   await deckWorker?.close();
   await assetCaptureWorker?.close();
+  await refSyncWorker?.close();
   await pipelineQueue.close();
   await canvaExportQueue.close();
   await deckExportQueue.close();
   await assetCaptureQueue.close();
+  await referenceSyncQueue.close();
 }

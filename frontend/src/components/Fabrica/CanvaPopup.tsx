@@ -236,7 +236,7 @@ export function CanvaPopup({ onClose, onInject, onSelectDesign }: Props) {
                         disabled={importingId !== null}
                         style={hasError ? { borderColor: 'var(--color-error)' } : undefined}
                       >
-                        <div style={{ position: 'relative' }}>
+                        <div style={{ position: 'relative', width: '100%' }}>
                           {design.thumbnail?.url ? (
                             <img src={design.thumbnail.url} alt="" className={styles.gridThumb} />
                           ) : (

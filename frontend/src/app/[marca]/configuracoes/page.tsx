@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Bot, Palette, Eye, PlugZap, ChevronRight, Trash2, X, Users, Image as ImageIcon, BarChart3 } from 'lucide-react';
+import { ArrowLeft, Bot, Palette, Eye, PlugZap, ChevronRight, Trash2, X, Users, Image as ImageIcon, BarChart3, Brain } from 'lucide-react';
 import PageHeader from '@/components/ui/PageHeader';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
@@ -13,8 +13,8 @@ import { api } from '@/lib/api';
 const CONFIG_SECTIONS = [
   {
     key: 'agent',
-    label: 'Agente IA',
-    description: 'Configure o SystemPrompt e contexto do Gemini para briefings automáticos.',
+    label: 'Agente e Memória',
+    description: 'Configure o SystemPrompt do Gemini e gerencie as regras/preferências aprendidas da marca.',
     icon: <Bot size={20} />,
   },
   {

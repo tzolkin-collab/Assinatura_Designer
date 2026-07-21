@@ -1005,7 +1005,7 @@ export default function BrandGaleriaPage() {
                           <div>
                             <div className={styles.canvaFormatCardTitle}>Apresentação PPTX (Editável, Automático)</div>
                             <div className={styles.canvaFormatCardDesc}>
-                              Gera um PowerPoint e importa direto no Canva como design editável — texto continua texto. Pode perder gradientes, sombras ou posicionamento mais livre na conversão.
+                              Gera um PowerPoint e importa direto no Canva como design estático, mantendo os textos editáveis. Funções JavaScript e links não são aceitos pela API do Canva e são descartados na importação.
                             </div>
                           </div>
                         </div>
@@ -1013,36 +1013,7 @@ export default function BrandGaleriaPage() {
                     </div>
                   </div>
 
-                  {htmlContent && (
-                    <div className={styles.adobePanelSection} style={{ marginTop: '16px' }}>
-                      <h4 className={styles.adobeSectionTitle}>Baixar arquivo</h4>
 
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                        {/* HTML Card */}
-                        {htmlContent && (
-                          <div 
-                            className={styles.canvaFormatCard}
-                            data-selected={canvaFormat === 'html'}
-                            onClick={() => { if (!isRunningExport) { setCanvaFormat('html'); setMostrarCanvaInstrucoes(false); } }}
-                          >
-                            <input 
-                              type="radio" 
-                              className={styles.canvaFormatCardRadio} 
-                              checked={canvaFormat === 'html'}
-                              onChange={() => {}}
-                              disabled={isRunningExport}
-                            />
-                            <div>
-                              <div className={styles.canvaFormatCardTitle}>Código Fonte HTML (Editável)</div>
-                              <div className={styles.canvaFormatCardDesc}>
-                                Baixa um ZIP com os arquivos HTML/CSS dos slides. Útil para desenvolvedores ou importação manual em outras ferramentas.
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
 
                   {/* Progresso ou Instruções */}
                   {isRunningExport && (
@@ -1064,21 +1035,7 @@ export default function BrandGaleriaPage() {
                     </div>
                   )}
 
-                  {mostrarCanvaInstrucoes && canvaFormat === 'html' && (
-                    <div className={styles.canvaInstructionBox}>
-                      <div style={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <span>✓</span> O arquivo foi gerado com sucesso!
-                      </div>
-                      <div>
-                        Para importá-lo no Canva de forma 100% editável:
-                        <ol style={{ margin: '8px 0 0 16px', padding: 0 }}>
-                          <li>Abra a tela inicial do seu Canva.</li>
-                          <li>Clique em <strong>Criar um design</strong> e depois em <strong>Importar arquivo</strong>.</li>
-                          <li>Selecione o arquivo ZIP que você acabou de baixar e pronto!</li>
-                        </ol>
-                      </div>
-                    </div>
-                  )}
+
 
                   <div style={{ marginTop: 'auto', display: 'flex', gap: '12px' }}>
                     <button

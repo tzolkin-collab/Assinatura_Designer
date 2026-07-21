@@ -252,3 +252,48 @@ assetsRouter.delete('/:assetId', requireBrandRole(EDITORS), async (req: BrandReq
     next(error);
   }
 });
+
+// POST /api/brands/:brandId/assets/:assetId/export-canva
+assetsRouter.post('/:assetId/export-canva', requireBrandRole(EDITORS), async (req: BrandRequest, res: Response, next: NextFunction) => {
+  try {
+    const { userId } = req.user!;
+    const brand = req.brand!;
+    const assetId = req.params.assetId as string;
+
+    const asset = await prisma.asset.findFirst({
+      where: { id: assetId, brandId: brand.id },
+    });
+    if (!asset) throw createError(404, 'Asset não encontrado nesta marca.');
+
+    // 1. Baixar o arquivo do R2 para a memória
+    const fileRes = await fetch(asset.url);
+    if (!fileRes.ok) throw createError(502, 'Falha ao recuperar o arquivo do armazenamento.');
+    const buffer = Buffer.from(await fileRes.arrayBuffer());
+
+    // 2. Fazer upload para o Canva (requer que o usuário tenha vinculado o Canva)
+    const { uploadAssetAndWait, createDesign, parseDesignResponse } = await import('../lib/canvaClient.js');
+    let canvaAssetId: string;
+    try {
+      canvaAssetId = await uploadAssetAndWait(userId, buffer, asset.name, asset.fileType || 'image/png');
+    } catch (err) {
+      throw createError(502, `Falha ao subir arquivo pro Canva: ${(err as Error).message}`);
+    }
+
+    // 3. Criar um novo design com a imagem
+    let designUrl: string | undefined;
+    try {
+      const designResult = await createDesign(userId, {
+        title: asset.name,
+        asset_id: canvaAssetId,
+      });
+      const parsed = parseDesignResponse(designResult);
+      designUrl = parsed.url;
+    } catch (err) {
+      throw createError(502, `Falha ao criar design no Canva: ${(err as Error).message}`);
+    }
+
+    res.json({ data: { url: designUrl } });
+  } catch (error) {
+    next(error);
+  }
+});

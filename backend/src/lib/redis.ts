@@ -100,6 +100,17 @@ export interface FabricaSession {
     brief: string;
   } | null;
   /**
+   * Pausa estratégica (Amostra de Estilo): o pipeline gera apenas o slide 0 e
+   * pausa aguardando o usuário aprovar o estilo visual antes de continuar.
+   */
+  pendingStyleProof?: {
+    format: 'presentation' | 'carousel';
+    postId: string;
+    skeleton: Array<{ title: string; goal: string; layout_type: string; order: number; copy?: string }>;
+    brief: string;
+    sourceCopy?: string;
+  } | null;
+  /**
    * Resultado do último review automático, guardado pelo pipeline para o
    * `review:decline` virar um [EDIT] cirúrgico (só os slides com deviation) em vez
    * de regenerar o deck inteiro. Limpo pelo brain no approve/decline.
@@ -183,6 +194,8 @@ export async function createSession(
     reviewMode,
     activeQuestion: null,
     pendingReview: null,
+    pendingPlan: null,
+    pendingStyleProof: null,
     messages: [],
     currentDesign: [],
     workerStatus: 'idle',

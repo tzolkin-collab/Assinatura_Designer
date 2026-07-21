@@ -579,7 +579,10 @@ export default function FabricaPage() {
                   </button>
                 </div>
               </div>
-              <p className={s.progressLabel}>{progressLabel || 'Gerando...'}</p>
+              <div className={s.progressLabelBox}>
+                <Loader2 size={16} className={s.spin} />
+                <p className={s.progressLabel}>{progressLabel || 'Gerando...'}</p>
+              </div>
               <div
                 className={s.progressTrack}
                 role="progressbar"

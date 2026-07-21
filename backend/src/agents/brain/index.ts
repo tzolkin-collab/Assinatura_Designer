@@ -28,6 +28,7 @@ import { logger } from '../../lib/logger.js';
 import { runPlanner, type SlideSkeletonItem } from '../planner/index.js';
 import { parseRequestedSlideCount } from '../pipeline.js';
 import { extractBracketedJson, stripBracketedJson, mapDeviationsToEdits } from '../../lib/tagExtract.js';
+import { brainTools, executeSkill } from './skills.js';
 
 const ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
 
@@ -100,10 +101,13 @@ function stripQuestionTag(content: string): string {
   // resíduo de JSON aninhado (opções-objeto, payload do [EDIT]) vazar para o chat.
   return stripBracketedJson(
     stripBracketedJson(
-      content.replace(/\[DISPATCH:(presentation|carousel)\]/gi, ''),
-      'QUESTION',
+      stripBracketedJson(
+        content.replace(/\[DISPATCH:(presentation|carousel)(?::proof)?\]/gi, ''),
+        'QUESTION',
+      ),
+      'EDIT',
     ),
-    'EDIT',
+    'MEMORY',
   );
 }
 
@@ -617,6 +621,35 @@ async function handleUserMessageInner(
     await updateSession(sessionId, { pendingPlan: null });
   }
 
+  // ── Pausa estratégica (Amostra de Estilo) ────────────────────────────────────
+  if (session.pendingStyleProof) {
+    const proof = session.pendingStyleProof;
+    const msg = userMessage.trim();
+    const aprovou = msg.toLowerCase() === 'aprovado' || /^(aprovado|aprovo|aprovar|pode gerar|gera|manda ver|perfeito,? pode gerar)[.!]?$/i.test(msg);
+    if (aprovou) {
+      await updateSession(sessionId, { pendingStyleProof: null, activeQuestion: null, phase: 'ready', workerStatus: 'running' });
+      const aprovada = await getSession(sessionId);
+      if (aprovada) emitSessionState(sessionId, aprovada);
+      ws.token(sessionId, '\nEstilo aprovado — gerando o restante da apresentação com essa linguagem visual.\n');
+      ws.end(sessionId);
+      enqueuePipeline({
+        sessionId,
+        brief: proof.brief,
+        format: proof.format,
+        approvedSkeleton: proof.skeleton,
+        sourceCopy: proof.sourceCopy,
+        postId: proof.postId,
+        resumeFromStyleProof: true,
+      }).catch((err) => {
+        logger.error('Falha ao enfileirar o pipeline (estilo aprovado)', { error: (err as Error).message });
+        ws.error(sessionId, `Erro ao retomar a geração: ${(err as Error).message}`);
+      });
+      return;
+    }
+    // Se não aprovou, o fluxo morre aqui e o LLM responde (podendo disparar outro DISPATCH).
+    await updateSession(sessionId, { pendingStyleProof: null });
+  }
+
   const latestSession = await getSession(sessionId);
   if (!latestSession) return;
 
@@ -632,52 +665,96 @@ async function handleUserMessageInner(
 
   // Remove a última (já está em userMessage)
   const historyWithoutLast = history.slice(0, -1);
+  const currentTurnContents: any[] = [
+    ...historyWithoutLast,
+    { role: 'user', parts: [{ text: `[FASE: ${latestSession.phase.toUpperCase()}]\n\n${buildModelMessage(userMessage, attachments)}` }] },
+  ];
 
   try {
-    const stream = await generateStreamWithRetry(ai, {
-      model: BRAIN_MODEL,
-      contents: [
-        ...historyWithoutLast,
-        { role: 'user', parts: [{ text: `[FASE: ${latestSession.phase.toUpperCase()}]\n\n${buildModelMessage(userMessage, attachments)}` }] },
-      ],
-      config: {
-        systemInstruction: [
-          BRAIN_SYSTEM_PROMPT,
-          brandContextSummary ? `## Contexto atual da marca\n${brandContextSummary}` : '',
-        ].filter(Boolean).join('\n\n'),
-        temperature: 0.7,
-        thinkingConfig: { thinkingBudget: 6000 },
-      },
-    }, BRAIN_MODEL, {
-      onRetry: ({ attempt }) => {
-        ws.token(sessionId, attempt === 1
-          ? '\n\nO modelo está com alta demanda. Tentando novamente...\n\n'
-          : '\n\nAinda estou tentando destravar a geração...\n\n');
-      },
-      onFallback: () => {
-        ws.token(sessionId, '\n\nTroquei para um modelo de fallback para não travar sua criação.\n\n');
-      },
-    });
-
+    let activeQuestion = null;
     let fullResponse = '';
 
-    for await (const chunk of stream) {
-      for (const part of chunk.candidates?.[0]?.content?.parts ?? []) {
-        if ((part as { thought?: boolean }).thought) {
-          const thoughtText = (part as { text?: string }).text ?? '';
-          if (thoughtText) {
-            ws.emit(sessionId, 'thinking', { text: thoughtText });
+    // Agent Loop (máximo de 3 iterações para evitar loop infinito com tools)
+    for (let iteration = 0; iteration < 3; iteration++) {
+      let functionCallsToExecute: Array<{ name: string; args: any }> = [];
+      let stepResponse = '';
+
+      const stream = await generateStreamWithRetry(ai, {
+        model: BRAIN_MODEL,
+        contents: currentTurnContents,
+        config: {
+          systemInstruction: [
+            BRAIN_SYSTEM_PROMPT,
+            brandContextSummary ? `## Contexto atual da marca\n${brandContextSummary}` : '',
+          ].filter(Boolean).join('\n\n'),
+          temperature: 0.7,
+          thinkingConfig: { thinkingBudget: 6000 },
+          tools: brainTools,
+        },
+      }, BRAIN_MODEL, {
+        onRetry: ({ attempt }) => {
+          ws.token(sessionId, attempt === 1
+            ? '\n\nO modelo está com alta demanda. Tentando novamente...\n\n'
+            : '\n\nAinda estou tentando destravar a geração...\n\n');
+        },
+        onFallback: () => {
+          ws.token(sessionId, '\n\nTroquei para um modelo de fallback para não travar sua criação.\n\n');
+        },
+      });
+
+      for await (const chunk of stream) {
+        for (const part of chunk.candidates?.[0]?.content?.parts ?? []) {
+          if ((part as any).functionCall) {
+            functionCallsToExecute.push((part as any).functionCall);
+            continue;
           }
-          continue;
+
+          if ((part as { thought?: boolean }).thought) {
+            const thoughtText = (part as { text?: string }).text ?? '';
+            if (thoughtText) {
+              ws.emit(sessionId, 'thinking', { text: thoughtText });
+            }
+            continue;
+          }
+          const text = (part as { text?: string }).text ?? '';
+          if (!text) continue;
+          stepResponse += text;
+          fullResponse += text;
+          ws.token(sessionId, text);
         }
-        const text = (part as { text?: string }).text ?? '';
-        if (!text) continue;
-        fullResponse += text;
-        ws.token(sessionId, text);
       }
+
+      // Adiciona o que o modelo disse até agora no histórico da iteração
+      if (stepResponse || functionCallsToExecute.length > 0) {
+        const assistantParts: any[] = [];
+        if (stepResponse) assistantParts.push({ text: stepResponse });
+        for (const call of functionCallsToExecute) {
+          assistantParts.push({ functionCall: call });
+        }
+        currentTurnContents.push({ role: 'model', parts: assistantParts });
+      }
+
+      if (functionCallsToExecute.length === 0) {
+        // Nenhuma tool chamada, terminou a iteração do agente
+        activeQuestion = parseQuestionTag(fullResponse, latestSession.reviewMode);
+        break;
+      }
+
+      // Executa as tools e devolve para o modelo
+      const functionResponseParts: any[] = [];
+      for (const call of functionCallsToExecute) {
+        ws.emit(sessionId, 'thinking', { text: `Acionando integração: ${call.name}...` });
+        const result = await executeSkill(call.name, call.args, { userId: latestSession.userId, brandSlug: latestSession.brandSlug });
+        functionResponseParts.push({
+          functionResponse: {
+            name: call.name,
+            response: result
+          }
+        });
+      }
+      currentTurnContents.push({ role: 'user', parts: functionResponseParts });
     }
 
-    const activeQuestion = parseQuestionTag(fullResponse, latestSession.reviewMode);
     const assistantMessage = stripQuestionTag(fullResponse);
 
     // Persiste resposta do Brain
@@ -740,8 +817,8 @@ async function detectAndDispatch(
     semArteParaEditar = true;
   }
 
-  // [DISPATCH:presentation] ou [DISPATCH:carousel]
-  const match = response.match(/\[DISPATCH:(presentation|carousel)\]/i);
+  // [DISPATCH:presentation], [DISPATCH:carousel] ou [DISPATCH:presentation:proof]
+  const match = response.match(/\[DISPATCH:(presentation|carousel)(?::proof)?\]/i);
   if (!match) {
     // A IA pediu para EDITAR, não há arte, e ela não pediu geração. Sem isto, o pedido
     // morreria calado — o mesmo silêncio que este bloco inteiro existe para matar.
@@ -759,6 +836,7 @@ async function detectAndDispatch(
   }
 
   const format = match[1] as 'presentation' | 'carousel';
+  const isProof = /:proof\]/i.test(match[0]);
 
   // Concatena as intenções do usuário para formar o brief completo (essencial para edições)
   const fullBrief = session.messages
@@ -782,7 +860,7 @@ async function detectAndDispatch(
   // Enfileira a geração (durável, com retry) — não bloqueia o stream. O erro
   // aqui é só de enfileiramento (ex.: Redis fora); falhas da geração em si são
   // tratadas no worker (queue.ts) e notificadas via ws.
-  enqueuePipeline({ sessionId, brief: fullBrief, format }).catch(err => {
+  enqueuePipeline({ sessionId, brief: fullBrief, format, generateStyleProofOnly: isProof }).catch(err => {
     logger.error('Falha ao enfileirar o pipeline', { error: (err as Error).message });
     ws.error(sessionId, `Erro ao iniciar a geração: ${err instanceof Error ? err.message : String(err)}`);
   });

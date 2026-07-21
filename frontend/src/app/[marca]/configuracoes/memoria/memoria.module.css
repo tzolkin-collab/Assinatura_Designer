@@ -1,0 +1,186 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.backLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 14px;
+  text-decoration: none;
+  font-weight: 500;
+  transition: color 0.2s;
+  margin-bottom: 8px;
+}
+
+.backLink:hover {
+  color: var(--text-primary);
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.cardContent {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.iconWrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: rgba(var(--primary-rgb), 0.1);
+  color: var(--primary);
+  flex-shrink: 0;
+}
+
+.titleWrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.description {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.memoryList {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.memoryItem {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 8px;
+  background-color: var(--surface-hover);
+  border: 1px solid var(--border);
+  transition: border-color 0.2s;
+}
+
+.memoryItem:hover {
+  border-color: var(--border-hover);
+}
+
+.memoryContent {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.memoryKey {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+}
+
+.memoryValue {
+  font-size: 14px;
+  color: var(--text-primary);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.memoryActions {
+  display: flex;
+  gap: 8px;
+}
+
+.actionButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.actionButton:hover {
+  background: var(--surface-active);
+  color: var(--text-primary);
+}
+
+.actionButton.danger:hover {
+  background: rgba(239, 68, 68, 0.1);
+  color: #ef4444;
+}
+
+.emptyState {
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 14px;
+  background: var(--surface-hover);
+  border-radius: 8px;
+  border: 1px dashed var(--border);
+}
+
+.form {
+  display: flex;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.inputGroup {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.input {
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-primary);
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.input:focus {
+  border-color: var(--primary);
+}
+
+.addButton {
+  align-self: flex-end;
+}

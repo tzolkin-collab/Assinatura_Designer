@@ -3,7 +3,7 @@ import crypto from 'crypto';
 import { config } from '../config.js';
 import { createError } from '../middleware/errorHandler.js';
 
-const s3 = new S3Client({
+export const s3 = new S3Client({
   region: 'auto',
   endpoint: config.r2Endpoint,
   credentials: {

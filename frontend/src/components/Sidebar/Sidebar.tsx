@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import styles from './Sidebar.module.css';
 import NotificationBell from '../Notification/NotificationBell';
+import { useAuth } from '@/lib/hooks';
 
 interface NavItem {
   label: string;
@@ -108,6 +109,7 @@ function NavLink({ item, pathname }: { item: NavItem; pathname: string }) {
 export default function Sidebar() {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const { user } = useAuth();
 
   // Detect if we're inside a brand context ([marca]/...) vs. numa rota GLOBAL
   // (sem marca). Bug real encontrado 2026-07-20: esta lista estava incompleta
@@ -203,10 +205,10 @@ export default function Sidebar() {
         <div className={styles.bottom}>
           <div className={styles.divider} />
           <div className={styles.user}>
-            <div className={styles.avatar}>U</div>
+            <div className={styles.avatar}>{user?.name?.[0]?.toUpperCase() || user?.email?.[0]?.toUpperCase() || 'U'}</div>
             <div className={styles.userInfo}>
-              <span className={styles.userName}>Usuário</span>
-              <span className={styles.userRole}>Designer</span>
+              <span className={styles.userName}>{user?.name || 'Carregando...'}</span>
+              <span className={styles.userRole}>{user?.role === 'ADMIN' ? 'Administrador' : 'Designer'}</span>
             </div>
             <NotificationBell />
             <button

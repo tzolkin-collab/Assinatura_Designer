@@ -4,7 +4,7 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
 import Image from 'next/image';
-import { ArrowLeft, Camera, ExternalLink, RefreshCw, X, Loader2 } from 'lucide-react';
+import { ArrowLeft, ExternalLink, RefreshCw, X, Loader2, ImageIcon } from 'lucide-react';
 import PageHeader from '@/components/ui/PageHeader';
 import Button from '@/components/ui/Button';
 import Card from '@/components/ui/Card';
@@ -35,6 +35,9 @@ interface Reference {
   palette?: string[];
   createdAt: string;
   updatedAt: string;
+  autoSyncEnabled: boolean;
+  autoSyncInterval: number;
+  lastSyncedAt?: string | null;
 }
 
 export default function ReferenciasPage() {
@@ -51,6 +54,8 @@ export default function ReferenciasPage() {
   const [newName, setNewName] = useState('');
   const [newUrl, setNewUrl] = useState('');
   const [sourceType, setSourceType] = useState<'WEBSITE' | 'INSTAGRAM'>('WEBSITE');
+  const [autoSyncEnabled, setAutoSyncEnabled] = useState(false);
+  const [autoSyncInterval, setAutoSyncInterval] = useState(14);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState('');
   const nameRef = useRef<HTMLInputElement>(null);
@@ -90,12 +95,16 @@ export default function ReferenciasPage() {
         name: newName.trim(),
         analysisUrl: newUrl.trim() || undefined,
         sourceType,
+        autoSyncEnabled,
+        autoSyncInterval,
       });
       setRefs((prev) => [ref, ...prev]);
       setShowModal(false);
       setNewName('');
       setNewUrl('');
       setSourceType('WEBSITE');
+      setAutoSyncEnabled(false);
+      setAutoSyncInterval(14);
     } catch (err) {
       setCreateError(err instanceof ApiError ? err.message : 'Erro ao criar referência.');
     } finally {
@@ -103,31 +112,6 @@ export default function ReferenciasPage() {
     }
   };
 
-  const handleCaptureScreenshot = async (ref: Reference) => {
-    if (capturingScreenshot) return;
-    setCapturingScreenshot(true);
-    try {
-      await api.post(`/settings/${slug}/referencias/${ref.id}/screenshot`, {});
-      // Poll until imageUrl appears (max 30s)
-      let attempts = 0;
-      const poll = async () => {
-        if (attempts++ > 6) { setCapturingScreenshot(false); return; }
-        const updated = await api.get<Reference[]>(`/settings/${slug}/referencias`);
-        const found = (updated ?? []).find((r) => r.id === ref.id);
-        if (found?.imageUrl) {
-          setRefs(updated ?? []);
-          setSelectedRef(found);
-          setCapturingScreenshot(false);
-          return;
-        }
-        
-        setTimeout(poll, 5000);
-      };
-      setTimeout(poll, 5000);
-    } catch {
-      setCapturingScreenshot(false);
-    }
-  };
 
   const handleDelete = async (id: string) => {
     const ref = refs.find(r => r.id === id);
@@ -135,6 +119,35 @@ export default function ReferenciasPage() {
     await api.delete(`/settings/${slug}/referencias/${id}`).catch(() => {});
     setRefs((prev) => prev.filter((r) => r.id !== id));
     if (selectedRef?.id === id) setSelectedRef(null);
+  };
+
+  const handleToggleSync = async (ref: Reference, enabled: boolean, interval: number) => {
+    try {
+      const updated = await api.patch<{ data: Reference }>(`/settings/${slug}/referencias/${ref.id}`, {
+        autoSyncEnabled: enabled,
+        autoSyncInterval: interval,
+      });
+      setRefs((prev) => prev.map((r) => r.id === ref.id ? updated.data : r));
+      if (selectedRef?.id === ref.id) {
+        setSelectedRef(updated.data);
+      }
+    } catch (error) {
+      console.error('Failed to update sync settings', error);
+      alert('Não foi possível atualizar a sincronização.');
+    }
+  };
+
+  const handleForceSync = async (refId: string) => {
+    try {
+      setRefs((prev) => prev.map((r) => r.id === refId ? { ...r, status: 'PENDING' } : r));
+      if (selectedRef?.id === refId) {
+        setSelectedRef({ ...selectedRef, status: 'PENDING' });
+      }
+      await api.post(`/settings/${slug}/referencias/${refId}/sync`);
+    } catch (error) {
+      console.error('Failed to force sync', error);
+      alert('Não foi possível iniciar a atualização.');
+    }
   };
 
   const statusLabel = (status: Reference['status']) => {
@@ -195,6 +208,11 @@ export default function ReferenciasPage() {
                   </span>
                   {ref.insights > 0 && (
                     <span className={styles.insights}>{ref.insights} seções</span>
+                  )}
+                  {ref.autoSyncEnabled && (
+                    <span className={styles.insights} style={{ color: 'var(--color-accent)' }}>
+                      Auto-Sync ({ref.autoSyncInterval}d)
+                    </span>
                   )}
                   {ref.insightsText && (
                     <button className={styles.viewBtn} onClick={() => setSelectedRef(ref)} title="Ver insights">
@@ -266,6 +284,29 @@ export default function ReferenciasPage() {
                   type="url"
                 />
               </div>
+
+              <div className={styles.formGroup}>
+                <label className={styles.formCheckboxLabel}>
+                  <input
+                    type="checkbox"
+                    checked={autoSyncEnabled}
+                    onChange={(e) => setAutoSyncEnabled(e.target.checked)}
+                    className={styles.checkboxInput}
+                  />
+                  Refazer pesquisa automaticamente?
+                </label>
+                {autoSyncEnabled && (
+                  <select
+                    className={styles.formInput}
+                    value={autoSyncInterval}
+                    onChange={(e) => setAutoSyncInterval(Number(e.target.value))}
+                    style={{ marginTop: 8 }}
+                  >
+                    <option value={7}>A cada 1 semana</option>
+                    <option value={14}>A cada 2 semanas</option>
+                  </select>
+                )}
+              </div>
               {createError && <p className={styles.formError}>{createError}</p>}
               <p className={styles.formHint}>
                 O Gemini irá analisar a referência em background e gerar insights automáticos.
@@ -305,6 +346,49 @@ export default function ReferenciasPage() {
             </div>
             
             <div className={styles.insightsBody}>
+              <div className={styles.syncCard}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: selectedRef.autoSyncEnabled ? 12 : 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ padding: '6px', backgroundColor: 'var(--color-bg-secondary)', borderRadius: '6px' }}>
+                      <RefreshCw size={16} color="var(--color-accent)" />
+                    </div>
+                    <div>
+                      <h3 className={styles.sectionTitle} style={{ margin: 0, fontSize: 14 }}>Piloto Automático</h3>
+                      <p style={{ margin: 0, fontSize: 12, color: 'var(--color-text-tertiary)' }}>Reanalisar referência</p>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                    <label className={styles.switch}>
+                      <input 
+                        type="checkbox" 
+                        checked={selectedRef.autoSyncEnabled} 
+                        onChange={(e) => handleToggleSync(selectedRef, e.target.checked, selectedRef.autoSyncInterval)}
+                      />
+                      <span className={styles.slider}></span>
+                    </label>
+                  </div>
+                </div>
+                {selectedRef.autoSyncEnabled && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <span style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>Frequência:</span>
+                    <select
+                      className={styles.formInput}
+                      value={selectedRef.autoSyncInterval}
+                      onChange={(e) => handleToggleSync(selectedRef, true, Number(e.target.value))}
+                      style={{ padding: '4px 8px', fontSize: 12 }}
+                    >
+                      <option value={7}>A cada 1 semana</option>
+                      <option value={14}>A cada 2 semanas</option>
+                    </select>
+                    {selectedRef.lastSyncedAt && (
+                      <span style={{ fontSize: 12, color: 'var(--color-text-tertiary)', marginLeft: 'auto' }}>
+                        Última: {new Date(selectedRef.lastSyncedAt).toLocaleDateString('pt-BR')}
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+
               <div className={styles.propertiesGrid}>
                 <div className={styles.propertyCard}>
                   <span className={styles.propertyLabel}>Arquetipo</span>
@@ -334,19 +418,17 @@ export default function ReferenciasPage() {
 
               <div className={styles.imagePreviewSection}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-                  <h3 className={styles.sectionTitle} style={{ margin: 0 }}>Screenshot</h3>
-                  {selectedRef.sourceType === 'WEBSITE' && (
-                    <button
-                      className={styles.viewBtn}
-                      onClick={() => handleCaptureScreenshot(selectedRef)}
-                      disabled={capturingScreenshot}
-                      title={selectedRef.imageUrl ? 'Recapturar screenshot' : 'Capturar screenshot'}
-                      style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '4px 10px', fontSize: 12 }}
-                    >
-                      {capturingScreenshot ? <Loader2 size={13} className={styles.spinnerSmall} /> : <Camera size={13} />}
-                      {capturingScreenshot ? 'Capturando...' : selectedRef.imageUrl ? 'Recapturar' : 'Capturar'}
-                    </button>
-                  )}
+                  <h3 className={styles.sectionTitle} style={{ margin: 0 }}>Screenshot / Imagem</h3>
+                  <Button 
+                    variant="secondary" 
+                    size="sm" 
+                    disabled={selectedRef.status === 'PENDING'}
+                    onClick={() => handleForceSync(selectedRef.id)}
+                    title="Forçar atualização da imagem e dos insights agora"
+                  >
+                    <RefreshCw size={14} className={selectedRef.status === 'PENDING' ? styles.spin : ''} />
+                    Refazer Análise
+                  </Button>
                 </div>
                 {selectedRef.imageUrl ? (
                   <div className={styles.imageWithMarkers}>
@@ -368,9 +450,7 @@ export default function ReferenciasPage() {
                   </div>
                 ) : (
                   <p style={{ fontSize: 13, color: 'var(--color-text-tertiary)', margin: 0 }}>
-                    {selectedRef.sourceType === 'WEBSITE'
-                      ? 'Nenhum screenshot capturado. Clique em "Capturar" para gerar.'
-                      : 'Screenshots não disponíveis para referências do Instagram.'}
+                    Nenhuma imagem disponível. A imagem será capturada automaticamente.
                   </p>
                 )}
               </div>

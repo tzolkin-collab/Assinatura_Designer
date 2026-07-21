@@ -3,11 +3,11 @@
 import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, UserPlus, Shield, X, Loader2, Trash2 } from 'lucide-react';
+import { ArrowLeft, UserPlus, X, Loader2, Trash2 } from 'lucide-react';
 import PageHeader from '@/components/ui/PageHeader';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
-import styles from '../configuracoes.module.css';
+import styles from './equipe.module.css';
 import { api, getApiErrorMessage } from '@/lib/api';
 import { useBrandPermissions } from '@/hooks/useBrandPermissions';
 import { ROLE_LABELS, type BrandRole } from '@/lib/permissions';
@@ -65,19 +65,14 @@ export default function EquipePage() {
       });
 
       if (res.invite) {
-        // Email ainda sem conta: o backend devolve um link de uso único. Não há serviço
-        // de email no projeto, então quem convida repassa o link.
         setInviteLink(res.invite.url);
       } else {
-        // Já tinha conta: entrou direto na equipe.
         setInviteModalOpen(false);
       }
 
       setInviteEmail('');
       fetchMembers();
     } catch (error) {
-      // Mostra a mensagem real do backend (permissão, email já na equipe, role inválida)
-      // em vez de um texto genérico que chuta a causa.
       setErro(getApiErrorMessage(error, 'Não foi possível convidar.'));
     } finally {
       setInviting(false);
@@ -101,13 +96,13 @@ export default function EquipePage() {
   };
 
   return (
-    <div>
+    <div className={styles.container}>
       <Link href={`/${params.marca}/configuracoes`} className={styles.backLink}>
         <ArrowLeft size={16} />
         Voltar para configurações
       </Link>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <div className={styles.headerRow}>
         <PageHeader
           title="Gestão de Equipe"
           description="Controle quem tem acesso aos designs desta marca."
@@ -122,47 +117,56 @@ export default function EquipePage() {
       </div>
 
       {!canManageTeam && !permsLoading && (
-        <p style={{ fontSize: '13px', color: 'var(--color-text-dim)', marginBottom: '16px' }}>
+        <p className={styles.hintText}>
           {hint} Você pode ver a equipe, mas não alterá-la.
         </p>
       )}
 
       {erro && (
-        <p style={{ fontSize: '13px', color: '#ef4444', marginBottom: '16px' }} role="alert">
+        <p className={styles.errorText} role="alert">
           {erro}
         </p>
       )}
 
-      <Card padding="lg">
+      <Card padding="none">
         {loading ? (
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <div style={{ padding: '32px', display: 'flex', gap: '8px', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-tertiary)' }}>
             <Loader2 className="animate-spin" size={16} /> Carregando equipe...
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            {members.map(member => (
-              <div key={member.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px', border: '1px solid var(--color-border)', borderRadius: '8px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <div style={{ width: 32, height: 32, borderRadius: '50%', backgroundColor: 'var(--color-accent)', color: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>
-                    {member.user.name.charAt(0).toUpperCase()}
+          <div>
+            <div className={styles.tableHeader}>
+              <div>Usuário</div>
+              <div>Nível de Acesso</div>
+              <div></div>
+            </div>
+            <div className={styles.memberList}>
+              {members.map(member => (
+                <div key={member.id} className={styles.memberRow}>
+                  <div className={styles.userInfo}>
+                    <div className={styles.avatar}>
+                      {member.user.name.charAt(0).toUpperCase()}
+                    </div>
+                    <div className={styles.userDetails}>
+                      <span className={styles.userName}>{member.user.name}</span>
+                      <span className={styles.userEmail}>{member.user.email}</span>
+                    </div>
                   </div>
                   <div>
-                    <div style={{ fontWeight: 500 }}>{member.user.name}</div>
-                    <div style={{ fontSize: '12px', color: 'var(--color-text-dim)' }}>{member.user.email}</div>
+                    <span className={`${styles.roleBadge} ${member.role === 'ADMIN' || member.role === 'OWNER' ? styles.admin : ''}`}>
+                      {ROLE_LABELS[member.role as BrandRole] ?? member.role}
+                    </span>
+                  </div>
+                  <div className={styles.actions}>
+                    {member.role !== 'OWNER' && canManageTeam && (
+                      <button onClick={() => handleRemove(member.userId)} className={styles.deleteButton} title="Remover usuário">
+                        <Trash2 size={16} />
+                      </button>
+                    )}
                   </div>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                  <span style={{ fontSize: '12px', background: 'var(--color-bg-elevated)', padding: '4px 8px', borderRadius: '4px', border: '1px solid var(--color-border)' }}>
-                    {ROLE_LABELS[member.role as BrandRole] ?? member.role}
-                  </span>
-                  {member.role !== 'OWNER' && canManageTeam && (
-                    <button onClick={() => handleRemove(member.userId)} style={{ background: 'transparent', border: 'none', color: '#ef4444', cursor: 'pointer' }}>
-                      <Trash2 size={16} />
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
         )}
       </Card>
@@ -179,15 +183,15 @@ export default function EquipePage() {
 
             {inviteLink ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                <p style={{ fontSize: '13px', color: 'var(--color-text-muted, #9ca3af)', lineHeight: 1.5 }}>
+                <p style={{ fontSize: '13px', color: 'var(--color-text-tertiary)', lineHeight: 1.5 }}>
                   Esta pessoa ainda não tem conta. Envie o link abaixo para ela criar a senha
                   e entrar na equipe. O link vale por 7 dias e só pode ser usado uma vez.
                 </p>
                 <input
                   readOnly
                   value={inviteLink}
+                  className={styles.inputField}
                   onFocus={e => e.currentTarget.select()}
-                  style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--color-border)', background: 'var(--color-bg)', color: '#fff', fontSize: '12px' }}
                 />
                 <div className={styles.modalActions}>
                   <Button type="button" variant="secondary" onClick={closeInviteModal}>Fechar</Button>
@@ -198,29 +202,70 @@ export default function EquipePage() {
               </div>
             ) : (
             <form onSubmit={handleInvite}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '24px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', marginBottom: '24px' }}>
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', marginBottom: '8px' }}>Email</label>
+                  <label className={styles.inputLabel}>Email</label>
                   <input
                     type="email"
                     required
-                    style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--color-border)', background: 'transparent', color: '#fff' }}
+                    className={styles.inputField}
                     value={inviteEmail}
                     onChange={e => setInviteEmail(e.target.value)}
                     placeholder="email@exemplo.com"
                   />
                 </div>
+                
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', marginBottom: '8px' }}>Nível de Permissão</label>
-                  <select
-                    style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid var(--color-border)', background: 'var(--color-bg)', color: '#fff' }}
-                    value={inviteRole}
-                    onChange={e => setInviteRole(e.target.value)}
-                  >
-                    <option value="ADMIN">ADMIN (Pode convidar outras pessoas)</option>
-                    <option value="EDITOR">EDITOR (Pode criar e alterar designs)</option>
-                    <option value="VIEWER">VIEWER (Apenas visualiza e comenta)</option>
-                  </select>
+                  <label className={styles.inputLabel}>Nível de Permissão</label>
+                  <div className={styles.roleSelector}>
+                    {/* Role ADMIN */}
+                    <label className={`${styles.roleOption} ${inviteRole === 'ADMIN' ? styles.selected : ''}`}>
+                      <input
+                        type="radio"
+                        name="role"
+                        value="ADMIN"
+                        checked={inviteRole === 'ADMIN'}
+                        onChange={e => setInviteRole(e.target.value)}
+                        className={styles.roleRadio}
+                      />
+                      <div className={styles.roleDetails}>
+                        <span className={styles.roleName}>Administrador (ADMIN)</span>
+                        <span className={styles.roleDesc}>Acesso total. Pode criar e editar designs, gerenciar equipe, configurar a IA e apagar a marca.</span>
+                      </div>
+                    </label>
+
+                    {/* Role EDITOR */}
+                    <label className={`${styles.roleOption} ${inviteRole === 'EDITOR' ? styles.selected : ''}`}>
+                      <input
+                        type="radio"
+                        name="role"
+                        value="EDITOR"
+                        checked={inviteRole === 'EDITOR'}
+                        onChange={e => setInviteRole(e.target.value)}
+                        className={styles.roleRadio}
+                      />
+                      <div className={styles.roleDetails}>
+                        <span className={styles.roleName}>Editor (EDITOR)</span>
+                        <span className={styles.roleDesc}>Criador de conteúdo. Pode conversar com a IA, gerar novos designs e editar slides. Não gerencia a equipe.</span>
+                      </div>
+                    </label>
+
+                    {/* Role VIEWER */}
+                    <label className={`${styles.roleOption} ${inviteRole === 'VIEWER' ? styles.selected : ''}`}>
+                      <input
+                        type="radio"
+                        name="role"
+                        value="VIEWER"
+                        checked={inviteRole === 'VIEWER'}
+                        onChange={e => setInviteRole(e.target.value)}
+                        className={styles.roleRadio}
+                      />
+                      <div className={styles.roleDetails}>
+                        <span className={styles.roleName}>Visualizador (VIEWER)</span>
+                        <span className={styles.roleDesc}>Somente leitura. Pode visualizar os designs gerados e baixar arquivos finais, mas não pode editar ou criar.</span>
+                      </div>
+                    </label>
+                  </div>
                 </div>
               </div>
               <div className={styles.modalActions}>

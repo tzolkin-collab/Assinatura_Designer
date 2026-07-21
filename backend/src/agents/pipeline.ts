@@ -45,6 +45,10 @@ export interface PipelineParams {
   approvedSkeleton?: SlideSkeletonItem[];
   /** Copy oficial completa (para o planner, quando não há roteiro aprovado). */
   sourceCopy?: string;
+  /** Se true, o pipeline gera apenas a capa (Slide 0) e pausa aguardando aprovação visual. */
+  generateStyleProofOnly?: boolean;
+  /** Se true, o pipeline retoma a geração de uma pausa de estilo (gerando do Slide 1 em diante). */
+  resumeFromStyleProof?: boolean;
 }
 
 export async function runPipeline(params: PipelineParams): Promise<void> {
@@ -111,8 +115,7 @@ async function runPipelineInner(
   // Geração de passo único: gera → revisa → para. NÃO regeramos automaticamente
   // a apresentação inteira. A análise do revisor é mostrada ao usuário, que
   // decide se aceita o design ou pede ajustes/refação no chat.
-  {
-    await checkCancelled();
+  await checkCancelled();
     // ── 1. Planner ────────────────────────────────────────────────────────────
     ws.progress(sessionId, 10, 'Planejando estrutura (Manager)...');
 
@@ -269,7 +272,11 @@ async function runPipelineInner(
             logoUrl: brand.logoUrl,
             assetUrls: brand.assetUrls,
           },
-          skeleton,
+          skeleton: params.generateStyleProofOnly 
+            ? skeleton.slice(0, 1) 
+            : params.resumeFromStyleProof 
+              ? skeleton.slice(1) 
+              : skeleton,
         },
         extractJsonObject,
         // A cada slide pronto: transmite o delta (preview ao vivo) e emite
@@ -298,12 +305,14 @@ async function runPipelineInner(
             reasoning: partial.reasoning,
             slides: [] as unknown[],
           };
-          ws.designSlide(sessionId, { index, total: totalSlides, slide, envelope });
+          const realIndex = params.resumeFromStyleProof ? index + 1 : index;
+          const realTotal = params.resumeFromStyleProof ? totalSlides + 1 : totalSlides;
+          ws.designSlide(sessionId, { index: realIndex, total: realTotal, slide, envelope });
 
           // Persistência incremental: salva o slide individual na tabela relacional.
           try {
             const existingSlide = await prisma.slide.findFirst({
-              where: { postId, position: index },
+              where: { postId, position: realIndex },
             });
             if (existingSlide) {
               await prisma.slide.update({
@@ -436,7 +445,7 @@ async function runPipelineInner(
       ws.error(sessionId, `Não consegui gerar o design agora. ${humanizeGeminiError(err)}`);
       throw err;
     }
-  }
+
 
   // ── Salvar post no banco ────────────────────────────────────────────────────
   try {
@@ -491,7 +500,48 @@ async function runPipelineInner(
   }
 
   // ── Finalizar ──────────────────────────────────────────────────────────────
-  await updateSession(sessionId, { phase: 'done', workerStatus: 'done' });
+  if (params.generateStyleProofOnly) {
+    await updateSession(sessionId, { 
+      phase: 'listening', // Volta para listening para aprovar a amostra
+      workerStatus: 'idle',
+      pendingStyleProof: {
+        format,
+        postId,
+        skeleton,
+        brief,
+        sourceCopy: params.sourceCopy,
+      },
+      activeQuestion: {
+        id: randomUUID(),
+        kind: 'generic',
+        question: 'Gerei o primeiro slide como amostra visual. O estilo agradou? Posso seguir por essa linha?',
+        options: [
+          { id: 'aprovado', label: 'Aprovado', description: 'Gerar o restante da apresentação' },
+          { id: 'reprovado', label: 'Quero mudar algo', description: 'Ajustar o estilo primeiro' }
+        ],
+        allowFreeform: true,
+        allowSkip: false,
+        mode: session.reviewMode,
+      }
+    });
+  } else {
+    await updateSession(sessionId, { 
+      phase: 'done', 
+      workerStatus: 'done',
+      activeQuestion: {
+        id: randomUUID(),
+        kind: 'generic',
+        question: 'O que achou do resultado?',
+        options: [
+          { id: 'aprovado', label: 'Ficou ótimo!', description: 'Finalizar e manter assim' },
+          { id: 'reprovado', label: 'Quero mudar algo', description: 'Pedir ajustes e salvar na memória' }
+        ],
+        allowFreeform: true,
+        allowSkip: true,
+        mode: session.reviewMode,
+      }
+    });
+  }
   const finalSession = await getSession(sessionId);
   if (finalSession) {
     ws.sessionState(sessionId, {

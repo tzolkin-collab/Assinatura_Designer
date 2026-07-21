@@ -155,14 +155,17 @@ model Reference {
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
   brandId      String
-  archetype    String?
-  density      String?
-  imageUrl     String?
-  markers      Json?
-  palette      String[]
-  sourceType   SourceType @default(WEBSITE)
-  toneOfVoice  String?
-  brand        Brand      @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  archetype        String?
+  density          String?
+  imageUrl         String?
+  markers          Json?
+  palette          String[]
+  sourceType       SourceType @default(WEBSITE)
+  toneOfVoice      String?
+  autoSyncEnabled  Boolean    @default(false)
+  autoSyncInterval Int        @default(14)
+  lastSyncedAt     DateTime?
+  brand            Brand      @relation(fields: [brandId], references: [id], onDelete: Cascade)
 
   @@index([brandId])
 }

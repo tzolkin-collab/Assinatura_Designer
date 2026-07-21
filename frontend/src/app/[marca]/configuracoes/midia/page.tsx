@@ -57,6 +57,7 @@ export default function MidiaPage() {
   const [uploading, setUploading] = useState(false);
   const [erro, setErro] = useState('');
   const [importando, setImportando] = useState(false);
+  const [exportandoCanva, setExportandoCanva] = useState<string | null>(null);
   const [popupAberto, setPopupAberto] = useState<'drive' | 'canva' | null>(null);
 
   const [filterSource, setFilterSource] = useState<AssetSource | null>(null);
@@ -176,6 +177,21 @@ export default function MidiaPage() {
       fetchAssets();
     } catch (e) {
       setErro(getApiErrorMessage(e, 'Não foi possível excluir o arquivo.'));
+    }
+  };
+
+  const handleExportCanva = async (assetId: string) => {
+    setExportandoCanva(assetId);
+    setErro('');
+    try {
+      const res = await api.post<{ url: string }>(`/brands/${slug}/assets/${assetId}/export-canva`, {});
+      if (res.url) {
+        window.open(res.url, '_blank');
+      }
+    } catch (error) {
+      setErro(getApiErrorMessage(error, 'Falha ao exportar imagem para o Canva. Verifique se o Canva está conectado em Configurações > Integrações Canva.'));
+    } finally {
+      setExportandoCanva(null);
     }
   };
 
@@ -342,15 +358,28 @@ export default function MidiaPage() {
                   )}
                 </div>
 
-                <button
-                  onClick={() => handleRemove(asset.id)}
-                  disabled={!canManageAssets}
-                  title={canManageAssets ? 'Excluir arquivo' : hint}
-                  className={styles.removeBtn}
-                  style={{ display: canManageAssets ? 'flex' : 'none' }}
-                >
-                  <Trash2 size={14} />
-                </button>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  {source === 'ai-generated' && (
+                    <button
+                      onClick={() => handleExportCanva(asset.id)}
+                      disabled={exportandoCanva === asset.id || !canManageAssets}
+                      title={canManageAssets ? 'Criar um design no Canva com essa imagem' : hint}
+                      className={styles.removeBtn}
+                      style={{ color: '#00c4cc' }}
+                    >
+                      {exportandoCanva === asset.id ? <Loader2 className="animate-spin" size={14} /> : <FileImage size={14} />}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => handleRemove(asset.id)}
+                    disabled={!canManageAssets}
+                    title={canManageAssets ? 'Excluir arquivo' : hint}
+                    className={styles.removeBtn}
+                    style={{ display: canManageAssets ? 'flex' : 'none' }}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
               </Card>
             );
           })

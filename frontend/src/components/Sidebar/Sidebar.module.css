@@ -29,7 +29,7 @@
 .logoMark {
   width: 32px;
   height: 32px;
-  background-color: var(--color-accent);
+  background-color: #ffffff;
   color: #ffffff;
   border-radius: var(--radius-md);
   display: flex;
