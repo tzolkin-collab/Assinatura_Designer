@@ -15,6 +15,14 @@ export interface SlideSkeletonItem {
    *  Presente apenas no modo roteirista — quando existe, o gerador NÃO inventa
    *  conteúdo: usa este texto. */
   copy?: string;
+  /** Descrição do que a imagem/ilustração deste slide precisa mostrar — só
+   *  quando o layout se beneficia de uma imagem real (não gradiente/forma).
+   *  Resolvida depois por `lib/imageResolver.ts` (reaproveita asset da
+   *  biblioteca ou gera um novo) antes do artista escrever o HTML. */
+  imageHint?: string;
+  /** Preenchidos pelo imageResolver — não vêm do planner. */
+  imageUrl?: string;
+  svgMarkup?: string;
 }
 
 // Teto de sanidade da copy injetada nos prompts do planner (~15-20K tokens).
@@ -95,6 +103,7 @@ function coerceItem(item: Partial<SlideSkeletonItem>, order: number, isFirst: bo
       : (isFirst ? 'title-hero' : isLast ? 'closing' : 'content-split'),
     order,
     ...(typeof item?.copy === 'string' && item.copy.trim() ? { copy: item.copy.trim() } : {}),
+    ...(typeof item?.imageHint === 'string' && item.imageHint.trim() ? { imageHint: item.imageHint.trim() } : {}),
   };
 }
 
@@ -151,7 +160,8 @@ Array<{
   title: string;       // título sugerido/tema do slide
   goal: string;        // objetivo de conteúdo do slide (o que o slide deve transmitir de forma textual)
   layout_type: string; // sugestão de layout (ex: title-hero, content-split, metrics, quote, closing)
-  order: number;       // índice sequencial do slide, começando do 1${copyBlock.schemaExtra}
+  order: number;       // índice sequencial do slide, começando do 1
+  imageHint?: string;  // SÓ quando o layout pede uma imagem/foto/ilustração real (não gradiente/forma geométrica): descreva o que ela deve mostrar${copyBlock.schemaExtra}
 }>
 
 Regras Importantes:
@@ -159,7 +169,8 @@ Regras Importantes:
 2. O último slide deve ser sempre um encerramento ou chamada de ação (ex: closing).
 3. Distribua os tipos de slides (layout_type) para criar um ritmo visual dinâmico.
 4. ${countRule}
-5. Retorne APENAS o array JSON limpo, sem marcações de código markdown (como \`\`\`json).${copyBlock.rules}
+5. imageHint é opcional e raro — a maioria dos slides deve usar tipografia/gradiente/forma, não foto. Só preencha quando uma imagem/foto/ilustração real agregar (ex: produto, pessoa, cenário, ícone complexo). Descreva o CONTEÚDO visual, não o estilo.
+6. Retorne APENAS o array JSON limpo, sem marcações de código markdown (como \`\`\`json).${copyBlock.rules}
 
 ## Briefing do usuário:
 ${params.brief}
@@ -214,14 +225,15 @@ async function runPlannerChunked(
 Gere APENAS os slides de ${start + 1} a ${end} (${end - start} itens), continuando o arco narrativo de forma coesa e sem repetir o que já foi planejado.
 
 Schema de cada item (array JSON puro, sem markdown):
-{ "title": string, "goal": string, "layout_type": string, "order": number${copyBlock.schemaExtra ? ', "copy": string' : ''} }
+{ "title": string, "goal": string, "layout_type": string, "order": number, "imageHint"?: string${copyBlock.schemaExtra ? ', "copy": string' : ''} }
 
 Regras:
 1. order deve ir de ${start + 1} a ${end}, em sequência.
 ${start === 0 ? '2. O slide 1 é a capa (title-hero).' : '2. NÃO é o início — dê continuidade ao que já existe.'}
 ${end === target ? `3. O slide ${target} é o encerramento/CTA (closing).` : '3. NÃO é o final — deixe gancho para os próximos.'}
 4. Varie os layout_type para ritmo visual.
-5. Retorne SÓ o array JSON dos ${end - start} itens.${copyBlock.rules}
+5. imageHint é opcional e raro — só quando uma imagem/foto/ilustração real agregar ao slide (produto, pessoa, cenário). A maioria deve usar tipografia/gradiente/forma.
+6. Retorne SÓ o array JSON dos ${end - start} itens.${copyBlock.rules}
 
 ## Briefing do usuário:
 ${params.brief.slice(0, 4000)}

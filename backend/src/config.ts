@@ -58,6 +58,9 @@ export const config = {
     fast: process.env.GEMINI_FAST_MODEL || 'gemini-2.5-flash',
     /** Tarefas mecânicas (classificar, extrair, sugerir): o mais barato que funciona. */
     utility: process.env.GEMINI_UTILITY_MODEL || 'gemini-2.5-flash-lite',
+    /** Geração de imagem/foto (lib/imageResolver.ts). Fallback pro flash-image se o pro estourar cota. */
+    image: process.env.GEMINI_IMAGE_MODEL || 'gemini-3-pro-image-preview',
+    imageFallback: process.env.GEMINI_IMAGE_FALLBACK_MODEL || 'gemini-2.5-flash-image',
   },
   // Teto de tokens de "thinking" na geração. O modelo pro às vezes gasta quase
   // todo o maxOutputTokens pensando e trunca o JSON (finishReason MAX_TOKENS →
@@ -71,6 +74,9 @@ export const config = {
   // 0 = sem limite.
   aiDailyTokenBudget: parseInt(process.env.AI_DAILY_TOKEN_BUDGET || '20000000', 10),
   aiBrandDailyTokenBudget: parseInt(process.env.AI_BRAND_DAILY_TOKEN_BUDGET || '5000000', 10),
+  // Teto de imagens GERADAS (não reaproveitadas da biblioteca) por deck — cada uma é uma
+  // chamada de modelo de imagem, mais cara e lenta que texto. 0 = nunca gera, só reaproveita.
+  maxGeneratedImagesPerDeck: parseInt(process.env.MAX_GENERATED_IMAGES_PER_DECK || '6', 10),
   // Só para estimar o custo no log. 0 = não estima (default: não chutamos preço).
   // Também é o preço de reserva (input=output) para um modelo fora da tabela abaixo.
   aiUsdPerMillionTokens: parseFloat(process.env.AI_USD_PER_MILLION_TOKENS || '0'),

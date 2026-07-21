@@ -11,6 +11,7 @@ import type { ReviewResult } from './reviewer/index.js';
 import { generateHtmlDesignBatched } from '../lib/htmlDesign.js';
 import { syncPostSlides } from '../lib/postHelper.js';
 import { researchBrand, type VisualRef } from '../lib/fabricaLegacy.js';
+import { resolveSlideImages } from '../lib/imageResolver.js';
 import { humanizeGeminiError } from '../lib/geminiRetry.js';
 import { extractJsonObject } from '../lib/jsonHelper.js';
 import { GoogleGenAI } from '@google/genai';
@@ -212,6 +213,22 @@ async function runPipelineInner(
       }
     }
 
+    // ── 1.5. Imagens dos slides que pedem (reaproveita da biblioteca ou gera) ──
+    await checkCancelled();
+    const resolvedImages = await resolveSlideImages({
+      brandId: brand.id,
+      brandName: brand.name,
+      brandColors: brand.colors,
+      width,
+      height,
+      skeleton,
+      postId,
+    }).catch((err) => {
+      logger.error('Resolução de imagens dos slides falhou; seguindo sem imagens geradas', { error: (err as Error).message });
+      return new Map<number, { imageUrl?: string; svgMarkup?: string }>();
+    });
+    const enrichedSkeleton = skeleton.map((item, index) => ({ ...item, ...resolvedImages.get(index) }));
+
     // ── 2. Geração HTML/CSS (modo nativo do modelo) ───────────────────────────
     await checkCancelled();
     ws.progress(sessionId, 30, 'Gerando design...');
@@ -272,11 +289,11 @@ async function runPipelineInner(
             logoUrl: brand.logoUrl,
             assetUrls: brand.assetUrls,
           },
-          skeleton: params.generateStyleProofOnly 
-            ? skeleton.slice(0, 1) 
-            : params.resumeFromStyleProof 
-              ? skeleton.slice(1) 
-              : skeleton,
+          skeleton: params.generateStyleProofOnly
+            ? enrichedSkeleton.slice(0, 1)
+            : params.resumeFromStyleProof
+              ? enrichedSkeleton.slice(1)
+              : enrichedSkeleton,
         },
         extractJsonObject,
         // A cada slide pronto: transmite o delta (preview ao vivo) e emite

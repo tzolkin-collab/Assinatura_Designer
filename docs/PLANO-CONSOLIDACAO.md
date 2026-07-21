@@ -343,6 +343,27 @@ ficou **bloqueada**: `prisma migrate dev` achou um drift não relacionado (colun
 existem no banco sem migration no histórico — provável `db push` de sessão anterior). Resolver esse
 drift primeiro (não tentar `migrate reset` — apagaria dados reais).
 
+**Addendum 2026-07-21 (2ª parte) — geração de imagem reconstruída dentro do motor vivo.**
+O dono do produto confirmou: `assetUrls` já É a Biblioteca de Mídia (`brandContext.ts` lê
+`brand.assets`), isso nunca quebrou. O que faltava era GERAR imagem nova quando a biblioteca
+não serve — capacidade que só existia no motor órfão removido acima. Reconstruído como um
+passo novo, `lib/imageResolver.ts`, plugado em `pipeline.ts` **entre o planner e o artista**:
+1. Planner ganhou um campo opcional `imageHint` por slide (só quando o slide pede foto/ilustração
+   real, não gradiente/forma) — schema existia solto desde antes (tipo `SlidePlan.imageHint`
+   nunca era produzido de verdade; agora é, no schema que o planner REALMENTE usa).
+2. `resolveSlideImages` decide por slide, num único call barato: reaproveitar asset da biblioteca
+   (só se servir de verdade pra premissa — não força encaixe), gerar foto (`gemini-3-pro-image-preview`
+   → fallback `gemini-2.5-flash-image`, sobe pro R2, vira `Asset` novo `source:'ai-generated'`) ou
+   gerar SVG (ícone/ilustração vetorial, embutido inline no HTML — não é asset de biblioteca,
+   reaproveitamento de SVG é por prompt).
+3. Teto configurável (`MAX_GENERATED_IMAGES_PER_DECK`, default 6) — além do teto, slide fica sem imagem.
+4. Artista recebe a URL/SVG já resolvido no skeleton e é instruído a usá-lo tal qual, nunca inventar outro.
+
+**Achado no caminho (não mexido, fica registrado):** `generateHtmlDesign`/`generateHtmlDesignProgressive`
+e seus builders de prompt single-slide em `htmlDesign.ts` são código morto — zero chamador,
+só `generateHtmlDesignBatched` é usado por `pipeline.ts`. `agents/content/index.ts` também ficou
+órfão (perdeu o único chamador quando `fabricaLegacy.ts` foi podado). Candidatos a limpeza futura.
+
 **Direção de produto (declarada, ainda não construída):** só sobra **Apresentação** e **Design** —
 sem Animação. "Design" **não é sinônimo de 1 slide**: é a mesma saída do motor html-design, mas
 dimensionada pelos formatos já propostos na galeria + contexto do bot — cobre post estático de

@@ -36,7 +36,19 @@ export interface GenerateHtmlDesignInput {
     /** URLs reais do pool de assets da marca — o artista prefere estas a inventar fotos de banco. */
     assetUrls?: string[];
   };
-  skeleton?: Array<{ title: string; goal: string; layout_type: string; order: number; copy?: string }>;
+  skeleton?: Array<{
+    title: string;
+    goal: string;
+    layout_type: string;
+    order: number;
+    copy?: string;
+    /** URL real (biblioteca da marca ou gerada por IA e já hospedada) — o artista
+     *  DEVE usar via <img src>, nunca inventar outra para este slide. */
+    imageUrl?: string;
+    /** Markup <svg>...</svg> completo, gerado por IA — o artista deve embutir
+     *  inline no HTML do slide (não é URL, é o próprio código). */
+    svgMarkup?: string;
+  }>;
 }
 
 export class HtmlDesignValidationError extends Error {
@@ -448,6 +460,7 @@ function buildBatchUserPrompt(
 
   let skeletonPrompt = '\nSLIDES PLANEJADOS NESTE LOTE:\n';
   let hasCopy = false;
+  let hasResolvedImage = false;
   for (let i = startIndex; i < endIndex; i++) {
     const item = input.skeleton?.[i];
     if (item) {
@@ -456,10 +469,21 @@ function buildBatchUserPrompt(
         hasCopy = true;
         skeletonPrompt += `  COPY OFICIAL DO SLIDE ${i + 1} (use este texto VERBATIM como conteúdo — distribua em título/corpo conforme o layout, NÃO reescreva nem invente):\n  """${item.copy.trim()}"""\n`;
       }
+      if (item.imageUrl) {
+        hasResolvedImage = true;
+        skeletonPrompt += `  IMAGEM RESOLVIDA DO SLIDE ${i + 1}: use exatamente esta URL num <img src="${item.imageUrl}">. NÃO invente outra imagem/URL para este slide.\n`;
+      }
+      if (item.svgMarkup) {
+        hasResolvedImage = true;
+        skeletonPrompt += `  SVG RESOLVIDO DO SLIDE ${i + 1} (embuta este markup INLINE no HTML do slide, redimensione via CSS se precisar, não reescreva o desenho):\n  ${item.svgMarkup}\n`;
+      }
     }
   }
   if (hasCopy) {
     skeletonPrompt += '\nREGRA DE COPY: os slides acima têm copy oficial aprovada. O texto renderizado deve ser ESSE texto — sua liberdade é o DESIGN (layout, cor, tipografia), nunca o conteúdo.\n';
+  }
+  if (hasResolvedImage) {
+    skeletonPrompt += '\nREGRA DE IMAGEM: quando um slide tem "IMAGEM RESOLVIDA" ou "SVG RESOLVIDO" acima, use exatamente o que foi dado — não gere outra imagem, não troque a URL, não redesenhe o SVG.\n';
   }
 
   // Referência CONCRETA de identidade: o HTML do slide 1 (truncado) ancora paleta,

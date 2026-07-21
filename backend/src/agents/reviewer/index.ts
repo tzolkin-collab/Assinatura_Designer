@@ -1,7 +1,6 @@
 import { GoogleGenAI } from '@google/genai';
 import { config } from '../../config.js';
 import { generateWithRetry } from '../../lib/geminiRetry.js';
-import type { PlannerOutput } from '../planner/index.js';
 import { extractJsonObject } from '../../lib/jsonHelper.js';
 import { renderHtmlToBase64 } from '../../lib/htmlRaster.js';
 import { buildSlideDocument, type HtmlDesignContent } from '../../lib/htmlDesign.js';
