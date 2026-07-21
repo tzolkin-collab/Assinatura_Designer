@@ -2,10 +2,14 @@ import prisma from './prisma.js';
 import { renderHtmlToPng } from './htmlRaster.js';
 import { mergeSlidesIntoPost } from './postHelper.js';
 import { resolveRenderableDeck } from './renderableDeck.js';
+import { htmlDocsToPptx } from './htmlToPptx.js';
+import { uploadFileToR2, assertR2Configured } from './r2.js';
 import {
   uploadAssetAndWait,
   createDesign,
   createDesignMerge,
+  createUrlImportJob,
+  waitForUrlImport,
   parseDesignResponse,
   CanvaSessionExpiredError,
 } from './canvaClient.js';
@@ -28,6 +32,8 @@ export interface CanvaExportParams {
   userId: string;
   /** Exporta um slide só (índice) ou o deck inteiro quando ausente. */
   slideIndex?: number;
+  /** 'png' (padrão): arte pronta, rasterizada. 'pptx': design editável via Design Import API. */
+  mode?: 'png' | 'pptx';
 }
 
 export interface CanvaExportResult {
@@ -143,4 +149,63 @@ export async function runCanvaExport(
       designIds: perSlideDesignIds,
     };
   }
+}
+
+const PPTX_MIME = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+
+/**
+ * Export para o Canva pelo caminho EDITÁVEL: gera o PPTX do deck (htmlToPptx.ts,
+ * texto continua texto), sobe no R2 (a Design Import API do Canva exige uma URL
+ * pública — não aceita upload direto de bytes nesta rota) e manda o Canva
+ * importar via `POST /url-imports`. Resolve o BUG 2 do plano de consolidação:
+ * o caminho PNG (asset→design→merge acima) entrega arte pronta, texto vira
+ * pixel; este entrega o design de verdade, com trade-off de fidelidade
+ * (gradientes/sombras/posição livre podem não sobreviver à conversão).
+ */
+export async function runCanvaPptxExport(
+  params: CanvaExportParams,
+  onProgress?: ExportProgress,
+): Promise<CanvaExportResult> {
+  const { postId, userId } = params;
+
+  const post = await prisma.post.findUnique({
+    where: { id: postId },
+    include: { slides: { orderBy: { position: 'asc' } } },
+  });
+  if (!post) throw new Error('Post não encontrado');
+
+  const requester = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { canvaAccessToken: true },
+  });
+  if (!requester?.canvaAccessToken) {
+    throw new Error('Canva não conectado para este usuário');
+  }
+
+  // Falha rápido se o R2 não estiver configurado, antes de gastar tempo gerando o PPTX.
+  assertR2Configured();
+
+  const deck = resolveRenderableDeck(mergeSlidesIntoPost(post).content);
+  if (!deck) throw new Error('Export disponível apenas para designs html-design');
+
+  const titleBase = post.name?.trim() || `Design ${postId.slice(0, 8)}`;
+  const docs = Array.from({ length: deck.count }, (_, i) => deck.docAt(i));
+
+  const { buffer } = await htmlDocsToPptx(docs, deck.width, deck.height, titleBase, onProgress);
+
+  const publicUrl = await uploadFileToR2(buffer, `${titleBase}.pptx`, PPTX_MIME, 'canva-imports');
+
+  const created = (await createUrlImportJob(userId, publicUrl, titleBase, PPTX_MIME)) as {
+    job?: { id?: string };
+  };
+  const jobId = created.job?.id;
+  if (!jobId) throw new Error('Canva não retornou o id do job de import');
+
+  const design = await waitForUrlImport(userId, jobId);
+
+  return {
+    designId: design.id,
+    designUrl: design.urls?.edit_url ?? design.urls?.view_url,
+    slides: deck.count,
+  };
 }

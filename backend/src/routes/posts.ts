@@ -27,7 +27,10 @@ const exportFileSchema = z.object({
   }),
 });
 const createVersionSchema = z.object({ label: z.string().optional() });
-const exportCanvaSchema = z.object({ slideIndex: z.number().int().nonnegative().optional() });
+const exportCanvaSchema = z.object({
+  slideIndex: z.number().int().nonnegative().optional(),
+  mode: z.enum(['png', 'pptx']).optional(),
+});
 import { resolveRenderableDeck } from '../lib/renderableDeck.js';
 
 const ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
@@ -617,7 +620,7 @@ postsRouter.get('/:id/export-file/:jobId/download', async (req: AuthRequest, res
 postsRouter.post('/:id/export-canva', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const id = req.params.id as string;
-    const { slideIndex } = parseBody(exportCanvaSchema, req.body ?? {});
+    const { slideIndex, mode } = parseBody(exportCanvaSchema, req.body ?? {});
     const userId = req.user?.userId;
 
     // Valida tudo o que dá pra validar de forma barata ANTES de enfileirar: um job
@@ -651,10 +654,13 @@ postsRouter.post('/:id/export-canva', async (req: AuthRequest, res: Response, ne
       throw createError(400, 'slideIndex fora do limite');
     }
 
-    const jobId = await enqueueCanvaExport({ postId: id, userId: userId!, slideIndex });
+    // slideIndex só se aplica ao caminho PNG (asset por slide); PPTX sempre exporta
+    // o deck inteiro num arquivo só.
+    const effectiveSlideIndex = mode === 'pptx' ? undefined : slideIndex;
+    const jobId = await enqueueCanvaExport({ postId: id, userId: userId!, slideIndex: effectiveSlideIndex, mode });
 
     res.status(202).json({
-      data: { jobId, total: typeof slideIndex === 'number' ? 1 : deck.count },
+      data: { jobId, total: typeof effectiveSlideIndex === 'number' ? 1 : deck.count },
     });
   } catch (error) {
     next(error);

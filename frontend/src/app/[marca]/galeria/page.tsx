@@ -852,28 +852,57 @@ export default function BrandGaleriaPage() {
         const aspectRatio = `${contentWidth} / ${contentHeight}`;
 
         const isRunningExport = exportandoCanva?.postId === activeCanvaExportPost.id
-          || (exportando?.postId === activeCanvaExportPost.id && (exportando.formato === 'pptx' || exportando.formato === 'html'));
+          || (exportando?.postId === activeCanvaExportPost.id && exportando.formato === 'html');
 
         const handleExecutarCanvaExport = async (e: React.MouseEvent) => {
           e.preventDefault();
           if (canvaFormat === 'png') {
             await handleExportCanva(e, activeCanvaExportPost.id);
-          } else {
-            setMostrarCanvaInstrucoes(false);
+            return;
+          }
+          if (canvaFormat === 'pptx') {
+            // Caminho editável: gera PPTX → sobe no R2 → Canva importa via Design
+            // Import API. Mesma fila/progresso do PNG, resultado é um edit_url real.
+            setExportandoCanva({ postId: activeCanvaExportPost.id, done: 0, total: 0 });
             try {
-              await exportarDeck(
-                activeCanvaExportPost.id, 
-                canvaFormat, 
-                (done, total) => setExportando({ postId: activeCanvaExportPost.id, formato: canvaFormat, done, total }),
-                {}
+              const { jobId } = await api.post<{ jobId: string; total: number }>(
+                `/posts/${activeCanvaExportPost.id}/export-canva`,
+                { mode: 'pptx' },
               );
-              setMostrarCanvaInstrucoes(true);
+              const { acompanharExport } = await import('@/lib/canvaExport');
+              const resultado = await acompanharExport(
+                activeCanvaExportPost.id,
+                jobId,
+                (done, total) => setExportandoCanva({ postId: activeCanvaExportPost.id, done, total }),
+              );
+              if (resultado.designUrl) {
+                window.open(resultado.designUrl, '_blank', 'noopener');
+              }
+              alert('Design editável criado no Canva!');
+              setActiveCanvaExportPost(null);
             } catch (err) {
-              console.error(err);
-              alert('Não consegui exportar o arquivo.');
+              console.error('[export canva pptx]', err);
+              alert(getApiErrorMessage(err, 'Não consegui exportar para o Canva.'));
             } finally {
-              setExportando(null);
+              setExportandoCanva(null);
             }
+            return;
+          }
+          // HTML: o Canva não aceita HTML via API — só resta baixar e importar na UI.
+          setMostrarCanvaInstrucoes(false);
+          try {
+            await exportarDeck(
+              activeCanvaExportPost.id,
+              canvaFormat,
+              (done, total) => setExportando({ postId: activeCanvaExportPost.id, formato: canvaFormat, done, total }),
+              {}
+            );
+            setMostrarCanvaInstrucoes(true);
+          } catch (err) {
+            console.error(err);
+            alert('Não consegui exportar o arquivo.');
+          } finally {
+            setExportando(null);
           }
         };
 
@@ -954,41 +983,41 @@ export default function BrandGaleriaPage() {
                         <div>
                           <div className={styles.canvaFormatCardTitle}>Imagem PNG (Automático)</div>
                           <div className={styles.canvaFormatCardDesc}>
-                            Envia os slides renderizados como imagens de alta resolução direto para a sua conta do Canva, unidos num design multipágina.
+                            Envia os slides renderizados como imagens de alta resolução direto para a sua conta do Canva, unidos num design multipágina. Fiel ao visual, mas o texto vira pixel — não dá pra editar depois.
                           </div>
                         </div>
                       </div>
+
+                      {/* PPTX Card — caminho editável via Design Import API */}
+                      {(htmlContent || (designPages && designPages.length > 0)) && (
+                        <div
+                          className={styles.canvaFormatCard}
+                          data-selected={canvaFormat === 'pptx'}
+                          onClick={() => { if (!isRunningExport) { setCanvaFormat('pptx'); setMostrarCanvaInstrucoes(false); } }}
+                        >
+                          <input
+                            type="radio"
+                            className={styles.canvaFormatCardRadio}
+                            checked={canvaFormat === 'pptx'}
+                            onChange={() => {}}
+                            disabled={isRunningExport}
+                          />
+                          <div>
+                            <div className={styles.canvaFormatCardTitle}>Apresentação PPTX (Editável, Automático)</div>
+                            <div className={styles.canvaFormatCardDesc}>
+                              Gera um PowerPoint e importa direto no Canva como design editável — texto continua texto. Pode perder gradientes, sombras ou posicionamento mais livre na conversão.
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
 
-                  {(htmlContent || (designPages && designPages.length > 0)) && (
+                  {htmlContent && (
                     <div className={styles.adobePanelSection} style={{ marginTop: '16px' }}>
                       <h4 className={styles.adobeSectionTitle}>Baixar arquivo</h4>
-                      
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                        {/* PPTX Card */}
-                        {(htmlContent || (designPages && designPages.length > 0)) && (
-                          <div 
-                            className={styles.canvaFormatCard}
-                            data-selected={canvaFormat === 'pptx'}
-                            onClick={() => { if (!isRunningExport) { setCanvaFormat('pptx'); setMostrarCanvaInstrucoes(false); } }}
-                          >
-                            <input 
-                              type="radio" 
-                              className={styles.canvaFormatCardRadio} 
-                              checked={canvaFormat === 'pptx'}
-                              onChange={() => {}}
-                              disabled={isRunningExport}
-                            />
-                            <div>
-                              <div className={styles.canvaFormatCardTitle}>Apresentação PPTX (Editável)</div>
-                              <div className={styles.canvaFormatCardDesc}>
-                                Baixa um arquivo PowerPoint com texto e formas editáveis. Você pode importá-lo manualmente no Canva depois.
-                              </div>
-                            </div>
-                          </div>
-                        )}
 
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                         {/* HTML Card */}
                         {htmlContent && (
                           <div 
@@ -1035,7 +1064,7 @@ export default function BrandGaleriaPage() {
                     </div>
                   )}
 
-                  {mostrarCanvaInstrucoes && (canvaFormat === 'pptx' || canvaFormat === 'html') && (
+                  {mostrarCanvaInstrucoes && canvaFormat === 'html' && (
                     <div className={styles.canvaInstructionBox}>
                       <div style={{ fontWeight: 700, display: 'flex', alignItems: 'center', gap: '6px' }}>
                         <span>✓</span> O arquivo foi gerado com sucesso!
@@ -1045,7 +1074,7 @@ export default function BrandGaleriaPage() {
                         <ol style={{ margin: '8px 0 0 16px', padding: 0 }}>
                           <li>Abra a tela inicial do seu Canva.</li>
                           <li>Clique em <strong>Criar um design</strong> e depois em <strong>Importar arquivo</strong>.</li>
-                          <li>Selecione o arquivo ZIP/PPTX que você acabou de baixar e pronto!</li>
+                          <li>Selecione o arquivo ZIP que você acabou de baixar e pronto!</li>
                         </ol>
                       </div>
                     </div>
@@ -1067,9 +1096,9 @@ export default function BrandGaleriaPage() {
                     >
                       {isRunningExport
                         ? 'Processando...'
-                        : canvaFormat === 'png'
-                          ? 'Exportar para o Canva'
-                          : 'Baixar arquivo'}
+                        : canvaFormat === 'html'
+                          ? 'Baixar arquivo'
+                          : 'Exportar para o Canva'}
                     </button>
                   </div>
                 </div>

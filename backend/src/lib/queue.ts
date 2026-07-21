@@ -13,7 +13,7 @@ import prisma from './prisma.js';
 import { config } from '../config.js';
 import { ws } from './websocket.js';
 import { runPipeline, type PipelineParams } from '../agents/pipeline.js';
-import { runCanvaExport, type CanvaExportParams } from './canvaExport.js';
+import { runCanvaExport, runCanvaPptxExport, type CanvaExportParams } from './canvaExport.js';
 import { CanvaSessionExpiredError } from './canvaClient.js';
 import { getCanvaDesignName } from './canvaSync.js';
 import { runDeckExport, type DeckExportParams } from './deckExport.js';
@@ -149,11 +149,14 @@ export function startCanvaExportWorker(): Worker<CanvaExportParams> {
   exportWorker = new Worker<CanvaExportParams>(
     EXPORT_QUEUE_NAME,
     async (job: Job<CanvaExportParams>) => {
-      const result = await runCanvaExport(job.data, async (done, total) => {
+      const onProgress = async (done: number, total: number) => {
         // O progresso vive no próprio job: o cliente lê via GET do status, sem
         // precisar de sessão de WebSocket (o editor não tem uma).
         await job.updateProgress({ done, total });
-      });
+      };
+      const result = job.data.mode === 'pptx'
+        ? await runCanvaPptxExport(job.data, onProgress)
+        : await runCanvaExport(job.data, onProgress);
 
       // Salva os dados do design no banco após o export ter sucesso
       try {

@@ -461,6 +461,77 @@ export async function waitForExport(
   throw new Error('Canva export timed out');
 }
 
+// ── URL Import: PPTX → design editável (Design Imports API) ───────────────────
+// É o caminho que entrega EDITÁVEL de verdade — diferente do createDesign com
+// asset_id (PNG rasterizado), aqui o Canva importa o PPTX e converte cada
+// elemento (texto, forma, imagem) em objeto nativo. Exige uma URL PÚBLICA
+// (o R2 resolve isso: sobe o PPTX, dá a URL, o Canva busca sozinho).
+// Contrato verificado em canva.dev/docs/connect/api-reference/design-imports/
+// (create-url-import-job, get-url-import-job) — 2026-07-21.
+
+export async function createUrlImportJob(
+  userId: string,
+  url: string,
+  title: string,
+  mimeType: string,
+) {
+  const response = await canvaFetch(userId, '/url-imports', {
+    method: 'POST',
+    body: JSON.stringify({ title: title.slice(0, 255), url, mime_type: mimeType }),
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Canva URL import failed (${response.status}): ${text}`);
+  }
+  return response.json();
+}
+
+export async function getUrlImportJob(userId: string, jobId: string) {
+  const response = await canvaFetch(userId, `/url-imports/${jobId}`);
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Canva get URL import failed (${response.status}): ${text}`);
+  }
+  return response.json();
+}
+
+export interface CanvaUrlImportDesign {
+  id: string;
+  title?: string;
+  urls?: { edit_url?: string; view_url?: string };
+}
+
+/** Faz polling até o job de import terminar (sucesso ou falha). */
+export async function waitForUrlImport(
+  userId: string,
+  jobId: string,
+  maxAttempts = 60,
+  intervalMs = 3000,
+): Promise<CanvaUrlImportDesign> {
+  for (let i = 0; i < maxAttempts; i++) {
+    const result = (await getUrlImportJob(userId, jobId)) as {
+      job?: {
+        status?: string;
+        result?: { designs?: CanvaUrlImportDesign[] };
+        error?: { code?: string; message?: string };
+      };
+    };
+    const job = result.job;
+
+    if (job?.status === 'success') {
+      const design = job.result?.designs?.[0];
+      if (!design) throw new Error('Canva concluiu o import mas não retornou nenhum design');
+      return design;
+    }
+    if (job?.status === 'failed') {
+      throw new Error(`Canva URL import falhou: ${job.error?.message ?? job.error?.code ?? 'motivo desconhecido'}`);
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  throw new Error('Canva URL import excedeu o tempo limite');
+}
+
 export async function autofillDesign(
   userId: string,
   brandTemplateId: string,
