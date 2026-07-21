@@ -29,8 +29,6 @@ const exportFileSchema = z.object({
 const createVersionSchema = z.object({ label: z.string().optional() });
 const exportCanvaSchema = z.object({ slideIndex: z.number().int().nonnegative().optional() });
 import { resolveRenderableDeck } from '../lib/renderableDeck.js';
-import { generateIRPatchForSlide } from '../lib/designIR/aiPatch.js';
-import type { SlideNode as IRSlideNode } from '../lib/designIR/types.js';
 
 const ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
 
@@ -238,74 +236,6 @@ postsRouter.put('/:id/slides/:index/code', async (req: AuthRequest, res: Respons
     await prisma.post.update({ where: { id: post.id }, data: { updatedAt: new Date() } });
 
     res.json({ data: { slideIndex: idx, slide: clean } });
-  } catch (error) {
-    next(error);
-  }
-});
-
-// POST /api/posts/:id/ai-patch - edição cirúrgica IR guiada por linguagem natural.
-// Recebe uma instrução + (opcional) elementos selecionados de UM slide e devolve
-// um IRPatch (lista de ops) que o editor aplica localmente via applyPatch. Não
-// persiste — o salvamento do post é feito à parte pelo editor (PUT /posts/:id).
-postsRouter.post('/:id/ai-patch', async (req: AuthRequest, res: Response, next: NextFunction) => {
-  try {
-    const id = req.params.id as string;
-    const { slideIndex, instruction, selectedElementIds } = (req.body ?? {}) as {
-      slideIndex?: number;
-      instruction?: string;
-      selectedElementIds?: string[];
-    };
-
-    if (!instruction?.trim()) throw createError(400, 'instruction é obrigatória');
-
-    const post = await prisma.post.findFirst({
-      where: { id, brand: brandMemberFilter(req.user?.userId, EDITORS) },
-      include: { brand: true, slides: { orderBy: { position: 'asc' } } },
-    });
-    if (!post) throw createError(404, 'Post não encontrado');
-
-    const content = mergeSlidesIntoPost(post).content as {
-      kind?: string;
-      width?: number;
-      height?: number;
-      fonts?: string[];
-      ir?: { slides?: IRSlideNode[] };
-    };
-    if (content?.kind !== 'ir-design' || !Array.isArray(content.ir?.slides) || content.ir!.slides.length === 0) {
-      throw createError(400, 'Edição por IA disponível apenas para designs no formato ir-design');
-    }
-
-    const slides = content.ir!.slides;
-    const idx = Math.max(0, Math.min(Number(slideIndex) || 0, slides.length - 1));
-
-    enrichAiContext({ brandSlug: post.brand.slug, postId: post.id, feature: 'ai-patch' });
-
-    // O patch é aplicado no editor e só depois salvo, mas o banco AGORA ainda tem o
-    // estado pré-IA: é aqui que ele tem de ser congelado. Esperar o PUT não serve —
-    // o snapshot do editor é debounced e engoliria justamente esta mudança.
-    await snapshotPost(post.id, {
-      source: 'AI',
-      label: `Antes da IA editar o slide ${idx + 1}: "${instruction.trim().slice(0, 100)}"`,
-      userId: req.user?.userId,
-    });
-
-    const slide = slides[idx]!;
-    const brandColors = (post.brand as { colors?: string[] } | null)?.colors ?? [];
-
-    const patch = await generateIRPatchForSlide({
-      slide,
-      instruction,
-      brandColors,
-      selectedElementIds: Array.isArray(selectedElementIds) ? selectedElementIds : [],
-    });
-
-    if (patch.ops.length === 0) {
-      throw createError(422, 'Não consegui traduzir a instrução em uma alteração válida. Tente ser mais específico.');
-    }
-
-    // Devolve o patch e NÃO persiste: o editor aplica no canvas (entra no undo) e o
-    // save normal grava. Persistir aqui sobrescreveria o que o usuário ainda não salvou.
-    res.json({ data: { patch } });
   } catch (error) {
     next(error);
   }

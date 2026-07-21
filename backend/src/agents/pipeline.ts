@@ -419,7 +419,7 @@ async function runPipelineInner(
         throw err;
       }
 
-      logger.error('Erro no DesignDocument', {
+      logger.error('Erro na geração de design', {
         postId,
         slideCount,
         model: config.models.artist,
@@ -454,16 +454,10 @@ async function runPipelineInner(
         })),
     };
 
-    // Remove o array pesado de slides do JSON do post para usar a tabela slides.
-    // html-design guarda em `slides` (topo); ir-design em `ir.slides` — sem tirar
-    // este último o blob duplica o deck inteiro (a tabela relacional é a fonte).
+    // Remove o array pesado de slides do JSON do post para usar a tabela slides
+    // (a tabela relacional é a fonte).
     const contentToSave: Record<string, unknown> = { ...postContent };
     delete contentToSave.slides;
-    if (contentToSave.kind === 'ir-design' && contentToSave.ir) {
-      const ir = { ...(contentToSave.ir as Record<string, unknown>) };
-      delete ir.slides;
-      contentToSave.ir = ir;
-    }
 
     await prisma.post.update({
       where: { id: postId },

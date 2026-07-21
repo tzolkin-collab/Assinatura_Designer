@@ -25,9 +25,6 @@ import { mergeSlidesIntoPost, persistPostContent } from '../../lib/postHelper.js
 import { snapshotPost } from '../../lib/postVersions.js';
 import { runWithAiContext, enrichAiContext } from '../../lib/aiContext.js';
 import { logger } from '../../lib/logger.js';
-import { generateIRPatchForSlide } from '../../lib/designIR/aiPatch.js';
-import { applyPatchToSlide } from '../../lib/designIR/patcher.js';
-import type { SlideNode as IRSlideNode } from '../../lib/designIR/types.js';
 import { runPlanner, type SlideSkeletonItem } from '../planner/index.js';
 import { parseRequestedSlideCount } from '../pipeline.js';
 import { extractBracketedJson, stripBracketedJson, mapDeviationsToEdits } from '../../lib/tagExtract.js';
@@ -364,14 +361,11 @@ export function initBrainHandlers(): void {
 
     const arte = (postRow ? mergeSlidesIntoPost(postRow).content : null) as {
       kind?: string;
-      ir?: { slides?: unknown[] };
       slides?: unknown[];
     } | null;
-    const totalSlides = arte?.kind === 'ir-design' && Array.isArray(arte.ir?.slides)
-      ? arte.ir.slides.length
-      : arte?.kind === 'html-design' && Array.isArray(arte.slides)
-        ? arte.slides.length
-        : 0;
+    const totalSlides = arte?.kind === 'html-design' && Array.isArray(arte.slides)
+      ? arte.slides.length
+      : 0;
     const temArte = postRow !== null && totalSlides > 0;
 
     if (temArte) {
@@ -518,7 +512,7 @@ export async function reconnectSession(sessionId: string, userId?: string) {
           session.phase = 'done';
           if (content.pages) {
             session.currentDesign = content.pages;
-          } else if ((content as any).kind === 'ir-design' || (content as any).kind === 'html-design') {
+          } else if ((content as any).kind === 'html-design') {
             session.currentDesign = [content as any];
           }
           await updateSession(sessionId, session);
@@ -813,12 +807,8 @@ type ResultadoEdicao =
   | { outcome: 'falhou'; motivo: string };
 
 /**
- * Edita slides de um deck a partir de instruções em linguagem natural.
- *
- * Dual-formato: `html-design` (o que o pipeline produz desde 07-17, via
- * `editHtmlSlide`) e `ir-design` (decks legados da era IR, via
- * `generateIRPatchForSlide` + `applyPatchToSlide` no servidor — aqui não há
- * canvas do outro lado para aplicar o patch).
+ * Edita slides de um deck (`html-design`) a partir de instruções em linguagem natural.
+ * Via `editHtmlSlide`.
  *
  * Fonte de verdade é o POST, não `session.currentDesign`: o Redis expira, e o
  * `currentDesign` volta vazio na reconexão. Editar a partir dele daria
@@ -859,18 +849,15 @@ async function applySlideEdits(
     kind?: string;
     width?: number;
     height?: number;
-    ir?: { slides?: IRSlideNode[] };
     slides?: HtmlDesignSlide[];
   } | null;
 
-  const isIr = content?.kind === 'ir-design' && Array.isArray(content.ir?.slides) && content.ir!.slides!.length > 0;
   const isHtml = content?.kind === 'html-design' && Array.isArray(content.slides) && content.slides.length > 0;
-  if (!isIr && !isHtml) {
+  if (!isHtml) {
     return { outcome: 'sem-arte' };
   }
-  const irSlides = isIr ? content!.ir!.slides! : [];
-  const htmlSlides = isHtml ? content!.slides! : [];
-  const total = isIr ? irSlides.length : htmlSlides.length;
+  const htmlSlides = content!.slides!;
+  const total = htmlSlides.length;
 
   // Congela o design de ANTES da IA mexer — depois do loop o estado anterior não
   // existe em lugar nenhum. Uma vez só, cobrindo o turno inteiro.
@@ -894,17 +881,11 @@ async function applySlideEdits(
   // Envelope leve do delta: o front (useFabricaWs) acumula os slides por índice e só
   // reseta o acúmulo se o `postId` mudar. Emitindo com o postId do próprio deck, o
   // preview troca SÓ o slide editado, ao vivo — sem uma linha de frontend.
-  const envelopeDelta = isIr
-    ? {
-        ...(content as Record<string, unknown>),
-        postId: postRow.id,
-        ir: { ...(content!.ir as Record<string, unknown>), slides: [] as unknown[] },
-      }
-    : {
-        ...(content as Record<string, unknown>),
-        postId: postRow.id,
-        slides: [] as unknown[],
-      };
+  const envelopeDelta = {
+    ...(content as Record<string, unknown>),
+    postId: postRow.id,
+    slides: [] as unknown[],
+  };
 
   // editHtmlSlide precisa de um gerador de texto; usa o mesmo caminho com retry
   // do resto do produto (tier estética preservada pelo preferredModel).
@@ -928,24 +909,7 @@ async function applySlideEdits(
     ws.progress(sessionId, 40 + Math.round(((i + 1) / edits.length) * 50), `Ajustando slide ${idx + 1}...`);
 
     try {
-      if (isIr) {
-        const slide = irSlides[idx];
-        if (!slide) continue;
-        const patch = await generateIRPatchForSlide({ slide, instruction, brandColors });
-
-        // O sanitizador descartou tudo: a IA não conseguiu traduzir o pedido em uma
-        // alteração válida. Isso é uma FALHA e vai ser dita — não engolida.
-        if (patch.ops.length === 0) {
-          falhas.push(`slide ${idx + 1}`);
-          continue;
-        }
-
-        const novo = applyPatchToSlide(slide, patch);
-        irSlides[idx] = novo;
-        changed++;
-        ws.designSlide(sessionId, { index: idx, total, slide: novo, envelope: envelopeDelta });
-      } else {
-        const slide = htmlSlides[idx];
+      const slide = htmlSlides[idx];
         if (!slide) continue;
         const novo = await editHtmlSlide(generateText, {
           slide,
@@ -969,7 +933,6 @@ async function applySlideEdits(
         htmlSlides[idx] = novo;
         changed++;
         ws.designSlide(sessionId, { index: idx, total, slide: novo, envelope: envelopeDelta });
-      }
     } catch (err) {
       falhas.push(`slide ${idx + 1}`);
       logger.error('Edição de slide por IA falhou', { slide: idx + 1, error: (err as Error).message });
