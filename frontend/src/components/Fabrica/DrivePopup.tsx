@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { ExternalLink, Loader2, X, HardDrive, Check, Square, Search, ChevronLeft, FolderOpen } from 'lucide-react';
+import { ExternalLink, Loader2, X, HardDrive, Check, Square, Search, ChevronLeft, Folder, File } from 'lucide-react';
 import { API_BASE } from '@/lib/api';
+import styles from './connectorPopup.module.css';
 
 interface DriveFile {
   id: string;
@@ -50,7 +51,7 @@ export function DrivePopup({ onClose, onInject }: Props) {
   const [searchQuery, setSearchQuery] = useState('');
   const [folderStack, setFolderStack] = useState<Array<{ id: string; name: string }>>([]);
 
-  const currentFolderId = folderStack.length > 0 ? folderStack[folderStack.length - 1].id : undefined;
+  const currentFolderId = folderStack.length > 0 ? folderStack[folderStack.length - 1]!.id : undefined;
 
   const loadFiles = useCallback(async (folderId?: string, q?: string) => {
     setLoadingFiles(true);
@@ -168,74 +169,75 @@ export function DrivePopup({ onClose, onInject }: Props) {
   };
 
   return (
-    <div style={OVERLAY} onClick={onClose}>
-      <div style={POPUP} onClick={(e) => e.stopPropagation()}>
-        <div style={HEADER}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <HardDrive size={15} style={{ color: '#3b82f6' }} />
-            <span style={{ fontSize: 13, fontWeight: 600, color: '#1d1c1a' }}>Google Drive</span>
+    <div className={styles.overlay} onClick={onClose}>
+      <div className={styles.popup + ' ' + styles.popupWide} onClick={(e) => e.stopPropagation()}>
+        <div className={styles.header}>
+          <div className={styles.headerTitleGroup}>
+            <div className={styles.headerIconBadge} style={{ background: '#e8f0fe' }}>
+              <HardDrive size={14} style={{ color: '#1a73e8' }} />
+            </div>
+            <span className={styles.headerTitle}>Google Drive</span>
           </div>
-          <button style={CLOSE_BTN} onClick={onClose}>
+          <button className={styles.closeBtn} onClick={onClose}>
             <X size={16} />
           </button>
         </div>
 
         {status === 'loading' && (
-          <div style={CENTER}>
-            <Loader2 size={24} style={{ color: '#3b82f6' }} className="animate-spin" />
+          <div className={styles.center}>
+            <Loader2 size={22} className={styles.spin} style={{ color: 'var(--color-text-tertiary)' }} />
           </div>
         )}
 
         {status === 'error' && (
-          <div style={CENTER}>
-            <p style={{ fontSize: 12, color: '#ef4444', textAlign: 'center', margin: 0 }}>
+          <div className={styles.center}>
+            <p className={`${styles.centerText} ${styles.centerTextError}`}>
               Falha ao conectar com a API do Google Drive. Verifique se o backend está ativo.
             </p>
           </div>
         )}
 
         {status === 'disconnected' && (
-          <div style={DISCONNECTED_STATE}>
-            <p style={{ fontSize: 12, color: '#4b5563', marginBottom: '16px', textAlign: 'center' }}>
-              Para trazer mídias e contextos de marcas diretamente do Google Drive, conecte sua conta do Google abaixo.
+          <div className={styles.center}>
+            <HardDrive size={32} style={{ color: 'var(--color-text-tertiary)', opacity: 0.5 }} />
+            <p className={styles.centerText}>
+              Para trazer mídias e contextos de marcas diretamente do Google Drive, conecte sua conta do Google.
             </p>
-            <button style={CONNECT_BTN} onClick={handleConnectDrive}>
+            <button className={styles.connectBtn} onClick={handleConnectDrive}>
               Conectar Google Drive
             </button>
           </div>
         )}
 
         {status === 'connected' && (
-          <div style={CONTENT}>
-            {/* Search + breadcrumb */}
-            <div style={TOOLBAR}>
+          <div className={styles.content}>
+            <div className={styles.toolbar}>
               {folderStack.length > 0 && (
-                <button style={BACK_BTN} onClick={goBack} title="Voltar">
+                <button className={styles.backBtn} onClick={goBack} title="Voltar">
                   <ChevronLeft size={14} />
                 </button>
               )}
-              <div style={SEARCH_WRAP}>
-                <Search size={12} style={{ color: '#9ca3af', flexShrink: 0 }} />
+              <div className={styles.searchWrap}>
+                <Search size={13} style={{ color: 'var(--color-text-tertiary)', flexShrink: 0 }} />
                 <input
-                  style={SEARCH_INPUT}
-                  placeholder={folderStack.length > 0 ? `Buscar em "${folderStack[folderStack.length - 1].name}"` : 'Buscar no Drive...'}
+                  className={styles.searchInput}
+                  placeholder={folderStack.length > 0 ? `Buscar em "${folderStack[folderStack.length - 1]!.name}"` : 'Buscar no Drive...'}
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                 />
               </div>
             </div>
 
-            {/* Breadcrumb */}
             {folderStack.length > 0 && (
-              <div style={BREADCRUMB}>
-                <span style={{ color: '#9ca3af', cursor: 'pointer' }} onClick={() => { setFolderStack([]); setSearchQuery(''); }}>
+              <div className={styles.breadcrumb}>
+                <span className={styles.breadcrumbItem} onClick={() => { setFolderStack([]); setSearchQuery(''); }}>
                   Meu Drive
                 </span>
                 {folderStack.map((f, i) => (
-                  <span key={f.id}>
-                    <span style={{ color: '#d1d5db', margin: '0 4px' }}>/</span>
+                  <span key={f.id} style={{ display: 'inline-flex', alignItems: 'center' }}>
+                    <span className={styles.breadcrumbSep}>/</span>
                     <span
-                      style={{ color: i === folderStack.length - 1 ? '#1f2937' : '#9ca3af', cursor: 'pointer', fontWeight: i === folderStack.length - 1 ? 500 : 400 }}
+                      className={i === folderStack.length - 1 ? styles.breadcrumbActive : styles.breadcrumbItem}
                       onClick={() => { setFolderStack((prev) => prev.slice(0, i + 1)); setSearchQuery(''); }}
                     >
                       {f.name}
@@ -245,13 +247,13 @@ export function DrivePopup({ onClose, onInject }: Props) {
               </div>
             )}
 
-            <div style={LIST}>
+            <div className={styles.list}>
               {loadingFiles ? (
-                <div style={CENTER}>
-                  <Loader2 size={20} style={{ color: '#3b82f6' }} className="animate-spin" />
+                <div className={styles.center}>
+                  <Loader2 size={18} className={styles.spin} style={{ color: 'var(--color-text-tertiary)' }} />
                 </div>
               ) : files.length === 0 ? (
-                <p style={{ fontSize: 12, color: '#9ca3af', textAlign: 'center', padding: '24px 0' }}>
+                <p className={styles.emptyState}>
                   {searchQuery ? 'Nenhum resultado encontrado.' : 'Nenhum arquivo encontrado nesta pasta.'}
                 </p>
               ) : (
@@ -260,81 +262,75 @@ export function DrivePopup({ onClose, onInject }: Props) {
                   const isFolder = file.mimeType === 'application/vnd.google-apps.folder';
 
                   return (
-                    <div
+                    <button
                       key={file.id}
-                      style={{
-                        ...FILE_ROW,
-                        backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.05)' : 'transparent',
-                        borderColor: isSelected ? '#3b82f6' : 'rgba(0, 0, 0, 0.06)',
-                      }}
+                      className={`${styles.listItem} ${isSelected ? styles.listItemSelected : ''}`}
                       onClick={() => isFolder ? openFolder(file) : toggleFile(file.id)}
                     >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flex: 1, minWidth: 0 }}>
-                        {/* Thumbnail or icon */}
+                      <div className={styles.listItemMain}>
                         {file.thumbnailLink && !isFolder ? (
                           <img
                             src={file.thumbnailLink}
                             alt=""
-                            style={{ width: 28, height: 28, borderRadius: 4, objectFit: 'cover', flexShrink: 0 }}
+                            className={styles.listItemThumb}
                             onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                           />
                         ) : (
-                          <span style={{ fontSize: '18px', flexShrink: 0 }}>{isFolder ? '📁' : '📄'}</span>
-                        )}
-                        <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0, flex: 1 }}>
-                          <span style={{ fontSize: '12px', fontWeight: 500, color: '#1f2937', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                            {file.name}
+                          <span className={styles.listItemIcon}>
+                            {isFolder
+                              ? <Folder size={17} style={{ color: '#f6b93b' }} fill="#fce8b8" />
+                              : <File size={17} style={{ color: 'var(--color-text-tertiary)' }} />}
                           </span>
-                          <span style={{ fontSize: '10px', color: '#9ca3af' }}>
+                        )}
+                        <div className={styles.listItemText}>
+                          <span className={styles.listItemName}>{file.name}</span>
+                          <span className={styles.listItemMeta}>
                             {isFolder ? 'Pasta' : [formatSize(file.size), formatDate(file.modifiedTime)].filter(Boolean).join(' · ')}
                           </span>
                         </div>
                       </div>
                       {isFolder ? (
-                        <FolderOpen size={14} style={{ color: '#d1d5db', flexShrink: 0 }} />
+                        <ChevronLeft size={14} style={{ color: 'var(--color-text-tertiary)', transform: 'rotate(180deg)', flexShrink: 0 }} />
                       ) : (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <div className={styles.listItemActions}>
                           {file.webViewLink && (
                             <a
                               href={file.webViewLink}
                               target="_blank"
                               rel="noopener noreferrer"
                               onClick={(e) => e.stopPropagation()}
-                              style={{ color: '#d1d5db' }}
+                              className={styles.externalLink}
                               title="Abrir no Drive"
                             >
-                              <ExternalLink size={12} />
+                              <ExternalLink size={13} />
                             </a>
                           )}
-                          <div style={{ color: isSelected ? '#3b82f6' : '#d1d5db' }}>
-                            {isSelected ? <Check size={16} /> : <Square size={16} style={{ opacity: 0.3 }} />}
+                          <div className={`${styles.checkIcon} ${isSelected ? styles.checkIconSelected : ''}`}>
+                            {isSelected ? <Check size={16} /> : <Square size={16} style={{ opacity: 0.35 }} />}
                           </div>
                         </div>
                       )}
-                    </div>
+                    </button>
                   );
                 })
               )}
             </div>
 
-            <div style={FOOTER}>
-              <span style={{ fontSize: 10, color: '#9ca3af' }}>
-                {selectedFiles.size > 0 ? `${selectedFiles.size} selecionado(s)` : 'Selecione arquivos para injetar'}
+            <div className={styles.footer}>
+              <span className={styles.footerHint}>
+                {selectedFiles.size > 0 ? `${selectedFiles.size} selecionado(s)` : 'Selecione arquivos para importar'}
               </span>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <button style={CANCEL_BTN} onClick={onClose} disabled={downloading}>
+              <div className={styles.btnRow}>
+                <button className={styles.btnSecondary} onClick={onClose} disabled={downloading}>
                   Cancelar
                 </button>
                 <button
-                  style={{
-                    ...INJECT_BTN,
-                    opacity: selectedFiles.size === 0 || downloading ? 0.6 : 1,
-                    cursor: selectedFiles.size === 0 || downloading ? 'not-allowed' : 'pointer',
-                  }}
+                  className={styles.btnPrimary}
                   disabled={selectedFiles.size === 0 || downloading}
                   onClick={injectSelected}
                 >
-                  {downloading ? 'Baixando...' : 'Injetar no Chat'}
+                  {downloading && <Loader2 size={13} className={styles.spin} />}
+                  {downloading ? 'Baixando...' : 'Importar'}
                 </button>
               </div>
             </div>
@@ -344,174 +340,3 @@ export function DrivePopup({ onClose, onInject }: Props) {
     </div>
   );
 }
-
-// ── Styles ───────────────────────────────────────────────────────────────────
-
-const OVERLAY: React.CSSProperties = {
-  position: 'fixed',
-  top: 0, left: 0, right: 0, bottom: 0,
-  backgroundColor: 'rgba(0, 0, 0, 0.4)',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  zIndex: 1000,
-  backdropFilter: 'blur(2px)',
-};
-
-const POPUP: React.CSSProperties = {
-  backgroundColor: '#ffffff',
-  borderRadius: '12px',
-  width: 'min(460px, 90vw)',
-  maxHeight: '80vh',
-  display: 'flex',
-  flexDirection: 'column',
-  boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
-  overflow: 'hidden',
-};
-
-const HEADER: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-  padding: '12px 16px',
-  borderBottom: '1px solid rgba(0, 0, 0, 0.08)',
-};
-
-const CLOSE_BTN: React.CSSProperties = {
-  border: 'none',
-  background: 'transparent',
-  cursor: 'pointer',
-  color: '#6b7280',
-  padding: '4px',
-  borderRadius: '4px',
-};
-
-const CENTER: React.CSSProperties = {
-  padding: '48px 16px',
-  display: 'flex',
-  justifyContent: 'center',
-  alignItems: 'center',
-};
-
-const DISCONNECTED_STATE: React.CSSProperties = {
-  padding: '32px 24px',
-  display: 'flex',
-  flexDirection: 'column',
-  alignItems: 'center',
-};
-
-const CONNECT_BTN: React.CSSProperties = {
-  backgroundColor: '#3b82f6',
-  color: '#ffffff',
-  border: 'none',
-  padding: '8px 16px',
-  borderRadius: '6px',
-  fontSize: '12px',
-  fontWeight: 500,
-  cursor: 'pointer',
-  boxShadow: '0 2px 4px rgba(59, 130, 246, 0.15)',
-};
-
-const CONTENT: React.CSSProperties = {
-  display: 'flex',
-  flexDirection: 'column',
-  flex: 1,
-  overflow: 'hidden',
-};
-
-const TOOLBAR: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: '6px',
-  padding: '8px 12px',
-  borderBottom: '1px solid rgba(0, 0, 0, 0.06)',
-};
-
-const BACK_BTN: React.CSSProperties = {
-  border: '1px solid #e5e7eb',
-  background: '#ffffff',
-  borderRadius: '6px',
-  padding: '4px',
-  cursor: 'pointer',
-  color: '#6b7280',
-  display: 'flex',
-  alignItems: 'center',
-};
-
-const SEARCH_WRAP: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  gap: '6px',
-  flex: 1,
-  background: '#f9fafb',
-  borderRadius: '6px',
-  padding: '5px 8px',
-  border: '1px solid rgba(0, 0, 0, 0.06)',
-};
-
-const SEARCH_INPUT: React.CSSProperties = {
-  border: 'none',
-  background: 'transparent',
-  outline: 'none',
-  fontSize: '12px',
-  color: '#1f2937',
-  flex: 1,
-};
-
-const BREADCRUMB: React.CSSProperties = {
-  padding: '4px 16px 6px',
-  fontSize: '10px',
-  color: '#9ca3af',
-  borderBottom: '1px solid rgba(0, 0, 0, 0.04)',
-};
-
-const LIST: React.CSSProperties = {
-  padding: '8px 12px',
-  overflowY: 'auto',
-  flex: 1,
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '6px',
-};
-
-const FILE_ROW: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-  padding: '6px 10px',
-  borderRadius: '8px',
-  border: '1px solid',
-  cursor: 'pointer',
-  transition: 'all 0.15s ease',
-};
-
-const FOOTER: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-  gap: '8px',
-  padding: '10px 16px',
-  borderTop: '1px solid rgba(0, 0, 0, 0.08)',
-  backgroundColor: '#f9fafb',
-};
-
-const CANCEL_BTN: React.CSSProperties = {
-  border: '1px solid #d1d5db',
-  background: '#ffffff',
-  color: '#374151',
-  padding: '6px 12px',
-  borderRadius: '6px',
-  fontSize: '12px',
-  fontWeight: 500,
-  cursor: 'pointer',
-};
-
-const INJECT_BTN: React.CSSProperties = {
-  border: 'none',
-  background: '#3b82f6',
-  color: '#ffffff',
-  padding: '6px 12px',
-  borderRadius: '6px',
-  fontSize: '12px',
-  fontWeight: 500,
-};

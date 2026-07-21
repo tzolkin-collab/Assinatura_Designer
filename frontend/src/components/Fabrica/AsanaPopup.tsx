@@ -1,9 +1,10 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
-import { CheckSquare, ExternalLink, Loader2, Square, X, Image as ImageIcon } from 'lucide-react';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import { CheckSquare, ExternalLink, Loader2, Square, X, Image as ImageIcon, Search, ListChecks } from 'lucide-react';
 import { toBlob } from 'html-to-image';
 import { API_BASE } from '@/lib/api';
+import styles from './connectorPopup.module.css';
 
 interface AsanaProject { gid: string; name: string }
 interface AsanaTask {
@@ -37,7 +38,8 @@ export function AsanaPopup({ onClose, onInject }: Props) {
   const [loadingTasks, setLoadingTasks] = useState(false);
   const [selectedTasks, setSelectedTasks] = useState<Set<string>>(new Set());
   const [exportingImage, setExportingImage] = useState(false);
-  
+  const [search, setSearch] = useState('');
+
   const imageExportRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -59,31 +61,41 @@ export function AsanaPopup({ onClose, onInject }: Props) {
     setSelectedProject(projectId);
     setLoadingTasks(true);
     setTasks([]);
+    setSearch('');
     try {
       const r = await fetch(`${API_BASE}/asana/projects/${projectId}/tasks`, { headers: authHeaders() });
       const d = await r.json() as { data?: AsanaTask[] };
       setTasks(d.data ?? []);
-    } catch {}
-    finally { setLoadingTasks(false); }
+    } catch {
+      // segue com a lista vazia
+    } finally {
+      setLoadingTasks(false);
+    }
   };
 
   const toggleTask = (gid: string) => {
     setSelectedTasks(prev => {
       const next = new Set(prev);
-      if (next.has(gid)) {
-        next.delete(gid);
-        return next;
-      }
-      
-      next.add(gid);
+      if (next.has(gid)) next.delete(gid);
+      else next.add(gid);
       return next;
     });
   };
 
+  const filteredProjects = useMemo(
+    () => (search.trim() ? projects.filter((p) => p.name.toLowerCase().includes(search.toLowerCase())) : projects),
+    [projects, search],
+  );
+
+  const filteredTasks = useMemo(
+    () => (search.trim() ? tasks.filter((t) => t.name.toLowerCase().includes(search.toLowerCase())) : tasks),
+    [tasks, search],
+  );
+
   const injectSelected = async () => {
     const selected = tasks.filter(t => selectedTasks.has(t.gid));
     if (selected.length === 0) return;
-    
+
     const text = selected.map(t => {
       const parts = [`• ${t.name}`];
       if (t.due_on) parts.push(`  Prazo: ${t.due_on}`);
@@ -99,9 +111,7 @@ export function AsanaPopup({ onClose, onInject }: Props) {
         const res = await fetch(`${API_BASE}/asana/tasks/${t.gid}/attachments`, { headers: authHeaders() });
         if (res.ok) {
           const body = await res.json() as { data?: Array<{ name: string; mimeType: string; dataBase64: string }> };
-          if (body.data) {
-            allAttachments.push(...body.data);
-          }
+          if (body.data) allAttachments.push(...body.data);
         }
       }
     } catch (err) {
@@ -120,16 +130,11 @@ export function AsanaPopup({ onClose, onInject }: Props) {
       setExportingImage(true);
       const blob = await toBlob(imageExportRef.current, {
         backgroundColor: '#ffffff',
-        pixelRatio: 2, // High resolution
-        style: {
-          transform: 'scale(1)',
-          opacity: '1'
-        }
+        pixelRatio: 2,
+        style: { transform: 'scale(1)', opacity: '1' },
       });
       if (blob) {
-        await navigator.clipboard.write([
-          new ClipboardItem({ 'image/png': blob })
-        ]);
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
         alert('Imagem copiada para a área de transferência!');
         onClose();
       }
@@ -142,145 +147,150 @@ export function AsanaPopup({ onClose, onInject }: Props) {
   };
 
   return (
-    <div style={OVERLAY} onMouseDown={onClose}>
-      <div style={POPUP} onMouseDown={e => e.stopPropagation()}>
-
-        {/* Header */}
-        <div style={HEADER}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-            <img src="/asana-logo.svg" width={16} height={16} alt="" />
-            <span style={{ fontSize: 13, fontWeight: 600, color: '#1d1c1a' }}>Asana</span>
+    <div className={styles.overlay} onMouseDown={onClose}>
+      <div className={styles.popup} onMouseDown={e => e.stopPropagation()}>
+        <div className={styles.header}>
+          <div className={styles.headerTitleGroup}>
+            <div className={styles.headerIconBadge} style={{ background: '#fbeee8' }}>
+              <img src="/asana-logo.svg" width={14} height={14} alt="" />
+            </div>
+            <span className={styles.headerTitle}>Asana</span>
           </div>
-          <button onClick={onClose} style={CLOSE_BTN}><X size={14} /></button>
+          <button className={styles.closeBtn} onClick={onClose}>
+            <X size={16} />
+          </button>
         </div>
 
-        {/* Loading */}
         {status === 'loading' && (
-          <div style={CENTER}>
-            <Loader2 size={16} style={{ animation: 'spin 1s linear infinite', color: '#96948f' }} />
+          <div className={styles.center}>
+            <Loader2 size={22} className={styles.spin} style={{ color: 'var(--color-text-tertiary)' }} />
           </div>
         )}
 
-        {/* Not connected */}
         {status === 'disconnected' && (
-          <div style={CENTER}>
-            <p style={{ fontSize: 12, color: '#96948f', textAlign: 'center', lineHeight: 1.6 }}>
-              Asana não conectado.<br />Configure o token em<br />Configurações → Integrações.
+          <div className={styles.center}>
+            <ListChecks size={32} style={{ color: 'var(--color-text-tertiary)', opacity: 0.5 }} />
+            <p className={styles.centerText}>
+              Asana não conectado. Configure em Configurações → Integrações.
             </p>
           </div>
         )}
 
-        {/* Error */}
         {status === 'error' && (
-          <div style={CENTER}>
-            <p style={{ fontSize: 12, color: '#b91c1c', textAlign: 'center' }}>
+          <div className={styles.center}>
+            <p className={`${styles.centerText} ${styles.centerTextError}`}>
               Erro ao carregar projetos.
             </p>
           </div>
         )}
 
-        {/* Projects list */}
         {status === 'connected' && !selectedProject && (
-          <div style={SCROLL_AREA}>
-            <p style={SECTION_LABEL}>Projetos</p>
-            {projects.map(p => (
-              <button
-                key={p.gid}
-                style={LIST_ITEM}
-                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = '#f3f2ef'; }}
-                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
-                onClick={() => loadTasks(p.gid)}
-              >
-                {p.name}
-              </button>
-            ))}
-            {projects.length === 0 && (
-              <p style={{ fontSize: 12, color: '#96948f', padding: '8px 14px' }}>
-                Nenhum projeto encontrado.
-              </p>
-            )}
+          <div className={styles.content}>
+            <div className={styles.toolbar}>
+              <div className={styles.searchWrap}>
+                <Search size={13} style={{ color: 'var(--color-text-tertiary)', flexShrink: 0 }} />
+                <input
+                  className={styles.searchInput}
+                  placeholder="Buscar projeto..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                />
+              </div>
+            </div>
+            <p className={styles.sectionLabel}>Projetos</p>
+            <div className={styles.list}>
+              {filteredProjects.map(p => (
+                <button key={p.gid} className={styles.listItem} onClick={() => loadTasks(p.gid)}>
+                  <div className={styles.listItemMain}>
+                    <span className={styles.listItemIcon}><ListChecks size={16} style={{ color: 'var(--color-text-tertiary)' }} /></span>
+                    <span className={styles.listItemName}>{p.name}</span>
+                  </div>
+                </button>
+              ))}
+              {filteredProjects.length === 0 && (
+                <p className={styles.emptyState}>
+                  {search ? 'Nenhum projeto encontrado.' : 'Nenhum projeto encontrado.'}
+                </p>
+              )}
+            </div>
           </div>
         )}
 
-        {/* Tasks list */}
         {status === 'connected' && selectedProject && (
-          <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
-            <div style={{ padding: '6px 14px 6px', borderBottom: '1px solid rgba(0,0,0,0.06)', background: '#f3f2ef' }}>
+          <div className={styles.content}>
+            <div className={styles.toolbar}>
               <button
-                style={{ background: 'none', border: 'none', color: '#63615c', cursor: 'pointer', fontSize: 11, padding: 0 }}
-                onClick={() => { setSelectedProject(null); setTasks([]); setSelectedTasks(new Set()); }}
+                className={styles.textBackBtn}
+                onClick={() => { setSelectedProject(null); setTasks([]); setSelectedTasks(new Set()); setSearch(''); }}
               >
                 ← Projetos
               </button>
+              <div className={styles.searchWrap}>
+                <Search size={13} style={{ color: 'var(--color-text-tertiary)', flexShrink: 0 }} />
+                <input
+                  className={styles.searchInput}
+                  placeholder="Buscar tarefa..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                />
+              </div>
             </div>
 
             {loadingTasks ? (
-              <div style={CENTER}>
-                <Loader2 size={14} style={{ animation: 'spin 1s linear infinite', color: '#96948f' }} />
+              <div className={styles.center}>
+                <Loader2 size={18} className={styles.spin} style={{ color: 'var(--color-text-tertiary)' }} />
               </div>
             ) : (
-              <div style={SCROLL_AREA}>
-                {tasks.map(t => (
-                  <div
-                    key={t.gid}
-                    style={{
-                      display: 'flex', alignItems: 'flex-start', gap: 8, padding: '6px 14px',
-                      cursor: 'pointer', borderRadius: 6, margin: '0 4px',
-                      background: selectedTasks.has(t.gid) ? '#fdf2ef' : 'transparent',
-                      transition: 'background 0.1s',
-                    }}
-                    onClick={() => toggleTask(t.gid)}
-                  >
-                    <div style={{ marginTop: 2, flexShrink: 0, color: selectedTasks.has(t.gid) ? '#d97757' : '#c4c2bc' }}>
-                      {selectedTasks.has(t.gid) ? <CheckSquare size={13} /> : <Square size={13} />}
-                    </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <p style={{
-                        fontSize: 12, margin: 0, lineHeight: 1.4,
-                        color: t.completed ? '#c4c2bc' : '#1d1c1a',
-                        textDecoration: t.completed ? 'line-through' : 'none',
-                      }}>
-                        {t.name}
-                      </p>
-                      {(t.due_on || t.assignee?.name) && (
-                        <p style={{ fontSize: 11, margin: '2px 0 0', color: '#96948f' }}>
-                          {[t.due_on, t.assignee?.name].filter(Boolean).join(' · ')}
-                        </p>
+              <div className={styles.list}>
+                {filteredTasks.map(t => {
+                  const isSelected = selectedTasks.has(t.gid);
+                  return (
+                    <button key={t.gid} className={`${styles.listItem} ${isSelected ? styles.listItemSelected : ''}`} onClick={() => toggleTask(t.gid)}>
+                      <div className={styles.listItemMain}>
+                        <div className={`${styles.checkIcon} ${isSelected ? styles.checkIconSelected : ''}`}>
+                          {isSelected ? <CheckSquare size={16} /> : <Square size={16} style={{ opacity: 0.35 }} />}
+                        </div>
+                        <div className={styles.listItemText}>
+                          <span className={`${styles.listItemName} ${t.completed ? styles.listItemNameDone : ''}`}>
+                            {t.name}
+                          </span>
+                          {(t.due_on || t.assignee?.name) && (
+                            <span className={styles.listItemMeta}>
+                              {[t.due_on, t.assignee?.name].filter(Boolean).join(' · ')}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      {t.permalink_url && (
+                        <a
+                          href={t.permalink_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className={styles.externalLink}
+                          onClick={e => e.stopPropagation()}
+                        >
+                          <ExternalLink size={13} />
+                        </a>
                       )}
-                    </div>
-                    {t.permalink_url && (
-                      <a
-                        href={t.permalink_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        style={{ color: '#c4c2bc', flexShrink: 0, marginTop: 2 }}
-                        onClick={e => e.stopPropagation()}
-                      >
-                        <ExternalLink size={11} />
-                      </a>
-                    )}
-                  </div>
-                ))}
-                {tasks.length === 0 && (
-                  <p style={{ fontSize: 12, color: '#96948f', padding: '8px 14px' }}>
-                    Nenhuma tarefa neste projeto.
+                    </button>
+                  );
+                })}
+                {filteredTasks.length === 0 && (
+                  <p className={styles.emptyState}>
+                    {search ? 'Nenhuma tarefa encontrada.' : 'Nenhuma tarefa neste projeto.'}
                   </p>
                 )}
               </div>
             )}
 
             {selectedTasks.size > 0 && (
-              <div style={{ padding: '8px 12px 10px', borderTop: '1px solid rgba(0,0,0,0.06)', display: 'flex', gap: 8, flexDirection: 'column' }}>
-                <button style={INJECT_BTN} onClick={injectSelected}>
+              <div className={styles.footer} style={{ flexDirection: 'column', alignItems: 'stretch', gap: 8 }}>
+                <button className={styles.btnPrimary} style={{ width: '100%', justifyContent: 'center' }} onClick={injectSelected}>
                   Injetar {selectedTasks.size} tarefa{selectedTasks.size > 1 ? 's' : ''} no contexto
                 </button>
-                <button 
-                  style={{...INJECT_BTN, background: '#4b5563', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6}} 
-                  onClick={exportAsImage}
-                  disabled={exportingImage}
-                >
-                  {exportingImage ? <Loader2 size={14} className="animate-spin" /> : <ImageIcon size={14} />}
-                  Exportar como Imagem Numerada
+                <button className={styles.btnGhostFull} onClick={exportAsImage} disabled={exportingImage}>
+                  {exportingImage ? <Loader2 size={14} className={styles.spin} /> : <ImageIcon size={14} />}
+                  Exportar como imagem numerada
                 </button>
               </div>
             )}
@@ -301,29 +311,29 @@ export function AsanaPopup({ onClose, onInject }: Props) {
                 {new Date().toLocaleDateString('pt-BR')}
               </span>
             </div>
-            
+
             <table style={EXPORT_TABLE}>
               <thead>
                 <tr>
-                  <th style={{...EXPORT_TH, width: 40, textAlign: 'center'}}>#</th>
+                  <th style={{ ...EXPORT_TH, width: 40, textAlign: 'center' }}>#</th>
                   <th style={EXPORT_TH}>Tarefa</th>
-                  <th style={{...EXPORT_TH, width: 100}}>Prazo</th>
-                  <th style={{...EXPORT_TH, width: 140}}>Responsável</th>
+                  <th style={{ ...EXPORT_TH, width: 100 }}>Prazo</th>
+                  <th style={{ ...EXPORT_TH, width: 140 }}>Responsável</th>
                 </tr>
               </thead>
               <tbody>
                 {tasks.filter(t => selectedTasks.has(t.gid)).map((t, index) => (
                   <tr key={t.gid} style={EXPORT_TR}>
-                    <td style={{...EXPORT_TD, textAlign: 'center', fontWeight: 'bold', color: '#4b5563'}}>
+                    <td style={{ ...EXPORT_TD, textAlign: 'center', fontWeight: 'bold', color: '#4b5563' }}>
                       {index + 1}
                     </td>
-                    <td style={{...EXPORT_TD, fontWeight: 500, color: '#111827'}}>
+                    <td style={{ ...EXPORT_TD, fontWeight: 500, color: '#111827' }}>
                       <div style={{ textDecoration: t.completed ? 'line-through' : 'none' }}>
                         {t.name}
                       </div>
                       {t.notes && <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4, fontWeight: 400 }}>{t.notes.slice(0, 80)}{t.notes.length > 80 ? '...' : ''}</div>}
                     </td>
-                    <td style={{...EXPORT_TD, color: '#ef4444', fontWeight: 500}}>
+                    <td style={{ ...EXPORT_TD, color: '#ef4444', fontWeight: 500 }}>
                       {t.due_on ? new Date(t.due_on).toLocaleDateString('pt-BR') : '-'}
                     </td>
                     <td style={EXPORT_TD}>
@@ -333,7 +343,7 @@ export function AsanaPopup({ onClose, onInject }: Props) {
                 ))}
               </tbody>
             </table>
-            
+
             <div style={{ marginTop: 24, fontSize: 12, color: '#9ca3af', textAlign: 'center' }}>
               Gerado via Assinatura Designer App
             </div>
@@ -344,44 +354,8 @@ export function AsanaPopup({ onClose, onInject }: Props) {
   );
 }
 
-// ── Styles ───────────────────────────────────────────────────────────────────
-
-const OVERLAY: React.CSSProperties = {
-  position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 1000,
-  display: 'flex', alignItems: 'center', justifyContent: 'center',
-  padding: '16px',
-};
-const POPUP: React.CSSProperties = {
-  width: '100%', maxWidth: 320, maxHeight: 440, background: '#ffffff',
-  border: '1px solid rgba(0,0,0,0.08)', borderRadius: 12,
-  display: 'flex', flexDirection: 'column', overflow: 'hidden',
-  boxShadow: '0 8px 30px rgba(0,0,0,0.12)',
-};
-const HEADER: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-  padding: '10px 14px', borderBottom: '1px solid rgba(0,0,0,0.06)',
-  background: '#f3f2ef',
-};
-const CLOSE_BTN: React.CSSProperties = {
-  background: 'none', border: 'none', color: '#96948f', cursor: 'pointer', padding: 2,
-};
-const CENTER: React.CSSProperties = {
-  display: 'flex', alignItems: 'center', justifyContent: 'center', flex: 1, padding: 28,
-};
-const SCROLL_AREA: React.CSSProperties = { flex: 1, overflowY: 'auto', padding: '4px 0' };
-const SECTION_LABEL: React.CSSProperties = {
-  fontSize: 10, color: '#96948f', padding: '4px 14px 2px',
-  letterSpacing: '0.07em', textTransform: 'uppercase', margin: 0,
-};
-const LIST_ITEM: React.CSSProperties = {
-  display: 'block', width: '100%', textAlign: 'left', background: 'transparent',
-  border: 'none', color: '#1d1c1a', fontSize: 12, padding: '7px 14px',
-  cursor: 'pointer', transition: 'background 0.1s',
-};
-const INJECT_BTN: React.CSSProperties = {
-  width: '100%', background: '#d97757', border: 'none', borderRadius: 7,
-  color: '#fff', fontSize: 12, fontWeight: 500, padding: '7px 12px', cursor: 'pointer',
-};
+// ── Estilos do card de export (rasterizado via html-to-image, fora do fluxo
+//    normal de estilo — precisa ser um documento autocontido em px fixos). ──
 
 const EXPORT_WRAPPER: React.CSSProperties = {
   width: 800,
