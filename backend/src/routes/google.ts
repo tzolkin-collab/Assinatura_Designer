@@ -3,6 +3,8 @@ import createError from 'http-errors';
 import prisma from '../lib/prisma.js';
 import { config } from '../config.js';
 import { requireAuth, type AuthRequest } from '../middleware/auth.js';
+import { generateOAuthState, isStateFresh, isTokenExpiringSoon, exchangeAuthorizationCode, refreshOAuthToken } from '../lib/connectorOAuth.js';
+import { encryptToken, tryDecryptToken } from '../lib/tokenCrypto.js';
 
 // Alias para evitar conflito entre Express.Response e globalThis.Response (fetch)
 type Res = ExpressResponse;
@@ -13,6 +15,7 @@ export const googlePublicRouter = Router();
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 const GOOGLE_DRIVE_API = 'https://www.googleapis.com/drive/v3';
+const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 
 /**
  * Retorna um access_token válido para o usuário. Se o token expirou (ou está
@@ -24,20 +27,17 @@ async function getValidGoogleToken(userId: string): Promise<string> {
     select: { googleAccessToken: true, googleRefreshToken: true, googleTokenExpiry: true },
   });
 
-  if (!user?.googleAccessToken) {
+  const accessToken = tryDecryptToken(user?.googleAccessToken);
+  if (!accessToken) {
     throw createError(403, 'Google Drive não conectado para este usuário');
   }
 
-  const bufferMs = 5 * 60 * 1000;
-  const expiresAtMs = user.googleTokenExpiry?.getTime() ?? 0;
-
-  // Token ainda válido — retorna direto
-  if (expiresAtMs - bufferMs > Date.now()) {
-    return user.googleAccessToken;
+  if (!isTokenExpiringSoon(user?.googleTokenExpiry)) {
+    return accessToken;
   }
 
-  // Precisa renovar
-  if (!user.googleRefreshToken) {
+  const refreshToken = tryDecryptToken(user?.googleRefreshToken);
+  if (!refreshToken) {
     throw createError(401, 'Refresh token do Google ausente. Reconecte o Drive nas integrações.');
   }
 
@@ -47,37 +47,24 @@ async function getValidGoogleToken(userId: string): Promise<string> {
     throw createError(500, 'Credenciais do Google não configuradas no .env');
   }
 
-  const body = new URLSearchParams({
-    client_id: clientId,
-    client_secret: clientSecret,
-    refresh_token: user.googleRefreshToken,
-    grant_type: 'refresh_token',
-  });
-
-  const res = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: body.toString(),
-  });
-
-  if (!res.ok) {
-    const text = await res.text();
-    console.error('[Google] Token refresh failed:', text);
+  let tokens;
+  try {
+    tokens = await refreshOAuthToken(GOOGLE_TOKEN_URL, {
+      client_id: clientId,
+      client_secret: clientSecret,
+      refresh_token: refreshToken,
+    });
+  } catch (err) {
+    console.error('[Google] Token refresh failed:', err);
     throw createError(401, 'Falha ao renovar token do Google. Reconecte o Drive.');
   }
 
-  const tokens = (await res.json()) as {
-    access_token: string;
-    expires_in: number;
-    refresh_token?: string;
-  };
-
   const updateData: Record<string, unknown> = {
-    googleAccessToken: tokens.access_token,
+    googleAccessToken: encryptToken(tokens.access_token),
     googleTokenExpiry: new Date(Date.now() + tokens.expires_in * 1000),
   };
   if (tokens.refresh_token) {
-    updateData.googleRefreshToken = tokens.refresh_token;
+    updateData.googleRefreshToken = encryptToken(tokens.refresh_token);
   }
 
   await prisma.user.update({ where: { id: userId }, data: updateData });
@@ -106,6 +93,14 @@ googleRouter.get('/auth-url', requireAuth, async (req: AuthRequest, res: Res, ne
     const userId = req.user?.userId;
     if (!userId) throw createError(401, 'Não autenticado');
 
+    // Nonce guardado no usuário e conferido no callback — em vez do `userId` cru
+    // como state antigo (ver connectorOAuth.ts).
+    const state = generateOAuthState();
+    await prisma.user.update({
+      where: { id: userId },
+      data: { googleOauthState: state, googleOauthStateAt: new Date() },
+    });
+
     const params = new URLSearchParams({
       client_id: clientId,
       redirect_uri: redirectUri,
@@ -113,7 +108,7 @@ googleRouter.get('/auth-url', requireAuth, async (req: AuthRequest, res: Res, ne
       scope: 'https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/drive.metadata.readonly',
       access_type: 'offline',
       prompt: 'consent',
-      state: userId,
+      state,
     });
 
     const url = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
@@ -138,11 +133,15 @@ googlePublicRouter.get('/callback', async (req, res, next) => {
       throw createError(400, 'Code e state são obrigatórios.');
     }
 
-    const userId = state;
-    const user = await prisma.user.findUnique({ where: { id: userId } });
+    // Acha o usuário pelo state que geramos no auth-url (não mais um userId cru).
+    const user = await prisma.user.findFirst({ where: { googleOauthState: state } });
     if (!user) {
-      throw createError(404, 'Usuário não encontrado.');
+      throw createError(404, 'Invalid or expired OAuth state. Please restart the connection process.');
     }
+    if (!isStateFresh(user.googleOauthStateAt)) {
+      throw createError(400, 'OAuth state expired. Please restart the connection process.');
+    }
+    const userId = user.id;
 
     const clientId = process.env.GOOGLE_CLIENT_ID;
     const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
@@ -153,7 +152,7 @@ googlePublicRouter.get('/callback', async (req, res, next) => {
     }
 
     // Faz a troca do code temporário pelos tokens reais de acesso e atualização
-    const tokenParams = new URLSearchParams({
+    const tokens = await exchangeAuthorizationCode(GOOGLE_TOKEN_URL, {
       code,
       client_id: clientId,
       client_secret: clientSecret,
@@ -161,32 +160,15 @@ googlePublicRouter.get('/callback', async (req, res, next) => {
       grant_type: 'authorization_code',
     });
 
-    const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: tokenParams.toString(),
-    });
-
-    if (!tokenResponse.ok) {
-      const errorText = await tokenResponse.text();
-      throw createError(tokenResponse.status, `Falha na troca de tokens do Google: ${errorText}`);
-    }
-
-    const tokens = (await tokenResponse.json()) as {
-      access_token: string;
-      refresh_token?: string;
-      expires_in: number;
-    };
-
     const updateData: Record<string, unknown> = {
-      googleAccessToken: tokens.access_token,
+      googleAccessToken: encryptToken(tokens.access_token),
       googleTokenExpiry: new Date(Date.now() + tokens.expires_in * 1000),
+      googleOauthState: null,
+      googleOauthStateAt: null,
     };
 
     if (tokens.refresh_token) {
-      updateData.googleRefreshToken = tokens.refresh_token;
+      updateData.googleRefreshToken = encryptToken(tokens.refresh_token);
     }
 
     // Salva os tokens reais no banco de dados

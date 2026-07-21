@@ -3,9 +3,13 @@ import { config } from '../config.js';
 import prisma from '../lib/prisma.js';
 import { createError } from '../middleware/errorHandler.js';
 import { requireAuth, AuthRequest } from '../middleware/auth.js';
+import { generateOAuthState, isStateFresh, isTokenExpiringSoon, exchangeAuthorizationCode, refreshOAuthToken } from '../lib/connectorOAuth.js';
+import { encryptToken, tryDecryptToken } from '../lib/tokenCrypto.js';
 
 export const asanaRouter = Router();
 export const asanaPublicRouter = Router();
+
+const ASANA_TOKEN_URL = 'https://app.asana.com/-/oauth_token';
 
 // ── GET /api/asana/auth-url ──
 asanaRouter.get('/auth-url', requireAuth, async (req: AuthRequest, res: Response, next: NextFunction) => {
@@ -15,14 +19,21 @@ asanaRouter.get('/auth-url', requireAuth, async (req: AuthRequest, res: Response
     }
 
     const userId = req.user?.userId;
-    // O state serve para segurança contra CSRF e para recuperar o usuário no callback
-    const state = userId; 
+    if (!userId) throw createError(401, 'Não autenticado');
+
+    // Nonce guardado no usuário e conferido no callback — em vez do `userId` cru
+    // como state antigo, que qualquer request podia forjar (ver connectorOAuth.ts).
+    const state = generateOAuthState();
+    await prisma.user.update({
+      where: { id: userId },
+      data: { asanaOauthState: state, asanaOauthStateAt: new Date() },
+    });
 
     const params = new URLSearchParams({
       client_id: config.asanaClientId,
       redirect_uri: config.asanaRedirectUri,
       response_type: 'code',
-      state: state || '',
+      state,
     });
 
     const url = `https://app.asana.com/-/oauth_authorize?${params.toString()}`;
@@ -44,16 +55,16 @@ asanaPublicRouter.get('/callback', async (req: AuthRequest, res: Response, next:
       throw createError(400, 'Code and state are required');
     }
 
-    // O state é o userId salvo na URL de autorização
-    const userId = state;
-
-    const user = await prisma.user.findUnique({ where: { id: userId } });
+    // Acha o usuário pelo state que geramos no auth-url (não mais um userId cru).
+    const user = await prisma.user.findFirst({ where: { asanaOauthState: state } });
     if (!user) {
-      throw createError(400, 'Usuário não encontrado');
+      throw createError(400, 'Invalid or expired OAuth state. Please restart the connection process.');
+    }
+    if (!isStateFresh(user.asanaOauthStateAt)) {
+      throw createError(400, 'OAuth state expired. Please restart the connection process.');
     }
 
-    // Faz a troca do code pelo token
-    const tokenParams = new URLSearchParams({
+    const tokens = await exchangeAuthorizationCode(ASANA_TOKEN_URL, {
       grant_type: 'authorization_code',
       client_id: config.asanaClientId,
       client_secret: config.asanaClientSecret,
@@ -61,24 +72,15 @@ asanaPublicRouter.get('/callback', async (req: AuthRequest, res: Response, next:
       code,
     });
 
-    const tokenResponse = await fetch('https://app.asana.com/-/oauth_token', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: tokenParams.toString(),
-    });
-
-    if (!tokenResponse.ok) {
-      const errorText = await tokenResponse.text();
-      throw createError(tokenResponse.status, `Failed to exchange token: ${errorText}`);
-    }
-
-    const tokens = (await tokenResponse.json()) as { access_token: string };
-
     await prisma.user.update({
-      where: { id: userId },
-      data: { asanaToken: tokens.access_token },
+      where: { id: user.id },
+      data: {
+        asanaToken: encryptToken(tokens.access_token),
+        asanaRefreshToken: tokens.refresh_token ? encryptToken(tokens.refresh_token) : undefined,
+        asanaTokenExpiry: new Date(Date.now() + tokens.expires_in * 1000),
+        asanaOauthState: null,
+        asanaOauthStateAt: null,
+      },
     });
 
     // Redirect back to the brand's integrations settings page
@@ -90,10 +92,41 @@ asanaPublicRouter.get('/callback', async (req: AuthRequest, res: Response, next:
 
 const ASANA_API_BASE = 'https://app.asana.com/api/1.0';
 
+/** Devolve um access_token válido, renovando via refresh_token se estiver perto de expirar. */
 async function getAsanaToken(userId: string): Promise<string> {
-  const user = await prisma.user.findUnique({ where: { id: userId }, select: { asanaToken: true } });
-  if (!user?.asanaToken) throw createError(403, 'Asana não configurado para este usuário');
-  return user.asanaToken;
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { asanaToken: true, asanaRefreshToken: true, asanaTokenExpiry: true },
+  });
+  const accessToken = tryDecryptToken(user?.asanaToken);
+  if (!accessToken) throw createError(403, 'Asana não configurado para este usuário');
+
+  const refreshToken = tryDecryptToken(user?.asanaRefreshToken);
+  if (!refreshToken || !isTokenExpiringSoon(user?.asanaTokenExpiry)) {
+    return accessToken;
+  }
+
+  try {
+    const tokens = await refreshOAuthToken(ASANA_TOKEN_URL, {
+      client_id: config.asanaClientId,
+      client_secret: config.asanaClientSecret,
+      refresh_token: refreshToken,
+    });
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        asanaToken: encryptToken(tokens.access_token),
+        asanaRefreshToken: tokens.refresh_token ? encryptToken(tokens.refresh_token) : undefined,
+        asanaTokenExpiry: new Date(Date.now() + tokens.expires_in * 1000),
+      },
+    });
+    return tokens.access_token;
+  } catch (err) {
+    console.error('[Asana] Token refresh failed:', err);
+    // Token vencido e sem refresh possível: cai pro token atual (a chamada seguinte
+    // vai falhar com 401 tratado abaixo) em vez de derrubar a request aqui.
+    return accessToken;
+  }
 }
 
 async function asanaFetch<T = unknown>(token: string, path: string): Promise<T> {

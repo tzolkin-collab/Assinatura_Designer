@@ -15,6 +15,7 @@ import {
   canvaFetch,
 } from '../lib/canvaClient.js';
 import { encryptToken } from '../lib/tokenCrypto.js';
+import { isStateFresh } from '../lib/connectorOAuth.js';
 
 // O Canva é conector do DESIGNER (por usuário), como o Asana e o Drive: é a pessoa
 // que edita a arte, então a exportação cai na conta Canva DELA. Antes isto era
@@ -94,11 +95,8 @@ canvaPublicRouter.get('/callback', async (req: AuthRequest, res: Response, next:
       throw createError(500, 'Code verifier not found. Please restart the connection process.');
     }
 
-    // State expire após 10 minutos para mitigar replay.
-    const stateAgeMs = user.canvaOauthStateAt
-      ? Date.now() - user.canvaOauthStateAt.getTime()
-      : Number.POSITIVE_INFINITY;
-    if (stateAgeMs > 10 * 60 * 1000) {
+    // State expira após 10 minutos para mitigar replay.
+    if (!isStateFresh(user.canvaOauthStateAt)) {
       throw createError(400, 'OAuth state expired. Please restart the connection process.');
     }
 

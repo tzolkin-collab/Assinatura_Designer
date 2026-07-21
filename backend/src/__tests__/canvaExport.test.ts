@@ -27,25 +27,16 @@ import { renderHtmlToPng } from '../lib/htmlRaster';
 import { uploadAssetAndWait, createDesign, createDesignMerge, CanvaSessionExpiredError } from '../lib/canvaClient';
 
 const deckDe = (n: number) => ({
-  kind: 'ir-design',
+  kind: 'html-design',
   version: 1,
   width: 1080,
   height: 1080,
   fonts: ['Inter'],
-  ir: {
-    width: 1080,
-    height: 1080,
-    fonts: ['Inter'],
-    slides: Array.from({ length: n }, (_, i) => ({
-      id: `s${i}`,
-      background: { type: 'solid', color: '#fff' },
-      elements: [],
-    })),
-  },
+  slides: Array.from({ length: n }, (_, i) => ({ html: `<div>Slide ${i}</div>`, css: '' })),
 });
 
 // A tabela relacional `slides` é a fonte de verdade: mergeSlidesIntoPost reescreve
-// content.ir.slides a partir dela. Um fixture com `slides: []` produz um deck vazio.
+// content.slides a partir dela. Um fixture com `slides: []` produz um deck vazio.
 const postCom = (n: number) => ({
   id: 'post-1',
   name: 'Deck de Teste',
@@ -53,7 +44,7 @@ const postCom = (n: number) => ({
   slides: Array.from({ length: n }, (_, i) => ({
     id: `row-${i}`,
     position: i,
-    contentJson: { id: `s${i}`, background: { type: 'solid', color: '#fff' }, elements: [] },
+    contentJson: { html: `<div>Slide ${i}</div>`, css: '' },
   })),
 });
 

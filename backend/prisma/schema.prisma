@@ -15,9 +15,17 @@ model User {
   createdAt          DateTime        @default(now())
   updatedAt          DateTime        @updatedAt
   asanaToken         String?
+  asanaRefreshToken  String?
+  asanaTokenExpiry   DateTime?
+  // Nonce + expiração do handshake OAuth do Asana (mesmo padrão do Canva) — o
+  // `state = userId` cru antigo não provava que a request veio do auth-url nosso.
+  asanaOauthState    String?
+  asanaOauthStateAt  DateTime?
   googleAccessToken  String?
   googleRefreshToken String?
   googleTokenExpiry  DateTime?
+  googleOauthState   String?
+  googleOauthStateAt DateTime?
   canvaAccessToken   String?
   canvaRefreshToken  String?
   canvaTokenExpiry   DateTime?
@@ -36,6 +44,8 @@ model User {
 
   // Achamos o usuário pelo state no callback do OAuth — sem índice seria full scan.
   @@index([canvaOauthState])
+  @@index([asanaOauthState])
+  @@index([googleOauthState])
 }
 
 enum BrandRole {

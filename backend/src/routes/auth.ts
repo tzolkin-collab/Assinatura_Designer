@@ -9,6 +9,7 @@ import { ensureInternalTeamMemberships } from '../lib/internalTeam.js';
 import { hashInviteToken } from '../lib/invites.js';
 import { z } from 'zod';
 import { parseBody } from '../lib/validate.js';
+import { encryptToken } from '../lib/tokenCrypto.js';
 
 export const authRouter = Router();
 
@@ -75,7 +76,7 @@ authRouter.post('/connections/asana', requireAuth, async (req: AuthRequest, res:
 
     await prisma.user.update({
       where: { id: req.user!.userId },
-      data: { asanaToken: token }
+      data: { asanaToken: encryptToken(token), asanaRefreshToken: null, asanaTokenExpiry: null }
     });
 
     res.json({ message: 'Asana token saved successfully' });

@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { config } from '../config.js';
 import prisma from './prisma.js';
 import { encryptToken, tryDecryptToken } from './tokenCrypto.js';
+import { generateOAuthState, isTokenExpiringSoon } from './connectorOAuth.js';
 
 const CANVA_API_BASE = 'https://api.canva.com/rest/v1';
 const CANVA_AUTH_BASE = 'https://www.canva.com/api/oauth';
@@ -17,9 +18,7 @@ export function generateCodeChallenge(verifier: string): string {
   return crypto.createHash('sha256').update(verifier).digest('base64url');
 }
 
-export function generateOAuthState(): string {
-  return crypto.randomBytes(48).toString('base64url');
-}
+export { generateOAuthState };
 
 // ── Authorization URL Builder ──
 
@@ -133,9 +132,7 @@ export async function getValidAccessToken(userId: string): Promise<string | null
   if (!accessToken || !refreshToken) return null;
 
   // If token expires within 5 minutes (ou expiração desconhecida), refresh it
-  const bufferMs = 5 * 60 * 1000;
-  const expiresAtMs = user?.canvaTokenExpiry?.getTime() ?? 0;
-  if (expiresAtMs - bufferMs < Date.now()) {
+  if (isTokenExpiringSoon(user?.canvaTokenExpiry)) {
     try {
       const tokens = await refreshAccessToken(refreshToken);
       const expiresAt = new Date(Date.now() + tokens.expires_in * 1000);
