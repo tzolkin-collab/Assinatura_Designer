@@ -4,7 +4,6 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, PenTool } from 'lucide-react';
 import PageHeader from '@/components/ui/PageHeader';
-import DesignRenderer from '@/components/Fabrica/DesignRenderer';
 import { extractEditablePages } from '@/lib/designContent';
 import { useBrandPosts } from '@/lib/hooks';
 import styles from './editor-index.module.css';
@@ -15,10 +14,7 @@ export default function EditorIndexPage() {
   const slug = params.marca as string;
   const { posts, loading } = useBrandPosts(slug);
 
-  const designPosts = posts.filter((p) => {
-    const status = extractEditablePages(p.content).status;
-    return status === 'editable' || status === 'html';
-  });
+  const designPosts = posts.filter((p) => extractEditablePages(p.content).status === 'html');
 
   return (
     <div>
@@ -44,30 +40,16 @@ export default function EditorIndexPage() {
         <div className={styles.grid}>
           {designPosts.map(post => {
             const editable = extractEditablePages(post.content);
-            const isHtml = editable.status === 'html';
-            const dp = editable.status === 'editable' ? editable.pages : [];
-            const slideCount = isHtml ? editable.content.slides.length : dp.length;
-            const first = dp[0];
+            const slideCount = editable.status === 'html' ? editable.content.slides.length : 0;
             return (
               <button
                 key={post.id}
                 className={styles.card}
                 onClick={() => router.push(`/${slug}/editor/${post.id}`)}
               >
-                <div
-                  className={styles.thumb}
-                  style={{ backgroundColor: isHtml ? '#1a1a1a' : (first?.backgroundColor ?? '#111') }}
-                >
-                  {isHtml && post.previewUrl ? (
+                <div className={styles.thumb} style={{ backgroundColor: '#1a1a1a' }}>
+                  {post.previewUrl ? (
                     <img src={post.previewUrl} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                  ) : first ? (
-                    <DesignRenderer
-                      pages={[first]}
-                      canvasWidth={first.width ?? 1080}
-                      canvasHeight={first.height ?? 1080}
-                      hideNav
-                      mode="cover"
-                    />
                   ) : (
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#999', fontSize: 12 }}>
                       Sem Preview

@@ -2,7 +2,6 @@ import { WebSocketServer, WebSocket } from 'ws';
 import type { Server } from 'http';
 import jwt from 'jsonwebtoken';
 import { config } from '../config.js';
-import type { DesignPage } from './designTypes.js';
 import { publish, sessionChannel, onEvent, subscribe, initEventBus, type BusEvent } from './eventBus.js';
 import { logger } from './logger.js';
 
@@ -202,7 +201,7 @@ export const ws = {
   toolResult: (sessionId: string, name: string, result: unknown) =>
     broadcast(sessionId, { type: 'agent:tool_result', data: { name, result } }),
 
-  designUpdate: (sessionId: string, pages: DesignPage[]) =>
+  designUpdate: (sessionId: string, pages: unknown[]) =>
     broadcast(sessionId, { type: 'design:update', data: { pages } }),
 
   // Delta de UM slide durante a geração progressiva. Evita o O(n²) de reenviar o

@@ -327,3 +327,25 @@ sessões anteriores, **não re-verificado** (confirmar ao vivo antes de agir).
 8. **🟡 Resiliência do Gemini.** 429 de créditos e "modelo lento" (responde em ~70s sem erro) já
    derrubaram gerações antes. Há tratamento (`lib/geminiRetry.ts`), mas é histórico que reincide —
    monitorar, não assumir resolvido.
+
+---
+
+## 7. Addendum 2026-07-21 — 4º motor órfão achado e removido; "Design" vira categoria própria
+
+Este plano (§1.1) mapeou 3 motores. Uma varredura completa de dependências (não só grep pontual)
+achou um **4º sistema inteiro** que nenhuma seção acima cobria: `routes/ai.ts` (~1300 linhas) +
+`lib/nanoBanana.ts` + `lib/designFixer.ts` + `lib/designTypes.ts` (camadas `DesignLayer`/`DesignPage`
+com animação de entrada embutida) + frontend `DesignRenderer`/`LayerView`/`AnimatedLayerView`.
+**Confirmado 100% órfão** — zero endpoint chamado pelo frontend atual, zero post no banco no formato
+de camadas. Removido por completo (~4500 linhas líquidas, 30 arquivos). `PostType.ANIMATION` também
+era morto (zero criação em código, zero posts) — tirado do schema, mas a migration real no Postgres
+ficou **bloqueada**: `prisma migrate dev` achou um drift não relacionado (colunas `Reference.autoSyncEnabled/autoSyncInterval/lastSyncedAt`
+existem no banco sem migration no histórico — provável `db push` de sessão anterior). Resolver esse
+drift primeiro (não tentar `migrate reset` — apagaria dados reais).
+
+**Direção de produto (declarada, ainda não construída):** só sobra **Apresentação** e **Design** —
+sem Animação. "Design" **não é sinônimo de 1 slide**: é a mesma saída do motor html-design, mas
+dimensionada pelos formatos já propostos na galeria + contexto do bot — cobre post estático de
+Instagram/Twitter/LinkedIn, foto de produto pra e-commerce, carrossel, logo, story estático. Pode
+ter várias páginas igual apresentação; a diferença é o **formato/uso**, não a estrutura técnica.
+Ainda não desenhado nem implementado — próximo passo de arquitetura quando essa frente for retomada.

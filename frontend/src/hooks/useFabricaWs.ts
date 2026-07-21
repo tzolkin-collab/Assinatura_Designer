@@ -2,8 +2,11 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { API_BASE } from '@/lib/api';
-import type { DesignPage } from '@/components/Fabrica/DesignRenderer';
 import type { FabricaQuestion, SessionPhase, WorkerStatus, ReviewMode } from '@/lib/fabricaSession';
+
+// Envelope genérico do design corrente (hoje sempre um HtmlDesignPostContent
+// embrulhado num array de 1 elemento — ver lib/designContent.ts).
+type DesignPage = Record<string, unknown>;
 
 export type { SessionPhase, WorkerStatus, ReviewMode };
 

@@ -1,7 +1,6 @@
 import { GoogleGenAI } from '@google/genai';
 import { config } from '../../config.js';
 import { generateWithRetry } from '../../lib/geminiRetry.js';
-import type { DesignPage } from '../../lib/designTypes.js';
 import type { PlannerOutput } from '../planner/index.js';
 import { extractJsonObject } from '../../lib/jsonHelper.js';
 import { renderHtmlToBase64 } from '../../lib/htmlRaster.js';
@@ -28,36 +27,6 @@ export interface ReviewResult {
   deviations: ReviewDeviation[];
   feedback: string;
   correctionInstructions?: string;
-}
-
-/** Layer de uma página no formato legado (nanoBanana). Campos opcionais porque a
- *  página vem do JSON do post, sem garantia de schema. */
-interface ReviewLayer {
-  type?: string;
-  id?: string;
-  zIndex?: number;
-  x?: number;
-  y?: number;
-  width?: number;
-  height?: number;
-  content?: string;
-  url?: string;
-}
-
-interface ReviewPage {
-  kind?: string;
-  layers?: ReviewLayer[];
-  [key: string]: unknown;
-}
-
-export async function runReviewer(params: {
-  pages: ReviewPage[];
-  plan: PlannerOutput;
-  brandContext: string;
-}): Promise<ReviewResult> {
-  const { pages, plan, brandContext } = params;
-
-  return runLegacyReviewer(pages as DesignPage[], plan, brandContext);
 }
 
 // ── Núcleo da crítica visual: recebe PNGs já renderizados e o modelo os avalia ──
@@ -160,78 +129,6 @@ export async function runHtmlReviewer(content: HtmlDesignContent, brandContext: 
   return critiqueRenderedSlides(images, brandContext, objective, indexes);
 }
 
-// ── Caminho legado (Layer model): estrutural + texto, sem visão ─────────────────
-async function runLegacyReviewer(
-  pages: DesignPage[],
-  plan: PlannerOutput,
-  brandContext: string,
-): Promise<ReviewResult> {
-  const structuralDeviations = checkStructural(pages, plan);
-  const slideSummary = pages.map((page, i) => {
-    const slide = plan.slides[i];
-    const textLayers = page.layers?.filter((l) => l.type === 'text') ?? [];
-    const imageLayers = page.layers?.filter((l) => l.type === 'image') ?? [];
-    const sortedLayers = [...(page.layers ?? [])].sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
-    const compositionSignals = sortedLayers.slice(0, 8).map((layer) => {
-      const base = `${layer.type}#${layer.id} z=${layer.zIndex ?? 0} x=${Math.round(layer.x ?? 0)} y=${Math.round(layer.y ?? 0)} w=${Math.round(layer.width ?? 0)} h=${Math.round(layer.height ?? 0)}`;
-      if (layer.type === 'text') return `${base} text="${String(layer.content ?? '').slice(0, 60)}"`;
-      if (layer.type === 'image') return `${base} image=${layer.url ? 'ok' : 'missing'}`;
-      return base;
-    }).join(' | ');
-    return `Slide ${i} [${slide?.templateId ?? 'unknown'}]:
-    - Image Hint Planejado: ${slide?.imageHint ?? 'Nenhum'}
-    - ${textLayers.length} layers de texto
-    - ${imageLayers.length} layers de imagem
-    - Conteúdo dos textos: ${textLayers.slice(0, 3).map((l) => `"${String(l.content ?? '').slice(0, 60)}"`).join(' | ')}
-    - Composição: ${compositionSignals}`;
-  }).join('\n');
-
-  const prompt = `Você é o Agente Revisor de um sistema de design com IA.
-
-## Contexto da marca
-${brandContext}
-
-## Plano original
-Objetivo: ${plan.objective}
-Arco: ${plan.narrativeArc}
-Tom: ${plan.toneAndVoice}
-Critérios de qualidade: ${plan.qualityCriteria.join(', ')}
-
-## Design gerado (${pages.length} slides)
-${slideSummary}
-
-## Desvios estruturais já detectados
-${structuralDeviations.length > 0 ? structuralDeviations.map(d => `- [${d.severity}] Slide ${d.slideIndex}: ${d.description}`).join('\n') : 'Nenhum'}
-
-## Sua tarefa
-Avalie o design contra o plano e a marca (conteúdo, tom, hierarquia, consistência).
-
-Responda APENAS com JSON:
-{
-  "reasoning": "...",
-  "approved": boolean,
-  "score": number,
-  "deviations": [ { "type": "content|visual|brand|overflow|missing-zone", "severity": "minor|major|critical", "slideIndex": number, "description": "...", "fix": "..." } ],
-  "feedback": "...",
-  "correctionInstructions": "..."
-}`;
-
-  const response = await generateWithRetry(ai, {
-    model: config.models.fast,
-    contents: [{ role: 'user', parts: [{ text: prompt }] }],
-    config: { responseMimeType: 'application/json', temperature: 0.1 },
-  }, config.models.fast);
-
-  const raw = response.text ?? '{}';
-  const llmResult = JSON.parse(raw) as ReviewResult;
-
-  return {
-    ...llmResult,
-    deviations: [...structuralDeviations, ...(llmResult.deviations ?? [])],
-    approved: llmResult.approved && structuralDeviations.filter(d => d.severity === 'critical').length === 0,
-  };
-}
-
 /**
  * Escolhe QUAIS slides o crítico visual vai ver.
  *
@@ -257,38 +154,4 @@ export function sampleSlideIndexes(total: number, max: number): number[] {
   for (let i = 1; i < total - 1 && escolhidos.size < max; i++) escolhidos.add(i);
 
   return [...escolhidos].sort((a, b) => a - b).slice(0, max);
-}
-
-function checkStructural(pages: DesignPage[], plan: PlannerOutput): ReviewDeviation[] {
-  const deviations: ReviewDeviation[] = [];
-
-  for (let i = 0; i < pages.length; i++) {
-    const page = pages[i]!;
-    const slide = plan.slides[i];
-    if (!slide) continue;
-
-    const emptyImages = page.layers?.filter(l => l.type === 'image' && !l.url) ?? [];
-    for (const layer of emptyImages) {
-      deviations.push({
-        type: 'missing-zone',
-        severity: 'major',
-        slideIndex: i,
-        description: `Layer de imagem "${layer.id}" sem URL`,
-        fix: 'Gerar ou buscar imagem para esta zona',
-      });
-    }
-
-    const emptyTexts = page.layers?.filter(l => l.type === 'text' && !l.content?.trim()) ?? [];
-    for (const layer of emptyTexts) {
-      deviations.push({
-        type: 'missing-zone',
-        severity: 'minor',
-        slideIndex: i,
-        description: `Layer de texto "${layer.id}" vazio`,
-        fix: 'Preencher conteúdo da zona',
-      });
-    }
-  }
-
-  return deviations;
 }

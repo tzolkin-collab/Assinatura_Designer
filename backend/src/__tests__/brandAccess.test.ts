@@ -41,7 +41,7 @@ describe('Autorização por marca (RBAC)', () => {
 
     it('bloqueia geração de design (403)', async () => {
       const res = await auth(
-        request(app).post('/api/ai/marca-alheia/chat').send({ message: 'oi' }),
+        request(app).post('/api/ai/marca-alheia/generate-briefing').send({ industry: 'x', audience: 'y' }),
       );
       expect(res.status).toBe(403);
     });

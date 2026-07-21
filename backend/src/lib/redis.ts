@@ -1,7 +1,6 @@
 import Redis from 'ioredis';
 import { randomUUID } from 'crypto';
 import { config } from '../config.js';
-import type { DesignPage } from './designTypes.js';
 import type { FabricaQuestion, ReviewMode, SessionPhase, WorkerStatus } from './fabricaSession.js';
 import { logger } from './logger.js';
 
@@ -128,7 +127,7 @@ export interface FabricaSession {
     }>;
   } | null;
   messages: ChatMessage[];
-  currentDesign: DesignPage[];
+  currentDesign: unknown[];
   workerStatus: WorkerStatus;
   createdAt: number;
   updatedAt: number;
@@ -242,7 +241,7 @@ export async function getSession(sessionId: string): Promise<FabricaSession | nu
   return {
     ...hashToMeta(hash),
     messages: mensagensCruas.map((raw) => JSON.parse(raw) as ChatMessage),
-    currentDesign: designCru ? (JSON.parse(designCru) as DesignPage[]) : [],
+    currentDesign: designCru ? (JSON.parse(designCru) as unknown[]) : [],
   };
 }
 

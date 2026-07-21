@@ -14,7 +14,6 @@ import { api, getApiErrorMessage } from '@/lib/api';
 import { exportarDeck, type DeckFileFormat } from '@/lib/deckFile';
 import { useBrandPermissions } from '@/hooks/useBrandPermissions';
 import { extractChatHistory, extractDimensions, extractPreviewSource, extractSessionId, getAspectRatioTag, type FabricaChatHistoryMessage, type HtmlDesignPostContent } from '@/lib/designContent';
-import DesignRenderer, { type DesignPage } from '@/components/Fabrica/DesignRenderer';
 import dynamic from 'next/dynamic';
 const HtmlSlideRenderer = dynamic(() => import('@/components/DesignDocument/HtmlSlideRenderer'), { ssr: false });
 const AiSpendBadge = dynamic(() => import('@/components/AiUsage/AiSpendBadge'), { ssr: false });
@@ -23,7 +22,6 @@ function formatPostType(type: string) {
   switch (type) {
     case 'CAROUSEL': return 'Apresentação';
     case 'PRESENTATION': return 'Apresentação';
-    case 'ANIMATION': return 'Animação';
     case 'SINGLE_IMAGE': return 'Post Único';
     default: return type;
   }
@@ -122,7 +120,7 @@ export default function BrandGaleriaPage() {
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
 
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
-  const [activeBundle, setActiveBundle] = useState<'PRESENTATION' | 'DESIGNS' | 'ANIMATION'>('PRESENTATION');
+  const [activeBundle, setActiveBundle] = useState<'PRESENTATION' | 'DESIGNS'>('PRESENTATION');
   const [activeFormat, setActiveFormat] = useState<'all' | '1:1' | '3:4' | '4:5' | '16:9' | '9:16'>('all');
 
   // Um export por vez: cada slide é um render de chromium no servidor: deixar o
@@ -399,8 +397,7 @@ export default function BrandGaleriaPage() {
 
     const matchesBundle =
       activeBundle === 'PRESENTATION' ? post.type === 'PRESENTATION' :
-      activeBundle === 'DESIGNS' ? (post.type === 'CAROUSEL' || post.type === 'SINGLE_IMAGE') :
-      post.type === 'ANIMATION';
+      (post.type === 'CAROUSEL' || post.type === 'SINGLE_IMAGE');
 
     const dimensions = extractDimensions(post.content);
     const ratioTag = getAspectRatioTag(dimensions.width, dimensions.height);
@@ -556,19 +553,13 @@ export default function BrandGaleriaPage() {
       {activePreviewPost && (() => {
         const preview = extractPreviewSource(activePreviewPost.content, null);
         const imageUrl = activePreviewPost.previewUrl || (preview?.kind === 'image' ? preview.url : null);
-        const designPages = preview?.kind === 'design' ? preview.pages : null;
         const htmlContent = preview?.kind === 'html-design' ? preview.content : null;
-        const firstPage = designPages?.[0];
         const chatHistory = extractChatHistory(activePreviewPost.content);
         const sessionId = extractSessionId(activePreviewPost.content);
 
         // Calcular proporção real das páginas
-        const contentWidth = htmlContent?.width
-          || (preview?.kind === 'design' ? preview.width : null)
-          || 1080;
-        const contentHeight = htmlContent?.height
-          || (preview?.kind === 'design' ? preview.height : null)
-          || 1080;
+        const contentWidth = htmlContent?.width || 1080;
+        const contentHeight = htmlContent?.height || 1080;
         const aspectRatio = `${contentWidth} / ${contentHeight}`;
 
         return (
@@ -608,21 +599,6 @@ export default function BrandGaleriaPage() {
                         </div>
                       </div>
                     ))
-                  ) : designPages ? (
-                    designPages.map((page: any, idx: number) => (
-                      <div key={page.id || idx} className={styles.adobePreviewSlideContainer}>
-                        <div className={styles.adobePreviewSlideHeader}>
-                          Slide {idx + 1} {page.name ? `— ${page.name}` : ''}
-                        </div>
-                        <div className={styles.adobePreviewSlideContent} style={{ aspectRatio }}>
-                          <DesignRenderer
-                            pages={[page]}
-                            canvasWidth={(preview?.kind === 'design' ? preview.width : null) ?? 1080}
-                            canvasHeight={(preview?.kind === 'design' ? preview.height : null) ?? 1080}
-                          />
-                        </div>
-                      </div>
-                    ))
                   ) : (
                     <div style={{ color: 'var(--color-text-tertiary)' }}>Sem preview disponível</div>
                   )}
@@ -651,7 +627,7 @@ export default function BrandGaleriaPage() {
 
                 <div className={styles.adobePanelBody}>
                   {/* Seção: Ações Rápidas */}
-                  {(htmlContent || (designPages && designPages.length > 0)) && canEdit && (
+                  {htmlContent && canEdit && (
                     <div className={styles.adobePanelSection}>
                       <h4 className={styles.adobeSectionTitle}>Editar</h4>
                       <Link
@@ -682,7 +658,7 @@ export default function BrandGaleriaPage() {
                         </button>
                       )}
                       
-                      {(htmlContent || (designPages && designPages.length > 0)) && (
+                      {htmlContent && (
                         <>
                           <button
                             className={styles.adobeSecondaryBtn}
@@ -839,16 +815,11 @@ export default function BrandGaleriaPage() {
       {activeCanvaExportPost && (() => {
         const preview = extractPreviewSource(activeCanvaExportPost.content, null);
         const imageUrl = activeCanvaExportPost.previewUrl || (preview?.kind === 'image' ? preview.url : null);
-        const designPages = preview?.kind === 'design' ? preview.pages : null;
         const htmlContent = preview?.kind === 'html-design' ? preview.content : null;
 
         // Calcular proporção real das páginas
-        const contentWidth = htmlContent?.width
-          || (preview?.kind === 'design' ? preview.width : null)
-          || 1080;
-        const contentHeight = htmlContent?.height
-          || (preview?.kind === 'design' ? preview.height : null)
-          || 1080;
+        const contentWidth = htmlContent?.width || 1080;
+        const contentHeight = htmlContent?.height || 1080;
         const aspectRatio = `${contentWidth} / ${contentHeight}`;
 
         const isRunningExport = exportandoCanva?.postId === activeCanvaExportPost.id
@@ -933,19 +904,6 @@ export default function BrandGaleriaPage() {
                         </div>
                       </div>
                     ))
-                  ) : designPages ? (
-                    designPages.map((page: any, idx: number) => (
-                      <div key={page.id || idx} className={styles.adobePreviewSlideContainer}>
-                        <div className={styles.adobePreviewSlideHeader}>Slide {idx + 1} {page.name ? `— ${page.name}` : ''}</div>
-                        <div className={styles.adobePreviewSlideContent} style={{ aspectRatio }}>
-                          <DesignRenderer
-                            pages={[page]}
-                            canvasWidth={(preview?.kind === 'design' ? preview.width : null) ?? 1080}
-                            canvasHeight={(preview?.kind === 'design' ? preview.height : null) ?? 1080}
-                          />
-                        </div>
-                      </div>
-                    ))
                   ) : (
                     <div style={{ color: 'var(--color-text-tertiary)' }}>Sem preview disponível</div>
                   )}
@@ -989,7 +947,7 @@ export default function BrandGaleriaPage() {
                       </div>
 
                       {/* PPTX Card — caminho editável via Design Import API */}
-                      {(htmlContent || (designPages && designPages.length > 0)) && (
+                      {htmlContent && (
                         <div
                           className={styles.canvaFormatCard}
                           data-selected={canvaFormat === 'pptx'}
@@ -1261,14 +1219,6 @@ export default function BrandGaleriaPage() {
             <LayoutGrid size={16} />
             Designs
           </button>
-          <button
-            type="button"
-            className={`${styles.bundleTab} ${activeBundle === 'ANIMATION' ? styles.bundleTabActive : ''}`}
-            onClick={() => setActiveBundle('ANIMATION')}
-          >
-            <Sparkles size={16} />
-            Animações
-          </button>
         </div>
 
         {activeBundle === 'DESIGNS' && (
@@ -1329,13 +1279,11 @@ export default function BrandGaleriaPage() {
       ) : filteredPosts.length === 0 ? (
         <div className={styles.empty}>Nenhuma arte encontrada nesta pasta.</div>
       ) : viewMode === 'grid' ? (
-        <div className={`${styles.grid} ${activeBundle === 'PRESENTATION' ? styles.gridPresentations : activeBundle === 'DESIGNS' ? styles.gridDesigns : styles.gridAnimations}`}>
+        <div className={`${styles.grid} ${activeBundle === 'PRESENTATION' ? styles.gridPresentations : styles.gridDesigns}`}>
           {filteredPosts.map((post, index) => {
             const preview = extractPreviewSource(post.content, null);
             const imageUrl = post.previewUrl || (preview?.kind === 'image' ? preview.url : null);
-            const designPages = preview?.kind === 'design' ? preview.pages : null;
             const htmlContent = preview?.kind === 'html-design' ? preview.content : null;
-            const firstPage = designPages?.[0];
 
             return (
               <div
@@ -1345,8 +1293,8 @@ export default function BrandGaleriaPage() {
                 onDragStart={() => handleDragStart(post.id)}
                 onDragEnd={() => setDraggedPostId(null)}
               >
-                  <div 
-                    className={`${styles.postThumb} ${activeBundle === 'PRESENTATION' ? styles.postThumbPresentation : activeBundle === 'DESIGNS' ? styles.postThumbDesign : ''}`}
+                  <div
+                    className={`${styles.postThumb} ${activeBundle === 'PRESENTATION' ? styles.postThumbPresentation : styles.postThumbDesign}`}
                     onClick={() => setActivePreviewPost(post)}
                   >
                     <div className={styles.thumbOverlay}>
@@ -1367,24 +1315,14 @@ export default function BrandGaleriaPage() {
                       <div className={styles.thumbDesign}>
                         <HtmlSlideRenderer content={htmlContent} mode="cover" hideNav />
                       </div>
-                    ) : (designPages && firstPage) ? (
-                      <div className={styles.thumbDesign}>
-                        <DesignRenderer
-                          pages={[firstPage]}
-                          canvasWidth={firstPage.width ?? 1080}
-                          canvasHeight={firstPage.height ?? 1080}
-                          hideNav
-                          mode="cover"
-                        />
-                      </div>
                     ) : (
                       <div className={styles.thumbEmpty}>
                         <span style={{ color: 'var(--color-text-tertiary)', fontSize: '12px' }}>Sem preview</span>
                       </div>
                     )}
-                    {(htmlContent || designPages) && (
+                    {htmlContent && (
                       <span className={styles.slideCount}>
-                        {htmlContent ? htmlContent.slides.length : designPages?.length} slides
+                        {htmlContent.slides.length} slides
                       </span>
                     )}
                   </div>
@@ -1426,9 +1364,7 @@ export default function BrandGaleriaPage() {
           {filteredPosts.map((post, index) => {
             const preview = extractPreviewSource(post.content, null);
             const imageUrl = post.previewUrl || (preview?.kind === 'image' ? preview.url : null);
-            const designPages = preview?.kind === 'design' ? preview.pages : null;
             const htmlContent = preview?.kind === 'html-design' ? preview.content : null;
-            const firstPage = designPages?.[0];
             const chatHistory = extractChatHistory(post.content);
             const sessionId = extractSessionId(post.content);
 
@@ -1468,20 +1404,6 @@ export default function BrandGaleriaPage() {
                         onClick={(e) => { e.stopPropagation(); setActivePreviewPost(post); }}
                       >
                         <HtmlSlideRenderer content={htmlContent} mode="cover" hideNav />
-                      </div>
-                    ) : designPages && firstPage ? (
-                      <div
-                        className={styles.thumbDesign}
-                        style={{ backgroundColor: firstPage.backgroundColor ?? '#111', cursor: 'pointer' }}
-                        onClick={(e) => { e.stopPropagation(); setActivePreviewPost(post); }}
-                      >
-                        <DesignRenderer
-                          pages={[firstPage]}
-                          canvasWidth={firstPage.width ?? 1080}
-                          canvasHeight={firstPage.height ?? 1080}
-                          hideNav
-                          mode="cover"
-                        />
                       </div>
                     ) : (
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', height: '100%', color: 'var(--color-text-tertiary)', backgroundColor: 'var(--color-bg-secondary)' }}>
@@ -1528,10 +1450,10 @@ export default function BrandGaleriaPage() {
                             <span title={post.createdBy.email}>👤 {post.createdBy.name.split(' ')[0]}</span>
                           </>
                         )}
-                        {designPages && (
+                        {htmlContent && (
                           <>
                             <span>•</span>
-                            <span>{designPages.length} slides</span>
+                            <span>{htmlContent.slides.length} slides</span>
                           </>
                         )}
                       </div>
@@ -1580,7 +1502,7 @@ export default function BrandGaleriaPage() {
                         : <Send size={16} />}
                     </button>
                   )}
-                  {designPages && firstPage && (
+                  {htmlContent && !imageUrl && (
                      <button
                       className={styles.actionBtn}
                       onClick={() => setActivePreviewPost(post)}

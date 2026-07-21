@@ -3,7 +3,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { ArrowUp, Paperclip, Sparkles, Wifi, WifiOff, X, MessageSquarePlus, Check, Loader2 } from 'lucide-react';
-import DesignRenderer from '@/components/Fabrica/DesignRenderer';
 import dynamic from 'next/dynamic';
 const HtmlSlideRenderer = dynamic(() => import('@/components/DesignDocument/HtmlSlideRenderer'), { ssr: false });
 import { type HtmlDesignPostContent } from '@/lib/designContent';
@@ -815,14 +814,7 @@ export default function FabricaPage() {
                   activeSlide={safeSlide}
                   hideNav
                 />
-              ) : (
-                <DesignRenderer
-                  pages={[currentDesign[safeSlide] ?? currentDesign[0]]}
-                  canvasWidth={1920}
-                  canvasHeight={1080}
-                  hideNav
-                />
-              )}
+              ) : null}
             </div>
 
             {/* Slide navigation */}
