@@ -13,11 +13,10 @@ import { useState, useEffect, useMemo } from 'react';
 import { api, getApiErrorMessage } from '@/lib/api';
 import { exportarDeck, type DeckFileFormat } from '@/lib/deckFile';
 import { useBrandPermissions } from '@/hooks/useBrandPermissions';
-import { extractChatHistory, extractPreviewSource, extractSessionId, type FabricaChatHistoryMessage, type HtmlDesignPostContent, type IRDesignPostContent } from '@/lib/designContent';
+import { extractChatHistory, extractDimensions, extractPreviewSource, extractSessionId, getAspectRatioTag, type FabricaChatHistoryMessage, type HtmlDesignPostContent } from '@/lib/designContent';
 import DesignRenderer, { type DesignPage } from '@/components/Fabrica/DesignRenderer';
 import dynamic from 'next/dynamic';
 const HtmlSlideRenderer = dynamic(() => import('@/components/DesignDocument/HtmlSlideRenderer'), { ssr: false });
-const IRSlideRenderer = dynamic(() => import('@/components/DesignDocument/IRSlideRenderer'), { ssr: false });
 const AiSpendBadge = dynamic(() => import('@/components/AiUsage/AiSpendBadge'), { ssr: false });
 
 function formatPostType(type: string) {
@@ -123,6 +122,8 @@ export default function BrandGaleriaPage() {
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
 
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [activeBundle, setActiveBundle] = useState<'PRESENTATION' | 'DESIGNS' | 'ANIMATION'>('PRESENTATION');
+  const [activeFormat, setActiveFormat] = useState<'all' | '1:1' | '3:4' | '4:5' | '16:9' | '9:16'>('all');
 
   // Um export por vez: cada slide é um render de chromium no servidor: deixar o
   // usuário disparar cinco decks juntos só derrubaria os cinco.
@@ -392,9 +393,20 @@ export default function BrandGaleriaPage() {
   };
 
   const filteredPosts = posts.filter(post => {
-    if (activeFolder === null) return true; // Show all
-    if (activeFolder === 'unassigned') return !post.folderId;
-    return post.folderId === activeFolder;
+    const matchesFolder = activeFolder === null ? true :
+      activeFolder === 'unassigned' ? !post.folderId :
+      post.folderId === activeFolder;
+
+    const matchesBundle =
+      activeBundle === 'PRESENTATION' ? post.type === 'PRESENTATION' :
+      activeBundle === 'DESIGNS' ? (post.type === 'CAROUSEL' || post.type === 'SINGLE_IMAGE') :
+      post.type === 'ANIMATION';
+
+    const dimensions = extractDimensions(post.content);
+    const ratioTag = getAspectRatioTag(dimensions.width, dimensions.height);
+    const matchesFormat = activeFormat === 'all' || ratioTag === activeFormat || ratioTag === 'unknown';
+
+    return matchesFolder && matchesBundle && matchesFormat;
   });
 
 
@@ -546,21 +558,16 @@ export default function BrandGaleriaPage() {
         const imageUrl = activePreviewPost.previewUrl || (preview?.kind === 'image' ? preview.url : null);
         const designPages = preview?.kind === 'design' ? preview.pages : null;
         const htmlContent = preview?.kind === 'html-design' ? preview.content : null;
-        const irContent = preview?.kind === 'ir-design' ? preview.content : null;
         const firstPage = designPages?.[0];
         const chatHistory = extractChatHistory(activePreviewPost.content);
         const sessionId = extractSessionId(activePreviewPost.content);
 
         // Calcular proporção real das páginas
-        const contentWidth = htmlContent?.width 
-          || irContent?.ir?.width 
-          || (irContent as any)?.width 
-          || (preview?.kind === 'design' ? preview.width : null) 
+        const contentWidth = htmlContent?.width
+          || (preview?.kind === 'design' ? preview.width : null)
           || 1080;
-        const contentHeight = htmlContent?.height 
-          || irContent?.ir?.height 
-          || (irContent as any)?.height 
-          || (preview?.kind === 'design' ? preview.height : null) 
+        const contentHeight = htmlContent?.height
+          || (preview?.kind === 'design' ? preview.height : null)
           || 1080;
         const aspectRatio = `${contentWidth} / ${contentHeight}`;
 
@@ -595,21 +602,6 @@ export default function BrandGaleriaPage() {
                         <div className={styles.adobePreviewSlideContent} style={{ aspectRatio }}>
                           <HtmlSlideRenderer
                             content={{ ...htmlContent, slides: [slide] }}
-                            mode="contain"
-                            hideNav
-                          />
-                        </div>
-                      </div>
-                    ))
-                  ) : irContent ? (
-                    irContent.ir?.slides?.map((slide: any, idx: number) => (
-                      <div key={idx} className={styles.adobePreviewSlideContainer}>
-                        <div className={styles.adobePreviewSlideHeader}>
-                          Slide {idx + 1} {slide.name ? `— ${slide.name}` : ''}
-                        </div>
-                        <div className={styles.adobePreviewSlideContent} style={{ aspectRatio }}>
-                          <IRSlideRenderer
-                            content={{ ...irContent, ir: { ...irContent.ir, slides: [slide] } }}
                             mode="contain"
                             hideNav
                           />
@@ -659,7 +651,7 @@ export default function BrandGaleriaPage() {
 
                 <div className={styles.adobePanelBody}>
                   {/* Seção: Ações Rápidas */}
-                  {(htmlContent || irContent || (designPages && designPages.length > 0)) && canEdit && (
+                  {(htmlContent || (designPages && designPages.length > 0)) && canEdit && (
                     <div className={styles.adobePanelSection}>
                       <h4 className={styles.adobeSectionTitle}>Editar</h4>
                       <Link
@@ -690,7 +682,7 @@ export default function BrandGaleriaPage() {
                         </button>
                       )}
                       
-                      {(htmlContent || irContent || (designPages && designPages.length > 0)) && (
+                      {(htmlContent || (designPages && designPages.length > 0)) && (
                         <>
                           <button
                             className={styles.adobeSecondaryBtn}
@@ -849,22 +841,17 @@ export default function BrandGaleriaPage() {
         const imageUrl = activeCanvaExportPost.previewUrl || (preview?.kind === 'image' ? preview.url : null);
         const designPages = preview?.kind === 'design' ? preview.pages : null;
         const htmlContent = preview?.kind === 'html-design' ? preview.content : null;
-        const irContent = preview?.kind === 'ir-design' ? preview.content : null;
-        
+
         // Calcular proporção real das páginas
-        const contentWidth = htmlContent?.width 
-          || irContent?.ir?.width 
-          || (irContent as any)?.width 
-          || (preview?.kind === 'design' ? preview.width : null) 
+        const contentWidth = htmlContent?.width
+          || (preview?.kind === 'design' ? preview.width : null)
           || 1080;
-        const contentHeight = htmlContent?.height 
-          || irContent?.ir?.height 
-          || (irContent as any)?.height 
-          || (preview?.kind === 'design' ? preview.height : null) 
+        const contentHeight = htmlContent?.height
+          || (preview?.kind === 'design' ? preview.height : null)
           || 1080;
         const aspectRatio = `${contentWidth} / ${contentHeight}`;
 
-        const isRunningExport = exportandoCanva?.postId === activeCanvaExportPost.id 
+        const isRunningExport = exportandoCanva?.postId === activeCanvaExportPost.id
           || (exportando?.postId === activeCanvaExportPost.id && (exportando.formato === 'pptx' || exportando.formato === 'html'));
 
         const handleExecutarCanvaExport = async (e: React.MouseEvent) => {
@@ -914,15 +901,6 @@ export default function BrandGaleriaPage() {
                         <div className={styles.adobePreviewSlideHeader}>Slide {idx + 1}</div>
                         <div className={styles.adobePreviewSlideContent} style={{ aspectRatio }}>
                           <HtmlSlideRenderer content={{ ...htmlContent, slides: [slide] }} mode="contain" hideNav />
-                        </div>
-                      </div>
-                    ))
-                  ) : irContent ? (
-                    irContent.ir?.slides?.map((slide: any, idx: number) => (
-                      <div key={idx} className={styles.adobePreviewSlideContainer}>
-                        <div className={styles.adobePreviewSlideHeader}>Slide {idx + 1} {slide.name ? `— ${slide.name}` : ''}</div>
-                        <div className={styles.adobePreviewSlideContent} style={{ aspectRatio }}>
-                          <IRSlideRenderer content={{ ...irContent, ir: { ...irContent.ir, slides: [slide] } }} mode="contain" hideNav />
                         </div>
                       </div>
                     ))
@@ -983,13 +961,13 @@ export default function BrandGaleriaPage() {
                     </div>
                   </div>
 
-                  {(htmlContent || irContent || (designPages && designPages.length > 0)) && (
+                  {(htmlContent || (designPages && designPages.length > 0)) && (
                     <div className={styles.adobePanelSection} style={{ marginTop: '16px' }}>
                       <h4 className={styles.adobeSectionTitle}>Baixar arquivo</h4>
                       
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                         {/* PPTX Card */}
-                        {(htmlContent || irContent || (designPages && designPages.length > 0)) && (
+                        {(htmlContent || (designPages && designPages.length > 0)) && (
                           <div 
                             className={styles.canvaFormatCard}
                             data-selected={canvaFormat === 'pptx'}
@@ -1280,6 +1258,53 @@ export default function BrandGaleriaPage() {
           </Button>
         </div>
 
+        <div className={styles.bundleTabs}>
+          <button
+            type="button"
+            className={`${styles.bundleTab} ${activeBundle === 'PRESENTATION' ? styles.bundleTabActive : ''}`}
+            onClick={() => setActiveBundle('PRESENTATION')}
+          >
+            <Presentation size={16} />
+            Apresentações
+          </button>
+          <button
+            type="button"
+            className={`${styles.bundleTab} ${activeBundle === 'DESIGNS' ? styles.bundleTabActive : ''}`}
+            onClick={() => setActiveBundle('DESIGNS')}
+          >
+            <LayoutGrid size={16} />
+            Designs
+          </button>
+          <button
+            type="button"
+            className={`${styles.bundleTab} ${activeBundle === 'ANIMATION' ? styles.bundleTabActive : ''}`}
+            onClick={() => setActiveBundle('ANIMATION')}
+          >
+            <Sparkles size={16} />
+            Animações
+          </button>
+        </div>
+
+        {activeBundle === 'DESIGNS' && (
+          <div className={styles.formatFilters}>
+            {(['all', '1:1', '3:4', '4:5', '16:9', '9:16'] as const).map((fmt) => (
+              <button
+                key={fmt}
+                type="button"
+                className={`${styles.formatChip} ${activeFormat === fmt ? styles.formatChipActive : ''}`}
+                onClick={() => setActiveFormat(fmt)}
+              >
+                {fmt === 'all' ? 'Todos' :
+                 fmt === '1:1' ? '1:1 · Quadrado' :
+                 fmt === '3:4' ? '3:4 · Retrato' :
+                 fmt === '4:5' ? '4:5 · iPhone' :
+                 fmt === '16:9' ? '16:9 · Paisagem' :
+                 '9:16 · Story'}
+              </button>
+            ))}
+          </div>
+        )}
+
         <div className={styles.foldersGrid}>
           <div
             className={`${styles.folderCard} ${activeFolder === null ? styles.folderCardActive : ''} ${dragOverFolderId === 'root' ? styles.folderCardDragOver : ''}`}
@@ -1318,13 +1343,12 @@ export default function BrandGaleriaPage() {
       ) : filteredPosts.length === 0 ? (
         <div className={styles.empty}>Nenhuma arte encontrada nesta pasta.</div>
       ) : viewMode === 'grid' ? (
-        <div className={styles.grid}>
+        <div className={`${styles.grid} ${activeBundle === 'PRESENTATION' ? styles.gridPresentations : activeBundle === 'DESIGNS' ? styles.gridDesigns : styles.gridAnimations}`}>
           {filteredPosts.map((post, index) => {
             const preview = extractPreviewSource(post.content, null);
             const imageUrl = post.previewUrl || (preview?.kind === 'image' ? preview.url : null);
             const designPages = preview?.kind === 'design' ? preview.pages : null;
             const htmlContent = preview?.kind === 'html-design' ? preview.content : null;
-            const irContent = preview?.kind === 'ir-design' ? preview.content : null;
             const firstPage = designPages?.[0];
 
             return (
@@ -1336,7 +1360,7 @@ export default function BrandGaleriaPage() {
                 onDragEnd={() => setDraggedPostId(null)}
               >
                   <div 
-                    className={styles.postThumb}
+                    className={`${styles.postThumb} ${activeBundle === 'PRESENTATION' ? styles.postThumbPresentation : activeBundle === 'DESIGNS' ? styles.postThumbDesign : ''}`}
                     onClick={() => setActivePreviewPost(post)}
                   >
                     <div className={styles.thumbOverlay}>
@@ -1357,10 +1381,6 @@ export default function BrandGaleriaPage() {
                       <div className={styles.thumbDesign}>
                         <HtmlSlideRenderer content={htmlContent} mode="cover" hideNav />
                       </div>
-                    ) : irContent ? (
-                      <div className={styles.thumbDesign}>
-                        <IRSlideRenderer content={irContent} mode="cover" hideNav />
-                      </div>
                     ) : (designPages && firstPage) ? (
                       <div className={styles.thumbDesign}>
                         <DesignRenderer
@@ -1376,9 +1396,9 @@ export default function BrandGaleriaPage() {
                         <span style={{ color: 'var(--color-text-tertiary)', fontSize: '12px' }}>Sem preview</span>
                       </div>
                     )}
-                    {(htmlContent || irContent || designPages) && (
+                    {(htmlContent || designPages) && (
                       <span className={styles.slideCount}>
-                        {htmlContent ? htmlContent.slides.length : irContent ? (irContent.ir?.slides?.length ?? 0) : designPages?.length} slides
+                        {htmlContent ? htmlContent.slides.length : designPages?.length} slides
                       </span>
                     )}
                   </div>
@@ -1422,7 +1442,6 @@ export default function BrandGaleriaPage() {
             const imageUrl = post.previewUrl || (preview?.kind === 'image' ? preview.url : null);
             const designPages = preview?.kind === 'design' ? preview.pages : null;
             const htmlContent = preview?.kind === 'html-design' ? preview.content : null;
-            const irContent = preview?.kind === 'ir-design' ? preview.content : null;
             const firstPage = designPages?.[0];
             const chatHistory = extractChatHistory(post.content);
             const sessionId = extractSessionId(post.content);
@@ -1463,14 +1482,6 @@ export default function BrandGaleriaPage() {
                         onClick={(e) => { e.stopPropagation(); setActivePreviewPost(post); }}
                       >
                         <HtmlSlideRenderer content={htmlContent} mode="cover" hideNav />
-                      </div>
-                    ) : irContent ? (
-                      <div 
-                        className={styles.thumbDesign}
-                        style={{ cursor: 'pointer' }}
-                        onClick={(e) => { e.stopPropagation(); setActivePreviewPost(post); }}
-                      >
-                        <IRSlideRenderer content={irContent} mode="cover" hideNav />
                       </div>
                     ) : designPages && firstPage ? (
                       <div
@@ -1561,7 +1572,7 @@ export default function BrandGaleriaPage() {
                       </button>
                     </>
                   )}
-                  {(htmlContent || (irContent && (irContent.ir?.slides?.length ?? 0) > 0)) && canEdit && (
+                  {htmlContent && canEdit && (
                     <Link
                       href={`/${slug}/editor/${post.id}`}
                       className={styles.actionBtn}
@@ -1571,7 +1582,7 @@ export default function BrandGaleriaPage() {
                       <PenLine size={16} />
                     </Link>
                   )}
-                  {(htmlContent || (irContent && (irContent.ir?.slides?.length ?? 0) > 0)) && (
+                  {htmlContent && (
                     <button
                       className={styles.actionBtn}
                       onClick={(e) => handleExportCanva(e, post.id)}

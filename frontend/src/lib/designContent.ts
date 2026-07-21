@@ -24,25 +24,15 @@ export type FabricaDesignPostContent = {
   chatHistory?: FabricaChatHistoryMessage[];
 };
 
-export type IRDesignPostContent = {
-  kind: 'ir-design';
-  version: 1;
-  ir: any; // Using any here to avoid cyclic dependency, but we will import it.
-  sessionId?: string;
-  chatHistory?: FabricaChatHistoryMessage[];
-};
-
 export type EditablePagesResult =
   | { status: 'editable'; pages: DesignPage[]; source: 'legacy-pages' | 'image-post'; warnings?: string[] }
   | { status: 'html'; content: HtmlDesignPostContent }
-  | { status: 'ir'; content: IRDesignPostContent }
   | { status: 'not-editable'; reason: 'empty' | 'invalid' | 'image-without-url' };
 
 export type PreviewSource =
   | { kind: 'image'; url: string }
   | { kind: 'design'; pages: DesignPage[]; width: number; height: number; source: 'legacy-pages' }
   | { kind: 'html-design'; content: HtmlDesignPostContent }
-  | { kind: 'ir-design'; content: IRDesignPostContent }
   | null;
 
 const DEFAULT_CANVAS_SIZE = 1080;
@@ -145,10 +135,6 @@ export function isHtmlDesignContent(content: unknown): content is HtmlDesignPost
     && typeof content.height === 'number';
 }
 
-export function isIRDesignContent(content: unknown): content is IRDesignPostContent {
-  if (!isRecord(content)) return false;
-  return content.kind === 'ir-design' && 'ir' in content;
-}
 
 
 
@@ -177,10 +163,6 @@ export function extractEditablePages(content: unknown): EditablePagesResult {
     return { status: 'html', content };
   }
 
-  if (isIRDesignContent(content)) {
-    return { status: 'ir', content };
-  }
-
   if (isFabricaDesignContent(content)) {
     return { status: 'editable', pages: content.pages, source: 'legacy-pages' };
   }
@@ -205,8 +187,6 @@ export function extractPreviewSource(content: unknown, previewUrl?: string | nul
   // slide previews, full capabilities (exporting/editing), and multi-slide controls are preserved.
   if (isHtmlDesignContent(content)) return { kind: 'html-design', content };
 
-  if (isIRDesignContent(content)) return { kind: 'ir-design', content };
-
   const editable = extractEditablePages(content);
   if (editable.status === 'editable' && editable.source !== 'image-post') {
     const firstPage = editable.pages[0];
@@ -230,12 +210,9 @@ export function extractPreviewSource(content: unknown, previewUrl?: string | nul
   return null;
 }
 
-// O `ir-design` PRECISA estar nestas duas listas para compatibilidade com posts legados.
 // O backend grava `sessionId` e `chatHistory` no envelope de todo deck (pipeline.ts).
-// html-design é hoje o único formato que o produto gera — ir-design é um motor legado
-// mantido para renderizar posts antigos. Ambos precisam ser suportados na galeria.
 export function extractChatHistory(content: unknown): FabricaChatHistoryMessage[] {
-  if (isFabricaDesignContent(content) || isHtmlDesignContent(content) || isIRDesignContent(content)) {
+  if (isFabricaDesignContent(content) || isHtmlDesignContent(content)) {
     return content.chatHistory ?? [];
   }
   return [];
@@ -248,8 +225,62 @@ export function extractSessionId(content: unknown): string | null {
   if (isHtmlDesignContent(content)) {
     return content.sessionId ?? null;
   }
-  if (isIRDesignContent(content)) {
-    return content.sessionId ?? null;
-  }
   return null;
+}
+
+export type AspectRatioTag = '1:1' | '3:4' | '4:5' | '16:9' | '9:16' | 'unknown';
+
+export function extractDimensions(content: unknown): { width?: number; height?: number } {
+  if (!isRecord(content)) return {};
+
+  if (isHtmlDesignContent(content)) {
+    const firstSlideRaw = Array.isArray(content.slides) ? content.slides[0] : undefined;
+    const firstSlide = isRecord(firstSlideRaw) ? (firstSlideRaw as Record<string, unknown>) : undefined;
+    if (firstSlide && (isFiniteNumber(firstSlide.width) || isFiniteNumber(firstSlide.height))) {
+      return {
+        width: isFiniteNumber(firstSlide.width) ? firstSlide.width : undefined,
+        height: isFiniteNumber(firstSlide.height) ? firstSlide.height : undefined,
+      };
+    }
+    return {
+      width: isFiniteNumber(content.width) ? content.width : undefined,
+      height: isFiniteNumber(content.height) ? content.height : undefined,
+    };
+  }
+
+  if (isFabricaDesignContent(content)) {
+    const firstPage = content.pages[0];
+    if (firstPage) {
+      return {
+        width: isFiniteNumber(firstPage.width) ? firstPage.width : undefined,
+        height: isFiniteNumber(firstPage.height) ? firstPage.height : undefined,
+      };
+    }
+  }
+
+  const editable = extractEditablePages(content);
+  if (editable.status === 'editable' && editable.pages[0]) {
+    const firstPage = editable.pages[0];
+    return {
+      width: isFiniteNumber(firstPage.width) ? firstPage.width : undefined,
+      height: isFiniteNumber(firstPage.height) ? firstPage.height : undefined,
+    };
+  }
+
+  const fallback = content as Record<string, unknown>;
+  return {
+    width: isFiniteNumber(fallback.width) ? fallback.width : undefined,
+    height: isFiniteNumber(fallback.height) ? fallback.height : undefined,
+  };
+}
+
+export function getAspectRatioTag(width?: number, height?: number): AspectRatioTag {
+  if (!width || !height || width <= 0 || height <= 0) return 'unknown';
+  const ratio = width / height;
+
+  if (Math.abs(ratio - 1) < 0.15) return '1:1';
+  if (ratio > 1.65) return '16:9';
+  if (ratio < 0.5) return '9:16';
+  if (ratio < 0.85) return '4:5';
+  return '3:4';
 }

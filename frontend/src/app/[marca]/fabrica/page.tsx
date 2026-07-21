@@ -6,7 +6,6 @@ import { ArrowUp, Paperclip, Sparkles, Wifi, WifiOff, X, MessageSquarePlus, Chec
 import DesignRenderer from '@/components/Fabrica/DesignRenderer';
 import dynamic from 'next/dynamic';
 const HtmlSlideRenderer = dynamic(() => import('@/components/DesignDocument/HtmlSlideRenderer'), { ssr: false });
-const IRSlideRenderer = dynamic(() => import('@/components/DesignDocument/IRSlideRenderer'), { ssr: false });
 import { type HtmlDesignPostContent } from '@/lib/designContent';
 const AsanaPopup = dynamic(() => import('@/components/Fabrica/AsanaPopup').then(mod => ({ default: mod.AsanaPopup })), { ssr: false });
 const CanvaPopup = dynamic(() => import('@/components/Fabrica/CanvaPopup').then(mod => ({ default: mod.CanvaPopup })), { ssr: false });
@@ -329,14 +328,11 @@ export default function FabricaPage() {
 
   const displayMessages = messages;
 
-  // ── Normaliza o formato do design pro preview (html-design, ir-design, legacy) ─
+  // ── Normaliza o formato do design pro preview (html-design, legacy) ─
   const designKind = (currentDesign[0] as { kind?: string } | undefined)?.kind;
   const isHtmlDesign = designKind === 'html-design';
-  const isIrDesign = designKind === 'ir-design';
   const slideCount = isHtmlDesign
     ? ((currentDesign[0] as unknown as HtmlDesignPostContent).slides?.length ?? 0)
-    : isIrDesign
-    ? ((currentDesign[0] as { ir?: { slides?: unknown[] } }).ir?.slides?.length ?? 0)
     : currentDesign.length;
 
   // Índice clampeado (derivado): se um novo design tiver menos slides que o anterior,
@@ -813,12 +809,6 @@ export default function FabricaPage() {
               {isHtmlDesign ? (
                 <HtmlSlideRenderer
                   content={currentDesign[0] as unknown as HtmlDesignPostContent}
-                  activeSlide={safeSlide}
-                  hideNav
-                />
-              ) : isIrDesign ? (
-                <IRSlideRenderer
-                  content={currentDesign[0]}
                   activeSlide={safeSlide}
                   hideNav
                 />

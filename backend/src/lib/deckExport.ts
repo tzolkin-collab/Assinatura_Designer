@@ -80,7 +80,7 @@ async function carregarDeck(postId: string): Promise<{ deck: RenderableDeck; tit
 
   const deck = resolveRenderableDeck(mergeSlidesIntoPost(post).content);
   if (!deck) {
-    throw createError(400, 'Export disponível apenas para designs html-design ou ir-design');
+    throw createError(400, 'Export disponível apenas para designs html-design');
   }
   if (deck.count === 0) throw createError(400, 'Este design ainda não tem slides.');
 

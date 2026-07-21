@@ -1,8 +1,6 @@
 import type { Prisma } from '@prisma/client';
 import prisma from './prisma.js';
 import { buildSlideDocument, type HtmlDesignSlide } from './htmlDesign.js';
-import { compileSlideToDocument } from './designIR/compiler.js';
-import type { SlideNode } from './designIR/types.js';
 
 /** Linha da tabela relacional `slides` (a fonte de verdade de cada slide). */
 interface SlideRow {
@@ -163,11 +161,10 @@ export async function syncPostSlides(postId: string, content: unknown): Promise<
     let htmlDoc = '';
 
     try {
-      // O slide vem do JSON do post, então só sabemos a forma pelo `kind` do content.
-      // O compilador valida/normaliza o que receber, e a falha cai no catch abaixo.
-      htmlDoc = isIr
-        ? compileSlideToDocument(slideContent as unknown as SlideNode, fonts, width, height)
-        : buildSlideDocument(slideContent as unknown as HtmlDesignSlide, fonts, width, height);
+      // O slide vem do JSON do post (html-design). O compilador valida/normaliza.
+      if (!isIr) {
+        htmlDoc = buildSlideDocument(slideContent as unknown as HtmlDesignSlide, fonts, width, height);
+      }
     } catch (e) {
       console.error(`Falha ao compilar slide ${i} para cache de render`, e);
     }

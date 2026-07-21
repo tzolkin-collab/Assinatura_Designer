@@ -259,7 +259,7 @@ postsRouter.get('/:id/export', async (req: AuthRequest, res: Response, next: Nex
     const postWithSlides = mergeSlidesIntoPost(post);
     const deck = resolveRenderableDeck(postWithSlides.content);
     if (!deck) {
-      throw createError(400, 'Export disponível apenas para designs html-design ou ir-design');
+      throw createError(400, 'Export disponível apenas para designs html-design');
     }
 
     const requested = Number(req.query.slide ?? 0) || 0;
@@ -517,7 +517,7 @@ postsRouter.post('/:id/export-file', async (req: AuthRequest, res: Response, nex
 
     const deck = resolveRenderableDeck(mergeSlidesIntoPost(post).content);
     if (!deck) {
-      throw createError(400, 'Export disponível apenas para designs html-design ou ir-design');
+      throw createError(400, 'Export disponível apenas para designs html-design');
     }
     if (deck.count === 0) throw createError(400, 'Este design ainda não tem slides.');
 
@@ -644,7 +644,7 @@ postsRouter.post('/:id/export-canva', async (req: AuthRequest, res: Response, ne
 
     const deck = resolveRenderableDeck(mergeSlidesIntoPost(post).content);
     if (!deck) {
-      throw createError(400, 'Export Canva disponível apenas para designs html-design ou ir-design');
+      throw createError(400, 'Export Canva disponível apenas para designs html-design');
     }
 
     if (typeof slideIndex === 'number' && (slideIndex < 0 || slideIndex >= deck.count)) {

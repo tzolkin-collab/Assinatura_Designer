@@ -59,8 +59,6 @@ export const config = {
     /** Tarefas mecânicas (classificar, extrair, sugerir): o mais barato que funciona. */
     utility: process.env.GEMINI_UTILITY_MODEL || 'gemini-2.5-flash-lite',
   },
-  // Alias legado do models.artist — NÃO use em código novo (será removido).
-  geminiDesignDocumentModel: process.env.GEMINI_DESIGN_DOCUMENT_MODEL || 'gemini-3.1-pro-preview',
   // Teto de tokens de "thinking" na geração. O modelo pro às vezes gasta quase
   // todo o maxOutputTokens pensando e trunca o JSON (finishReason MAX_TOKENS →
   // "did not contain valid JSON"). Limitar o thinking deixa a maior parte do

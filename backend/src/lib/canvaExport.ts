@@ -68,7 +68,7 @@ export async function runCanvaExport(
   }
 
   const deck = resolveRenderableDeck(mergeSlidesIntoPost(post).content);
-  if (!deck) throw new Error('Export disponível apenas para designs html-design ou ir-design');
+  if (!deck) throw new Error('Export disponível apenas para designs html-design');
 
   const indices =
     typeof slideIndex === 'number'
