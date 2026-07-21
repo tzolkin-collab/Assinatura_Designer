@@ -274,6 +274,19 @@
   gap: 4px;
 }
 
+/* Variante em 2 colunas — usa a largura do popup (popupWide) melhor que uma
+   lista de coluna única quando os itens são compactos (Drive, Canva). */
+.listTwoCol {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-content: start;
+  gap: 6px;
+}
+
+.spanAll {
+  grid-column: 1 / -1;
+}
+
 .listItem {
   display: flex;
   align-items: center;
@@ -388,11 +401,12 @@
    lista de texto escondia justamente a informação mais útil pra escolher. */
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  grid-template-columns: 1fr 1fr;
   gap: var(--space-3);
   padding: var(--space-3) var(--space-4);
   overflow-y: auto;
   flex: 1;
+  align-content: start;
 }
 
 .gridItem {

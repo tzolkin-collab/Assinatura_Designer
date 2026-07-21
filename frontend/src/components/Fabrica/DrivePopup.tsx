@@ -247,13 +247,13 @@ export function DrivePopup({ onClose, onInject }: Props) {
               </div>
             )}
 
-            <div className={styles.list}>
+            <div className={`${styles.list} ${styles.listTwoCol}`}>
               {loadingFiles ? (
-                <div className={styles.center}>
+                <div className={`${styles.center} ${styles.spanAll}`}>
                   <Loader2 size={18} className={styles.spin} style={{ color: 'var(--color-text-tertiary)' }} />
                 </div>
               ) : files.length === 0 ? (
-                <p className={styles.emptyState}>
+                <p className={`${styles.emptyState} ${styles.spanAll}`}>
                   {searchQuery ? 'Nenhum resultado encontrado.' : 'Nenhum arquivo encontrado nesta pasta.'}
                 </p>
               ) : (
