@@ -230,11 +230,10 @@ export function extractPreviewSource(content: unknown, previewUrl?: string | nul
   return null;
 }
 
-// O `ir-design` PRECISA estar nestas duas listas. O backend grava `sessionId` e
-// `chatHistory` no envelope de todo deck (pipeline.ts), mas a migração para o IR não
-// passou por aqui: como ir-design é hoje o único formato que o produto gera, TODO deck
-// aparecia na galeria como "Sessão: não registrada", com histórico vazio e sem o link
-// "Abrir sessão" — ou seja, sem caminho de volta para a conversa que o criou.
+// O `ir-design` PRECISA estar nestas duas listas para compatibilidade com posts legados.
+// O backend grava `sessionId` e `chatHistory` no envelope de todo deck (pipeline.ts).
+// html-design é hoje o único formato que o produto gera — ir-design é um motor legado
+// mantido para renderizar posts antigos. Ambos precisam ser suportados na galeria.
 export function extractChatHistory(content: unknown): FabricaChatHistoryMessage[] {
   if (isFabricaDesignContent(content) || isHtmlDesignContent(content) || isIRDesignContent(content)) {
     return content.chatHistory ?? [];

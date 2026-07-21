@@ -43,6 +43,13 @@ const MIME_BY_FORMAT: Record<DeckExportFormat, string> = {
   html: 'application/zip',
 };
 
+const EXT_BY_FORMAT: Record<DeckExportFormat, string> = {
+  pdf: 'pdf',
+  zip: 'png',
+  pptx: 'pptx',
+  html: 'zip',
+};
+
 export interface DeckExportParams {
   postId: string;
   /** Dono do pedido: o worker não sabe quem pediu, e o progresso não pode vazar. */
@@ -176,7 +183,8 @@ export async function runDeckExport(
     buffer = pptxBuffer;
   }
 
-  const fileName = `${titulo}.${format}`;
+  const ext = EXT_BY_FORMAT[format];
+  const fileName = format === 'zip' ? `${titulo}-png.${ext}` : format === 'html' ? `${titulo}-html.${ext}` : `${titulo}.${ext}`;
   const url = await uploadFileToR2(buffer, fileName, MIME_BY_FORMAT[format], 'exports');
 
   logger.info('Export de deck concluído', { postId, format, slides: deck.count, bytes: buffer.length });

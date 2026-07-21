@@ -5,7 +5,8 @@ import type { SlideNode as IRSlideNode } from './designIR/types.js';
 // Normaliza um post (html-design OU ir-design) para um "deck renderizável": um
 // jeito único de obter width/height/fonts e o documento HTML completo de cada
 // slide (compilando o IR quando necessário). É o que destrava export/Canva para
-// ir-design, o formato principal gerado hoje.
+// html-design, o formato principal gerado hoje. IR é um motor legado mantido para
+// compatibilidade com posts antigos, mas não é mais gerado pelo pipeline.
 //
 // Vive em lib/ (e não em routes/) porque o worker de export do Canva também
 // precisa dele — duas cópias divergiriam na primeira mudança de formato.
