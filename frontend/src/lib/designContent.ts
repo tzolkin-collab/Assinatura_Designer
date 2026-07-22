@@ -45,6 +45,12 @@ function extractImageUrlFromContent(content: unknown): string | null {
   return typeof url === 'string' && url.trim().length > 0 ? url : null;
 }
 
+export type UsedBrandAsset = {
+  id: string;
+  url: string;
+  name: string;
+};
+
 export type HtmlDesignPostContent = {
   kind: 'html-design';
   version: 1;
@@ -57,7 +63,15 @@ export type HtmlDesignPostContent = {
   sessionId?: string;
   chatHistory?: FabricaChatHistoryMessage[];
   reasoning?: string;
+  /** Assets da Biblioteca de Mídia que entraram de fato neste deck (detectado no
+   *  HTML final + resolvidos pelo imageResolver) — ver pipeline.ts. */
+  usedAssets?: UsedBrandAsset[];
 };
+
+export function extractUsedAssets(content: unknown): UsedBrandAsset[] {
+  if (!isHtmlDesignContent(content)) return [];
+  return Array.isArray(content.usedAssets) ? content.usedAssets : [];
+}
 
 export function isHtmlDesignContent(content: unknown): content is HtmlDesignPostContent {
   if (!isRecord(content)) return false;

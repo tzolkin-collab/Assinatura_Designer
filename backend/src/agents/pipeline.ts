@@ -1,14 +1,14 @@
 import { randomUUID } from 'crypto';
 import type { Prisma } from '@prisma/client';
 import prisma from '../lib/prisma.js';
-import { getSession, updateSession, updateBrandMemory } from '../lib/redis.js';
+import { getSession, updateSession, updateBrandMemory, getBrandMemory } from '../lib/redis.js';
 import { ws } from '../lib/websocket.js';
 import { buildBrandContextSummary, resolveBrandContext } from '../lib/brandContext.js';
 import { executeTool } from './tools/index.js';
 import { runPlanner, MAX_SLIDES, type SlideSkeletonItem } from './planner/index.js';
 import { runHtmlReviewer } from './reviewer/index.js';
 import type { ReviewResult } from './reviewer/index.js';
-import { generateHtmlDesignBatched } from '../lib/htmlDesign.js';
+import { generateHtmlDesignBatched, type HtmlDesignSlide } from '../lib/htmlDesign.js';
 import { syncPostSlides } from '../lib/postHelper.js';
 import { researchBrand, type VisualRef } from '../lib/fabricaLegacy.js';
 import { resolveSlideImages } from '../lib/imageResolver.js';
@@ -85,7 +85,16 @@ async function runPipelineInner(
     return;
   }
 
-  const brandContext = buildBrandContextSummary(brand);
+  // Preferências que a IA aprendeu no chat desta marca (skill updateBrandMemory).
+  // Antes só eram gravadas, nunca lidas de volta — o usuário "ensinava" uma regra
+  // e ela nunca mudava a próxima geração.
+  const brandMemory = await getBrandMemory(session.brandSlug).catch(() => null);
+  const learnedPreferences = brandMemory?.preferences;
+  const learnedPreferencesText = learnedPreferences && Object.keys(learnedPreferences).length > 0
+    ? `Regras aprendidas sobre esta marca em conversas anteriores (respeite):\n${Object.entries(learnedPreferences).map(([k, v]) => `- ${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`).join('\n')}`
+    : '';
+
+  const brandContext = [buildBrandContextSummary(brand), learnedPreferencesText].filter(Boolean).join('\n\n');
 
   await updateSession(sessionId, { phase: 'running', workerStatus: 'running' });
   const runningSession = await getSession(sessionId);
@@ -223,6 +232,8 @@ async function runPipelineInner(
       height,
       skeleton,
       postId,
+      allowGeneratedGraphics: brand.presentationConfig?.allowGeneratedGraphics,
+      allowSvgLayouts: brand.presentationConfig?.allowSvgLayouts,
     }).catch((err) => {
       logger.error('Resolução de imagens dos slides falhou; seguindo sem imagens geradas', { error: (err as Error).message });
       return new Map<number, { imageUrl?: string; svgMarkup?: string }>();
@@ -288,6 +299,9 @@ async function runPipelineInner(
             agentPrompt: brand.agentPrompt,
             logoUrl: brand.logoUrl,
             assetUrls: brand.assetUrls,
+            presentationConfig: brand.presentationConfig ?? undefined,
+            references: brand.references,
+            learnedPreferences,
           },
           skeleton: params.generateStyleProofOnly
             ? enrichedSkeleton.slice(0, 1)
@@ -485,6 +499,29 @@ async function runPipelineInner(
     // (a tabela relacional é a fonte).
     const contentToSave: Record<string, unknown> = { ...postContent };
     delete contentToSave.slides;
+
+    // Quais assets da Biblioteca de Mídia entraram de fato no deck — pra mostrar
+    // um card de transparência na tela ("usei estas imagens da sua marca").
+    // Cobre tanto o que o artista escolheu sozinho da lista oferecida (assetUrls)
+    // quanto o que o imageResolver já resolveu por slide.
+    try {
+      const finalSlides = Array.isArray(envelope.slides) ? (envelope.slides as HtmlDesignSlide[]) : [];
+      const htmlBlob = finalSlides.map((s) => `${s.html ?? ''}${s.css ?? ''}`).join('\n');
+      const offeredUrls = brand.assetUrls ?? [];
+      const detectedUrls = offeredUrls.filter((url) => htmlBlob.includes(url));
+      const resolvedUrls = Array.from(resolvedImages.values()).map((v) => v.imageUrl).filter((u): u is string => !!u);
+      const usedAssetUrls = Array.from(new Set([...detectedUrls, ...resolvedUrls]));
+
+      if (usedAssetUrls.length > 0) {
+        const usedAssets = await prisma.asset.findMany({
+          where: { brandId: brand.id, url: { in: usedAssetUrls } },
+          select: { id: true, url: true, name: true },
+        });
+        contentToSave.usedAssets = usedAssets;
+      }
+    } catch (err) {
+      logger.warn('Falha ao detectar assets usados no deck (não bloqueia o save)', { postId, error: (err as Error).message });
+    }
 
     await prisma.post.update({
       where: { id: postId },

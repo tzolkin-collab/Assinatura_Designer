@@ -13,7 +13,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { api, getApiErrorMessage } from '@/lib/api';
 import { exportarDeck, type DeckFileFormat } from '@/lib/deckFile';
 import { useBrandPermissions } from '@/hooks/useBrandPermissions';
-import { extractChatHistory, extractDimensions, extractPreviewSource, extractSessionId, getAspectRatioTag, type FabricaChatHistoryMessage, type HtmlDesignPostContent } from '@/lib/designContent';
+import { extractChatHistory, extractDimensions, extractPreviewSource, extractSessionId, extractUsedAssets, getAspectRatioTag, type FabricaChatHistoryMessage, type HtmlDesignPostContent } from '@/lib/designContent';
 import dynamic from 'next/dynamic';
 const HtmlSlideRenderer = dynamic(() => import('@/components/DesignDocument/HtmlSlideRenderer'), { ssr: false });
 const AiSpendBadge = dynamic(() => import('@/components/AiUsage/AiSpendBadge'), { ssr: false });
@@ -556,6 +556,7 @@ export default function BrandGaleriaPage() {
         const htmlContent = preview?.kind === 'html-design' ? preview.content : null;
         const chatHistory = extractChatHistory(activePreviewPost.content);
         const sessionId = extractSessionId(activePreviewPost.content);
+        const usedAssets = extractUsedAssets(activePreviewPost.content);
 
         // Calcular proporção real das páginas
         const contentWidth = htmlContent?.width || 1080;
@@ -638,6 +639,21 @@ export default function BrandGaleriaPage() {
                         <PenLine size={16} />
                         Abrir no Editor
                       </Link>
+                    </div>
+                  )}
+
+                  {/* Seção: Assets da marca usados neste deck */}
+                  {usedAssets.length > 0 && (
+                    <div className={styles.adobePanelSection}>
+                      <h4 className={styles.adobeSectionTitle}>Assets da marca usados ({usedAssets.length})</h4>
+                      <div className={styles.usedAssetsGrid}>
+                        {usedAssets.map((asset) => (
+                          <div key={asset.id} className={styles.usedAssetCard} title={asset.name}>
+                            <img src={asset.url} alt={asset.name} className={styles.usedAssetThumb} />
+                            <span className={styles.usedAssetName}>{asset.name}</span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
 

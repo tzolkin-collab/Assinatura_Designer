@@ -61,6 +61,8 @@ function extractGeneratedImageDataUrl(response: unknown): string {
 async function decideImagePlan(
   slidesNeedingImage: Array<{ index: number; title: string; hint: string }>,
   existingAssets: ExistingBrandAsset[],
+  allowGeneratedGraphics: boolean,
+  allowSvgLayouts: boolean,
 ): Promise<ImageDecision[]> {
   if (slidesNeedingImage.length === 0) return [];
 
@@ -72,6 +74,9 @@ async function decideImagePlan(
     .map((s) => `- Slide ${s.index}: "${s.title}" — precisa de: ${s.hint}`)
     .join('\n');
 
+  const actionsAllowed = ['"reuse"', allowGeneratedGraphics ? '"generate-photo"' : null, allowSvgLayouts ? '"generate-svg"' : null, '"skip"']
+    .filter(Boolean).join('|');
+
   const prompt = `Você decide, para cada slide abaixo, se a Biblioteca de Mídia da marca já tem uma imagem que SERVE de verdade pra premissa dele, ou se precisa gerar uma nova.
 
 ## Slides que pedem imagem:
@@ -82,14 +87,14 @@ ${assetsBlock}
 
 ## Regras de decisão:
 1. "reuse": SÓ quando um asset da lista corresponde de verdade ao que o slide precisa (não force um encaixe genérico — um asset de "logo" não serve pra "foto de produto em uso").
-2. "generate-photo": quando o slide precisa de uma foto/cena realista (produto, pessoa, ambiente) e nada na biblioteca serve.
-3. "generate-svg": quando o slide precisa de um ícone, ilustração vetorial simples ou gráfico decorativo complexo (não uma foto realista) e nada na biblioteca serve.
-4. "skip": quando não vale a pena gerar (raro — só se o hint for vago demais pra virar prompt de imagem).
+${allowGeneratedGraphics ? '2. "generate-photo": quando o slide precisa de uma foto/cena realista (produto, pessoa, ambiente) e nada na biblioteca serve.' : '2. Geração de foto está DESLIGADA para esta marca — nunca escolha "generate-photo". Se nada na biblioteca serve, use "skip".'}
+${allowSvgLayouts ? '3. "generate-svg": quando o slide precisa de um ícone, ilustração vetorial simples ou gráfico decorativo complexo (não uma foto realista) e nada na biblioteca serve.' : '3. Geração de SVG está DESLIGADA para esta marca — nunca escolha "generate-svg". Se nada na biblioteca serve, use "skip".'}
+4. "skip": quando não vale a pena gerar (raro — só se o hint for vago demais pra virar prompt de imagem), ou quando a ação necessária está desligada acima.
 5. Para "reuse", "assetUrl" DEVE ser uma URL exata da lista acima.
-6. Para "generate-photo"/"generate-svg", "generatePrompt" é uma descrição visual completa e específica (cena, composição, luz, estilo) pronta pra virar prompt de geração — não repita o hint cru.
+6. Para "generate-photo"/"generate-svg" (só se permitido), "generatePrompt" é uma descrição visual completa e específica (cena, composição, luz, estilo) pronta pra virar prompt de geração — não repita o hint cru.
 
 Retorne APENAS um array JSON:
-[{ "slideIndex": number, "action": "reuse"|"generate-photo"|"generate-svg"|"skip", "assetUrl"?: string, "generatePrompt"?: string }]`;
+[{ "slideIndex": number, "action": ${actionsAllowed}, "assetUrl"?: string, "generatePrompt"?: string }]`;
 
   try {
     const response = await generateWithRetry(ai, {
@@ -195,6 +200,9 @@ export interface ResolveSlideImagesParams {
   skeleton: SlideSkeletonItem[];
   createdById?: string;
   postId?: string;
+  /** Configuráveis em Presentation Config da marca. Default true — desligar é opt-out. */
+  allowGeneratedGraphics?: boolean;
+  allowSvgLayouts?: boolean;
 }
 
 /**
@@ -219,7 +227,10 @@ export async function resolveSlideImages(params: ResolveSlideImagesParams): Prom
     select: { url: true, name: true, tags: true },
   }).catch(() => [] as ExistingBrandAsset[]);
 
-  const decisions = await decideImagePlan(slidesNeedingImage, existingAssets);
+  const allowGeneratedGraphics = params.allowGeneratedGraphics !== false;
+  const allowSvgLayouts = params.allowSvgLayouts !== false;
+
+  const decisions = await decideImagePlan(slidesNeedingImage, existingAssets, allowGeneratedGraphics, allowSvgLayouts);
 
   let generatedCount = 0;
   const budget = Math.max(0, config.maxGeneratedImagesPerDeck);
@@ -235,6 +246,10 @@ export async function resolveSlideImages(params: ResolveSlideImagesParams): Prom
     }
 
     if (decision.action === 'skip' || !decision.generatePrompt) continue;
+    // Segunda trava (o prompt já pede pra não escolher a ação desligada, isto é
+    // o backstop caso o modelo ignore a instrução).
+    if (decision.action === 'generate-photo' && !allowGeneratedGraphics) continue;
+    if (decision.action === 'generate-svg' && !allowSvgLayouts) continue;
 
     if (generatedCount >= budget) {
       logger.info('Teto de imagens geradas do deck atingido — slide fica sem imagem', {

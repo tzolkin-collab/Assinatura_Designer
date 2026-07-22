@@ -35,6 +35,29 @@ export interface GenerateHtmlDesignInput {
     logoUrl?: string | null;
     /** URLs reais do pool de assets da marca — o artista prefere estas a inventar fotos de banco. */
     assetUrls?: string[];
+    /** Preferências de vibe/paleta/ousadia configuradas na marca. Antes só chegava
+     *  ao planner/reviewer via texto solto — o artista nunca via isto. */
+    presentationConfig?: {
+      visualVibe?: string;
+      paletteDirection?: string;
+      paletteApproved?: string[];
+      paletteNotes?: string;
+      boldness?: 'safe' | 'balanced' | 'bold';
+      photoPreference?: 'minimal' | 'balanced' | 'high';
+      imageryStyle?: string;
+      notes?: string;
+    };
+    /** Referências visuais analisadas (Benchmarking) — arquétipo/tom/paleta/insights. */
+    references?: Array<{
+      name: string;
+      archetype?: string | null;
+      toneOfVoice?: string | null;
+      palette?: string[];
+      insightsText?: string | null;
+    }>;
+    /** Regras/preferências que a IA aprendeu no chat desta marca (ex.: "não gosto de
+     *  azul"), gravadas via skill updateBrandMemory. Chave livre → valor livre. */
+    learnedPreferences?: Record<string, unknown>;
   };
   skeleton?: Array<{
     title: string;
@@ -159,6 +182,42 @@ export function validateHtmlDesign(value: unknown, expect: { width: number; heig
 function assetsBlock(assetUrls: string[] | undefined): string {
   if (!assetUrls || assetUrls.length === 0) return '';
   return `Imagens reais da marca (prefira estas a fotos de banco quando fizer sentido no layout):\n${assetUrls.slice(0, 8).map((u) => `- ${u}`).join('\n')}`;
+}
+
+// Antes só o planner e o revisor viam isto (via texto solto em brandContext.ts);
+// o artista — quem de fato escreve a paleta/composição — nunca recebia. "Ousadia"
+// ou "vibe visual" configurados na marca não mudavam nada no pixel.
+function presentationConfigBlock(pc: GenerateHtmlDesignInput['brand']['presentationConfig']): string {
+  if (!pc) return '';
+  const lines = [
+    pc.visualVibe ? `Vibe visual: ${pc.visualVibe}` : '',
+    pc.paletteDirection ? `Direção de paleta: ${pc.paletteDirection}` : '',
+    pc.paletteApproved?.length ? `Paleta aprovada (priorize estas cores exatas): ${pc.paletteApproved.join(', ')}` : '',
+    pc.paletteNotes ? `Notas de paleta: ${pc.paletteNotes}` : '',
+    pc.boldness ? `Nível de ousadia: ${pc.boldness === 'safe' ? 'seguro/conservador' : pc.boldness === 'bold' ? 'ousado, quebre convenções' : 'equilibrado'}` : '',
+    pc.photoPreference ? `Preferência de fotos: ${pc.photoPreference === 'minimal' ? 'mínima, priorize tipografia/forma' : pc.photoPreference === 'high' ? 'alta, use foto sempre que fizer sentido' : 'equilibrada'}` : '',
+    pc.imageryStyle ? `Estilo de imagem: ${pc.imageryStyle}` : '',
+    pc.notes ? `Notas gerais da marca sobre design: ${pc.notes}` : '',
+  ].filter(Boolean);
+  if (lines.length === 0) return '';
+  return `Preferências de design desta marca (siga à risca):\n${lines.map((l) => `- ${l}`).join('\n')}`;
+}
+
+function referencesBlock(references: GenerateHtmlDesignInput['brand']['references']): string {
+  if (!references || references.length === 0) return '';
+  const lines = references.slice(0, 4).map((r) => {
+    const descriptors = [r.archetype, r.toneOfVoice].filter(Boolean).join(' · ');
+    const palette = r.palette?.length ? ` | paleta: ${r.palette.join(', ')}` : '';
+    const insight = r.insightsText ? ` | ${r.insightsText.slice(0, 150)}` : '';
+    return `- ${r.name}${descriptors ? ` (${descriptors})` : ''}${palette}${insight}`;
+  });
+  return `Referências visuais analisadas desta marca (inspire-se, não copie):\n${lines.join('\n')}`;
+}
+
+function learnedPreferencesBlock(prefs: Record<string, unknown> | undefined): string {
+  if (!prefs || Object.keys(prefs).length === 0) return '';
+  const lines = Object.entries(prefs).map(([key, value]) => `- ${key}: ${typeof value === 'string' ? value : JSON.stringify(value)}`);
+  return `Regras aprendidas sobre esta marca em conversas anteriores (respeite):\n${lines.join('\n')}`;
 }
 
 // ── Geração em LOTES PARALELOS (escala para decks grandes) ─────────────────────
@@ -288,6 +347,9 @@ Diretrizes: ${b.guidelines || 'não definidas'}
 ${b.agentPrompt ? `Instruções do agente: ${b.agentPrompt}` : ''}
 ${b.logoUrl ? `Logo: ${b.logoUrl}` : ''}
 ${assetsBlock(b.assetUrls)}
+${presentationConfigBlock(b.presentationConfig)}
+${referencesBlock(b.references)}
+${learnedPreferencesBlock(b.learnedPreferences)}
 ${skeletonPrompt}
 ${renderStyleBible(bible)}${refBlock}
 

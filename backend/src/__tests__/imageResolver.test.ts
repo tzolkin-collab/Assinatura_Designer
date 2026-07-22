@@ -154,4 +154,34 @@ describe('resolveSlideImages', () => {
 
     await expect(resolveSlideImages({ ...baseParams, skeleton })).resolves.toEqual(new Map());
   });
+
+  it('backstop: ignora "generate-photo" se allowGeneratedGraphics=false mesmo se o modelo escolher essa ação', async () => {
+    (generateWithRetry as ReturnType<typeof vi.fn>).mockResolvedValue({
+      text: JSON.stringify([
+        { slideIndex: 1, action: 'generate-photo', generatePrompt: 'cena qualquer' },
+      ]),
+    });
+
+    const skeleton = skeletonBase([{}, { imageHint: 'foto do produto' }]);
+    const result = await resolveSlideImages({ ...baseParams, skeleton, allowGeneratedGraphics: false });
+
+    expect(result.size).toBe(0);
+    expect(mockGenerateContent).not.toHaveBeenCalled();
+    expect(uploadFileToR2).not.toHaveBeenCalled();
+  });
+
+  it('backstop: ignora "generate-svg" se allowSvgLayouts=false mesmo se o modelo escolher essa ação', async () => {
+    (generateWithRetry as ReturnType<typeof vi.fn>).mockResolvedValue({
+      text: JSON.stringify([
+        { slideIndex: 1, action: 'generate-svg', generatePrompt: 'ícone qualquer' },
+      ]),
+    });
+
+    const skeleton = skeletonBase([{}, { imageHint: 'ícone' }]);
+    const result = await resolveSlideImages({ ...baseParams, skeleton, allowSvgLayouts: false });
+
+    expect(result.size).toBe(0);
+    // só a chamada de decisão deve ter ocorrido, nenhuma segunda chamada pra gerar SVG
+    expect(generateWithRetry).toHaveBeenCalledTimes(1);
+  });
 });
