@@ -30,6 +30,11 @@ const referenciaSchema = z.object({
   autoSyncInterval: z.number().optional(),
 });
 
+const referenciaSyncSettingsSchema = z.object({
+  autoSyncEnabled: z.boolean().optional(),
+  autoSyncInterval: z.number().optional(),
+});
+
 const s3 = new S3Client({
   region: 'auto',
   endpoint: appConfig.r2Endpoint,
@@ -150,7 +155,9 @@ settingsRouter.patch('/:slug/referencias/:id', async (req: AuthRequest, res: Res
     const slug = req.params.slug as string;
     const brandId = await getBrandId(slug, req.user?.userId);
     const id = req.params.id as string;
-    const { autoSyncEnabled, autoSyncInterval } = req.body;
+    const parsed = referenciaSyncSettingsSchema.safeParse(req.body);
+    if (!parsed.success) throw createError(400, parsed.error.errors[0]?.message ?? 'Corpo da requisição inválido');
+    const { autoSyncEnabled, autoSyncInterval } = parsed.data;
 
     const ref = await prisma.reference.findFirst({ where: { id, brandId } });
     if (!ref) throw createError(404, 'Reference not found');
