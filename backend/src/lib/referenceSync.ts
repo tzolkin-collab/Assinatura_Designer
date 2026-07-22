@@ -51,6 +51,7 @@ export async function analyzeReferenceBackground(refId: string, slug: string, na
       : `Marca: ${brand?.name || slug}`;
 
     let imageUrl: string | null = null;
+    let screenshotBase64: string | null = null;
     let externalContent = '';
 
     try {
@@ -63,7 +64,13 @@ export async function analyzeReferenceBackground(refId: string, slug: string, na
         const imgRes = await fetch(json.data.screenshot.url);
         const arrayBuffer = await imgRes.arrayBuffer();
         const buffer = Buffer.from(arrayBuffer);
-        imageUrl = await uploadBase64ToR2(buffer.toString('base64'), 'image/png');
+        // Guardado pra ir junto no prompt de análise (ver abaixo) — antes a
+        // screenshot só subia pro R2 e ficava decorativa na tela; arquétipo/tom/
+        // densidade/PALETA eram "adivinhados" a partir de texto raspado, nunca de
+        // olhar a tela de verdade. Paleta em hex "chutada" por texto é dado
+        // inventado com cara de medido — o pior tipo de erro (parece preciso).
+        screenshotBase64 = buffer.toString('base64');
+        imageUrl = await uploadBase64ToR2(screenshotBase64, 'image/png');
       }
     } catch (err) {
       logger.error('Erro ao capturar screenshot via Microlink', { url: analysisUrl, error: err instanceof Error ? err.message : String(err) });
@@ -88,6 +95,7 @@ Referência a ser analisada: "${name}" (${analysisUrl})
 Tipo de Fonte: ${sourceType}
 Conteúdo/Contexto Extraído:
 ${externalContent}
+${screenshotBase64 ? '\nUma screenshot REAL da página está anexada a esta mensagem. Baseie "palette" e "density" no que você VÊ na imagem (cores reais dos pixels, densidade visual real do layout) — NÃO invente hex a partir do texto. "archetype" e "toneOfVoice" podem usar texto + imagem juntos.' : '\n(Sem screenshot disponível — baseie-se no texto/conteúdo acima; para "palette", só inclua cores que estejam EXPLICITAMENTE mencionadas no conteúdo, ou devolva array vazio em vez de inventar hex.)'}
 
 Sua tarefa é analisar essa referência e retornar um JSON com os seguintes campos exatos:
 {
@@ -133,9 +141,14 @@ Sua tarefa é analisar essa referência e retornar um JSON com os seguintes camp
       required: ['archetype', 'toneOfVoice', 'density', 'palette', 'markers', 'insightsText']
     };
 
+    const parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [{ text: prompt }];
+    if (screenshotBase64) {
+      parts.push({ inlineData: { mimeType: 'image/png', data: screenshotBase64 } });
+    }
+
     const result = await generateWithRetry(ai, {
       model: appConfig.models.fast,
-      contents: prompt,
+      contents: { role: 'user', parts },
       config: {
         responseMimeType: 'application/json',
         responseSchema: responseSchema,

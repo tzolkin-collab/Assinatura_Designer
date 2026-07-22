@@ -18,6 +18,7 @@ import { generateStreamWithRetry, generateWithRetry, humanizeGeminiError } from 
 import { extractJsonObject } from '../../lib/jsonHelper.js';
 import { editHtmlSlide, type HtmlDesignSlide } from '../../lib/htmlDesign.js';
 import { enqueuePipeline } from '../../lib/queue.js';
+import { uploadFileToR2 } from '../../lib/r2.js';
 import { BRAIN_SYSTEM_PROMPT } from './prompts.js';
 import prisma from '../../lib/prisma.js';
 import { executeTool } from '../tools/index.js';
@@ -275,12 +276,23 @@ function normalizeAttachments(value: unknown): ChatAttachment[] | undefined {
   return attachments.length > 0 ? attachments : undefined;
 }
 
-function buildModelMessage(content: string, attachments?: ChatAttachment[]): string {
-  if (!attachments || attachments.length === 0) return content;
-  const attachmentBlock = attachments
-    .map((attachment, index) => `- Imagem ${index + 1}: ${attachment.name} (${attachment.mimeType})`)
-    .join('\n');
-  return `${content}\n\n[Imagens anexadas pelo usuário]\n${attachmentBlock}`;
+type ModelPart = { text?: string; inlineData?: { mimeType: string; data: string } };
+
+// Antes isto virava só um texto listando nome+mimetype do anexo — o modelo NUNCA
+// via o pixel da foto que o usuário mandou, só sabia que um arquivo existia.
+// Agora manda a imagem de verdade como inlineData (capado em 4 por mensagem —
+// múltiplas fotos grandes por turno estouram o payload à toa).
+const MAX_INLINE_IMAGES_PER_MESSAGE = 4;
+
+function buildMessageParts(content: string, attachments?: ChatAttachment[]): ModelPart[] {
+  const parts: ModelPart[] = [{ text: content }];
+  if (!attachments || attachments.length === 0) return parts;
+
+  for (const attachment of attachments.slice(0, MAX_INLINE_IMAGES_PER_MESSAGE)) {
+    parts.push({ text: `[Imagem anexada pelo usuário: ${attachment.name}]` });
+    parts.push({ inlineData: { mimeType: attachment.mimeType, data: attachment.dataBase64 } });
+  }
+  return parts;
 }
 
 // ── Bootstrap: registra handlers WebSocket ────────────────────────────────────
@@ -579,6 +591,21 @@ async function handleUserMessageInner(
   // não cairia no teto da marca.
   enrichAiContext({ brandSlug: session.brandSlug });
 
+  // Sobe cada foto anexada pro R2 assim que chega — antes ela só existia como
+  // base64 dentro da mensagem: o cérebro via só o NOME do arquivo em texto (nunca
+  // o pixel), e a geração nunca tinha como usá-la (nenhuma URL real pra embutir
+  // num <img>). Com a URL em mãos, os dois casos passam a funcionar de verdade.
+  if (attachments && attachments.length > 0) {
+    await Promise.all(attachments.map(async (a) => {
+      try {
+        const buffer = Buffer.from(a.dataBase64, 'base64');
+        a.url = await uploadFileToR2(buffer, a.name, a.mimeType, `brands/${session!.brandSlug}/chat-attachments`);
+      } catch (err) {
+        logger.warn('Falha ao subir anexo do chat pro R2 — segue só com o base64 (sem URL pra geração)', { error: (err as Error).message });
+      }
+    }));
+  }
+
   // Persiste mensagem do usuário
   await appendMessage(sessionId, {
     role: 'user',
@@ -660,14 +687,14 @@ async function handleUserMessageInner(
     .filter(m => m.role === 'user' || m.role === 'assistant')
     .map(m => ({
       role: m.role === 'user' ? 'user' : 'model' as const,
-      parts: [{ text: buildModelMessage(m.content, m.attachments) }],
+      parts: buildMessageParts(m.content, m.attachments),
     }));
 
   // Remove a última (já está em userMessage)
   const historyWithoutLast = history.slice(0, -1);
   const currentTurnContents: any[] = [
     ...historyWithoutLast,
-    { role: 'user', parts: [{ text: `[FASE: ${latestSession.phase.toUpperCase()}]\n\n${buildModelMessage(userMessage, attachments)}` }] },
+    { role: 'user', parts: buildMessageParts(`[FASE: ${latestSession.phase.toUpperCase()}]\n\n${userMessage}`, attachments) },
   ];
 
   try {
@@ -844,6 +871,16 @@ async function detectAndDispatch(
     .map(m => m.content)
     .join('\n\n[Nova solicitação de edição]:\n');
 
+  // Fotos anexadas na conversa (já com URL do R2, ver handleUserMessageInner) —
+  // o artista passa a poder usá-las de verdade no deck, igual um asset da marca.
+  // Antes ficavam presas no chat, sem nenhum caminho até a geração.
+  const attachmentImages = session.messages
+    .filter(m => m.role === 'user')
+    .flatMap(m => m.attachments ?? [])
+    .filter((a): a is typeof a & { url: string } => typeof a.url === 'string')
+    .slice(0, 6)
+    .map(a => ({ url: a.url, name: a.name }));
+
   // Fluxo copy-first: com copy oficial na conversa (colada ou anexo de texto),
   // o roteiro é planejado ANTES e pausado para aprovação — a geração cara só
   // roda depois do "aprovar". Sem copy, o fluxo direto continua o mesmo.
@@ -860,7 +897,7 @@ async function detectAndDispatch(
   // Enfileira a geração (durável, com retry) — não bloqueia o stream. O erro
   // aqui é só de enfileiramento (ex.: Redis fora); falhas da geração em si são
   // tratadas no worker (queue.ts) e notificadas via ws.
-  enqueuePipeline({ sessionId, brief: fullBrief, format, generateStyleProofOnly: isProof }).catch(err => {
+  enqueuePipeline({ sessionId, brief: fullBrief, format, generateStyleProofOnly: isProof, attachmentImages }).catch(err => {
     logger.error('Falha ao enfileirar o pipeline', { error: (err as Error).message });
     ws.error(sessionId, `Erro ao iniciar a geração: ${err instanceof Error ? err.message : String(err)}`);
   });

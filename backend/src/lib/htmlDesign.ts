@@ -34,7 +34,7 @@ export interface GenerateHtmlDesignInput {
     agentPrompt?: string;
     logoUrl?: string | null;
     /** URLs reais do pool de assets da marca — o artista prefere estas a inventar fotos de banco. */
-    assetUrls?: string[];
+    assetUrls?: Array<{ url: string; name: string }>;
     /** Preferências de vibe/paleta/ousadia configuradas na marca. Antes só chegava
      *  ao planner/reviewer via texto solto — o artista nunca via isto. */
     presentationConfig?: {
@@ -179,9 +179,11 @@ export function validateHtmlDesign(value: unknown, expect: { width: number; heig
 // Lista as imagens REAIS da marca (upload/Drive/Asana) pro artista preferir a
 // elas em vez de inventar URL de banco de imagem. Teto de 8: o prompt já é
 // grande e o essencial é sinalizar que existe acervo, não despejar tudo.
-function assetsBlock(assetUrls: string[] | undefined): string {
+function assetsBlock(assetUrls: Array<{ url: string; name: string }> | undefined): string {
   if (!assetUrls || assetUrls.length === 0) return '';
-  return `Imagens reais da marca (prefira estas a fotos de banco quando fizer sentido no layout):\n${assetUrls.slice(0, 8).map((u) => `- ${u}`).join('\n')}`;
+  // Antes era só a URL crua — o artista não tinha nem o nome do arquivo pra saber
+  // do que se trata antes de decidir onde/se usar.
+  return `Imagens reais da marca (prefira estas a fotos de banco quando fizer sentido no layout):\n${assetUrls.slice(0, 8).map((a) => `- ${a.name}: ${a.url}`).join('\n')}`;
 }
 
 // Antes só o planner e o revisor viam isto (via texto solto em brandContext.ts);

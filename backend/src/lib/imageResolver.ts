@@ -57,6 +57,27 @@ function extractGeneratedImageDataUrl(response: unknown): string {
   return `data:${mimeType};base64,${imageData}`;
 }
 
+const MAX_ASSET_BYTES = 8 * 1024 * 1024; // 8MB — trava contra asset gigante travando o call
+
+// Baixa um asset existente pra mandar de VERDADE (pixel) na decisão de reuso.
+// Antes a decisão era só por nome/tags em texto — um asset "banner-verao.jpg"
+// tagueado "produto" podia ser reaproveitado num slide que pedia "foto de pessoa
+// sorrindo" só por semelhança de texto, sem o modelo nunca ter visto a imagem.
+async function fetchAssetImageBase64(url: string): Promise<{ mimeType: string; data: string } | null> {
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) return null;
+    const mimeType = res.headers.get('content-type')?.split(';')[0]?.trim() || 'image/jpeg';
+    if (!mimeType.startsWith('image/')) return null;
+    const buffer = Buffer.from(await res.arrayBuffer());
+    if (buffer.length > MAX_ASSET_BYTES) return null;
+    return { mimeType, data: buffer.toString('base64') };
+  } catch (err) {
+    logger.warn('Falha ao baixar asset existente pra decisão visual de reuso', { url, error: (err as Error).message });
+    return null;
+  }
+}
+
 // ── Passo 1: decide reaproveitar, gerar ou pular, para cada slide com imageHint ──
 async function decideImagePlan(
   slidesNeedingImage: Array<{ index: number; title: string; hint: string }>,
@@ -66,8 +87,13 @@ async function decideImagePlan(
 ): Promise<ImageDecision[]> {
   if (slidesNeedingImage.length === 0) return [];
 
+  // Baixa os assets em paralelo pra mandar de verdade (pixel) na decisão — não só
+  // nome/tags em texto. Falha individual não derruba o plano: some da lista de
+  // imagens anexadas, mas o asset continua listado em texto como fallback.
+  const assetImages = await Promise.all(existingAssets.map((a) => fetchAssetImageBase64(a.url)));
+
   const assetsBlock = existingAssets.length > 0
-    ? existingAssets.map((a, i) => `${i + 1}. URL: ${a.url} | Nome: ${a.name} | Tags: ${a.tags.join(', ') || 'nenhuma'}`).join('\n')
+    ? existingAssets.map((a, i) => `${i + 1}. Nome: ${a.name} | Tags: ${a.tags.join(', ') || 'nenhuma'} | URL: ${a.url}${assetImages[i] ? ' | Imagem anexada abaixo como "Asset ' + (i + 1) + '"' : ' | (imagem não pôde ser carregada, avalie só pelo nome/tags)'}`).join('\n')
     : 'Biblioteca vazia — nenhum asset disponível.';
 
   const slidesBlock = slidesNeedingImage
@@ -86,8 +112,8 @@ ${slidesBlock}
 ${assetsBlock}
 
 ## Regras de decisão:
-1. "reuse": SÓ quando um asset da lista corresponde de verdade ao que o slide precisa (não force um encaixe genérico — um asset de "logo" não serve pra "foto de produto em uso").
-${allowGeneratedGraphics ? '2. "generate-photo": quando o slide precisa de uma foto/cena realista (produto, pessoa, ambiente) e nada na biblioteca serve.' : '2. Geração de foto está DESLIGADA para esta marca — nunca escolha "generate-photo". Se nada na biblioteca serve, use "skip".'}
+1. "reuse": SÓ quando um asset da lista corresponde de verdade ao que o slide precisa — julgue pela IMAGEM anexada quando disponível (não só pelo nome/tags; um arquivo mal nomeado pode ser exatamente o que o slide precisa, e um nome parecido pode ser visualmente errado). Não force um encaixe genérico — um asset de "logo" não serve pra "foto de produto em uso".
+${allowGeneratedGraphics ? '2. "generate-photo": quando o slide precisa de uma foto/cena realista (produto, pessoa, ambiente) e nada na biblioteca serve de verdade (visualmente).' : '2. Geração de foto está DESLIGADA para esta marca — nunca escolha "generate-photo". Se nada na biblioteca serve, use "skip".'}
 ${allowSvgLayouts ? '3. "generate-svg": quando o slide precisa de um ícone, ilustração vetorial simples ou gráfico decorativo complexo (não uma foto realista) e nada na biblioteca serve.' : '3. Geração de SVG está DESLIGADA para esta marca — nunca escolha "generate-svg". Se nada na biblioteca serve, use "skip".'}
 4. "skip": quando não vale a pena gerar (raro — só se o hint for vago demais pra virar prompt de imagem), ou quando a ação necessária está desligada acima.
 5. Para "reuse", "assetUrl" DEVE ser uma URL exata da lista acima.
@@ -96,10 +122,19 @@ ${allowSvgLayouts ? '3. "generate-svg": quando o slide precisa de um ícone, ilu
 Retorne APENAS um array JSON:
 [{ "slideIndex": number, "action": ${actionsAllowed}, "assetUrl"?: string, "generatePrompt"?: string }]`;
 
+  const parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [{ text: prompt }];
+  existingAssets.forEach((_, i) => {
+    const img = assetImages[i];
+    if (img) {
+      parts.push({ text: `Asset ${i + 1}:` });
+      parts.push({ inlineData: img });
+    }
+  });
+
   try {
     const response = await generateWithRetry(ai, {
       model: config.models.fast,
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      contents: [{ role: 'user', parts }],
       config: { responseMimeType: 'application/json', temperature: 0.2 },
     }, config.models.fast);
 
@@ -220,10 +255,13 @@ export async function resolveSlideImages(params: ResolveSlideImagesParams): Prom
 
   if (slidesNeedingImage.length === 0) return results;
 
+  // Teto de 8 (era 24): agora cada candidato é BAIXADO e mandado como imagem de
+  // verdade na decisão (ver decideImagePlan) — 24 imagens num call estouraria
+  // custo/latência à toa. 8 casa com o teto que o artista já usa (assetsBlock).
   const existingAssets = await prisma.asset.findMany({
     where: { brandId: params.brandId, fileType: { startsWith: 'image/' } },
     orderBy: { createdAt: 'desc' },
-    take: 24,
+    take: 8,
     select: { url: true, name: true, tags: true },
   }).catch(() => [] as ExistingBrandAsset[]);
 

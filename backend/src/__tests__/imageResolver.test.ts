@@ -36,10 +36,17 @@ const baseParams = {
   postId: 'post-1',
 };
 
+const fakeImageResponse = () => ({
+  ok: true,
+  headers: { get: (h: string) => (h === 'content-type' ? 'image/png' : null) },
+  arrayBuffer: async () => new TextEncoder().encode('fake-png-bytes').buffer,
+});
+
 describe('resolveSlideImages', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     prismaMock.asset.findMany.mockResolvedValue([]);
+    vi.stubGlobal('fetch', vi.fn(async () => fakeImageResponse()));
   });
 
   it('não chama nada quando nenhum slide tem imageHint', async () => {
@@ -65,6 +72,23 @@ describe('resolveSlideImages', () => {
     expect(result.get(1)).toEqual({ imageUrl: 'https://cdn.example.com/logo.png' });
     expect(mockGenerateContent).not.toHaveBeenCalled();
     expect(prismaMock.asset.create).not.toHaveBeenCalled();
+  });
+
+  it('baixa os assets existentes e manda como imagem (inlineData) na decisão de reuso, não só nome/tags', async () => {
+    prismaMock.asset.findMany.mockResolvedValue([
+      { url: 'https://cdn.example.com/produto.jpg', name: 'produto-final-v2.jpg', tags: [] },
+    ]);
+    (generateWithRetry as ReturnType<typeof vi.fn>).mockResolvedValue({
+      text: JSON.stringify([{ slideIndex: 1, action: 'skip' }]),
+    });
+
+    const skeleton = skeletonBase([{}, { imageHint: 'foto do produto em uso' }]);
+    await resolveSlideImages({ ...baseParams, skeleton });
+
+    expect(fetch).toHaveBeenCalledWith('https://cdn.example.com/produto.jpg', expect.anything());
+    const call = (generateWithRetry as ReturnType<typeof vi.fn>).mock.calls[0];
+    const parts = call[1].contents[0].parts as Array<{ inlineData?: { mimeType: string; data: string } }>;
+    expect(parts.some((p) => p.inlineData?.mimeType === 'image/png')).toBe(true);
   });
 
   it('ignora "reuse" quando a URL não está na lista oferecida (modelo alucinou)', async () => {

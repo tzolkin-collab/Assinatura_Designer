@@ -50,6 +50,9 @@ export interface PipelineParams {
   generateStyleProofOnly?: boolean;
   /** Se true, o pipeline retoma a geração de uma pausa de estilo (gerando do Slide 1 em diante). */
   resumeFromStyleProof?: boolean;
+  /** Fotos que o usuário anexou no chat desta sessão (já com URL do R2) — o
+   *  artista as recebe igual a um asset da marca, podendo embutir de verdade. */
+  attachmentImages?: Array<{ url: string; name: string }>;
 }
 
 export async function runPipeline(params: PipelineParams): Promise<void> {
@@ -298,7 +301,9 @@ async function runPipelineInner(
             guidelines: brand.guidelines,
             agentPrompt: brand.agentPrompt,
             logoUrl: brand.logoUrl,
-            assetUrls: brand.assetUrls,
+            // Fotos anexadas pelo usuário no chat entram JUNTO com os assets da
+            // marca — o artista as trata igual, prefere a inventar foto de banco.
+            assetUrls: [...(params.attachmentImages ?? []), ...brand.assetUrls],
             presentationConfig: brand.presentationConfig ?? undefined,
             references: brand.references,
             learnedPreferences,
@@ -507,7 +512,7 @@ async function runPipelineInner(
     try {
       const finalSlides = Array.isArray(envelope.slides) ? (envelope.slides as HtmlDesignSlide[]) : [];
       const htmlBlob = finalSlides.map((s) => `${s.html ?? ''}${s.css ?? ''}`).join('\n');
-      const offeredUrls = brand.assetUrls ?? [];
+      const offeredUrls = (brand.assetUrls ?? []).map((a) => a.url);
       const detectedUrls = offeredUrls.filter((url) => htmlBlob.includes(url));
       const resolvedUrls = Array.from(resolvedImages.values()).map((v) => v.imageUrl).filter((u): u is string => !!u);
       const usedAssetUrls = Array.from(new Set([...detectedUrls, ...resolvedUrls]));

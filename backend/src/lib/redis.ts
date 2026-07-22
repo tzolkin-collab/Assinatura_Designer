@@ -62,6 +62,10 @@ export interface ChatAttachment {
   name: string;
   mimeType: string;
   dataBase64: string;
+  /** URL pública no R2, preenchida ao receber o anexo (ver brain/index.ts). Permite
+   *  reaproveitar a imagem na geração (embutida no deck) sem carregar o base64
+   *  de volta — antes o anexo só existia como base64 e nunca saía do chat. */
+  url?: string;
 }
 
 export interface ChatMessage {

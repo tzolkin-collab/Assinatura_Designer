@@ -23,9 +23,10 @@ export type ResolvedBrandContext = DesignDocumentBrandContext & {
     palette: string[];
     insightsText: string | null;
   }>;
-  /** URLs de imagens do pool de assets da marca (upload/Drive/Asana) — o artista
-   *  as usa em vez de inventar fotos de banco quando fizer sentido para o layout. */
-  assetUrls: string[];
+  /** Imagens do pool de assets da marca (upload/Drive/Asana) — o artista as usa em
+   *  vez de inventar fotos de banco quando fizer sentido para o layout. Nome junto
+   *  (antes era só URL crua — o artista escolhia sem nenhuma pista do conteúdo). */
+  assetUrls: Array<{ url: string; name: string }>;
 };
 
 function normalizePresentationConfig(value: unknown): PresentationConfig | undefined {
@@ -57,7 +58,7 @@ export async function resolveBrandContext(slug: string): Promise<ResolvedBrandCo
         where: { fileType: { startsWith: 'image/' } },
         orderBy: { createdAt: 'desc' },
         take: 12,
-        select: { url: true },
+        select: { url: true, name: true },
       },
     },
   });
@@ -82,7 +83,7 @@ export async function resolveBrandContext(slug: string): Promise<ResolvedBrandCo
       palette: ref.palette,
       insightsText: ref.insightsText,
     })),
-    assetUrls: brand.assets.map((a) => a.url),
+    assetUrls: brand.assets.map((a) => ({ url: a.url, name: a.name })),
   };
 }
 
