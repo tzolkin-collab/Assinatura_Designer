@@ -86,6 +86,7 @@ vi.mock('../lib/prisma', () => {
       deleteMany: vi.fn(),
     },
     slide: { findMany: vi.fn(), update: vi.fn(), create: vi.fn(), deleteMany: vi.fn() },
+    reference: { findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn(), update: vi.fn(), deleteMany: vi.fn() },
   };
 
   // O aceite de convite roda numa transação. Executamos o callback com o próprio mock,

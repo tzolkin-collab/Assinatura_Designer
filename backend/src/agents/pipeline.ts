@@ -12,6 +12,7 @@ import { generateHtmlDesignBatched, type HtmlDesignSlide } from '../lib/htmlDesi
 import { syncPostSlides } from '../lib/postHelper.js';
 import { researchBrand, type VisualRef } from '../lib/fabricaLegacy.js';
 import { resolveSlideImages } from '../lib/imageResolver.js';
+import { buildSlidesHtmlBlob, detectAssetUrlsInHtml, mergeUsedAssetUrls } from '../lib/assetUsage.js';
 import { humanizeGeminiError } from '../lib/geminiRetry.js';
 import { extractJsonObject } from '../lib/jsonHelper.js';
 import { GoogleGenAI } from '@google/genai';
@@ -511,11 +512,10 @@ async function runPipelineInner(
     // quanto o que o imageResolver já resolveu por slide.
     try {
       const finalSlides = Array.isArray(envelope.slides) ? (envelope.slides as HtmlDesignSlide[]) : [];
-      const htmlBlob = finalSlides.map((s) => `${s.html ?? ''}${s.css ?? ''}`).join('\n');
+      const htmlBlob = buildSlidesHtmlBlob(finalSlides);
       const offeredUrls = (brand.assetUrls ?? []).map((a) => a.url);
-      const detectedUrls = offeredUrls.filter((url) => htmlBlob.includes(url));
-      const resolvedUrls = Array.from(resolvedImages.values()).map((v) => v.imageUrl).filter((u): u is string => !!u);
-      const usedAssetUrls = Array.from(new Set([...detectedUrls, ...resolvedUrls]));
+      const detectedUrls = detectAssetUrlsInHtml(htmlBlob, offeredUrls);
+      const usedAssetUrls = mergeUsedAssetUrls(detectedUrls, Array.from(resolvedImages.values()).map((v) => v.imageUrl));
 
       if (usedAssetUrls.length > 0) {
         const usedAssets = await prisma.asset.findMany({

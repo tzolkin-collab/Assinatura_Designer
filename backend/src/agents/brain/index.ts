@@ -19,6 +19,7 @@ import { extractJsonObject } from '../../lib/jsonHelper.js';
 import { editHtmlSlide, type HtmlDesignSlide } from '../../lib/htmlDesign.js';
 import { enqueuePipeline } from '../../lib/queue.js';
 import { uploadFileToR2 } from '../../lib/r2.js';
+import { buildMessageParts } from '../../lib/chatMessageParts.js';
 import { BRAIN_SYSTEM_PROMPT } from './prompts.js';
 import prisma from '../../lib/prisma.js';
 import { executeTool } from '../tools/index.js';
@@ -276,24 +277,6 @@ function normalizeAttachments(value: unknown): ChatAttachment[] | undefined {
   return attachments.length > 0 ? attachments : undefined;
 }
 
-type ModelPart = { text?: string; inlineData?: { mimeType: string; data: string } };
-
-// Antes isto virava só um texto listando nome+mimetype do anexo — o modelo NUNCA
-// via o pixel da foto que o usuário mandou, só sabia que um arquivo existia.
-// Agora manda a imagem de verdade como inlineData (capado em 4 por mensagem —
-// múltiplas fotos grandes por turno estouram o payload à toa).
-const MAX_INLINE_IMAGES_PER_MESSAGE = 4;
-
-function buildMessageParts(content: string, attachments?: ChatAttachment[]): ModelPart[] {
-  const parts: ModelPart[] = [{ text: content }];
-  if (!attachments || attachments.length === 0) return parts;
-
-  for (const attachment of attachments.slice(0, MAX_INLINE_IMAGES_PER_MESSAGE)) {
-    parts.push({ text: `[Imagem anexada pelo usuário: ${attachment.name}]` });
-    parts.push({ inlineData: { mimeType: attachment.mimeType, data: attachment.dataBase64 } });
-  }
-  return parts;
-}
 
 // ── Bootstrap: registra handlers WebSocket ────────────────────────────────────
 

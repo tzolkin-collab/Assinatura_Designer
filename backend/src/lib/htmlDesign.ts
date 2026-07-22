@@ -179,7 +179,7 @@ export function validateHtmlDesign(value: unknown, expect: { width: number; heig
 // Lista as imagens REAIS da marca (upload/Drive/Asana) pro artista preferir a
 // elas em vez de inventar URL de banco de imagem. Teto de 8: o prompt já é
 // grande e o essencial é sinalizar que existe acervo, não despejar tudo.
-function assetsBlock(assetUrls: Array<{ url: string; name: string }> | undefined): string {
+export function assetsBlock(assetUrls: Array<{ url: string; name: string }> | undefined): string {
   if (!assetUrls || assetUrls.length === 0) return '';
   // Antes era só a URL crua — o artista não tinha nem o nome do arquivo pra saber
   // do que se trata antes de decidir onde/se usar.
@@ -189,7 +189,7 @@ function assetsBlock(assetUrls: Array<{ url: string; name: string }> | undefined
 // Antes só o planner e o revisor viam isto (via texto solto em brandContext.ts);
 // o artista — quem de fato escreve a paleta/composição — nunca recebia. "Ousadia"
 // ou "vibe visual" configurados na marca não mudavam nada no pixel.
-function presentationConfigBlock(pc: GenerateHtmlDesignInput['brand']['presentationConfig']): string {
+export function presentationConfigBlock(pc: GenerateHtmlDesignInput['brand']['presentationConfig']): string {
   if (!pc) return '';
   const lines = [
     pc.visualVibe ? `Vibe visual: ${pc.visualVibe}` : '',
@@ -205,7 +205,7 @@ function presentationConfigBlock(pc: GenerateHtmlDesignInput['brand']['presentat
   return `Preferências de design desta marca (siga à risca):\n${lines.map((l) => `- ${l}`).join('\n')}`;
 }
 
-function referencesBlock(references: GenerateHtmlDesignInput['brand']['references']): string {
+export function referencesBlock(references: GenerateHtmlDesignInput['brand']['references']): string {
   if (!references || references.length === 0) return '';
   const lines = references.slice(0, 4).map((r) => {
     const descriptors = [r.archetype, r.toneOfVoice].filter(Boolean).join(' · ');
@@ -216,7 +216,7 @@ function referencesBlock(references: GenerateHtmlDesignInput['brand']['reference
   return `Referências visuais analisadas desta marca (inspire-se, não copie):\n${lines.join('\n')}`;
 }
 
-function learnedPreferencesBlock(prefs: Record<string, unknown> | undefined): string {
+export function learnedPreferencesBlock(prefs: Record<string, unknown> | undefined): string {
   if (!prefs || Object.keys(prefs).length === 0) return '';
   const lines = Object.entries(prefs).map(([key, value]) => `- ${key}: ${typeof value === 'string' ? value : JSON.stringify(value)}`);
   return `Regras aprendidas sobre esta marca em conversas anteriores (respeite):\n${lines.join('\n')}`;
