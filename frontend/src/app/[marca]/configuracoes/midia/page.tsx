@@ -6,7 +6,7 @@ import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import {
   ArrowLeft, Upload, Image as ImageIcon, FileText, Trash2, Loader2,
-  HardDrive, FileImage, Sparkles, Images,
+  HardDrive, FileImage, Sparkles, Images, Layers, Camera,
 } from 'lucide-react';
 import PageHeader from '@/components/ui/PageHeader';
 import Card from '@/components/ui/Card';
@@ -21,7 +21,7 @@ const DrivePopup = dynamic(() => import('@/components/Fabrica/DrivePopup').then(
 const CanvaPopup = dynamic(() => import('@/components/Fabrica/CanvaPopup').then((m) => ({ default: m.CanvaPopup })), { ssr: false });
 const BrandbookUploaderModal = dynamic(() => import('@/components/Brandbook/BrandbookUploaderModal'), { ssr: false });
 
-type AssetSource = 'upload' | 'drive' | 'canva' | 'asana' | 'ai-generated';
+type AssetSource = 'upload' | 'drive' | 'canva' | 'asana' | 'ai-generated' | 'brandbook' | 'unsplash';
 
 interface Asset {
   id: string;
@@ -29,24 +29,28 @@ interface Asset {
   url: string;
   fileType: string;
   sizeBytes: number;
-  source?: AssetSource;
+  source?: string;
   tags?: string[];
 }
 
-const SOURCE_LABEL: Record<AssetSource, string> = {
+const SOURCE_LABEL: Record<string, string> = {
   upload: 'Upload',
   drive: 'Drive',
   canva: 'Canva',
   asana: 'Asana',
   'ai-generated': 'Gerado por IA',
+  brandbook: 'Brandbook',
+  unsplash: 'Unsplash',
 };
 
-const SOURCE_ICON: Record<AssetSource, typeof HardDrive> = {
+const SOURCE_ICON: Record<string, typeof HardDrive> = {
   upload: Upload,
   drive: HardDrive,
   canva: FileImage,
   asana: FileText,
   'ai-generated': Sparkles,
+  brandbook: Layers,
+  unsplash: Camera,
 };
 
 export default function MidiaPage() {
@@ -339,14 +343,16 @@ export default function MidiaPage() {
         ) : (
           filteredAssets.map((asset) => {
             const source = (asset.source ?? 'upload') as AssetSource;
-            const SourceIcon = SOURCE_ICON[source];
+            // Fonte nova vinda do backend não pode derrubar a página inteira —
+            // sem entrada no mapa, cai no genérico em vez de estourar React Error 130.
+            const SourceIcon = SOURCE_ICON[source] ?? FileText;
             const extraTags = (asset.tags ?? []).filter((t) => t !== source).slice(0, 2);
             return (
               <Card key={asset.id} padding="none" className={styles.card}>
                 <div className={styles.thumb}>
                   <span className={styles.sourceBadge}>
                     <SourceIcon size={11} />
-                    {SOURCE_LABEL[source]}
+                    {SOURCE_LABEL[source] ?? source}
                   </span>
                   {asset.fileType.startsWith('image/') ? (
                     <img src={asset.url} alt={asset.name} className={styles.thumbImg} />
