@@ -229,25 +229,29 @@ export async function processBrandbookIngest({
   let aiFonts: string[] = [];
 
   const promptText = `
-Você é um diretor de arte, engenheiro de vetores e estrategista de branding experiente.
-Analise os arquivos e imagens anexados do Brandbook da marca "${brand.name}".
+Você é um especialista em direção de arte, vetorização de marcas e engenharia de SVGs.
+Examine atentamente cada slide e imagem da apresentação/brandbook da marca "${brand.name}".
 
-Sua tarefa é extrair e estruturar as seguintes informações em JSON rigoroso:
-1. "guidelines": Resumo completo e detalhado do tom de voz, regras de marca, personalidade e proibições de design (em markdown, 2-4 parágrafos).
-2. "colors": Lista de códigos hexadecimais da paleta de cores (ex: ["#FF6B35", "#171717"]).
-3. "primaryFonts": Lista de nomes de famílias de fontes utilizadas (ex: ["Inter", "Roboto"]).
-4. "reconstructedSvgs": Se houver logotipos ou elementos gráficos visíveis nas imagens e não tivermos o arquivo SVG limpo, gere/remonte o código vetorial SVG limpo correspondente (com viewBox, fill e paths precisos) em uma lista de até 3 objetos:
-   [
-     { "name": "logo-pescado-ia.svg", "classification": "LOGOTYPE", "svgCode": "<svg viewBox=\\"0 0 200 60\\">...</svg>" },
-     { "name": "grafismo-pescado-ia.svg", "classification": "GRAPHIC_ELEMENT", "svgCode": "<svg viewBox=\\"0 0 100 100\\">...</svg>" }
-   ]
+Sua missão é extrair e vetorizar rigorosamente as seguintes informações em JSON:
+1. "guidelines": Resumo do tom de voz, regras de marca, promessa e personalidade (markdown, 2-4 parágrafos).
+2. "colors": Lista de todos os códigos hexadecimais da paleta de cores visíveis (ex: cores de fundo, botões, ícones, textos, ex: ["#3D101C", "#F8ECE5", "#892A45", "#3F51B5"]).
+3. "primaryFonts": Lista de nomes das famílias tipográficas utilizadas nos títulos e textos (ex: ["Inter", "Montserrat", "Playfair"]).
+4. "reconstructedSvgs": VETORIZE e remonte o código SVG limpo para CADA um dos seguintes elementos encontrados nas imagens (gere até 15 objetos vetoriais com viewBox, paths, stroke, fill e dimensões precisas):
+   - A LOGO OFICIAL da marca visível no canto superior esquerdo ou nos cabeçalhos (ex: o monograma "A✦ ASSINATURA" ou "A✦ ASSINATURA MARCA PRÓPRIA" com a estrela de 4 pontas). Classificação: "LOGOTYPE".
+   - O ÍCONE DA ESTRELA DE 4 PONTAS (Sparkle ✦) que é o grafismo assinatura da marca. Classificação: "GRAPHIC_ELEMENT".
+   - O CONJUNTO DE ÍCONES DE LINHA/CARD visíveis nos slides (ex: Ícone de caixa/estoque, sacola de compras, cadeado, gráfico de barras com seta, alvo/bullseye, coração, relógio/cronômetro, presente/bônus, bisnaga de creme, pessoas/aquisição, checkmark). Classificação: "ILLUSTRATION".
+   - GRAFISMOS DE MOLDURA E ESTRUTURA (ex: engrenagem/quebra-cabeça de 4 peças, arcos/linhas de fundo, barra chevron de etapas). Classificação: "GRAPHIC_ELEMENT".
 
-Responda APENAS em JSON no formato:
+Formato do JSON de resposta:
 {
   "guidelines": "...",
-  "colors": ["#HEX1", "#HEX2"],
+  "colors": ["#HEX1", "#HEX2", "#HEX3"],
   "primaryFonts": ["Fonte1"],
-  "reconstructedSvgs": []
+  "reconstructedSvgs": [
+    { "name": "logo-assinatura-vector.svg", "classification": "LOGOTYPE", "svgCode": "<svg viewBox=\\"0 0 200 60\\">...</svg>" },
+    { "name": "sparkle-estrela-4-pontas.svg", "classification": "GRAPHIC_ELEMENT", "svgCode": "<svg viewBox=\\"0 0 40 40\\">...</svg>" },
+    { "name": "icone-caixa-estoque.svg", "classification": "ILLUSTRATION", "svgCode": "<svg viewBox=\\"0 0 32 32\\">...</svg>" }
+  ]
 }
 `;
 
