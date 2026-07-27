@@ -41,7 +41,7 @@ ENV NODE_ENV=production
 RUN npx playwright install-deps chromium \
     && npx puppeteer browsers install chrome
 
-EXPOSE 4000
+EXPOSE 80
 
 # Aplica migrações pendentes e sobe o servidor.
 CMD ["sh", "-c", "npx prisma migrate deploy && node dist/server.js"]
