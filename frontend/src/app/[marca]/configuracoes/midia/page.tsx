@@ -19,6 +19,7 @@ import type { CanvaDesign } from '@/components/Fabrica/CanvaPopup';
 
 const DrivePopup = dynamic(() => import('@/components/Fabrica/DrivePopup').then((m) => ({ default: m.DrivePopup })), { ssr: false });
 const CanvaPopup = dynamic(() => import('@/components/Fabrica/CanvaPopup').then((m) => ({ default: m.CanvaPopup })), { ssr: false });
+const BrandbookUploaderModal = dynamic(() => import('@/components/Brandbook/BrandbookUploaderModal'), { ssr: false });
 
 type AssetSource = 'upload' | 'drive' | 'canva' | 'asana' | 'ai-generated';
 
@@ -201,6 +202,7 @@ export default function MidiaPage() {
     return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
   };
 
+  const [isBrandbookModalOpen, setIsBrandbookModalOpen] = useState(false);
   const busy = uploading || importando;
 
   return (
@@ -223,6 +225,13 @@ export default function MidiaPage() {
             onChange={handleFileUpload}
             accept="image/*,font/*,.svg"
           />
+          <Button
+            onClick={() => setIsBrandbookModalOpen(true)}
+            disabled={busy || !canManageAssets}
+          >
+            <Sparkles size={16} />
+            Adicionar Brandbook
+          </Button>
           <Button
             variant="secondary"
             onClick={() => setPopupAberto('canva')}
@@ -385,6 +394,19 @@ export default function MidiaPage() {
           })
         )}
       </div>
+
+      <BrandbookUploaderModal
+        slug={slug}
+        isOpen={isBrandbookModalOpen}
+        onClose={() => setIsBrandbookModalOpen(false)}
+        onSuccess={() => {
+          setLoading(true);
+          api.get<Asset[]>(`/brands/${slug}/assets`)
+            .then(setAssets)
+            .catch(() => {})
+            .finally(() => setLoading(false));
+        }}
+      />
     </div>
   );
 }

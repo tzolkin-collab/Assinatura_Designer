@@ -2,11 +2,12 @@
 
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Save, Check, X, Loader2 } from 'lucide-react';
+import { ArrowLeft, Save, Check, X, Loader2, Sparkles } from 'lucide-react';
 import PageHeader from '@/components/ui/PageHeader';
 import Button from '@/components/ui/Button';
 import Card from '@/components/ui/Card';
 import Toast from '@/components/ui/Toast';
+import BrandbookUploaderModal from '@/components/Brandbook/BrandbookUploaderModal';
 import styles from './branding.module.css';
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
@@ -308,6 +309,8 @@ export default function BrandingPage() {
     }
   };
 
+  const [isBrandbookModalOpen, setIsBrandbookModalOpen] = useState(false);
+
   return (
     <div>
       {toast && (
@@ -323,11 +326,38 @@ export default function BrandingPage() {
         title="Branding"
         description="Identidade visual da marca — cores, tipografia e diretrizes."
         actions={
-          <Button size="sm" onClick={handleSave} disabled={saving}>
-            <Save size={14} />
-            {saving ? 'Salvando...' : 'Salvar'}
-          </Button>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <Button size="sm" variant="secondary" onClick={() => setIsBrandbookModalOpen(true)}>
+              <Sparkles size={14} />
+              Importar Brandbook
+            </Button>
+            <Button size="sm" onClick={handleSave} disabled={saving}>
+              <Save size={14} />
+              {saving ? 'Salvando...' : 'Salvar'}
+            </Button>
+          </div>
         }
+      />
+
+      <BrandbookUploaderModal
+        slug={slug}
+        isOpen={isBrandbookModalOpen}
+        onClose={() => setIsBrandbookModalOpen(false)}
+        onSuccess={() => {
+          // Recarrega as configurações atualizadas após ingestão
+          api.get<BrandConfig>(`/settings/${slug}/config`).then((cfg) => {
+            if (cfg?.colors?.length) setColors(cfg.colors);
+            if (cfg?.logoUrl) setLogoUrl(cfg.logoUrl);
+            if (cfg?.guidelines) {
+              try {
+                const parsed = JSON.parse(cfg.guidelines);
+                setGuidelinesData((prev) => ({ ...prev, ...parsed }));
+              } catch {
+                setGuidelinesData((prev) => ({ ...prev, history: cfg.guidelines }));
+              }
+            }
+          });
+        }}
       />
 
       <div className={styles.grid}>

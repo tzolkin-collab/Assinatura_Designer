@@ -57,13 +57,17 @@ export async function resolveBrandContext(slug: string): Promise<ResolvedBrandCo
         orderBy: { updatedAt: 'desc' },
         take: 8,
       },
-      // Teto de 12: o prompt já é grande, e o artista não precisa do acervo
-      // inteiro — só do suficiente para não inventar foto de banco à toa.
       assets: {
-        where: { fileType: { startsWith: 'image/' } },
+        where: {
+          OR: [
+            { fileType: { startsWith: 'image/' } },
+            { fileType: 'image/svg+xml' },
+            { tags: { hasSome: ['LOGOTYPE', 'GRAPHIC_ELEMENT', 'ILLUSTRATION', 'brandbook'] } },
+          ],
+        },
         orderBy: { createdAt: 'desc' },
-        take: 12,
-        select: { url: true, name: true },
+        take: 20,
+        select: { url: true, name: true, tags: true },
       },
     },
   });
@@ -88,7 +92,7 @@ export async function resolveBrandContext(slug: string): Promise<ResolvedBrandCo
       palette: ref.palette,
       insightsText: ref.insightsText,
     })),
-    assetUrls: brand.assets.map((a) => ({ url: a.url, name: a.name })),
+    assetUrls: brand.assets.map((a) => ({ url: a.url, name: `${a.name}${a.tags.length ? ` [${a.tags.join(',')}]` : ''}` })),
     benchmarkSummary: brand.config?.benchmarkSummary,
   };
 }

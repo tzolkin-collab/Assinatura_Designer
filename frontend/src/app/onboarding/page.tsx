@@ -2,13 +2,14 @@
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Sparkles, Palette, MessageSquare, CheckCircle, ArrowRight, ArrowLeft, Loader2 } from 'lucide-react';
+import { Sparkles, Palette, MessageSquare, CheckCircle, ArrowRight, ArrowLeft, Loader2, FileUp } from 'lucide-react';
 import PageHeader from '@/components/ui/PageHeader';
 import Button from '@/components/ui/Button';
 import Card from '@/components/ui/Card';
 import Input from '@/components/ui/Input';
 import styles from './onboarding.module.css';
 import { api, ApiError } from '@/lib/api';
+import BrandbookUploaderModal from '@/components/Brandbook/BrandbookUploaderModal';
 
 const STEPS = [
   { id: 'brand', label: 'Marca', icon: <Sparkles size={16} /> },

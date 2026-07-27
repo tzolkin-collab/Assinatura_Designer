@@ -28,8 +28,11 @@ function attachmentPreviewLabel(attachment: Attachment): string {
   return attachment.name;
 }
 
+const BrandbookUploaderModal = dynamic(() => import('@/components/Brandbook/BrandbookUploaderModal'), { ssr: false });
+
 const SLASH_COMMANDS = [
   { id: 'btw',   label: '/btw',   desc: 'Contexto extra sem interromper' },
+  { id: 'brandbook', label: '/brandbook', desc: 'Importar/atualizar Brandbook completo' },
   { id: 'asana', label: '/asana', desc: 'Abrir painel do Asana' },
   { id: 'canva', label: '/canva', desc: 'Abrir painel do Canva' },
   { id: 'drive', label: '/drive', desc: 'Abrir painel do Google Drive' },
@@ -124,6 +127,8 @@ export default function FabricaPage() {
   const [showAsana, setShowAsana] = useState(false);
   const [showCanva, setShowCanva] = useState(false);
   const [showDrive, setShowDrive] = useState(false);
+  const [showFolderPicker, setShowFolderPicker] = useState(false);
+  const [showBrandbook, setShowBrandbook] = useState(false);
   const [previewSlide, setPreviewSlide] = useState(0);
 
   const threadRef = useRef<HTMLDivElement>(null);
@@ -174,6 +179,13 @@ export default function FabricaPage() {
       setShowSlash(false);
       setSlashSearch('');
       setInput('');
+      return;
+    }
+    if (id === 'brandbook') {
+      setShowBrandbook(true);
+      setShowSlash(false);
+      setSlashSearch('');
+      setInput(v => v.replace(/(\/[a-zA-Z0-9-]*)$/, ''));
       return;
     }
     if (id === 'asana') {
@@ -884,6 +896,18 @@ export default function FabricaPage() {
           </ArtifactPanel>
         )}
       </main>
+
+      <BrandbookUploaderModal
+        slug={marca}
+        isOpen={showBrandbook}
+        onClose={() => setShowBrandbook(false)}
+        onSuccess={(data) => {
+          setBtwContext((prev) => [
+            ...prev,
+            `Brandbook atualizado via upload (${data.svgsIndexed.total} SVGs indexados, cores: ${data.colors.join(', ')})`,
+          ]);
+        }}
+      />
     </div>
   );
 }

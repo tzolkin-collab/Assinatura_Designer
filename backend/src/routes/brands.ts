@@ -8,7 +8,68 @@ import { deleteFromR2 } from '../lib/r2.js';
 import { requireBrandRole, ANY_MEMBER, type BrandRequest } from '../middleware/brandAccess.js';
 import { getUsage, getBilling } from '../lib/aiBudget.js';
 
+import multer from 'multer';
+import { processBrandbookIngest } from '../lib/brandbookIngestion.js';
+
 export const brandsRouter = Router();
+const brandbookUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
+
+// POST /api/brands/:slug/brandbook/ingest - Upload e processamento do Brandbook
+brandsRouter.post('/:slug/brandbook/ingest', brandbookUpload.array('files', 15), async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { userId } = (req as AuthRequest).user!;
+    const slug = req.params.slug as string;
+    const files = (req.files as Express.Multer.File[]) || [];
+
+    if (files.length === 0) {
+      throw createError(400, 'Nenhum arquivo enviado para o Brandbook');
+    }
+
+    const result = await processBrandbookIngest({
+      brandSlug: slug,
+      files,
+      uploadedByUserId: userId,
+    });
+
+    res.json({ data: result });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/brands/:slug/brandbook/confirm-logo - Confirmar substituição de logo oficial
+brandsRouter.post('/:slug/brandbook/confirm-logo', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { userId } = (req as AuthRequest).user!;
+    const slug = req.params.slug as string;
+    const { logoUrl } = req.body;
+
+    if (!logoUrl) throw createError(400, 'logoUrl é obrigatório');
+
+    const brand = await prisma.brand.findFirst({
+      where: { slug, members: { some: { userId, role: { in: ['OWNER', 'ADMIN', 'EDITOR'] } } } },
+    });
+
+    if (!brand) throw createError(404, 'Marca não encontrada ou sem permissão');
+
+    await prisma.brandConfig.upsert({
+      where: { brandId: brand.id },
+      update: { logoUrl },
+      create: {
+        brandId: brand.id,
+        agentPrompt: `Você é o assistente de design da marca ${brand.name}.`,
+        guidelines: '',
+        colors: [],
+        primaryFonts: ['Inter'],
+        logoUrl,
+      },
+    });
+
+    res.json({ message: 'Logo oficial atualizada com sucesso', data: { logoUrl } });
+  } catch (error) {
+    next(error);
+  }
+});
 
 // GET /api/brands/:slug/ai-usage - quanto de IA esta marca já gastou hoje, por modelo.
 // Sem isto o teto é invisível: só se descobre que existe quando ele corta.
