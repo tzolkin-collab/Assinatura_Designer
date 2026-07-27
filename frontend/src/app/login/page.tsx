@@ -53,8 +53,13 @@ export default function LoginPage() {
       <div className={styles.card}>
         {/* Logo */}
         <div className={styles.logoArea}>
-          <div className={styles.logoMark}>A</div>
-          <h1 className={styles.logoTitle}>Assinatura</h1>
+          <img
+            src="/assinatura-logo.svg"
+            alt="Assinatura Design Studio"
+            className={styles.logo}
+            width={140}
+            height={40}
+          />
           <p className={styles.logoSub}>Design Studio</p>
         </div>
 
@@ -85,7 +90,7 @@ export default function LoginPage() {
         </form>
 
         <p className={styles.hint}>
-          Use <strong>admin@assinatura.com</strong> / <strong>admin</strong>
+          Use <strong>admin@assinatura.com</strong> / <strong>admin123</strong>
         </p>
       </div>
     </div>

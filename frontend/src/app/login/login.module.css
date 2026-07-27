@@ -27,25 +27,11 @@
   margin-bottom: var(--space-8);
 }
 
-.logoMark {
-  width: 48px;
-  height: 48px;
-  background-color: #ffffff;
-  color: #ffffff;
-  border-radius: var(--radius-lg);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 700;
-  font-size: var(--text-2xl);
-  margin-bottom: var(--space-2);
-}
-
-.logoTitle {
-  font-size: var(--text-2xl);
-  font-weight: 700;
-  color: var(--color-text);
-  line-height: 1;
+.logo {
+  height: 40px;
+  width: auto;
+  object-fit: contain;
+  filter: brightness(0) invert(1);
 }
 
 .logoSub {
