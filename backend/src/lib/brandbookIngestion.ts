@@ -229,19 +229,25 @@ export async function processBrandbookIngest({
   let aiFonts: string[] = [];
 
   const promptText = `
-Você é um diretor de arte e estrategista de branding experiente.
-Analise os arquivos e textos anexados do Brandbook da marca "${brand.name}".
+Você é um diretor de arte, engenheiro de vetores e estrategista de branding experiente.
+Analise os arquivos e imagens anexados do Brandbook da marca "${brand.name}".
 
 Sua tarefa é extrair e estruturar as seguintes informações em JSON rigoroso:
 1. "guidelines": Resumo completo e detalhado do tom de voz, regras de marca, personalidade e proibições de design (em markdown, 2-4 parágrafos).
 2. "colors": Lista de códigos hexadecimais da paleta de cores (ex: ["#FF6B35", "#171717"]).
 3. "primaryFonts": Lista de nomes de famílias de fontes utilizadas (ex: ["Inter", "Roboto"]).
+4. "reconstructedSvgs": Se houver logotipos ou elementos gráficos visíveis nas imagens e não tivermos o arquivo SVG limpo, gere/remonte o código vetorial SVG limpo correspondente (com viewBox, fill e paths precisos) em uma lista de até 3 objetos:
+   [
+     { "name": "logo-pescado-ia.svg", "classification": "LOGOTYPE", "svgCode": "<svg viewBox=\\"0 0 200 60\\">...</svg>" },
+     { "name": "grafismo-pescado-ia.svg", "classification": "GRAPHIC_ELEMENT", "svgCode": "<svg viewBox=\\"0 0 100 100\\">...</svg>" }
+   ]
 
 Responda APENAS em JSON no formato:
 {
   "guidelines": "...",
   "colors": ["#HEX1", "#HEX2"],
-  "primaryFonts": ["Fonte1"]
+  "primaryFonts": ["Fonte1"],
+  "reconstructedSvgs": []
 }
 `;
 
@@ -263,6 +269,52 @@ Responda APENAS em JSON no formato:
       if (parsed.guidelines) aiGuidelines = parsed.guidelines;
       if (Array.isArray(parsed.colors)) aiColors = parsed.colors.filter((c: unknown) => typeof c === 'string' && c.startsWith('#'));
       if (Array.isArray(parsed.primaryFonts)) aiFonts = parsed.primaryFonts.filter((f: unknown) => typeof f === 'string');
+
+      // Processa SVGs pescados e remontados pela IA
+      if (Array.isArray(parsed.reconstructedSvgs)) {
+        for (const item of parsed.reconstructedSvgs) {
+          if (item?.svgCode && typeof item.svgCode === 'string' && item.svgCode.includes('<svg')) {
+            try {
+              const svgBuffer = Buffer.from(item.svgCode, 'utf-8');
+              const filename = item.name || `vetor-ia-${Date.now()}.svg`;
+              const classification: SVGClassification = item.classification === 'LOGOTYPE' || item.classification === 'GRAPHIC_ELEMENT' ? item.classification : 'GRAPHIC_ELEMENT';
+
+              const r2Url = await uploadFileToR2(svgBuffer, filename, 'image/svg+xml', `brands/${brand.id}/brandbook`);
+
+              const asset = await prisma.asset.create({
+                data: {
+                  name: filename,
+                  url: r2Url,
+                  fileType: 'image/svg+xml',
+                  sizeBytes: svgBuffer.length,
+                  source: 'brandbook',
+                  tags: ['brandbook', 'ai-reconstructed', classification],
+                  brandId: brand.id,
+                  uploadedBy: uploadedByUserId ?? null,
+                },
+              });
+
+              processedSvgs.push({
+                id: asset.id,
+                name: asset.name,
+                url: asset.url,
+                classification,
+              });
+
+              if (classification === 'LOGOTYPE') {
+                logotypesCount++;
+                if (!detectedLogoUrl) detectedLogoUrl = r2Url;
+              } else if (classification === 'GRAPHIC_ELEMENT') {
+                graphicElementsCount++;
+              } else {
+                illustrationsCount++;
+              }
+            } catch (err) {
+              console.warn('Falha ao salvar SVG pescado pela IA:', err);
+            }
+          }
+        }
+      }
     }
   } catch (err) {
     console.warn('IA Ingestion fallback (leitura local usada):', err);

@@ -198,8 +198,19 @@ export default function BrandbookUploaderModal({
           <div className={styles.body}>
             <p className={styles.description}>
               Suba o manual em <strong>PDF, HTML, PNG/JPG, SVG</strong> ou um arquivo <strong>ZIP contendo pastas de SVGs</strong>.
-              A I.A. irá ler o documento, extrair diretrizes, paleta de cores, detectar logotipos e classificar grafismos e ilustrações.
+              A I.A. irá ler o documento, extrair diretrizes, paleta de cores, detectar logotipos, remontar vetores ausentes e classificar grafismos e ilustrações.
             </p>
+
+            <details className={styles.promptGuide}>
+              <summary>💡 Ver Guia de Prompts de IA para Benchmarking & Criação de Assets</summary>
+              <div className={styles.promptGuideContent}>
+                <p><strong>Prompt Base para Midjourney / DALL-E 3 / Recraft v3:</strong></p>
+                <code>
+                  Vector brand identity kit for "[Nome da Marca]", minimalist visual identity, flat vector shapes, brand mark logo, graphic patterns, decorative borders and icons, isolated on clean white background, brand color palette [Sua Paleta Hex] --no realistic, 3d, photo
+                </code>
+                <p><small>Dica: No Recraft.ai ou Illustrator, converta a imagem gerada para SVG vetorial antes do upload, ou deixe a I.A. do Designer pescar e vetorizar automaticamente ao subir a imagem/PDF.</small></p>
+              </div>
+            </details>
 
             <div
               className={`${styles.dropzone} ${isDraggingOver ? styles.dropzoneDragging : ''}`}
