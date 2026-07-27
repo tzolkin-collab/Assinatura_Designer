@@ -60,11 +60,16 @@ async function fetchComRedeAmigavel(input: string, init?: RequestInit): Promise<
 
 async function apiFetch<T>(endpoint: string, options: FetchOptions = {}): Promise<T> {
   const { requireAuth = true, headers, ...customOptions } = options;
-  
+
+  const isFormData = typeof FormData !== 'undefined' && customOptions.body instanceof FormData;
+
   const headersConfig: Record<string, string> = {
-    'Content-Type': 'application/json',
     ...(headers as Record<string, string>),
   };
+
+  if (!isFormData && !headersConfig['Content-Type']) {
+    headersConfig['Content-Type'] = 'application/json';
+  }
 
   if (requireAuth) {
     const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
@@ -74,7 +79,6 @@ async function apiFetch<T>(endpoint: string, options: FetchOptions = {}): Promis
       window.location.href = '/login';
       throw new ApiError(401, 'Missing token, redirecting to login');
     }
-    // requireAuth === 'optional' e sem token: segue anônimo, sem redirecionar.
   }
 
   const response = await fetchComRedeAmigavel(`${API_BASE}${endpoint}`, {
@@ -82,9 +86,6 @@ async function apiFetch<T>(endpoint: string, options: FetchOptions = {}): Promis
     ...customOptions,
   });
 
-  // Uma rota 'optional' nunca deveria devolver 401 por causa do token (ela
-  // sempre atende, com ou sem login) — só desloga automaticamente quando a
-  // auth era de fato obrigatória.
   if (response.status === 401 && requireAuth === true && typeof window !== 'undefined') {
     localStorage.removeItem('auth_token');
     document.cookie = 'auth_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
@@ -101,14 +102,36 @@ async function apiFetch<T>(endpoint: string, options: FetchOptions = {}): Promis
     );
   }
 
-  return data.data; // Our backend always wraps content in { data: ... }
+  return data.data;
 }
 
 export const api = {
-  get: <T>(endpoint: string, options?: FetchOptions) => apiFetch<T>(endpoint, { ...options, method: 'GET' }),
-  post: <T, B = unknown>(endpoint: string, body: B, options?: FetchOptions) => apiFetch<T>(endpoint, { ...options, method: 'POST', body: JSON.stringify(body) }),
-  put: <T, B = unknown>(endpoint: string, body: B, options?: FetchOptions) => apiFetch<T>(endpoint, { ...options, method: 'PUT', body: JSON.stringify(body) }),
-  patch: <T, B = unknown>(endpoint: string, body?: B, options?: FetchOptions) => apiFetch<T>(endpoint, { ...options, method: 'PATCH', body: body ? JSON.stringify(body) : undefined }),
+  get: <T>(endpoint: string, options?: FetchOptions) =>
+    apiFetch<T>(endpoint, { ...options, method: 'GET' }),
+  post: <T, B = unknown>(endpoint: string, body: B, options?: FetchOptions) => {
+    const isFormData = typeof FormData !== 'undefined' && body instanceof FormData;
+    return apiFetch<T>(endpoint, {
+      ...options,
+      method: 'POST',
+      body: isFormData ? (body as BodyInit) : JSON.stringify(body),
+    });
+  },
+  put: <T, B = unknown>(endpoint: string, body: B, options?: FetchOptions) => {
+    const isFormData = typeof FormData !== 'undefined' && body instanceof FormData;
+    return apiFetch<T>(endpoint, {
+      ...options,
+      method: 'PUT',
+      body: isFormData ? (body as BodyInit) : JSON.stringify(body),
+    });
+  },
+  patch: <T, B = unknown>(endpoint: string, body?: B, options?: FetchOptions) => {
+    const isFormData = typeof FormData !== 'undefined' && body instanceof FormData;
+    return apiFetch<T>(endpoint, {
+      ...options,
+      method: 'PATCH',
+      body: isFormData ? (body as BodyInit) : body ? JSON.stringify(body) : undefined,
+    });
+  },
   delete: <T>(endpoint: string, options?: FetchOptions) => apiFetch<T>(endpoint, { ...options, method: 'DELETE' }),
   uploadFile: async <T>(endpoint: string, file: File, options: FetchOptions = {}): Promise<T> => {
     const formData = new FormData();
