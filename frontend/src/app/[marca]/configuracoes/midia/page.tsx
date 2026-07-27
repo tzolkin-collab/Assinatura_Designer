@@ -72,9 +72,10 @@ export default function MidiaPage() {
   const fetchAssets = async () => {
     try {
       const res = await api.get<Asset[]>(`/brands/${slug}/assets`);
-      setAssets(res);
+      setAssets(Array.isArray(res) ? res : []);
     } catch (e) {
       console.error(e);
+      setAssets([]);
     } finally {
       setLoading(false);
     }
@@ -87,8 +88,9 @@ export default function MidiaPage() {
   // Contagem por fonte — vira tanto o resumo estratégico do topo quanto os
   // filtros (clicar num chip filtra a grade abaixo).
   const sourceCounts = useMemo(() => {
+    const list = Array.isArray(assets) ? assets : [];
     const counts: Partial<Record<AssetSource, number>> = {};
-    for (const a of assets) {
+    for (const a of list) {
       const s = (a.source ?? 'upload') as AssetSource;
       counts[s] = (counts[s] ?? 0) + 1;
     }
@@ -98,8 +100,9 @@ export default function MidiaPage() {
   // Tags mais usadas (fora as que só repetem o nome da fonte) — o essencial
   // pra filtrar sem virar uma nuvem infinita de tags de baixo valor.
   const topTags = useMemo(() => {
+    const list = Array.isArray(assets) ? assets : [];
     const counts = new Map<string, number>();
-    for (const a of assets) {
+    for (const a of list) {
       for (const t of a.tags ?? []) {
         if (Object.keys(SOURCE_LABEL).includes(t)) continue; // já é chip de fonte
         counts.set(t, (counts.get(t) ?? 0) + 1);
@@ -109,7 +112,8 @@ export default function MidiaPage() {
   }, [assets]);
 
   const filteredAssets = useMemo(() => {
-    return assets.filter((a) => {
+    const list = Array.isArray(assets) ? assets : [];
+    return list.filter((a) => {
       const source = (a.source ?? 'upload') as AssetSource;
       if (filterSource && source !== filterSource) return false;
       if (filterTag && !(a.tags ?? []).includes(filterTag)) return false;
@@ -402,8 +406,8 @@ export default function MidiaPage() {
         onSuccess={() => {
           setLoading(true);
           api.get<Asset[]>(`/brands/${slug}/assets`)
-            .then(setAssets)
-            .catch(() => {})
+            .then((data) => setAssets(Array.isArray(data) ? data : []))
+            .catch(() => setAssets([]))
             .finally(() => setLoading(false));
         }}
       />
