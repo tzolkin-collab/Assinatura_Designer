@@ -5,11 +5,16 @@ FROM node:22-bookworm-slim
 WORKDIR /app
 
 # openssl/ca-certificates são exigidos pelo query engine do Prisma em runtime.
+# unzip é necessário para o Puppeteer extrair o Chrome no passo 4.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends openssl ca-certificates \
+    && apt-get install -y --no-install-recommends openssl ca-certificates unzip \
     && rm -rf /var/lib/apt/lists/*
 
 ENV NODE_ENV=production
+# Impede o postinstall do Puppeteer de baixar o Chrome durante `npm ci`.
+# O binário é instalado explicitamente na etapa 4 (após as libs de SO do
+# playwright install-deps estarem disponíveis), o que é mais confiável.
+ENV PUPPETEER_SKIP_DOWNLOAD=true
 
 # 1) Dependências (inclui devDeps: precisamos de tsc/prisma CLI no build e do
 #    prisma CLI em runtime para `migrate deploy`). `npm ci` ignora NODE_ENV.
