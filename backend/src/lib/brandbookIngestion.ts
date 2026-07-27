@@ -97,67 +97,69 @@ export async function processBrandbookIngest({
   for (const file of files) {
     const filename = file.originalname.toLowerCase();
 
-    // 1. Arquivo ZIP (descompactar pasta de SVGs e assets)
-    if (file.mimetype === 'application/zip' || filename.endsWith('.zip')) {
+    let isZipHandled = false;
+
+    // Tenta descompactar como ZIP se tiver extensão/mimetype de zip ou octet-stream
+    if (filename.endsWith('.zip') || file.mimetype.includes('zip') || file.mimetype === 'application/octet-stream') {
       try {
         const zip = new AdmZip(file.buffer);
         const zipEntries = zip.getEntries();
+        if (zipEntries && zipEntries.length > 0) {
+          isZipHandled = true;
+          for (const entry of zipEntries) {
+            if (entry.isDirectory) continue;
+            const entryName = entry.entryName.toLowerCase();
+            const buffer = entry.getData();
 
-        for (const entry of zipEntries) {
-          if (entry.isDirectory) continue;
-          const entryName = entry.entryName.toLowerCase();
-          const buffer = entry.getData();
-
-          if (entryName.endsWith('.svg')) {
-            rawSvgsToProcess.push({ filename: entry.name || entry.entryName, buffer });
-          } else if (entryName.endsWith('.html') || entryName.endsWith('.htm') || entryName.endsWith('.css')) {
-            const txt = buffer.toString('utf-8');
-            textSnippets.push(txt);
-          } else if (entryName.endsWith('.png') || entryName.endsWith('.jpg') || entryName.endsWith('.jpeg') || entryName.endsWith('.webp')) {
-            if (imagePartsForGemini.length < 5) {
-              imagePartsForGemini.push({
-                inlineData: {
-                  mimeType: entryName.endsWith('.png') ? 'image/png' : 'image/jpeg',
-                  data: buffer.toString('base64'),
-                },
-              });
+            if (entryName.endsWith('.svg')) {
+              rawSvgsToProcess.push({ filename: entry.name || entry.entryName, buffer });
+            } else if (entryName.endsWith('.html') || entryName.endsWith('.htm') || entryName.endsWith('.css')) {
+              const txt = buffer.toString('utf-8');
+              textSnippets.push(txt);
+            } else if (entryName.endsWith('.png') || entryName.endsWith('.jpg') || entryName.endsWith('.jpeg') || entryName.endsWith('.webp')) {
+              if (imagePartsForGemini.length < 6) {
+                imagePartsForGemini.push({
+                  inlineData: {
+                    mimeType: entryName.endsWith('.png') ? 'image/png' : 'image/jpeg',
+                    data: buffer.toString('base64'),
+                  },
+                });
+              }
             }
           }
         }
-      } catch (err) {
-        console.warn('Erro ao descompactar ZIP:', err);
+      } catch {
+        isZipHandled = false;
       }
     }
-    // 2. SVG Individual
-    else if (file.mimetype === 'image/svg+xml' || filename.endsWith('.svg')) {
-      rawSvgsToProcess.push({ filename: file.originalname, buffer: file.buffer });
-      textSnippets.push(file.buffer.toString('utf-8'));
-    }
-    // 3. HTML / CSS Individual
-    else if (file.mimetype === 'text/html' || filename.endsWith('.html') || filename.endsWith('.htm') || filename.endsWith('.css')) {
-      const txt = file.buffer.toString('utf-8');
-      textSnippets.push(txt);
 
-      // Extrai SVGs inline se houver <svg...</svg>
-      const inlineSvgRegex = /<svg[\s\S]*?<\/svg>/gi;
-      let match;
-      let svgIndex = 1;
-      while ((match = inlineSvgRegex.exec(txt)) !== null) {
-        rawSvgsToProcess.push({
-          filename: `inline-graphic-${svgIndex++}.svg`,
-          buffer: Buffer.from(match[0], 'utf-8'),
-        });
-      }
-    }
-    // 4. Imagens PNG / JPG / WEBP / PDF
-    else if (file.mimetype.startsWith('image/') || file.mimetype === 'application/pdf') {
-      if (imagePartsForGemini.length < 6) {
-        imagePartsForGemini.push({
-          inlineData: {
-            mimeType: file.mimetype === 'application/pdf' ? 'application/pdf' : file.mimetype,
-            data: file.buffer.toString('base64'),
-          },
-        });
+    if (!isZipHandled) {
+      if (file.mimetype === 'image/svg+xml' || filename.endsWith('.svg')) {
+        rawSvgsToProcess.push({ filename: file.originalname, buffer: file.buffer });
+        textSnippets.push(file.buffer.toString('utf-8'));
+      } else if (file.mimetype === 'text/html' || filename.endsWith('.html') || filename.endsWith('.htm') || filename.endsWith('.css')) {
+        const txt = file.buffer.toString('utf-8');
+        textSnippets.push(txt);
+
+        // Extrai SVGs inline se houver <svg...</svg>
+        const inlineSvgRegex = /<svg[\s\S]*?<\/svg>/gi;
+        let match;
+        let svgIndex = 1;
+        while ((match = inlineSvgRegex.exec(txt)) !== null) {
+          rawSvgsToProcess.push({
+            filename: `inline-graphic-${svgIndex++}.svg`,
+            buffer: Buffer.from(match[0], 'utf-8'),
+          });
+        }
+      } else if (file.mimetype.startsWith('image/') || file.mimetype === 'application/pdf') {
+        if (imagePartsForGemini.length < 6) {
+          imagePartsForGemini.push({
+            inlineData: {
+              mimeType: file.mimetype === 'application/pdf' ? 'application/pdf' : file.mimetype,
+              data: file.buffer.toString('base64'),
+            },
+          });
+        }
       }
     }
   }

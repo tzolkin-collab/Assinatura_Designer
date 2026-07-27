@@ -86,9 +86,10 @@
   background-color: var(--color-bg-secondary);
   transition: all 0.2s ease;
 
-  &:hover {
+  &:hover, &.dropzoneDragging {
     border-color: var(--color-brand, #FF6B35);
-    background-color: rgba(255, 107, 53, 0.04);
+    background-color: rgba(255, 107, 53, 0.08);
+    transform: scale(1.01);
   }
 }
 

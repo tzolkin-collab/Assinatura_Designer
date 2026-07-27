@@ -44,25 +44,88 @@ export default function BrandbookUploaderModal({
   const [updatingLogo, setUpdatingLogo] = useState(false);
   const [logoUpdated, setLogoUpdated] = useState(false);
 
+  const [isDraggingOver, setIsDraggingOver] = useState(false);
+
   if (!isOpen) return null;
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      setSelectedFiles(Array.from(e.target.files));
+      setSelectedFiles((prev) => [...prev, ...Array.from(e.target.files!)]);
       setError('');
     }
   };
 
-  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+  const extractFilesFromDataTransfer = async (dataTransfer: DataTransfer): Promise<File[]> => {
+    const fileList: File[] = [];
+
+    const traverseEntry = async (entry: FileSystemEntry): Promise<void> => {
+      if (entry.isFile) {
+        const fileEntry = entry as FileSystemFileEntry;
+        await new Promise<void>((resolve) => {
+          fileEntry.file(
+            (f) => {
+              fileList.push(f);
+              resolve();
+            },
+            () => resolve()
+          );
+        });
+      } else if (entry.isDirectory) {
+        const dirEntry = entry as FileSystemDirectoryEntry;
+        const dirReader = dirEntry.createReader();
+        const entries = await new Promise<FileSystemEntry[]>((resolve) => {
+          dirReader.readEntries((results) => resolve(Array.from(results)), () => resolve([]));
+        });
+        for (const child of entries) {
+          await traverseEntry(child);
+        }
+      }
+    };
+
+    if (dataTransfer.items && dataTransfer.items.length > 0) {
+      for (let i = 0; i < dataTransfer.items.length; i++) {
+        const item = dataTransfer.items[i];
+        const entry = item.webkitGetAsEntry ? item.webkitGetAsEntry() : null;
+        if (entry) {
+          await traverseEntry(entry);
+        } else {
+          const f = item.getAsFile();
+          if (f) fileList.push(f);
+        }
+      }
+    } else if (dataTransfer.files && dataTransfer.files.length > 0) {
+      fileList.push(...Array.from(dataTransfer.files));
+    }
+
+    return fileList;
+  };
+
+  const handleDrop = async (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
-    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      setSelectedFiles(Array.from(e.dataTransfer.files));
-      setError('');
+    e.stopPropagation();
+    setIsDraggingOver(false);
+
+    try {
+      const files = await extractFilesFromDataTransfer(e.dataTransfer);
+      if (files.length > 0) {
+        setSelectedFiles((prev) => [...prev, ...files]);
+        setError('');
+      }
+    } catch (err) {
+      console.warn('Erro ao ler arquivos arrastados:', err);
     }
   };
 
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
+    e.stopPropagation();
+    if (!isDraggingOver) setIsDraggingOver(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDraggingOver(false);
   };
 
   const handleIngest = async () => {
@@ -139,16 +202,17 @@ export default function BrandbookUploaderModal({
             </p>
 
             <div
-              className={styles.dropzone}
+              className={`${styles.dropzone} ${isDraggingOver ? styles.dropzoneDragging : ''}`}
               onDrop={handleDrop}
               onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
               onClick={() => fileInputRef.current?.click()}
             >
               <input
                 ref={fileInputRef}
                 type="file"
                 multiple
-                accept=".pdf,.html,.htm,.css,.svg,.png,.jpg,.jpeg,.webp,.zip"
+                accept=".pdf,.html,.htm,.css,.svg,.png,.jpg,.jpeg,.webp,.zip,application/zip,application/x-zip-compressed,application/octet-stream"
                 style={{ display: 'none' }}
                 onChange={handleFileChange}
               />
