@@ -3,16 +3,17 @@
 import React, { useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { Mail, Lock } from 'lucide-react';
+import { Mail, Lock, User as UserIcon } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
-import styles from './login.module.css';
+import styles from '../login/login.module.css';
 
-function LoginContent() {
+function RegisterContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirectTo = searchParams.get('redirect') || searchParams.get('next');
 
+  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -22,8 +23,13 @@ function LoginContent() {
     e.preventDefault();
     setError('');
 
-    if (!email || !password) {
+    if (!name || !email || !password) {
       setError('Preencha todos os campos.');
+      return;
+    }
+
+    if (password.length < 8) {
+      setError('A senha deve ter pelo menos 8 caracteres.');
       return;
     }
 
@@ -31,24 +37,26 @@ function LoginContent() {
 
     try {
       const { api } = await import('@/lib/api');
-      
-      const response = await api.post<{ token: string }>('/auth/login', {
-        email,
-        password,
-      }, { requireAuth: false });
+
+      const response = await api.post<{ user: { id: string; email: string }; token: string }>(
+        '/auth/register',
+        { name, email, password },
+        { requireAuth: false },
+      );
 
       const { token } = response;
       localStorage.setItem('auth_token', token);
       document.cookie = `auth_token=${token}; path=/; max-age=604800`; // 7 dias
-      
+
+      // Redireciona para o projeto/página de destino solicitada ou para a galeria
       if (redirectTo && redirectTo.startsWith('/')) {
         router.push(redirectTo);
       } else {
         router.push('/galeria');
       }
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Falha ao autenticar.';
-      setError(message || 'Falha ao autenticar.');
+      const message = err instanceof Error ? err.message : 'Falha ao criar conta.';
+      setError(message || 'Falha ao criar conta.');
     } finally {
       setLoading(false);
     }
@@ -66,11 +74,19 @@ function LoginContent() {
             width={140}
             height={40}
           />
-          <p className={styles.logoSub}>Design Studio</p>
+          <p className={styles.logoSub}>Criar Conta no Design Studio</p>
         </div>
 
         {/* Form */}
         <form onSubmit={handleSubmit} className={styles.form}>
+          <Input
+            label="Seu nome"
+            type="text"
+            placeholder="Como quer ser chamado"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            icon={<UserIcon size={16} />}
+          />
           <Input
             label="E-mail"
             type="email"
@@ -80,9 +96,9 @@ function LoginContent() {
             icon={<Mail size={16} />}
           />
           <Input
-            label="Senha"
+            label="Crie sua senha"
             type="password"
-            placeholder="••••••••"
+            placeholder="Mínimo 8 caracteres"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             icon={<Lock size={16} />}
@@ -91,29 +107,22 @@ function LoginContent() {
           {error && <p className={styles.error}>{error}</p>}
 
           <Button type="submit" fullWidth loading={loading}>
-            Entrar
+            Cadastrar e Acessar
           </Button>
         </form>
 
         <p className={styles.hint}>
-          Ainda não tem conta?{' '}
-          <Link
-            href={redirectTo ? `/register?redirect=${encodeURIComponent(redirectTo)}` : '/register'}
-            style={{ color: 'var(--color-brand, #FF6B35)', textDecoration: 'underline' }}
-          >
-            Cadastre-se aqui
+          Já possui uma conta?{' '}
+          <Link href={redirectTo ? `/login?redirect=${encodeURIComponent(redirectTo)}` : '/login'} style={{ color: 'var(--color-brand, #FF6B35)', textDecoration: 'underline' }}>
+            Fazer Login
           </Link>
-        </p>
-
-        <p className={styles.hint} style={{ marginTop: 'var(--space-2)' }}>
-          Ou use <strong>admin@assinatura.com</strong> / <strong>admin123</strong>
         </p>
       </div>
     </div>
   );
 }
 
-export default function LoginPage() {
+export default function RegisterPage() {
   return (
     <Suspense fallback={
       <div className={styles.page}>
@@ -122,7 +131,7 @@ export default function LoginPage() {
         </div>
       </div>
     }>
-      <LoginContent />
+      <RegisterContent />
     </Suspense>
   );
 }
