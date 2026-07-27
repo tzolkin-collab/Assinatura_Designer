@@ -279,9 +279,18 @@ Formato do JSON de resposta:
         for (const item of parsed.reconstructedSvgs) {
           if (item?.svgCode && typeof item.svgCode === 'string' && item.svgCode.includes('<svg')) {
             try {
-              const svgBuffer = Buffer.from(item.svgCode, 'utf-8');
+              let cleanSvg = item.svgCode.trim();
+              cleanSvg = cleanSvg.replace(/^```(xml|svg|json)?/i, '').replace(/```$/i, '').trim();
+              if (!cleanSvg.includes('xmlns=')) {
+                cleanSvg = cleanSvg.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
+              }
+
+              const svgBuffer = Buffer.from(cleanSvg, 'utf-8');
               const filename = item.name || `vetor-ia-${Date.now()}.svg`;
-              const classification: SVGClassification = item.classification === 'LOGOTYPE' || item.classification === 'GRAPHIC_ELEMENT' ? item.classification : 'GRAPHIC_ELEMENT';
+              const classification: SVGClassification =
+                item.classification === 'LOGOTYPE' || item.classification === 'ILLUSTRATION' || item.classification === 'GRAPHIC_ELEMENT'
+                  ? item.classification
+                  : 'GRAPHIC_ELEMENT';
 
               const r2Url = await uploadFileToR2(svgBuffer, filename, 'image/svg+xml', `brands/${brand.id}/brandbook`);
 

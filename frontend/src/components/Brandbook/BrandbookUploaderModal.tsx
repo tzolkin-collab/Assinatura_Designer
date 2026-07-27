@@ -211,6 +211,21 @@ export default function BrandbookUploaderModal({
     setResult(null);
     setError('');
     setLogoUpdated(false);
+  };  const formatGuidelinesText = (text: string): string => {
+    if (!text) return '';
+    try {
+      const parsed = JSON.parse(text);
+      if (typeof parsed === 'object' && parsed !== null) {
+        const parts: string[] = [];
+        if (parsed.history) parts.push(parsed.history);
+        if (parsed.guidelines) parts.push(parsed.guidelines);
+        if (parsed.voice) parts.push(parsed.voice);
+        if (parts.length > 0) return parts.join('\n\n');
+      }
+    } catch {
+      // String de texto simples
+    }
+    return text.replace(/\\"/g, '"').replace(/^\{[\s\S]*\}$/, '').trim();
   };
 
   return (
@@ -359,9 +374,9 @@ export default function BrandbookUploaderModal({
                 </div>
                 <div className={styles.paletteRow}>
                   {result.colors.map((color, i) => (
-                    <div
+                    <span
                       key={i}
-                      className={styles.colorChip}
+                      className={styles.colorDot}
                       style={{ backgroundColor: color }}
                       title={color}
                     />
@@ -390,14 +405,16 @@ export default function BrandbookUploaderModal({
                 <p>Identificamos um logotipo no Brandbook enviado. Deseja definir como logo oficial da marca?</p>
 
                 <div className={styles.logoComparison}>
-                  {result.currentLogoUrl && (
-                    <div className={styles.logoCardItem}>
-                      <span>Atual</span>
-                      <img src={result.currentLogoUrl} alt="Logo Atual" />
-                    </div>
-                  )}
                   <div className={styles.logoCardItem}>
-                    <span>Detectada</span>
+                    <span>ATUAL</span>
+                    {result.currentLogoUrl ? (
+                      <img src={result.currentLogoUrl} alt="Logo Atual" />
+                    ) : (
+                      <small style={{ opacity: 0.6, padding: '12px' }}>Nenhuma logo definida</small>
+                    )}
+                  </div>
+                  <div className={styles.logoCardItem}>
+                    <span>DETECTADA</span>
                     <img src={result.detectedLogoUrl} alt="Nova Logo" />
                   </div>
                 </div>
@@ -423,7 +440,7 @@ export default function BrandbookUploaderModal({
             {/* Diretrizes em Texto */}
             <div className={styles.guidelinesPreview}>
               <h4>Diretrizes Extraídas pela I.A.</h4>
-              <div className={styles.guidelinesText}>{result.guidelines}</div>
+              <div className={styles.guidelinesText}>{formatGuidelinesText(result.guidelines)}</div>
             </div>
 
             <div className={styles.footer}>
