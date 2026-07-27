@@ -46,18 +46,22 @@ function classifySVG(filename: string, content: string): SVGClassification {
   const lowerName = filename.toLowerCase();
   const lowerContent = content.toLowerCase();
 
+  // 1. Logotipo oficial e variações de marca
   if (
     lowerName.includes('logo') ||
     lowerName.includes('logotype') ||
     lowerName.includes('brandmark') ||
     lowerName.includes('marca') ||
     lowerName.includes('isotipo') ||
-    lowerName.includes('simbolo')
+    lowerName.includes('simbolo') ||
+    lowerContent.includes('id="logo"') ||
+    lowerContent.includes('class="logo"') ||
+    lowerContent.includes('id="brand"')
   ) {
     return 'LOGOTYPE';
   }
 
-  // Se contém muitas linhas, paths de padrão ou palavras de moldura/divisor
+  // 2. Elementos gráficos, molduras, divisores e padrões de fundo
   if (
     lowerName.includes('pattern') ||
     lowerName.includes('frame') ||
@@ -66,11 +70,16 @@ function classifySVG(filename: string, content: string): SVGClassification {
     lowerName.includes('background') ||
     lowerName.includes('grafismo') ||
     lowerName.includes('forma') ||
-    lowerContent.includes('pattern')
+    lowerName.includes('banner') ||
+    lowerName.includes('faixa') ||
+    lowerContent.includes('<pattern') ||
+    lowerContent.includes('id="grafismo"') ||
+    lowerContent.includes('class="pattern"')
   ) {
     return 'GRAPHIC_ELEMENT';
   }
 
+  // 3. Ilustrações e ícones gerais
   return 'ILLUSTRATION';
 }
 
