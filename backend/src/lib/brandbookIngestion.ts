@@ -42,6 +42,62 @@ function extractColorsFromText(text: string): string[] {
   return Array.from(new Set(normalized));
 }
 
+function parseIngestionJSON(rawText: string): any {
+  let cleanText = rawText.trim();
+  cleanText = cleanText.replace(/^```(json|xml)?/i, '').replace(/```$/i, '').trim();
+
+  let parsed: any = {};
+  try {
+    parsed = JSON.parse(cleanText);
+  } catch (err) {
+    console.warn('JSON.parse falhou, tentando resgate de emergência...', err);
+    try {
+      parsed = JSON.parse(cleanText + ']}');
+    } catch {
+      parsed = {};
+    }
+  }
+
+  // Se guidelines veio como objeto ou stringified JSON, converte para Markdown limpo
+  if (parsed.guidelines) {
+    if (typeof parsed.guidelines === 'object' && parsed.guidelines !== null) {
+      const g = parsed.guidelines;
+      parsed.guidelines = [g.history, g.guidelines, g.voice, g.rules, g.summary].filter(Boolean).join('\n\n');
+    } else if (typeof parsed.guidelines === 'string' && parsed.guidelines.trim().startsWith('{')) {
+      try {
+        const inner = JSON.parse(parsed.guidelines);
+        if (typeof inner === 'object' && inner !== null) {
+          parsed.guidelines = [inner.history, inner.guidelines, inner.voice, inner.rules, inner.summary].filter(Boolean).join('\n\n');
+        }
+      } catch {
+        // Mantém como está se não for JSON válido
+      }
+    }
+  }
+
+  // Se reconstructedSvgs não veio no JSON parsed, resgata objetos SVG com Regex
+  if (!Array.isArray(parsed.reconstructedSvgs) || parsed.reconstructedSvgs.length === 0) {
+    const svgRegex = /\{\s*"name"\s*:\s*"([^"]+)"\s*,\s*"classification"\s*:\s*"([^"]+)"\s*,\s*"svgCode"\s*:\s*"([\s\S]*?)"\s*\}/gi;
+    const extracted: Array<{ name: string; classification: string; svgCode: string }> = [];
+    let match;
+    while ((match = svgRegex.exec(cleanText)) !== null) {
+      const svgCode = match[3].replace(/\\"/g, '"').replace(/\\n/g, '\n');
+      if (svgCode.includes('<svg')) {
+        extracted.push({
+          name: match[1],
+          classification: match[2],
+          svgCode,
+        });
+      }
+    }
+    if (extracted.length > 0) {
+      parsed.reconstructedSvgs = extracted;
+    }
+  }
+
+  return parsed;
+}
+
 function classifySVG(filename: string, content: string): SVGClassification {
   const lowerName = filename.toLowerCase();
   const lowerContent = content.toLowerCase();
@@ -265,11 +321,12 @@ Formato do JSON de resposta:
       ],
       config: {
         responseMimeType: 'application/json',
+        maxOutputTokens: 8192,
       },
     });
 
     if (aiResponse.text) {
-      const parsed = JSON.parse(aiResponse.text);
+      const parsed = parseIngestionJSON(aiResponse.text);
       if (parsed.guidelines) aiGuidelines = parsed.guidelines;
       if (Array.isArray(parsed.colors)) aiColors = parsed.colors.filter((c: unknown) => typeof c === 'string' && c.startsWith('#'));
       if (Array.isArray(parsed.primaryFonts)) aiFonts = parsed.primaryFonts.filter((f: unknown) => typeof f === 'string');
