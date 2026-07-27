@@ -10,6 +10,7 @@ import { getUsage, getBilling } from '../lib/aiBudget.js';
 
 import multer from 'multer';
 import { processBrandbookIngest } from '../lib/brandbookIngestion.js';
+import { getValidAccessToken, exportDesign, waitForExport } from '../lib/canvaClient.js';
 
 export const brandsRouter = Router();
 const brandbookUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
@@ -28,6 +29,82 @@ brandsRouter.post('/:slug/brandbook/ingest', brandbookUpload.array('files', 15),
     const result = await processBrandbookIngest({
       brandSlug: slug,
       files,
+      uploadedByUserId: userId,
+    });
+
+    res.json({ data: result });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/brands/:slug/brandbook/ingest-canva - Importar e analisar Brandbook direto do Canva
+brandsRouter.post('/:slug/brandbook/ingest-canva', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { userId } = (req as AuthRequest).user!;
+    const slug = req.params.slug as string;
+    let { designId, designUrl } = req.body;
+
+    if (!designId && designUrl) {
+      const match = String(designUrl).match(/design\/([A-Za-z0-9_-]+)/);
+      if (match) designId = match[1];
+    }
+
+    if (!designId) {
+      throw createError(400, 'É necessário informar o designId ou a URL do design do Canva');
+    }
+
+    const token = await getValidAccessToken(userId);
+    if (!token) {
+      throw createError(400, 'Sua conta do Canva não está conectada. Conecte sua conta em Configurações > Integrações.');
+    }
+
+    // Exporta o design do Canva como imagens PNG para análise
+    const exportJob = (await exportDesign(userId, designId, 'png')) as { job?: { id?: string } };
+    const jobId = exportJob?.job?.id;
+
+    if (!jobId) {
+      throw createError(500, 'Não foi possível iniciar a exportação do design no Canva');
+    }
+
+    const exportResult = await waitForExport(userId, jobId);
+    const job = exportResult.job as { urls?: string[] } | undefined;
+    const urls = job?.urls || [];
+
+    if (urls.length === 0) {
+      throw createError(500, 'O Canva não retornou imagens exportadas para este design');
+    }
+
+    // Faz o download de cada página/asset gerado no Canva
+    const downloadedFiles: Express.Multer.File[] = [];
+    for (let i = 0; i < urls.length; i++) {
+      const pageUrl = urls[i];
+      const pageRes = await fetch(pageUrl);
+      if (pageRes.ok) {
+        const arrayBuf = await pageRes.arrayBuffer();
+        const buffer = Buffer.from(arrayBuf);
+        downloadedFiles.push({
+          fieldname: 'files',
+          originalname: `canva-brandbook-page-${i + 1}.png`,
+          encoding: '7bit',
+          mimetype: 'image/png',
+          buffer,
+          size: buffer.length,
+          stream: null as any,
+          destination: '',
+          filename: `canva-brandbook-page-${i + 1}.png`,
+          path: '',
+        });
+      }
+    }
+
+    if (downloadedFiles.length === 0) {
+      throw createError(500, 'Falha ao baixar páginas exportadas do Canva');
+    }
+
+    const result = await processBrandbookIngest({
+      brandSlug: slug,
+      files: downloadedFiles,
       uploadedByUserId: userId,
     });
 

@@ -1,9 +1,10 @@
 'use client';
 
 import React, { useState, useRef } from 'react';
-import { Upload, X, CheckCircle, Sparkles, FileText, Image as ImageIcon, AlertCircle, RefreshCw, Layers, Palette } from 'lucide-react';
+import { Upload, X, CheckCircle, Sparkles, FileText, Image as ImageIcon, AlertCircle, RefreshCw, Layers, Palette, FileImage } from 'lucide-react';
 import Button from '@/components/ui/Button';
 import Card from '@/components/ui/Card';
+import Input from '@/components/ui/Input';
 import { api } from '@/lib/api';
 import styles from './BrandbookUploaderModal.module.css';
 
@@ -22,11 +23,11 @@ export interface IngestResultData {
   currentLogoUrl?: string | null;
 }
 
-interface BrandbookUploaderModalProps {
+export interface BrandbookUploaderModalProps {
   slug: string;
   isOpen: boolean;
   onClose: () => void;
-  onSuccess?: (result: IngestResultData) => void;
+  onSuccess?: (data: IngestResultData) => void;
 }
 
 export default function BrandbookUploaderModal({
@@ -44,6 +45,8 @@ export default function BrandbookUploaderModal({
   const [updatingLogo, setUpdatingLogo] = useState(false);
   const [logoUpdated, setLogoUpdated] = useState(false);
 
+  const [ingestMode, setIngestMode] = useState<'files' | 'canva'>('files');
+  const [canvaUrl, setCanvaUrl] = useState('');
   const [isDraggingOver, setIsDraggingOver] = useState(false);
 
   if (!isOpen) return null;
@@ -162,6 +165,34 @@ export default function BrandbookUploaderModal({
     }
   };
 
+  const handleIngestCanva = async () => {
+    if (!canvaUrl.trim()) {
+      setError('Cole a URL ou o ID do design do Brandbook no Canva.');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+    setStepText('Exportando páginas do Canva...');
+
+    try {
+      setStepText('Baixando páginas do Canva...');
+      const response = await api.post<IngestResultData>(
+        `/brands/${slug}/brandbook/ingest-canva`,
+        { designUrl: canvaUrl.trim() }
+      );
+
+      setResult(response);
+      if (onSuccess) onSuccess(response);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Falha ao importar Brandbook do Canva.';
+      setError(message);
+    } finally {
+      setLoading(false);
+      setStepText('');
+    }
+  };
+
   const handleConfirmLogo = async (newLogoUrl: string) => {
     setUpdatingLogo(true);
     try {
@@ -176,6 +207,7 @@ export default function BrandbookUploaderModal({
 
   const resetState = () => {
     setSelectedFiles([]);
+    setCanvaUrl('');
     setResult(null);
     setError('');
     setLogoUpdated(false);
@@ -196,8 +228,27 @@ export default function BrandbookUploaderModal({
 
         {!result ? (
           <div className={styles.body}>
+            <div className={styles.modeTabs}>
+              <button
+                type="button"
+                className={`${styles.modeTab} ${ingestMode === 'files' ? styles.modeTabActive : ''}`}
+                onClick={() => setIngestMode('files')}
+              >
+                <Upload size={14} />
+                Arquivos (PDF / ZIP / SVG)
+              </button>
+              <button
+                type="button"
+                className={`${styles.modeTab} ${ingestMode === 'canva' ? styles.modeTabActive : ''}`}
+                onClick={() => setIngestMode('canva')}
+              >
+                <FileImage size={14} />
+                Importar do Canva
+              </button>
+            </div>
+
             <p className={styles.description}>
-              Suba o manual em <strong>PDF, HTML, PNG/JPG, SVG</strong> ou um arquivo <strong>ZIP contendo pastas de SVGs</strong>.
+              Suba o manual em <strong>PDF, HTML, PNG/JPG, SVG</strong> ou um arquivo <strong>ZIP contendo pastas de SVGs</strong> (ou informe a URL de um design no Canva).
               A I.A. irá ler o documento, extrair diretrizes, paleta de cores, detectar logotipos, remontar vetores ausentes e classificar grafismos e ilustrações.
             </p>
 
@@ -212,29 +263,44 @@ export default function BrandbookUploaderModal({
               </div>
             </details>
 
-            <div
-              className={`${styles.dropzone} ${isDraggingOver ? styles.dropzoneDragging : ''}`}
-              onDrop={handleDrop}
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onClick={() => fileInputRef.current?.click()}
-            >
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                accept=".pdf,.html,.htm,.css,.svg,.png,.jpg,.jpeg,.webp,.zip,application/zip,application/x-zip-compressed,application/octet-stream"
-                style={{ display: 'none' }}
-                onChange={handleFileChange}
-              />
-              <Upload size={32} className={styles.uploadIcon} />
-              <p className={styles.dropText}>
-                Arraste os arquivos aqui ou <span>clique para selecionar</span>
-              </p>
-              <p className={styles.dropHint}>PDF, HTML, SVG, ZIP de pastas vetoriais ou PNG (até 25MB)</p>
-            </div>
+            {ingestMode === 'canva' ? (
+              <div className={styles.canvaBox}>
+                <label className={styles.canvaLabel}>URL ou ID do Design do Canva:</label>
+                <Input
+                  placeholder="https://www.canva.com/design/DAG.../edit"
+                  value={canvaUrl}
+                  onChange={(e) => setCanvaUrl(e.target.value)}
+                  disabled={loading}
+                />
+                <p className={styles.canvaHint}>
+                  Exporte ou selecione um template/Brandbook criado no Canva. O Designer irá baixar todas as páginas, separar os componentes e extrair os assets.
+                </p>
+              </div>
+            ) : (
+              <div
+                className={`${styles.dropzone} ${isDraggingOver ? styles.dropzoneDragging : ''}`}
+                onDrop={handleDrop}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  accept=".pdf,.html,.htm,.css,.svg,.png,.jpg,.jpeg,.webp,.zip,application/zip,application/x-zip-compressed,application/octet-stream"
+                  style={{ display: 'none' }}
+                  onChange={handleFileChange}
+                />
+                <Upload size={32} className={styles.uploadIcon} />
+                <p className={styles.dropText}>
+                  Arraste os arquivos aqui ou <span>clique para selecionar</span>
+                </p>
+                <p className={styles.dropHint}>PDF, HTML, SVG, ZIP de pastas vetoriais ou PNG (até 25MB)</p>
+              </div>
+            )}
 
-            {selectedFiles.length > 0 && (
+            {ingestMode === 'files' && selectedFiles.length > 0 && (
               <div className={styles.fileList}>
                 <h4>Arquivos selecionados ({selectedFiles.length}):</h4>
                 <ul>
@@ -264,9 +330,15 @@ export default function BrandbookUploaderModal({
               <Button variant="secondary" onClick={onClose} disabled={loading}>
                 Cancelar
               </Button>
-              <Button onClick={handleIngest} loading={loading} disabled={selectedFiles.length === 0}>
-                {loading ? stepText || 'Analisando Brandbook...' : 'Processar e Indexar Brandbook'}
-              </Button>
+              {ingestMode === 'canva' ? (
+                <Button onClick={handleIngestCanva} loading={loading} disabled={!canvaUrl.trim()}>
+                  {loading ? stepText || 'Importando do Canva...' : 'Importar e Indexar do Canva'}
+                </Button>
+              ) : (
+                <Button onClick={handleIngest} loading={loading} disabled={selectedFiles.length === 0}>
+                  {loading ? stepText || 'Analisando Brandbook...' : 'Processar e Indexar Brandbook'}
+                </Button>
+              )}
             </div>
           </div>
         ) : (
