@@ -707,6 +707,51 @@
   box-shadow: 0 10px 22px rgba(217, 119, 87, 0.07);
 }
 
+/* Miniatura DENTRO de uma opção clicável (ex.: font-compare — cada opção é UMA
+   fonte, a imagem ilustra a própria escolha). */
+.questionOptionImg {
+  width: 100%;
+  max-height: 120px;
+  object-fit: cover;
+  border-radius: 10px;
+  margin-bottom: 4px;
+}
+
+/* Grid de miniaturas SÓ ilustrativas acima das opções (ex.: bundle de N
+   candidatos de imagem da biblioteca) — não são clicáveis. */
+.questionPreviewGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.questionPreviewCard {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--color-bg-secondary);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.questionPreviewImg {
+  width: 100%;
+  height: 72px;
+  object-fit: cover;
+  display: block;
+}
+
+.questionPreviewLabel {
+  font-size: 10.5px;
+  color: var(--color-text-tertiary);
+  padding: 0 6px 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .questionFreeformWrap {
   display: flex;
   flex-direction: column;
@@ -1337,6 +1382,60 @@
   align-items: center;
   justify-content: center;
   padding: 20px;
+  position: relative;
+}
+
+/* Slide chegando via WS entra com fade/scale em vez de "pop" instantâneo — o
+   componente remonta por slide (key={`slide-${safeSlide}`}), então a animação
+   dispara a cada novo slide, não só na primeira carga. */
+@keyframes slideEnterFade {
+  from { opacity: 0; transform: scale(0.97); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.slideWrap > * {
+  animation: slideEnterFade 0.35s ease-out;
+}
+
+/* Esqueleto do slot ainda não gerado (geração progressiva) — substitui o iframe
+   em branco que aparecia ao navegar pra um slide que ainda não chegou. */
+.slideSkeleton {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  background: var(--color-bg-secondary);
+  overflow: hidden;
+}
+
+.slideSkeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(217, 119, 87, 0.10), transparent);
+  transform: translateX(-100%);
+  animation: buildShimmer 1.5s ease-in-out infinite;
+}
+
+.slideSkeletonShimmer {
+  position: absolute;
+  inset: 12%;
+  border-radius: 10px;
+  background: var(--color-border-hover);
+  opacity: 0.5;
+}
+
+.slideSkeletonLabel {
+  position: relative;
+  z-index: 1;
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+  background: var(--color-surface, rgba(255,255,255,0.85));
+  padding: 4px 10px;
+  border-radius: 999px;
 }
 
 /* Slide navigation */
@@ -1449,8 +1548,11 @@
 
   .previewPanel {
     order: -1;
-    flex: 0 1 auto;
-    max-height: 42vh;
+    /* altura explícita, não derivada do conteúdo: o conteúdo (ArtifactPanel) é
+       position:absolute internamente, então flex-basis:auto o veria como 0 e
+       colapsava o painel inteiro a ~1px. */
+    flex: 0 0 42vh;
+    height: 42vh;
     min-height: 0;
     border-bottom: 1px solid rgba(0, 0, 0, 0.05);
   }
@@ -1487,6 +1589,8 @@
   }
 
   .previewPanel {
+    flex-basis: 36vh;
+    height: 36vh;
     max-height: 36vh;
   }
 
@@ -1525,6 +1629,10 @@
     animation: none;
     opacity: 0.6;
   }
+
+  .slideWrap > * { animation: none; }
+
+  .slideSkeleton::after { animation: none; }
 
   .sendActive { animation: none; }
 

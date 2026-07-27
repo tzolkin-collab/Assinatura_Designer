@@ -20,6 +20,9 @@ vi.mock('../lib/redis', () => {
       del: vi.fn(async () => 1),
       quit: vi.fn(async () => 'OK'),
       incrby: vi.fn(async () => 1),
+      rpush: vi.fn(async () => 1),
+      lrange: vi.fn(async () => []),
+      ltrim: vi.fn(async () => 'OK'),
       // Contabilidade por modelo lê índices (SET) e hashes; sem registro, tudo vazio.
       smembers: vi.fn(async () => []),
       hgetall: vi.fn(async () => ({})),
@@ -51,7 +54,7 @@ vi.mock('../lib/redis', () => {
 
 vi.mock('../lib/prisma', () => {
   const prismaMock: Record<string, unknown> = {
-    brand: { findUnique: vi.fn() },
+    brand: { findUnique: vi.fn(), findFirst: vi.fn() },
     invite: { create: vi.fn(), findUnique: vi.fn(), updateMany: vi.fn() },
     brandMember: {
       findUnique: vi.fn(),
@@ -77,7 +80,7 @@ vi.mock('../lib/prisma', () => {
       update: vi.fn(),
       delete: vi.fn(),
     },
-    brandConfig: { findUnique: vi.fn(), upsert: vi.fn() },
+    brandConfig: { findUnique: vi.fn(), upsert: vi.fn(), update: vi.fn() },
     post: { findFirst: vi.fn(), findMany: vi.fn(), findUnique: vi.fn(), update: vi.fn() },
     postVersion: {
       findFirst: vi.fn(),
@@ -86,7 +89,7 @@ vi.mock('../lib/prisma', () => {
       deleteMany: vi.fn(),
     },
     slide: { findMany: vi.fn(), update: vi.fn(), create: vi.fn(), deleteMany: vi.fn() },
-    reference: { findFirst: vi.fn(), findMany: vi.fn(), create: vi.fn(), update: vi.fn(), deleteMany: vi.fn() },
+    reference: { findFirst: vi.fn(), findUnique: vi.fn(), findMany: vi.fn(), create: vi.fn(), update: vi.fn(), deleteMany: vi.fn() },
   };
 
   // O aceite de convite roda numa transação. Executamos o callback com o próprio mock,

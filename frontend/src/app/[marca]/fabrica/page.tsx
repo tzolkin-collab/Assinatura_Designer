@@ -330,13 +330,20 @@ export default function FabricaPage() {
   // ── Normaliza o formato do design pro preview (html-design, legacy) ─
   const designKind = (currentDesign[0] as { kind?: string } | undefined)?.kind;
   const isHtmlDesign = designKind === 'html-design';
+  // totalSlides (do WS, ver useFabricaWs) é o total DE VERDADE assim que o primeiro
+  // slide chega — slides.length sozinho só reflete o maior índice já recebido e
+  // cresce aos saltos conforme os lotes chegam fora de ordem.
+  const htmlDesignContent = currentDesign[0] as unknown as (HtmlDesignPostContent & { totalSlides?: number }) | undefined;
   const slideCount = isHtmlDesign
-    ? ((currentDesign[0] as unknown as HtmlDesignPostContent).slides?.length ?? 0)
+    ? Math.max(htmlDesignContent?.slides?.length ?? 0, htmlDesignContent?.totalSlides ?? 0)
     : currentDesign.length;
 
   // Índice clampeado (derivado): se um novo design tiver menos slides que o anterior,
   // mantém o preview dentro do range sem precisar de setState em effect.
   const safeSlide = Math.min(previewSlide, Math.max(0, slideCount - 1));
+  // Slot ainda não chegou (geração progressiva em andamento) — mostra esqueleto
+  // em vez de um iframe vazio/branco.
+  const activeSlideMissing = isHtmlDesign && workerStatus === 'running' && !htmlDesignContent?.slides?.[safeSlide];
 
   // Status de (pré-)salvamento: o pipeline persiste os slides de forma incremental
   // no banco, então enquanto gera está "Salvando rascunho"; parado com arte = "Salvo".
@@ -507,6 +514,17 @@ export default function FabricaPage() {
               {activeQuestion.helperText && (
                 <p className={s.questionHelper}>{activeQuestion.helperText}</p>
               )}
+              {activeQuestion.previewImages && activeQuestion.previewImages.length > 0 && (
+                <div className={s.questionPreviewGrid}>
+                  {activeQuestion.previewImages.map((img, i) => (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <div key={`${img.url}-${i}`} className={s.questionPreviewCard}>
+                      <img src={img.url} alt={img.label} className={s.questionPreviewImg} />
+                      <span className={s.questionPreviewLabel}>{img.label}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
               <div className={s.questionOptions}>
                 {activeQuestion.options.map((opt) => (
                   <button
@@ -518,6 +536,10 @@ export default function FabricaPage() {
                     }}
                     title={opt.description}
                   >
+                    {opt.imageUrl && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={opt.imageUrl} alt={opt.label} className={s.questionOptionImg} />
+                    )}
                     <span className={s.questionOptionLabel}>{opt.label}</span>
                     {opt.description && <span className={s.questionOptionDesc}>{opt.description}</span>}
                   </button>
@@ -808,8 +830,16 @@ export default function FabricaPage() {
 
             {/* Slide renderer */}
             <div className={s.slideWrap}>
-              {isHtmlDesign ? (
+              {activeSlideMissing ? (
+                <div className={s.slideSkeleton} key={`skeleton-${safeSlide}`}>
+                  <div className={s.slideSkeletonShimmer} />
+                  <span className={s.slideSkeletonLabel}>Gerando slide {safeSlide + 1}…</span>
+                </div>
+              ) : isHtmlDesign ? (
                 <HtmlSlideRenderer
+                  // key força remount por slide: dispara a transição de entrada
+                  // (fade/scale) do CSS a cada slide novo em vez de um "pop" instantâneo.
+                  key={`slide-${safeSlide}`}
                   content={currentDesign[0] as unknown as HtmlDesignPostContent}
                   activeSlide={safeSlide}
                   hideNav

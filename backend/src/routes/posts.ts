@@ -18,6 +18,8 @@ import { mergeSlidesIntoPost, syncPostSlides } from '../lib/postHelper.js';
 import { snapshotPost, restorePostVersion } from '../lib/postVersions.js';
 import { enrichAiContext } from '../lib/aiContext.js';
 import { enqueueCanvaExport, canvaExportQueue, enqueueDeckExport, deckExportQueue } from '../lib/queue.js';
+import { publishPost, unpublishPost, type HostingConfig } from '../lib/presentationHosting.js';
+import { setChatEnabled } from '../lib/presentationChat.js';
 import { z } from 'zod';
 import { parseBody } from '../lib/validate.js';
 
@@ -31,6 +33,13 @@ const exportCanvaSchema = z.object({
   slideIndex: z.number().int().nonnegative().optional(),
   mode: z.enum(['png', 'pptx']).optional(),
 });
+const publishSchema = z.object({
+  hostingConfig: z.object({
+    autoplay: z.boolean().optional(),
+    showCounter: z.boolean().optional(),
+  }).optional().default({}),
+});
+const chatToggleSchema = z.object({ enabled: z.boolean() });
 import { resolveRenderableDeck } from '../lib/renderableDeck.js';
 
 const ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
@@ -495,6 +504,70 @@ postsRouter.delete('/:id', async (req: AuthRequest, res: Response, next: NextFun
       where: { id: post.id },
     });
     res.json({ success: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/posts/:id/publish — hospeda o post como apresentação pública
+// navegável (Fase 5, Fatia 1). Gera/regenera o link público; republicar troca o
+// slug (quem tinha o link antigo perde acesso — republicar não é "atualizar
+// silenciosamente" o link já compartilhado).
+postsRouter.post('/:id/publish', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const id = req.params.id as string;
+    const { hostingConfig } = parseBody(publishSchema, req.body ?? {});
+
+    const post = await prisma.post.findFirst({
+      where: { id, brand: brandMemberFilter(req.user?.userId, EDITORS) },
+      select: { id: true },
+    });
+    if (!post) throw createError(404, 'Post não encontrado');
+
+    const { publicSlug, publishedAt } = await publishPost(post.id, hostingConfig as HostingConfig);
+    res.json({ data: { publicSlug, publishedAt, path: `/apresentacao/${publicSlug}` } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/posts/:id/unpublish — derruba o link público (o post continua
+// existindo normalmente no app, só para de ser acessível de fora).
+postsRouter.post('/:id/unpublish', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const id = req.params.id as string;
+    const post = await prisma.post.findFirst({
+      where: { id, brand: brandMemberFilter(req.user?.userId, EDITORS) },
+      select: { id: true },
+    });
+    if (!post) throw createError(404, 'Post não encontrado');
+
+    await unpublishPost(post.id);
+    res.json({ data: { success: true } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/posts/:id/chat/toggle — liga/desliga a caixa de perguntas da
+// plateia AO VIVO (não é config de publish-time: o palestrante pode ligar no
+// meio da apresentação). Guardado por publicSlug (Redis, efêmero), não no Post.
+postsRouter.post('/:id/chat/toggle', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const id = req.params.id as string;
+    const { enabled } = parseBody(chatToggleSchema, req.body ?? {});
+
+    const post = await prisma.post.findFirst({
+      where: { id, brand: brandMemberFilter(req.user?.userId, EDITORS) },
+      select: { publicSlug: true, publishedAt: true },
+    });
+    if (!post) throw createError(404, 'Post não encontrado');
+    if (!post.publicSlug || !post.publishedAt) {
+      throw createError(400, 'Publique a apresentação antes de habilitar perguntas.');
+    }
+
+    await setChatEnabled(post.publicSlug, enabled);
+    res.json({ data: { enabled } });
   } catch (error) {
     next(error);
   }

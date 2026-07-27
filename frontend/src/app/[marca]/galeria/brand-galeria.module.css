@@ -1324,6 +1324,75 @@
   cursor: not-allowed;
 }
 
+.hostSectionHint {
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+  margin: 0 0 4px;
+  line-height: 1.4;
+}
+
+.hostPublicUrlRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background-color: #fafaf9;
+}
+
+.hostPublicUrlText {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  color: var(--color-text-secondary);
+}
+
+.hostIconBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  padding: 2px;
+  flex-shrink: 0;
+}
+
+.hostIconBtn:hover {
+  color: var(--color-brand);
+}
+
+.hostToggleLabel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--color-text);
+  cursor: pointer;
+}
+
+.hostErrorText {
+  color: #ef4444;
+  font-size: 12px;
+  margin: 0;
+}
+
+.hostQrRow {
+  display: flex;
+  justify-content: center;
+}
+
+.hostQrImage {
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+}
+
 .adobeFolderRow {
   display: flex;
   align-items: center;

@@ -30,6 +30,7 @@ import { logger } from '../../lib/logger.js';
 import { runPlanner, type SlideSkeletonItem } from '../planner/index.js';
 import { parseRequestedSlideCount } from '../pipeline.js';
 import { extractBracketedJson, stripBracketedJson, mapDeviationsToEdits } from '../../lib/tagExtract.js';
+import { parseDispatchTag, stripDispatchTag } from '../../lib/dispatchTag.js';
 import { brainTools, executeSkill } from './skills.js';
 
 const ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
@@ -104,7 +105,7 @@ function stripQuestionTag(content: string): string {
   return stripBracketedJson(
     stripBracketedJson(
       stripBracketedJson(
-        content.replace(/\[DISPATCH:(presentation|carousel)(?::proof)?\]/gi, ''),
+        stripDispatchTag(content),
         'QUESTION',
       ),
       'EDIT',
@@ -206,6 +207,7 @@ async function planAndAskApproval(
   format: 'presentation' | 'carousel',
   fullBrief: string,
   sourceCopy: string,
+  aspectRatio?: string,
 ): Promise<void> {
   await updateSession(sessionId, { phase: 'ready', workerStatus: 'running' });
   const planning = await getSession(sessionId);
@@ -226,7 +228,7 @@ async function planAndAskApproval(
     await appendMessage(sessionId, { role: 'assistant', content: texto.trim(), timestamp: Date.now() });
 
     await updateSession(sessionId, {
-      pendingPlan: { format, skeleton, sourceCopy, brief: fullBrief },
+      pendingPlan: { format, aspectRatio, skeleton, sourceCopy, brief: fullBrief },
       activeQuestion: {
         id: randomUUID(),
         kind: 'generic',
@@ -249,7 +251,7 @@ async function planAndAskApproval(
     // recebe a copy e replaneja lá dentro, só perde a pausa de aprovação).
     logger.error('Roteiro copy-first falhou; caindo para geração direta', { error: (err as Error).message });
     ws.token(sessionId, '\n\n*Não consegui montar o roteiro prévio agora — vou gerar direto usando a copy como fonte.*\n');
-    enqueuePipeline({ sessionId, brief: fullBrief, format, sourceCopy }).catch((e) => {
+    enqueuePipeline({ sessionId, brief: fullBrief, format, sourceCopy, aspectRatio }).catch((e) => {
       logger.error('Falha ao enfileirar o pipeline (fallback copy-first)', { error: (e as Error).message });
       ws.error(sessionId, `Erro ao iniciar a geração: ${(e as Error).message}`);
     });
@@ -620,6 +622,7 @@ async function handleUserMessageInner(
         sessionId,
         brief: plan.brief,
         format: plan.format,
+        aspectRatio: plan.aspectRatio,
         approvedSkeleton: plan.skeleton,
         sourceCopy: plan.sourceCopy,
       }).catch((err) => {
@@ -646,6 +649,7 @@ async function handleUserMessageInner(
         sessionId,
         brief: proof.brief,
         format: proof.format,
+        aspectRatio: proof.aspectRatio,
         approvedSkeleton: proof.skeleton,
         sourceCopy: proof.sourceCopy,
         postId: proof.postId,
@@ -658,6 +662,47 @@ async function handleUserMessageInner(
     }
     // Se não aprovou, o fluxo morre aqui e o LLM responde (podendo disparar outro DISPATCH).
     await updateSession(sessionId, { pendingStyleProof: null });
+  }
+
+  // ── Bundle de candidatos de imagem ambíguos (reaproveitamento "meio-termo") ──
+  // Resposta é sempre um dos dois botões da activeQuestion (allowFreeform:false),
+  // então compara pelo label exato em vez de um regex livre feito para texto solto.
+  if (session.pendingImageCandidates) {
+    const pending = session.pendingImageCandidates;
+    const msg = userMessage.trim().toLowerCase();
+    const aceitouBiblioteca = msg === 'usar as fotos da biblioteca';
+    const pediuNovas = msg === 'gerar novas fotos';
+
+    if (aceitouBiblioteca || pediuNovas) {
+      await updateSession(sessionId, { pendingImageCandidates: null, activeQuestion: null, phase: 'ready', workerStatus: 'running' });
+      const retomando = await getSession(sessionId);
+      if (retomando) emitSessionState(sessionId, retomando);
+      ws.token(sessionId, aceitouBiblioteca
+        ? '\nCombinado, usando as fotos sugeridas da biblioteca — gerando o restante do design.\n'
+        : '\nSem problema, gerando fotos novas pra esses slides.\n');
+      ws.end(sessionId);
+      enqueuePipeline({
+        sessionId,
+        brief: pending.brief,
+        format: pending.format,
+        aspectRatio: pending.aspectRatio,
+        approvedSkeleton: pending.enrichedSkeleton,
+        sourceCopy: pending.sourceCopy,
+        postId: pending.postId,
+        resumeFromImageApproval: true,
+        imageCandidateDecision: {
+          decision: aceitouBiblioteca ? 'accept' : 'regenerate',
+          candidates: pending.candidates,
+        },
+      }).catch((err) => {
+        logger.error('Falha ao enfileirar o pipeline (bundle de imagens resolvido)', { error: (err as Error).message });
+        ws.error(sessionId, `Erro ao retomar a geração: ${(err as Error).message}`);
+      });
+      return;
+    }
+    // Resposta inesperada (não deveria acontecer com allowFreeform:false, mas por
+    // segurança não deixa a sessão travada num bundle morto).
+    await updateSession(sessionId, { pendingImageCandidates: null });
   }
 
   const latestSession = await getSession(sessionId);
@@ -827,9 +872,10 @@ async function detectAndDispatch(
     semArteParaEditar = true;
   }
 
-  // [DISPATCH:presentation], [DISPATCH:carousel] ou [DISPATCH:presentation:proof]
-  const match = response.match(/\[DISPATCH:(presentation|carousel)(?::proof)?\]/i);
-  if (!match) {
+  // [DISPATCH:presentation], [DISPATCH:carousel], [DISPATCH:presentation:proof]
+  // ou [DISPATCH:carousel:9x16] (proporção pro Design — ver lib/dispatchTag.ts)
+  const dispatch = parseDispatchTag(response);
+  if (!dispatch) {
     // A IA pediu para EDITAR, não há arte, e ela não pediu geração. Sem isto, o pedido
     // morreria calado — o mesmo silêncio que este bloco inteiro existe para matar.
     // Não geramos por conta própria: criar uma peça do zero é uma decisão da pessoa.
@@ -845,8 +891,7 @@ async function detectAndDispatch(
     return;
   }
 
-  const format = match[1] as 'presentation' | 'carousel';
-  const isProof = /:proof\]/i.test(match[0]);
+  const { format, isProof, aspectRatio } = dispatch;
 
   // Concatena as intenções do usuário para formar o brief completo (essencial para edições)
   const fullBrief = session.messages
@@ -869,7 +914,7 @@ async function detectAndDispatch(
   // roda depois do "aprovar". Sem copy, o fluxo direto continua o mesmo.
   const sourceCopy = extractSourceCopy(session.messages);
   if (sourceCopy) {
-    await planAndAskApproval(sessionId, session, format, fullBrief, sourceCopy);
+    await planAndAskApproval(sessionId, session, format, fullBrief, sourceCopy, aspectRatio);
     return;
   }
 
@@ -880,7 +925,7 @@ async function detectAndDispatch(
   // Enfileira a geração (durável, com retry) — não bloqueia o stream. O erro
   // aqui é só de enfileiramento (ex.: Redis fora); falhas da geração em si são
   // tratadas no worker (queue.ts) e notificadas via ws.
-  enqueuePipeline({ sessionId, brief: fullBrief, format, generateStyleProofOnly: isProof, attachmentImages }).catch(err => {
+  enqueuePipeline({ sessionId, brief: fullBrief, format, generateStyleProofOnly: isProof, attachmentImages, aspectRatio }).catch(err => {
     logger.error('Falha ao enfileirar o pipeline', { error: (err as Error).message });
     ws.error(sessionId, `Erro ao iniciar a geração: ${err instanceof Error ? err.message : String(err)}`);
   });

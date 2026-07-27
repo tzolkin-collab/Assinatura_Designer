@@ -19,6 +19,7 @@ import { getCanvaDesignName } from './canvaSync.js';
 import { runDeckExport, type DeckExportParams } from './deckExport.js';
 import { runAssetCapture, type AssetCaptureParams } from './assetCapture.js';
 import { analyzeReferenceBackground } from './referenceSync.js';
+import { runAutoResearchCycle } from './benchmarkOrchestrator.js';
 import { logger } from './logger.js';
 
 const QUEUE_NAME = 'pipeline';
@@ -313,7 +314,11 @@ export function startPipelineWorker(): Worker<PipelineParams> {
 
 const REF_SYNC_QUEUE_NAME = 'reference-sync';
 
-export const referenceSyncQueue = new Queue<{ refId: string; slug: string; name: string; analysisUrl: string; sourceType: 'WEBSITE' | 'INSTAGRAM' }>(REF_SYNC_QUEUE_NAME, {
+type ReferenceSyncJobData =
+  | { refId: string; slug: string; name: string; analysisUrl: string; sourceType: 'WEBSITE' | 'INSTAGRAM' }
+  | { brandId: string; slug: string };
+
+export const referenceSyncQueue = new Queue<ReferenceSyncJobData>(REF_SYNC_QUEUE_NAME, {
   connection: makeConnection(),
   defaultJobOptions: {
     attempts: 2,
@@ -331,26 +336,27 @@ export function startReferenceSyncWorker(): Worker {
     REF_SYNC_QUEUE_NAME,
     async (job) => {
       if (job.name === 'sync-cron') {
-        const dueRefs = await prisma.reference.findMany({
-          where: { autoSyncEnabled: true },
-          include: { brand: true }
+        // "Pesquisa automática" é por marca (BrandConfig.autoResearchEnabled),
+        // não mais por referência — substitui o antigo scan de
+        // Reference.autoSyncEnabled (mantido no schema, sem leitor a partir
+        // daqui). Ver benchmarkOrchestrator.ts para o motivo da troca.
+        const dueBrands = await prisma.brandConfig.findMany({
+          where: { autoResearchEnabled: true },
+          include: { brand: true },
         });
         const now = Date.now();
-        for (const ref of dueRefs) {
-          const lastSynced = ref.lastSyncedAt ? ref.lastSyncedAt.getTime() : ref.createdAt.getTime();
-          const daysSinceSync = (now - lastSynced) / (1000 * 60 * 60 * 24);
-          if (daysSinceSync >= ref.autoSyncInterval) {
-            await referenceSyncQueue.add('sync-single', {
-              refId: ref.id,
-              slug: ref.brand.slug,
-              name: ref.name,
-              analysisUrl: ref.analysisUrl ?? '',
-              sourceType: ref.sourceType
-            });
+        for (const cfg of dueBrands) {
+          const daysSince = (now - (cfg.lastAutoResearchAt?.getTime() ?? 0)) / (1000 * 60 * 60 * 24);
+          if (daysSince >= cfg.autoResearchInterval) {
+            await referenceSyncQueue.add('benchmark-refresh', { brandId: cfg.brandId, slug: cfg.brand.slug });
           }
         }
+      } else if (job.name === 'benchmark-refresh') {
+        const data = job.data as { brandId: string; slug: string };
+        await runAutoResearchCycle(data.brandId, data.slug);
       } else if (job.name === 'sync-single') {
-        await analyzeReferenceBackground(job.data.refId, job.data.slug, job.data.name, job.data.analysisUrl, job.data.sourceType);
+        const data = job.data as { refId: string; slug: string; name: string; analysisUrl: string; sourceType: 'WEBSITE' | 'INSTAGRAM' };
+        await analyzeReferenceBackground(data.refId, data.slug, data.name, data.analysisUrl, data.sourceType);
       }
     },
     { connection: makeConnection(), concurrency: 1 }

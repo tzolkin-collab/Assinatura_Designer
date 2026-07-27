@@ -149,7 +149,10 @@ export default function HtmlSlideRenderer({
     const obs = new ResizeObserver(([entry]) => {
       const { width: cw, height: ch } = entry.contentRect;
       if (cw <= 0 || ch <= 0) return;
-      setScale(mode === 'cover' ? Math.max(cw / width, ch / height) : cw / width);
+      // 'contain' precisa caber nas DUAS dimensões do container (senão um slide
+      // quadrado/retrato num container baixo e largo transborda por baixo, cobrindo
+      // a navegação que fica ao lado — só width/width ignorava a altura disponível).
+      setScale(mode === 'cover' ? Math.max(cw / width, ch / height) : Math.min(cw / width, ch / height));
     });
     obs.observe(el);
     return () => obs.disconnect();
@@ -177,22 +180,25 @@ export default function HtmlSlideRenderer({
     width,
     height,
     border: 0,
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    marginTop: -height / 2,
+    marginLeft: -width / 2,
     transform: `scale(${scale})`,
-    transformOrigin: mode === 'cover' ? 'center center' : 'top left',
-    ...(mode === 'cover'
-      ? { position: 'absolute', top: '50%', left: '50%', marginTop: -height / 2, marginLeft: -width / 2 }
-      : {}),
+    transformOrigin: 'center center',
   };
 
   return (
-    <div className={className} style={{ position: 'relative', width: '100%', height: mode === 'cover' ? '100%' : undefined }}>
+    // absolute+inset preenche a partir da caixa do ancestral posicionado mais próximo —
+    // width/height:100% quebrava dentro de um item flex (.slideWrap na Fábrica) cujo
+    // tamanho vem de flex-grow, não de uma altura "definida" pra fins de resolução de %.
+    <div className={className} style={{ position: 'absolute', inset: 0 }}>
       <div
         ref={outerRef}
         style={{
-          position: 'relative',
-          width: '100%',
-          height: mode === 'cover' ? '100%' : undefined,
-          aspectRatio: mode === 'contain' ? `${width} / ${height}` : undefined,
+          position: 'absolute',
+          inset: 0,
           overflow: 'hidden',
         }}
       >

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 import { prismaMock } from './client';
-import { getValidAccessToken, CanvaSessionExpiredError, canvaFetch, exchangeCodeForTokens, refreshAccessToken } from '../lib/canvaClient';
+import { getValidAccessToken, CanvaSessionExpiredError, canvaFetch, exchangeCodeForTokens, refreshAccessToken, uploadAsset } from '../lib/canvaClient';
 import { encryptToken } from '../lib/tokenCrypto';
 
 vi.mock('../config.js', async (importOriginal) => {
@@ -150,6 +150,40 @@ describe('canvaClient', () => {
             'Content-Type': 'application/x-www-form-urlencoded',
             Authorization: expect.stringMatching(/^Basic /),
           }),
+        }),
+      );
+    });
+  });
+
+  describe('uploadAsset', () => {
+    it('manda application/octet-stream com bytes crus e o nome no header Asset-Upload-Metadata', async () => {
+      // Regressão: a versão anterior montava multipart/form-data na mão, que a Canva
+      // rejeitava com 415 — o endpoint só aceita o arquivo cru + esse header.
+      prismaMock.user.findUnique.mockResolvedValue({
+        id: 'u1',
+        canvaAccessToken: encryptToken('access-vigente'),
+        canvaRefreshToken: encryptToken('refresh-vigente'),
+        canvaTokenExpiry: new Date(Date.now() + 3600_000),
+      } as any);
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ job: { id: 'job-1', status: 'in_progress' } }),
+      });
+
+      const buffer = Buffer.from('conteudo-fake-do-arquivo');
+      await uploadAsset('u1', buffer, 'foto.png', 'image/png');
+
+      expect(mockFetch).toHaveBeenCalledWith(
+        'https://api.canva.com/rest/v1/asset-uploads',
+        expect.objectContaining({
+          method: 'POST',
+          headers: expect.objectContaining({
+            'Content-Type': 'application/octet-stream',
+            'Asset-Upload-Metadata': JSON.stringify({ name_base64: Buffer.from('foto.png').toString('base64') }),
+          }),
+          body: new Uint8Array(buffer),
         }),
       );
     });

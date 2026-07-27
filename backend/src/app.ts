@@ -8,6 +8,7 @@ import { requireAuth } from './middleware/auth.js';
 import { healthRouter } from './routes/health.js';
 import { brandsRouter } from './routes/brands.js';
 import { settingsRouter } from './routes/settings.js';
+import { benchmarkRouter } from './routes/benchmark.js';
 import { authRouter } from './routes/auth.js';
 import { aiRouter } from './routes/ai.js';
 import { postsRouter } from './routes/posts.js';
@@ -21,6 +22,7 @@ import { teamRouter } from './routes/team.js';
 import { assetsRouter } from './routes/assets.js';
 import { notificationsRouter } from './routes/notifications.js';
 import { memoryRoutes } from './routes/memory.js';
+import { publicPresentationsRouter } from './routes/publicPresentations.js';
 
 const app = express();
 
@@ -55,6 +57,7 @@ app.use('/api/health', healthRouter);
 app.use('/api/auth', authRouter);
 app.use('/api/brands', requireAuth, brandsRouter);
 app.use('/api/settings', requireAuth, settingsRouter);
+app.use('/api/settings', requireAuth, benchmarkRouter);
 app.use('/api/ai', requireAuth, aiRouter);
 app.use('/api/posts', requireAuth, postsRouter);
 app.use('/api/folders', requireAuth, foldersRouter);
@@ -68,6 +71,9 @@ app.use('/api/brands/:brandId/members', requireAuth, teamRouter);
 app.use('/api/brands/:brandId/assets', requireAuth, assetsRouter);
 app.use('/api/brands/:brandSlug/memory', requireAuth, memoryRoutes);
 app.use('/api/notifications', requireAuth, notificationsRouter);
+// Apresentação hospedada (Fase 5): página pública, sem sessão nossa — quem acessa
+// é o visitante do link, não um usuário logado.
+app.use('/api/public/presentations', publicPresentationsRouter);
 
 // ── Canva Routes ──
 // O callback é público (redirect de browser vindo do Canva, sem header nosso) e

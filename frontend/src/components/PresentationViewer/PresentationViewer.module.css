@@ -1,0 +1,385 @@
+.root {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: #0b0b0c;
+  color: #f5f5f5;
+  outline: none;
+}
+
+.stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+/* Fica por cima do iframe do slide — intercepta o clique pra ele nunca chegar no
+   iframe (senão o foco do teclado migra pra dentro dele, e as setas param de
+   navegar). Transparente, ocupa a mesma área. */
+.clickCatcher {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  cursor: default;
+}
+
+/* Faixa invisível na borda esquerda — só existe pra detectar "mouse chegou
+   perto", numa área bem maior que o menu escondido em si (senão ninguém acha
+   o menu). Cobre a altura toda do stage, não só onde o menu descansa. */
+.cornerMenuZone {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 72px;
+  z-index: 2;
+  display: flex;
+  align-items: flex-end;
+  padding: 16px;
+}
+
+/* Menu discreto no canto — some FORA da tela por padrão (igual à Sidebar do
+   app, que também some/expande com o cursor) e só desliza pra dentro quando o
+   mouse chega perto da borda esquerda. Numa apresentação ao vivo a tela do
+   apresentador costuma ser espelhada pro projetor — um menu sempre visível
+   pareceria "chrome de app" o tempo todo pra plateia. */
+.cornerMenu {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 16px;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transform: translateX(-140%);
+  transition: transform 0.25s ease;
+}
+
+.cornerMenuVisible {
+  transform: translateX(0);
+}
+
+.cornerBtn {
+  position: relative;
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: transparent;
+  color: rgba(255, 255, 255, 0.85);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.cornerBtn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+
+.cornerItemWrap {
+  position: relative;
+}
+
+.chatBadge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  border-radius: 999px;
+  background: #ef4444;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
+
+/* Popover ancorado nos botões do menu do canto — abre pra DIREITA (o menu vive
+   na quina esquerda), diferente da barra antiga onde os popovers subiam. */
+.sidePopover {
+  position: absolute;
+  left: calc(100% + 12px);
+  bottom: 0;
+  width: 260px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 14px;
+  background: #18181a;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+
+.sidePopoverTitle {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.85);
+  align-self: flex-start;
+}
+
+.shareUrlRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.shareUrlText {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.shareCopyBtn {
+  border: 0;
+  background: transparent;
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.shareQrImage {
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.shareExpandBtn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px;
+}
+
+.shareExpandBtn:hover {
+  color: #fff;
+}
+
+/* ── Chat de perguntas da plateia ──────────────────────────────────────────── */
+
+.chatToggleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.chatSwitch {
+  position: relative;
+  width: 34px;
+  height: 20px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s ease;
+}
+
+.chatSwitch:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.chatSwitchOn {
+  background: #d97757;
+  border-color: #d97757;
+}
+
+.chatSwitchKnob {
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: #fff;
+  transition: transform 0.15s ease;
+}
+
+.chatSwitchOn .chatSwitchKnob {
+  transform: translateX(14px);
+}
+
+.chatHint {
+  align-self: flex-start;
+  margin: -4px 0 0;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.chatMessages {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.chatEmpty {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.4);
+  text-align: center;
+  padding: 8px 0;
+}
+
+.chatMessage {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 12.5px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.chatForm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.chatTextarea {
+  width: 100%;
+  resize: none;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.04);
+  color: #fff;
+  font-size: 12.5px;
+  font-family: inherit;
+}
+
+.chatTextarea::placeholder {
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.chatError {
+  margin: 0;
+  font-size: 11.5px;
+  color: #f87171;
+}
+
+.chatSentHint {
+  margin: 0;
+  font-size: 11.5px;
+  color: #4ade80;
+}
+
+.chatSendBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  align-self: flex-end;
+  border: 0;
+  border-radius: 8px;
+  padding: 6px 14px;
+  background: #d97757;
+  color: #fff;
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.chatSendBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.qrFullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  background: rgba(0, 0, 0, 0.92);
+  cursor: pointer;
+}
+
+.qrFullscreenClose {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.qrFullscreenClose:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.qrFullscreenImage {
+  width: min(70vh, 70vw, 520px);
+  height: min(70vh, 70vw, 520px);
+  border-radius: 16px;
+  border: 8px solid #fff;
+  cursor: default;
+}
+
+.qrFullscreenUrl {
+  font-size: 15px;
+  color: rgba(255, 255, 255, 0.75);
+  cursor: default;
+}
+
+.footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 16px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+  flex-shrink: 0;
+}
+
+.brand {
+  font-weight: 500;
+}
+
+.empty {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: #0b0b0c;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 14px;
+}

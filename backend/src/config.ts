@@ -157,6 +157,21 @@ export const config = {
   asanaClientId: process.env.ASANA_CLIENT_ID || '',
   asanaClientSecret: process.env.ASANA_CLIENT_SECRET || '',
   asanaRedirectUri: process.env.ASANA_REDIRECT_URI || 'http://localhost:4000/api/asana/callback',
+  // ── Unsplash (fallback de foto real) ──
+  // A geração por IA continua sendo o caminho principal; Unsplash entra só quando (a)
+  // o gasto de IA da marca já está alto (ver AI_PHOTO_FALLBACK_USAGE_RATIO) ou (b) a
+  // autoverificação de coerência reprova a foto gerada (ver imageResolver.ts). Sem
+  // chave configurada, o fallback fica OFF (mesmo comportamento de antes: skip).
+  unsplashAccessKey: process.env.UNSPLASH_ACCESS_KEY || '',
+  // Fração do teto diário de tokens da MARCA (0-1) a partir da qual preferimos
+  // Unsplash a gerar mais uma foto por IA. 0 = nunca usa esse gatilho (só a
+  // autoverificação de qualidade decide).
+  aiPhotoFallbackUsageRatio: parseFloat(process.env.AI_PHOTO_FALLBACK_USAGE_RATIO || '0.8'),
+  // ── Apify (benchmarking do Instagram) ──
+  // Instagram bloqueia screenshot headless (Microlink etc.) — sem isto, a análise
+  // de referência do Instagram nunca via a imagem de verdade, só um fallback fraco
+  // de Google Search grounding. Free tier da Apify: $5/mês, sem cartão.
+  apifyApiToken: process.env.APIFY_API_TOKEN || '',
 } as const;
 
 // ── Fail-fast de configuração ────────────────────────────────────────────────

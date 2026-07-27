@@ -4,6 +4,7 @@ import { GoogleGenAI, Type, Schema } from '@google/genai';
 import bcrypt from 'bcrypt';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import crypto from 'crypto';
+import multer from 'multer';
 import { generateWithRetry } from '../lib/geminiRetry.js';
 import { config } from '../config.js';
 import type { Prisma, BrandRole } from '@prisma/client';
@@ -15,9 +16,11 @@ import { config as appConfig } from '../config.js';
 import { AuthRequest } from '../middleware/auth.js';
 import { z } from 'zod';
 import { isPublicHttpUrl, isPublicHttpUrlResolved } from '../lib/validate.js';
-import { analyzeReferenceBackground } from '../lib/referenceSync.js';
+import { analyzeReferenceBackground, analyzeReferenceWithUploadedImage } from '../lib/referenceSync.js';
 
 export const settingsRouter = Router();
+
+const uploadReferenceImage = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 const referenciaSchema = z.object({
   name: z.string({ required_error: 'Reference name is required' }).trim().min(1, 'Reference name is required'),
@@ -67,7 +70,7 @@ settingsRouter.get('/:slug/config', async (req: AuthRequest, res: Response, next
 settingsRouter.put('/:slug/config', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const brandId = await getBrandId(req.params.slug as string, req.user?.userId);
-    const { agentPrompt, primaryFonts, colors, guidelines, logoUrl, presentationConfig } = req.body;
+    const { agentPrompt, primaryFonts, colors, guidelines, logoUrl, presentationConfig, autoResearchEnabled, autoResearchInterval } = req.body;
 
     const normalizedPresentationConfig =
       presentationConfig === undefined
@@ -76,7 +79,10 @@ settingsRouter.put('/:slug/config', async (req: AuthRequest, res: Response, next
 
     const config = await prisma.brandConfig.upsert({
       where: { brandId },
-      update: { agentPrompt, primaryFonts, colors, guidelines, logoUrl, presentationConfig: normalizedPresentationConfig },
+      update: {
+        agentPrompt, primaryFonts, colors, guidelines, logoUrl, presentationConfig: normalizedPresentationConfig,
+        autoResearchEnabled, autoResearchInterval,
+      },
       create: {
         brandId,
         agentPrompt: agentPrompt || '',
@@ -85,6 +91,8 @@ settingsRouter.put('/:slug/config', async (req: AuthRequest, res: Response, next
         guidelines: guidelines || '',
         logoUrl,
         presentationConfig: normalizedPresentationConfig,
+        autoResearchEnabled: !!autoResearchEnabled,
+        autoResearchInterval: autoResearchInterval ? Number(autoResearchInterval) : 14,
       },
     });
 
@@ -198,6 +206,42 @@ settingsRouter.post('/:slug/referencias/:id/sync', async (req: AuthRequest, res:
     next(error);
   }
 });
+
+// POST /api/settings/:slug/referencias/:id/upload-imagem — upload manual de um
+// print de verdade (Instagram bloqueia captura automática; isto contorna sem
+// depender de nenhum scraper de terceiro, funciona sempre).
+settingsRouter.post(
+  '/:slug/referencias/:id/upload-imagem',
+  uploadReferenceImage.single('file'),
+  async (req: AuthRequest, res: Response, next: NextFunction) => {
+    try {
+      const slug = req.params.slug as string;
+      const brandId = await getBrandId(slug, req.user?.userId);
+      const id = req.params.id as string;
+      const file = req.file;
+      if (!file) throw createError(400, 'Nenhuma imagem enviada.');
+      if (!file.mimetype.startsWith('image/')) throw createError(400, 'O arquivo precisa ser uma imagem.');
+
+      const ref = await prisma.reference.findFirst({ where: { id, brandId } });
+      if (!ref) throw createError(404, 'Reference not found');
+      if (!ref.analysisUrl) throw createError(400, 'Referência sem URL de análise configurada');
+
+      const updated = await prisma.reference.update({
+        where: { id },
+        data: { status: 'PENDING' },
+      });
+
+      res.json({ data: updated, message: 'Análise com imagem enviada iniciada' });
+
+      analyzeReferenceWithUploadedImage(
+        ref.id, slug, ref.name, ref.analysisUrl, ref.sourceType,
+        file.buffer.toString('base64'), file.mimetype,
+      ).catch(console.error);
+    } catch (error) {
+      next(error);
+    }
+  },
+);
 
 
 

@@ -229,7 +229,18 @@ export function learnedPreferencesBlock(prefs: Record<string, unknown> | undefin
 // emitir HTML/CSS livre (seu modo nativo) em vez do schema JSON rígido do IR.
 
 const MAX_BATCH_RETRIES = 3;
-const BATCH_SIZE = 3;
+
+// Designs/carrosséis são decks pequenos (4-6 slides pela heurística do planner):
+// lote de 1 dá o efeito de preview "sendo construído aos poucos" de verdade (cada
+// slide chega ao vivo assim que sai do modelo, em vez de 3 de uma vez quase
+// simultâneos) e dá a cada slide atenção dedicada da IA. Apresentação mantém lote
+// de 3 — decks grandes (podem chegar a centenas de slides) não podem pagar o custo
+// de uma chamada por slide. O style bible (fonts/reasoning) vem de METADADO
+// devolvido junto no lote 1, não de "olhar N exemplos" — reduzir o lote não
+// compromete a coesão visual entre slides.
+function resolveBatchSize(format: GenerateHtmlDesignInput['format']): number {
+  return format === 'carousel' ? 1 : 3;
+}
 
 // A "base" imutável que NÃO pode derivar entre os lotes: paleta/fontes da marca
 // + direção de arte que o modelo define no lote 1. Injetada verbatim em TODO
@@ -252,8 +263,8 @@ function renderStyleBible(bible: StyleBible): string {
   ].filter(Boolean).join('\n');
 }
 
-function buildBatchSystemInstruction(input: GenerateHtmlDesignInput, startIndex: number, total: number, bible: StyleBible): string {
-  const endIndex = Math.min(startIndex + BATCH_SIZE, total);
+function buildBatchSystemInstruction(input: GenerateHtmlDesignInput, startIndex: number, total: number, bible: StyleBible, batchSize: number): string {
+  const endIndex = Math.min(startIndex + batchSize, total);
 
   let skeletonInstruction = '\nVocê deve gerar os seguintes slides baseados nesta estrutura planejada:\n';
   for (let i = startIndex; i < endIndex; i++) {
@@ -291,6 +302,7 @@ QUALIDADE (nível "designer humano postaria sem retrabalho"):
 - Copy REAL em português (nunca "Texto", "Lorem", placeholders).
 - Visual: prefira gradientes CSS, formas geométricas e tipografia forte. Para fotos/logo, <img> com URLs https REAIS. Sem texto embutido em imagem.
 - Marque editáveis com data-editable="true" e data-role="headline|subtitle|body|cta|image".
+- NUNCA invente dado factual da empresa que não foi fornecido acima (telefone, e-mail, endereço, site, CNPJ, nome de produto específico, texto institucional de rodapé). Use SOMENTE o nome da marca, o logo e o que estiver em Diretrizes/Instruções do agente/Referências. Se o layout pedir uma info de contato que não veio nesses campos, prefira um CTA genérico ("Fale conosco", "Saiba mais", "Acesse o link na bio") a inventar um número ou endereço que pareça real.
 
 COESÃO: mantenha a MESMA direção de arte dos slides anteriores, mas VARIE o layout.
 
@@ -304,9 +316,10 @@ function buildBatchUserPrompt(
   total: number,
   bible: StyleBible,
   referenceSlides: HtmlDesignSlide[],
+  batchSize: number,
 ): string {
   const b = input.brand;
-  const endIndex = Math.min(startIndex + BATCH_SIZE, total);
+  const endIndex = Math.min(startIndex + batchSize, total);
 
   let skeletonPrompt = '\nSLIDES PLANEJADOS NESTE LOTE:\n';
   let hasCopy = false;
@@ -394,6 +407,7 @@ export async function generateHtmlDesignBatched(
 ): Promise<HtmlDesignContent> {
   const total = Math.max(1, input.slideCount);
   const concurrency = Math.max(1, options?.concurrency ?? 1);
+  const batchSize = resolveBatchSize(input.format);
 
   let fonts: string[] = [];
   let direction = '';
@@ -443,8 +457,8 @@ export async function generateHtmlDesignBatched(
     for (let attempt = 1; attempt <= MAX_BATCH_RETRIES; attempt++) {
       try {
         const raw = await generateText(
-          buildBatchSystemInstruction(input, startIndex, total, bible),
-          buildBatchUserPrompt(input, startIndex, total, bible, referenceSlides),
+          buildBatchSystemInstruction(input, startIndex, total, bible, batchSize),
+          buildBatchUserPrompt(input, startIndex, total, bible, referenceSlides, batchSize),
         );
         const parsed = extractJson(raw); // lança se não houver JSON válido
         const rec = isRecord(parsed) ? parsed : {};
@@ -482,14 +496,14 @@ export async function generateHtmlDesignBatched(
     }
     // Lote veio curto (modelo devolveu menos slides que o pedido): completa com
     // fallback para não deixar buraco no deck.
-    const end = Math.min(startIndex + BATCH_SIZE, total);
+    const end = Math.min(startIndex + batchSize, total);
     for (let idx = startIndex + batchSlides.length; idx < end; idx++) {
       await emitSlide(idx, buildFallbackSlide(idx));
     }
   };
 
   const processFallbackBatch = async (startIndex: number) => {
-    const end = Math.min(startIndex + BATCH_SIZE, total);
+    const end = Math.min(startIndex + batchSize, total);
     for (let idx = startIndex; idx < end; idx++) {
       await emitSlide(idx, buildFallbackSlide(idx));
     }
@@ -512,11 +526,11 @@ export async function generateHtmlDesignBatched(
   }
 
   // Os slides do lote 1 viram referência visual para os lotes paralelos.
-  const referenceSlides = slots.slice(0, BATCH_SIZE).filter(Boolean) as HtmlDesignSlide[];
+  const referenceSlides = slots.slice(0, batchSize).filter(Boolean) as HtmlDesignSlide[];
 
   // ── Lotes restantes: PARALELOS com concorrência limitada. ─────────────────────
   const starts: number[] = [];
-  for (let i = BATCH_SIZE; i < total; i += BATCH_SIZE) starts.push(i);
+  for (let i = batchSize; i < total; i += batchSize) starts.push(i);
 
   await runPool(starts, concurrency, async (startIndex) => {
     try {
@@ -596,7 +610,8 @@ Regras invioláveis:
 - Copy real em português (nunca placeholders).
 - Imagens SOMENTE por URL https real — NUNCA data: URL ou base64 inline.
 - Sem <script>, <iframe>, handlers on*.
-- Não reescreva o slide do zero; edite o que existe.`;
+- Não reescreva o slide do zero; edite o que existe.
+- NUNCA invente dado factual da empresa (telefone, e-mail, endereço, site, CNPJ) que não esteja nas Diretrizes de Marca abaixo — prefira um CTA genérico a um dado inventado que pareça real.`;
 
   const guidelinesBlock = input.brand.guidelines
     ? `\nDiretrizes de Marca (Siga-as rigorosamente): ${input.brand.guidelines}`

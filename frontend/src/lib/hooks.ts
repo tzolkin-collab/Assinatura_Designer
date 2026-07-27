@@ -24,6 +24,9 @@ export type Post = {
   updatedAt?: string;
   brandId?: string;
   createdBy?: { id: string; name: string; email: string } | null;
+  publicSlug?: string | null;
+  publishedAt?: string | null;
+  hostingConfig?: { autoplay?: boolean; showCounter?: boolean } | null;
 };
 
 export type UserConnection = {

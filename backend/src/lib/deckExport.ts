@@ -45,7 +45,9 @@ const MIME_BY_FORMAT: Record<DeckExportFormat, string> = {
 
 const EXT_BY_FORMAT: Record<DeckExportFormat, string> = {
   pdf: 'pdf',
-  zip: 'png',
+  // O conteúdo é um ZIP de verdade (vários slide-NN.png dentro) — extensão .png
+  // fazia o download descer como "<titulo>-png.png", que não abre como imagem.
+  zip: 'zip',
   pptx: 'pptx',
   html: 'zip',
 };

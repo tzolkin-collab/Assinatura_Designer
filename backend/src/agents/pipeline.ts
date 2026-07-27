@@ -11,7 +11,7 @@ import type { ReviewResult } from './reviewer/index.js';
 import { generateHtmlDesignBatched, type HtmlDesignSlide } from '../lib/htmlDesign.js';
 import { syncPostSlides } from '../lib/postHelper.js';
 import { researchBrand, type VisualRef } from '../lib/fabricaLegacy.js';
-import { resolveSlideImages } from '../lib/imageResolver.js';
+import { resolveSlideImages, resolveImageCandidateDecisions, type AmbiguousImageCandidate, type ResolvedSlideImage } from '../lib/imageResolver.js';
 import { buildSlidesHtmlBlob, detectAssetUrlsInHtml, mergeUsedAssetUrls } from '../lib/assetUsage.js';
 import { humanizeGeminiError } from '../lib/geminiRetry.js';
 import { extractJsonObject } from '../lib/jsonHelper.js';
@@ -30,6 +30,23 @@ export function parseRequestedSlideCount(brief: string): number | undefined {
   const n = parseInt(m[1]!, 10);
   if (!Number.isFinite(n) || n < 1) return undefined;
   return Math.min(n, MAX_SLIDES);
+}
+
+// Antes todo Design nascia 1080x1080 fixo — Stories/Reels/Pins pedem retrato e
+// nunca havia como pedir isso. Apresentação continua sempre 16:9 (aspectRatio
+// é ignorado pra ela). Dimensões em múltiplos de 1080 pra manter a resolução
+// consistente com o que o resto do pipeline (raster, export) já espera.
+const CAROUSEL_DIMENSIONS: Record<string, { width: number; height: number }> = {
+  '1:1': { width: 1080, height: 1080 },
+  '4:5': { width: 1080, height: 1350 },
+  '3:4': { width: 1080, height: 1440 },
+  '9:16': { width: 1080, height: 1920 },
+  '16:9': { width: 1920, height: 1080 },
+};
+
+export function resolveCanvasSize(format: 'presentation' | 'carousel', aspectRatio?: string): { width: number; height: number } {
+  if (format === 'presentation') return { width: 1920, height: 1080 };
+  return CAROUSEL_DIMENSIONS[aspectRatio ?? '1:1'] ?? CAROUSEL_DIMENSIONS['1:1']!;
 }
 
 export interface PipelineParams {
@@ -54,6 +71,20 @@ export interface PipelineParams {
   /** Fotos que o usuário anexou no chat desta sessão (já com URL do R2) — o
    *  artista as recebe igual a um asset da marca, podendo embutir de verdade. */
   attachmentImages?: Array<{ url: string; name: string }>;
+  /** Proporção do Design (1:1 default) — "16:9"/"1:1"/"4:5"/"3:4"/"9:16". Ignorado
+   *  para apresentação (sempre 16:9). */
+  aspectRatio?: string;
+  /** Se true, o pipeline retoma de uma pausa de bundle de imagens ambíguas — não
+   *  chama resolveSlideImages de novo (evitaria um novo call de decisão não-
+   *  determinístico), só aplica imageCandidateDecision sobre os candidatos que
+   *  já estavam pendentes. */
+  resumeFromImageApproval?: boolean;
+  /** Decisão do usuário sobre o bundle de candidatos ambíguos (ver
+   *  pendingImageCandidates em lib/redis.ts) — só usado com resumeFromImageApproval. */
+  imageCandidateDecision?: {
+    decision: 'accept' | 'regenerate';
+    candidates: AmbiguousImageCandidate[];
+  };
 }
 
 export async function runPipeline(params: PipelineParams): Promise<void> {
@@ -176,8 +207,7 @@ async function runPipelineInner(
         });
 
     const slideCount = skeleton.length;
-    const width = format === 'presentation' ? 1920 : 1080;
-    const height = 1080;
+    const { width, height } = resolveCanvasSize(format, params.aspectRatio);
 
     await checkCancelled();
     ws.progress(sessionId, 25, 'Inicializando design no banco de dados...');
@@ -228,20 +258,89 @@ async function runPipelineInner(
 
     // ── 1.5. Imagens dos slides que pedem (reaproveita da biblioteca ou gera) ──
     await checkCancelled();
-    const resolvedImages = await resolveSlideImages({
-      brandId: brand.id,
-      brandName: brand.name,
-      brandColors: brand.colors,
-      width,
-      height,
-      skeleton,
-      postId,
-      allowGeneratedGraphics: brand.presentationConfig?.allowGeneratedGraphics,
-      allowSvgLayouts: brand.presentationConfig?.allowSvgLayouts,
-    }).catch((err) => {
-      logger.error('Resolução de imagens dos slides falhou; seguindo sem imagens geradas', { error: (err as Error).message });
-      return new Map<number, { imageUrl?: string; svgMarkup?: string }>();
-    });
+    let resolvedImages: Map<number, ResolvedSlideImage>;
+
+    if (params.resumeFromImageApproval && params.imageCandidateDecision) {
+      // Retomando de uma pausa de bundle: NÃO chama resolveSlideImages de novo —
+      // isso rodaria decideImagePlan (LLM) outra vez e poderia produzir uma
+      // decisão DIFERENTE da que o usuário já viu e aprovou. `skeleton` aqui já é
+      // o approvedSkeleton com as imagens não-ambíguas do primeiro run — só falta
+      // aplicar a escolha do usuário sobre os candidatos que ficaram pendentes.
+      resolvedImages = await resolveImageCandidateDecisions(
+        params.imageCandidateDecision.candidates,
+        params.imageCandidateDecision.decision,
+        { brandName: brand.name, width, height, brandId: brand.id, postId },
+      ).catch((err) => {
+        logger.error('Falha ao aplicar decisão do bundle de imagens; seguindo sem essas imagens', { error: (err as Error).message });
+        return new Map<number, ResolvedSlideImage>();
+      });
+    } else {
+      const { resolved, pendingCandidates } = await resolveSlideImages({
+        brandId: brand.id,
+        brandName: brand.name,
+        brandColors: brand.colors,
+        width,
+        height,
+        skeleton,
+        postId,
+        allowGeneratedGraphics: brand.presentationConfig?.allowGeneratedGraphics,
+        allowSvgLayouts: brand.presentationConfig?.allowSvgLayouts,
+      }).catch((err) => {
+        logger.error('Resolução de imagens dos slides falhou; seguindo sem imagens geradas', { error: (err as Error).message });
+        return { resolved: new Map<number, ResolvedSlideImage>(), pendingCandidates: [] as AmbiguousImageCandidate[] };
+      });
+
+      if (pendingCandidates.length > 0) {
+        // Reaproveitamento "meio-termo" achado na biblioteca — não decide sozinho,
+        // pausa e pede aprovação (mesmo padrão da Amostra de Estilo). O deck fica
+        // em GENERATING; a geração só continua depois da resposta no chat.
+        const enrichedSoFar = skeleton.map((item, index) => ({ ...item, ...resolved.get(index) }));
+        await updateSession(sessionId, {
+          phase: 'listening',
+          workerStatus: 'idle',
+          pendingImageCandidates: {
+            format,
+            aspectRatio: params.aspectRatio,
+            postId,
+            enrichedSkeleton: enrichedSoFar,
+            candidates: pendingCandidates,
+            brief,
+            sourceCopy: params.sourceCopy,
+          },
+          activeQuestion: {
+            id: randomUUID(),
+            kind: 'image-candidates',
+            question: `Achei ${pendingCandidates.length === 1 ? 'uma foto' : `${pendingCandidates.length} fotos`} na biblioteca da marca que talvez sirva${pendingCandidates.length === 1 ? '' : 'm'} — mas não é uma correspondência óbvia. Quer usar ${pendingCandidates.length === 1 ? 'essa' : 'essas'} ou prefere que eu gere uma nova?`,
+            previewImages: pendingCandidates.map((c) => ({ url: c.assetUrl, label: c.assetName })),
+            options: [
+              { id: 'aceitar-biblioteca', label: 'Usar as fotos da biblioteca', description: 'Reaproveita exatamente o que já foi sugerido acima' },
+              { id: 'gerar-do-zero', label: 'Gerar novas fotos', description: 'Ignora essas sugestões e gera uma foto nova pra esses slides' },
+            ],
+            allowFreeform: false,
+            allowSkip: false,
+            mode: session.reviewMode,
+          },
+        });
+        const paused = await getSession(sessionId);
+        if (paused) {
+          // Inclui activeQuestion (o ws.sessionState mais abaixo, no final desta
+          // função, não inclui — mas o handler do frontend lê data.activeQuestion
+          // pra mostrar a pergunta ativa; sem isto o bundle não apareceria ao vivo).
+          ws.sessionState(sessionId, {
+            phase: paused.phase,
+            messages: paused.messages,
+            currentDesign: paused.currentDesign,
+            workerStatus: paused.workerStatus,
+            reviewMode: paused.reviewMode,
+            activeQuestion: paused.activeQuestion,
+          });
+        }
+        return;
+      }
+
+      resolvedImages = resolved;
+    }
+
     const enrichedSkeleton = skeleton.map((item, index) => ({ ...item, ...resolvedImages.get(index) }));
 
     // ── 2. Geração HTML/CSS (modo nativo do modelo) ───────────────────────────
@@ -565,6 +664,7 @@ async function runPipelineInner(
       workerStatus: 'idle',
       pendingStyleProof: {
         format,
+        aspectRatio: params.aspectRatio,
         postId,
         skeleton,
         brief,

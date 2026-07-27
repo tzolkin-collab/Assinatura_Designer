@@ -267,35 +267,18 @@ export async function uploadAsset(
   name: string,
   mimeType: string
 ) {
-  const boundary = `----CanvaUpload${Date.now()}`;
-
-  // Build multipart/form-data manually
-  const metadataPart =
-    `--${boundary}\r\n` +
-    `Content-Disposition: form-data; name="asset_upload"\r\n` +
-    `Content-Type: application/json\r\n\r\n` +
-    `${JSON.stringify({ name_base64: Buffer.from(name).toString('base64') })}\r\n`;
-
-  const filePart =
-    `--${boundary}\r\n` +
-    `Content-Disposition: form-data; name="asset"; filename="${name}"\r\n` +
-    `Content-Type: ${mimeType}\r\n\r\n`;
-
-  const ending = `\r\n--${boundary}--\r\n`;
-
-  const body = Buffer.concat([
-    Buffer.from(metadataPart),
-    Buffer.from(filePart),
-    buffer,
-    Buffer.from(ending),
-  ]);
+  // A API do Canva NÃO aceita multipart/form-data aqui (rejeitava com 415) — o corpo
+  // precisa ser os bytes crus do arquivo, e o nome vai num header à parte.
+  // https://www.canva.dev/docs/connect/api-reference/assets/create-asset-upload-job/
+  const metadata = JSON.stringify({ name_base64: Buffer.from(name).toString('base64') });
 
   const response = await canvaFetch(userId, '/asset-uploads', {
     method: 'POST',
     headers: {
-      'Content-Type': `multipart/form-data; boundary=${boundary}`,
+      'Content-Type': 'application/octet-stream',
+      'Asset-Upload-Metadata': metadata,
     },
-    body,
+    body: new Uint8Array(buffer),
   });
 
   if (!response.ok) {

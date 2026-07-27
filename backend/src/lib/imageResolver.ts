@@ -12,6 +12,9 @@
 import { GoogleGenAI } from '@google/genai';
 import { config } from '../config.js';
 import { generateWithRetry } from './geminiRetry.js';
+import { assertWithinBudget, recordUsage, getUsage } from './aiBudget.js';
+import { getAiContext } from './aiContext.js';
+import { searchUnsplashPhoto } from './unsplash.js';
 import { uploadFileToR2 } from './r2.js';
 import prisma from './prisma.js';
 import { logger } from './logger.js';
@@ -35,7 +38,18 @@ type ImageDecision = {
   action: 'reuse' | 'generate-photo' | 'generate-svg' | 'skip';
   assetUrl?: string;
   generatePrompt?: string;
+  /** Só relevante para "reuse": o quanto o modelo está certo de que o asset serve
+   *  de verdade. "medium" pausa a geração pra pedir aprovação do usuário em vez
+   *  de decidir sozinho — ver AmbiguousImageCandidate/resolveSlideImages. */
+  confidence?: 'high' | 'medium';
 };
+
+export interface AmbiguousImageCandidate {
+  slideIndex: number;
+  hint: string;
+  assetUrl: string;
+  assetName: string;
+}
 
 function inferAspectRatio(width: number, height: number): string {
   const ratio = width / height;
@@ -118,9 +132,10 @@ ${allowSvgLayouts ? '3. "generate-svg": quando o slide precisa de um ícone, ilu
 4. "skip": quando não vale a pena gerar (raro — só se o hint for vago demais pra virar prompt de imagem), ou quando a ação necessária está desligada acima.
 5. Para "reuse", "assetUrl" DEVE ser uma URL exata da lista acima.
 6. Para "generate-photo"/"generate-svg" (só se permitido), "generatePrompt" é uma descrição visual completa e específica (cena, composição, luz, estilo) pronta pra virar prompt de geração — não repita o hint cru.
+7. Para "reuse", inclua também "confidence": "high" quando o asset é claramente exato pro que o slide pede, ou "medium" quando serve mas não é óbvio (ex.: cobre a ideia geral mas não é uma correspondência perfeita). Decisões "medium" são mostradas pro usuário aprovar antes de usar — não deixe de marcar por medo disso.
 
 Retorne APENAS um array JSON:
-[{ "slideIndex": number, "action": ${actionsAllowed}, "assetUrl"?: string, "generatePrompt"?: string }]`;
+[{ "slideIndex": number, "action": ${actionsAllowed}, "assetUrl"?: string, "generatePrompt"?: string, "confidence"?: "high"|"medium" }]`;
 
   const parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [{ text: prompt }];
   existingAssets.forEach((_, i) => {
@@ -150,14 +165,13 @@ Retorne APENAS um array JSON:
   }
 }
 
-// ── Passo 2a: gera uma foto/cena via modelo de imagem, sobe pro R2 ──────────────
-async function generatePhotoAsset(
+// ── Passo 2a: gera uma foto/cena via modelo de imagem (bytes crus, sem upload) ──
+async function generatePhotoBuffer(
   prompt: string,
   brandName: string,
   width: number,
   height: number,
-  brandId: string,
-): Promise<string | null> {
+): Promise<{ buffer: Buffer; mimeType: string } | null> {
   const aspectRatio = inferAspectRatio(width, height);
   const creativePrompt = `Crie uma imagem premium, realista e comercial para usar como elemento visual num design de apresentação/social media.
 
@@ -171,6 +185,20 @@ REGRAS:
 - Estética premium, editorial, comercial, alta resolução, foco visual único.
 - Resultado em proporção ${aspectRatio}.`;
 
+  // Antes esta função chamava ai.models.generateContent direto, por fora do
+  // generateWithRetry — passava batido pelo teto de gasto (assertWithinBudget) E
+  // pelo registro de uso (recordUsage), deixando o gasto de gerar fotos invisível
+  // no billing. Checa o teto UMA vez (é o mesmo teto pros dois modelos de imagem —
+  // não faz sentido tentar o fallback se o teto já estourou) e registra uso a cada
+  // tentativa bem-sucedida, mesmo mantendo o loop de fallback próprio (o de
+  // generateWithRetry é pra modelo de TEXTO, não serve pra imagem).
+  try {
+    await assertWithinBudget();
+  } catch (err) {
+    logger.warn('Geração de foto pulada — teto de IA atingido', { error: (err as Error).message });
+    return null;
+  }
+
   const imageModels = [config.models.image, config.models.imageFallback];
   for (const model of imageModels) {
     try {
@@ -183,17 +211,108 @@ REGRAS:
           imageConfig: { aspectRatio, imageSize: model === config.models.image ? '2K' : '1K' },
         },
       });
+      await recordUsage(model, response.usageMetadata);
       const dataUrl = extractGeneratedImageDataUrl(response);
       if (!dataUrl) continue;
 
-      const [, base64] = dataUrl.split(',');
-      const buffer = Buffer.from(base64 ?? '', 'base64');
-      const url = await uploadFileToR2(buffer, `gerado-${Date.now()}.png`, 'image/png', `brands/${brandId}/generated`);
-      return url;
+      const [mimePart, base64] = dataUrl.split(',');
+      const mimeType = /^data:(.+);base64$/.exec(mimePart ?? '')?.[1] || 'image/png';
+      return { buffer: Buffer.from(base64 ?? '', 'base64'), mimeType };
     } catch (err) {
       logger.warn(`Geração de foto falhou no modelo ${model}`, { error: (err as Error).message });
     }
   }
+  return null;
+}
+
+// Autoverificação de coerência: manda a foto RECÉM-GERADA de volta pro modelo e
+// pergunta se ela corresponde de verdade à cena pedida. Sem isto, uma foto com
+// anatomia quebrada ou composição sem sentido ia parar no slide do mesmo jeito —
+// a única "revisão" era o reviewer de HTML, que nunca olha o CONTEÚDO da imagem,
+// só o layout ao redor dela.
+async function critiquePhotoCoherence(buffer: Buffer, mimeType: string, description: string): Promise<boolean> {
+  try {
+    const response = await generateWithRetry(ai, {
+      model: config.models.fast,
+      contents: [{
+        role: 'user',
+        parts: [
+          {
+            text: `Esta imagem foi gerada por IA pra representar: "${description}".\n\nEla corresponde de verdade a essa cena? Reprove se tiver anatomia/objetos deformados, texto ilegível ou sem sentido embutido na imagem, ou composição visualmente quebrada. Responda SOMENTE com a palavra "aprovado" ou "reprovado".`,
+          },
+          { inlineData: { mimeType, data: buffer.toString('base64') } },
+        ],
+      }],
+      config: { temperature: 0 },
+    }, config.models.fast);
+
+    return /aprovado/i.test((response.text ?? '').trim());
+  } catch (err) {
+    // Falha na autoverificação (modelo fora do ar, etc.) não deve travar a geração
+    // por uma checagem extra — aceita a imagem por padrão.
+    logger.warn('Autoverificação de coerência da foto falhou; aceitando a imagem por padrão', { error: (err as Error).message });
+    return true;
+  }
+}
+
+// Fração do teto diário de tokens da marca já consumida — usado pra decidir se
+// vale mais buscar uma foto real (Unsplash) do que gerar mais uma por IA.
+async function shouldPreferUnsplashForCost(): Promise<boolean> {
+  if (config.aiPhotoFallbackUsageRatio <= 0) return false;
+  try {
+    const { brandSlug } = getAiContext();
+    if (!brandSlug) return false;
+    const usage = await getUsage(brandSlug);
+    if (!usage.brandBudget || usage.brandBudget <= 0) return false;
+    return (usage.brandTokens ?? 0) / usage.brandBudget >= config.aiPhotoFallbackUsageRatio;
+  } catch (err) {
+    logger.warn('Falha ao checar gasto de IA pra decidir fallback de foto', { error: (err as Error).message });
+    return false;
+  }
+}
+
+export interface ResolvedPhoto {
+  url: string;
+  source: 'ai-generated' | 'unsplash';
+  credit?: string;
+}
+
+/**
+ * Resolve UMA foto pro slide: IA continua sendo o caminho PRINCIPAL. Unsplash
+ * entra como fallback em dois casos — (a) o gasto de IA da marca já está alto
+ * (`shouldPreferUnsplashForCost`, tentado ANTES de gerar mais uma) ou (b) a foto
+ * gerada foi reprovada na autoverificação de coerência (tentado DEPOIS, como
+ * segunda chance antes de desistir). Nunca lança.
+ */
+async function resolvePhoto(
+  prompt: string,
+  brandName: string,
+  width: number,
+  height: number,
+  brandId: string,
+): Promise<ResolvedPhoto | null> {
+  if (await shouldPreferUnsplashForCost()) {
+    const fromUnsplash = await searchUnsplashPhoto(prompt, width, height, brandId);
+    if (fromUnsplash) {
+      logger.info('Gasto de IA elevado — usando foto do Unsplash em vez de gerar', { brandId });
+      return { url: fromUnsplash.url, source: 'unsplash', credit: fromUnsplash.photographerName };
+    }
+    // Unsplash não achou nada bom pro termo — não desiste, tenta gerar mesmo assim.
+  }
+
+  const generated = await generatePhotoBuffer(prompt, brandName, width, height);
+  if (generated) {
+    const aprovada = await critiquePhotoCoherence(generated.buffer, generated.mimeType, prompt);
+    if (aprovada) {
+      const url = await uploadFileToR2(generated.buffer, `gerado-${Date.now()}.png`, generated.mimeType, `brands/${brandId}/generated`);
+      return { url, source: 'ai-generated' };
+    }
+    logger.info('Foto gerada reprovada na autoverificação de coerência — tentando Unsplash antes de desistir', { prompt: prompt.slice(0, 80) });
+  }
+
+  const fallback = await searchUnsplashPhoto(prompt, width, height, brandId);
+  if (fallback) return { url: fallback.url, source: 'unsplash', credit: fallback.photographerName };
+
   return null;
 }
 
@@ -240,20 +359,31 @@ export interface ResolveSlideImagesParams {
   allowSvgLayouts?: boolean;
 }
 
+export interface ResolveSlideImagesResult {
+  /** index→resultado (imageUrl OU svgMarkup), pronto pra mesclar no skeleton. */
+  resolved: Map<number, ResolvedSlideImage>;
+  /** Reuso "medium" (serve mas não é óbvio) — a pipeline PAUSA e pede aprovação
+   *  do usuário em vez de decidir sozinha. Vazio na maioria das gerações. */
+  pendingCandidates: AmbiguousImageCandidate[];
+}
+
 /**
- * Resolve a imagem de cada slide com `imageHint`. Retorna um mapa index→resultado
- * (imageUrl OU svgMarkup) pronto pra ser mesclado no skeleton antes de chamar o
- * artista. Nunca lança — falha parcial ou total só significa "menos slides com
+ * Resolve a imagem de cada slide com `imageHint`. Retorna os já resolvidos
+ * (imageUrl OU svgMarkup) prontos pra mesclar no skeleton, MAIS candidatos de
+ * reuso ambíguos que precisam de aprovação humana antes de virar definitivos —
+ * ver `resolveImageCandidateDecisions` pra aplicar a decisão do usuário sobre
+ * eles. Nunca lança — falha parcial ou total só significa "menos slides com
  * imagem resolvida", nunca derruba a geração do deck.
  */
-export async function resolveSlideImages(params: ResolveSlideImagesParams): Promise<Map<number, ResolvedSlideImage>> {
+export async function resolveSlideImages(params: ResolveSlideImagesParams): Promise<ResolveSlideImagesResult> {
   const results = new Map<number, ResolvedSlideImage>();
+  const pendingCandidates: AmbiguousImageCandidate[] = [];
 
   const slidesNeedingImage = params.skeleton
     .map((item, index) => ({ index, title: item.title, hint: item.imageHint }))
     .filter((s): s is { index: number; title: string; hint: string } => typeof s.hint === 'string' && s.hint.trim().length > 0);
 
-  if (slidesNeedingImage.length === 0) return results;
+  if (slidesNeedingImage.length === 0) return { resolved: results, pendingCandidates };
 
   // Teto de 8 (era 24): agora cada candidato é BAIXADO e mandado como imagem de
   // verdade na decisão (ver decideImagePlan) — 24 imagens num call estouraria
@@ -277,7 +407,21 @@ export async function resolveSlideImages(params: ResolveSlideImagesParams): Prom
     if (decision.action === 'reuse' && decision.assetUrl) {
       // Só aceita reuse de um asset que realmente estava na lista oferecida —
       // o modelo às vezes inventa URL parecida.
-      if (existingAssets.some((a) => a.url === decision.assetUrl)) {
+      const asset = existingAssets.find((a) => a.url === decision.assetUrl);
+      if (!asset) continue;
+
+      if (decision.confidence === 'medium') {
+        // Serve mas não é óbvio — não decide sozinho, pausa pra aprovação (ver
+        // pipeline.ts: pendingImageCandidates). O slide fica SEM imagem por ora;
+        // resolveImageCandidateDecisions resolve depois da resposta do usuário.
+        const item = params.skeleton.find((_, i) => i === decision.slideIndex);
+        pendingCandidates.push({
+          slideIndex: decision.slideIndex,
+          hint: item?.imageHint ?? '',
+          assetUrl: asset.url,
+          assetName: asset.name,
+        });
+      } else {
         results.set(decision.slideIndex, { imageUrl: decision.assetUrl });
       }
       continue;
@@ -298,21 +442,24 @@ export async function resolveSlideImages(params: ResolveSlideImagesParams): Prom
     }
 
     if (decision.action === 'generate-photo') {
-      const url = await generatePhotoAsset(decision.generatePrompt, params.brandName, params.width, params.height, params.brandId);
-      if (url) {
+      const photo = await resolvePhoto(decision.generatePrompt, params.brandName, params.width, params.height, params.brandId);
+      if (photo) {
         generatedCount++;
-        results.set(decision.slideIndex, { imageUrl: url });
+        results.set(decision.slideIndex, { imageUrl: photo.url });
+        const name = photo.source === 'unsplash'
+          ? `Unsplash — foto de ${photo.credit ?? 'autor desconhecido'}`
+          : `IA — ${decision.generatePrompt.slice(0, 60)}`;
         await prisma.asset.create({
           data: {
             brandId: params.brandId,
             uploadedBy: params.createdById,
             postId: params.postId,
-            name: `IA — ${decision.generatePrompt.slice(0, 60)}`,
-            url,
-            fileType: 'image/png',
+            name,
+            url: photo.url,
+            fileType: photo.source === 'unsplash' ? 'image/jpeg' : 'image/png',
             sizeBytes: 0,
-            source: 'ai-generated',
-            tags: ['ai-generated'],
+            source: photo.source,
+            tags: [photo.source],
           },
         }).catch((err) => logger.error('Falha ao salvar imagem gerada na biblioteca', { error: (err as Error).message }));
       }
@@ -325,6 +472,49 @@ export async function resolveSlideImages(params: ResolveSlideImagesParams): Prom
         // Asset da biblioteca; reaproveitamento de SVG é por prompt, não por URL.
       }
     }
+  }
+
+  return { resolved: results, pendingCandidates };
+}
+
+/**
+ * Aplica a decisão do usuário sobre o bundle de candidatos ambíguos (aprovado no
+ * chat, ver pipeline.ts `pendingImageCandidates`): "accept" usa o asset da
+ * biblioteca que já estava sugerido; "regenerate" gera uma foto nova pra esses
+ * slides em vez de reaproveitar. Nunca lança.
+ */
+export async function resolveImageCandidateDecisions(
+  candidates: AmbiguousImageCandidate[],
+  decision: 'accept' | 'regenerate',
+  params: Pick<ResolveSlideImagesParams, 'brandName' | 'width' | 'height' | 'brandId' | 'createdById' | 'postId'>,
+): Promise<Map<number, ResolvedSlideImage>> {
+  const results = new Map<number, ResolvedSlideImage>();
+
+  if (decision === 'accept') {
+    for (const c of candidates) results.set(c.slideIndex, { imageUrl: c.assetUrl });
+    return results;
+  }
+
+  for (const c of candidates) {
+    const photo = await resolvePhoto(c.hint, params.brandName, params.width, params.height, params.brandId);
+    if (!photo) continue;
+    results.set(c.slideIndex, { imageUrl: photo.url });
+    const name = photo.source === 'unsplash'
+      ? `Unsplash — foto de ${photo.credit ?? 'autor desconhecido'}`
+      : `IA — ${c.hint.slice(0, 60)}`;
+    await prisma.asset.create({
+      data: {
+        brandId: params.brandId,
+        uploadedBy: params.createdById,
+        postId: params.postId,
+        name,
+        url: photo.url,
+        fileType: photo.source === 'unsplash' ? 'image/jpeg' : 'image/png',
+        sizeBytes: 0,
+        source: photo.source,
+        tags: [photo.source],
+      },
+    }).catch((err) => logger.error('Falha ao salvar imagem gerada na biblioteca', { error: (err as Error).message }));
   }
 
   return results;

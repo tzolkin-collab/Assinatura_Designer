@@ -17,9 +17,14 @@ vi.mock('@google/genai', () => ({
   },
 }));
 
-import { resolveSlideImages } from '../lib/imageResolver';
+vi.mock('../lib/unsplash', () => ({
+  searchUnsplashPhoto: vi.fn(async () => null),
+}));
+
+import { resolveSlideImages, resolveImageCandidateDecisions } from '../lib/imageResolver';
 import { generateWithRetry } from '../lib/geminiRetry';
 import { uploadFileToR2 } from '../lib/r2';
+import { searchUnsplashPhoto } from '../lib/unsplash';
 
 const skeletonBase = (overrides: Partial<{ imageHint: string }>[] = []) => [
   { title: 'Capa', goal: 'Abrir', layout_type: 'title-hero', order: 1, ...overrides[0] },
@@ -50,7 +55,7 @@ describe('resolveSlideImages', () => {
   });
 
   it('não chama nada quando nenhum slide tem imageHint', async () => {
-    const result = await resolveSlideImages({ ...baseParams, skeleton: skeletonBase() });
+    const { resolved: result } = await resolveSlideImages({ ...baseParams, skeleton: skeletonBase() });
     expect(result.size).toBe(0);
     expect(generateWithRetry).not.toHaveBeenCalled();
     expect(prismaMock.asset.findMany).not.toHaveBeenCalled();
@@ -67,11 +72,50 @@ describe('resolveSlideImages', () => {
     });
 
     const skeleton = skeletonBase([{}, { imageHint: 'logo da marca em destaque' }]);
-    const result = await resolveSlideImages({ ...baseParams, skeleton });
+    const { resolved: result } = await resolveSlideImages({ ...baseParams, skeleton });
 
     expect(result.get(1)).toEqual({ imageUrl: 'https://cdn.example.com/logo.png' });
     expect(mockGenerateContent).not.toHaveBeenCalled();
     expect(prismaMock.asset.create).not.toHaveBeenCalled();
+  });
+
+  it('reuse com confidence "medium" NÃO decide sozinho — vira candidato pendente pro usuário aprovar', async () => {
+    prismaMock.asset.findMany.mockResolvedValue([
+      { url: 'https://cdn.example.com/talvez.png', name: 'foto-generica-escritorio.jpg', tags: [] },
+    ]);
+    (generateWithRetry as ReturnType<typeof vi.fn>).mockResolvedValue({
+      text: JSON.stringify([
+        { slideIndex: 1, action: 'reuse', assetUrl: 'https://cdn.example.com/talvez.png', confidence: 'medium' },
+      ]),
+    });
+
+    const skeleton = skeletonBase([{}, { imageHint: 'pessoa sorrindo no escritório' }]);
+    const { resolved, pendingCandidates } = await resolveSlideImages({ ...baseParams, skeleton });
+
+    expect(resolved.has(1)).toBe(false);
+    expect(pendingCandidates).toEqual([{
+      slideIndex: 1,
+      hint: 'pessoa sorrindo no escritório',
+      assetUrl: 'https://cdn.example.com/talvez.png',
+      assetName: 'foto-generica-escritorio.jpg',
+    }]);
+  });
+
+  it('reuse com confidence "high" (ou sem confidence, default) aplica direto — sem pausar', async () => {
+    prismaMock.asset.findMany.mockResolvedValue([
+      { url: 'https://cdn.example.com/exato.png', name: 'logo-oficial.png', tags: [] },
+    ]);
+    (generateWithRetry as ReturnType<typeof vi.fn>).mockResolvedValue({
+      text: JSON.stringify([
+        { slideIndex: 1, action: 'reuse', assetUrl: 'https://cdn.example.com/exato.png', confidence: 'high' },
+      ]),
+    });
+
+    const skeleton = skeletonBase([{}, { imageHint: 'logo da marca' }]);
+    const { resolved, pendingCandidates } = await resolveSlideImages({ ...baseParams, skeleton });
+
+    expect(resolved.get(1)).toEqual({ imageUrl: 'https://cdn.example.com/exato.png' });
+    expect(pendingCandidates).toEqual([]);
   });
 
   it('baixa os assets existentes e manda como imagem (inlineData) na decisão de reuso, não só nome/tags', async () => {
@@ -102,24 +146,28 @@ describe('resolveSlideImages', () => {
     });
 
     const skeleton = skeletonBase([{}, { imageHint: 'algo' }]);
-    const result = await resolveSlideImages({ ...baseParams, skeleton });
+    const { resolved: result } = await resolveSlideImages({ ...baseParams, skeleton });
 
     expect(result.has(1)).toBe(false);
   });
 
   it('gera uma foto, sobe pro R2 e salva na biblioteca como ai-generated', async () => {
-    (generateWithRetry as ReturnType<typeof vi.fn>).mockResolvedValue({
-      text: JSON.stringify([
-        { slideIndex: 1, action: 'generate-photo', generatePrompt: 'produto em uso, luz natural' },
-      ]),
-    });
+    // 1ª chamada: decisão do plano de imagens. 2ª+ (default): autoverificação de
+    // coerência da foto gerada — "aprovado" pra não cair no fallback do Unsplash.
+    (generateWithRetry as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({
+        text: JSON.stringify([
+          { slideIndex: 1, action: 'generate-photo', generatePrompt: 'produto em uso, luz natural' },
+        ]),
+      })
+      .mockResolvedValue({ text: 'aprovado' });
     mockGenerateContent.mockResolvedValue({
       candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: 'aGVsbG8=' } }] } }],
     });
     prismaMock.asset.create.mockResolvedValue({ id: 'a1' });
 
     const skeleton = skeletonBase([{}, { imageHint: 'foto do produto' }]);
-    const result = await resolveSlideImages({ ...baseParams, skeleton });
+    const { resolved: result } = await resolveSlideImages({ ...baseParams, skeleton });
 
     expect(result.get(1)?.imageUrl).toBe('https://r2.example.com/brands/brand-1/generated/gerado.png');
     expect(uploadFileToR2).toHaveBeenCalledTimes(1);
@@ -140,7 +188,7 @@ describe('resolveSlideImages', () => {
       .mockResolvedValueOnce({ text: '<svg viewBox="0 0 24 24"><path d="M0 0h24v24H0z"/></svg>' });
 
     const skeleton = skeletonBase([{}, { imageHint: 'ícone de crescimento' }]);
-    const result = await resolveSlideImages({ ...baseParams, skeleton });
+    const { resolved: result } = await resolveSlideImages({ ...baseParams, skeleton });
 
     expect(result.get(1)?.svgMarkup).toContain('<svg');
     expect(uploadFileToR2).not.toHaveBeenCalled();
@@ -152,19 +200,21 @@ describe('resolveSlideImages', () => {
     const original = config.maxGeneratedImagesPerDeck;
     (config as any).maxGeneratedImagesPerDeck = 1;
 
-    (generateWithRetry as ReturnType<typeof vi.fn>).mockResolvedValue({
-      text: JSON.stringify([
-        { slideIndex: 0, action: 'generate-photo', generatePrompt: 'cena 1' },
-        { slideIndex: 1, action: 'generate-photo', generatePrompt: 'cena 2' },
-      ]),
-    });
+    (generateWithRetry as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({
+        text: JSON.stringify([
+          { slideIndex: 0, action: 'generate-photo', generatePrompt: 'cena 1' },
+          { slideIndex: 1, action: 'generate-photo', generatePrompt: 'cena 2' },
+        ]),
+      })
+      .mockResolvedValue({ text: 'aprovado' });
     mockGenerateContent.mockResolvedValue({
       candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: 'aGVsbG8=' } }] } }],
     });
     prismaMock.asset.create.mockResolvedValue({ id: 'a1' });
 
     const skeleton = skeletonBase([{ imageHint: 'cena 1' }, { imageHint: 'cena 2' }]);
-    const result = await resolveSlideImages({ ...baseParams, skeleton });
+    const { resolved: result } = await resolveSlideImages({ ...baseParams, skeleton });
 
     expect(result.size).toBe(1);
     expect(mockGenerateContent).toHaveBeenCalledTimes(1);
@@ -176,7 +226,7 @@ describe('resolveSlideImages', () => {
     (generateWithRetry as ReturnType<typeof vi.fn>).mockRejectedValue(new Error('Gemini fora do ar'));
     const skeleton = skeletonBase([{}, { imageHint: 'algo' }]);
 
-    await expect(resolveSlideImages({ ...baseParams, skeleton })).resolves.toEqual(new Map());
+    await expect(resolveSlideImages({ ...baseParams, skeleton })).resolves.toEqual({ resolved: new Map(), pendingCandidates: [] });
   });
 
   it('backstop: ignora "generate-photo" se allowGeneratedGraphics=false mesmo se o modelo escolher essa ação', async () => {
@@ -187,11 +237,115 @@ describe('resolveSlideImages', () => {
     });
 
     const skeleton = skeletonBase([{}, { imageHint: 'foto do produto' }]);
-    const result = await resolveSlideImages({ ...baseParams, skeleton, allowGeneratedGraphics: false });
+    const { resolved: result } = await resolveSlideImages({ ...baseParams, skeleton, allowGeneratedGraphics: false });
 
     expect(result.size).toBe(0);
     expect(mockGenerateContent).not.toHaveBeenCalled();
     expect(uploadFileToR2).not.toHaveBeenCalled();
+  });
+
+  it('foto reprovada na autoverificação de coerência cai pro Unsplash em vez de usar a foto ruim', async () => {
+    (generateWithRetry as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({
+        text: JSON.stringify([
+          { slideIndex: 1, action: 'generate-photo', generatePrompt: 'pessoa sorrindo no escritório' },
+        ]),
+      })
+      .mockResolvedValueOnce({ text: 'reprovado' }); // autoverificação reprova a foto gerada
+    mockGenerateContent.mockResolvedValue({
+      candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: 'aGVsbG8=' } }] } }],
+    });
+    (searchUnsplashPhoto as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      url: 'https://r2.example.com/brands/brand-1/generated/unsplash-x.jpg',
+      photographerName: 'Fotógrafo Y',
+      photographerProfileUrl: 'https://unsplash.com/@y',
+      photoPageUrl: 'https://unsplash.com/photos/x',
+    });
+    prismaMock.asset.create.mockResolvedValue({ id: 'a1' });
+
+    const skeleton = skeletonBase([{}, { imageHint: 'foto de pessoa' }]);
+    const { resolved: result } = await resolveSlideImages({ ...baseParams, skeleton });
+
+    expect(result.get(1)?.imageUrl).toBe('https://r2.example.com/brands/brand-1/generated/unsplash-x.jpg');
+    // A foto gerada (reprovada) NUNCA é enviada pro R2 — só a do Unsplash.
+    expect(uploadFileToR2).not.toHaveBeenCalled();
+    expect(prismaMock.asset.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ source: 'unsplash', name: expect.stringContaining('Fotógrafo Y') }),
+      }),
+    );
+  });
+
+  it('gasto de IA da marca acima do teto: prefere Unsplash a gerar mais uma foto', async () => {
+    const aiBudget = await import('../lib/aiBudget.js');
+    const usageSpy = vi.spyOn(aiBudget, 'getUsage').mockResolvedValue({
+      globalTokens: 0, globalBudget: 0, brandSlug: 'marca-x', brandTokens: 900_000, brandBudget: 1_000_000,
+      models: [], cost: { usd: 0, brl: 0 }, currency: 'USD', taxRate: 0,
+    } as any);
+    const aiContext = await import('../lib/aiContext.js');
+    const contextSpy = vi.spyOn(aiContext, 'getAiContext').mockReturnValue({ brandSlug: 'marca-x' });
+
+    (generateWithRetry as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      text: JSON.stringify([
+        { slideIndex: 1, action: 'generate-photo', generatePrompt: 'produto em uso' },
+      ]),
+    });
+    (searchUnsplashPhoto as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      url: 'https://r2.example.com/brands/brand-1/generated/unsplash-z.jpg',
+      photographerName: 'Fotógrafo Z',
+      photographerProfileUrl: 'https://unsplash.com/@z',
+      photoPageUrl: 'https://unsplash.com/photos/z',
+    });
+
+    const skeleton = skeletonBase([{}, { imageHint: 'foto do produto' }]);
+    const { resolved: result } = await resolveSlideImages({ ...baseParams, skeleton });
+
+    expect(result.get(1)?.imageUrl).toBe('https://r2.example.com/brands/brand-1/generated/unsplash-z.jpg');
+    // Nem chegou a tentar gerar — o gatilho de custo age ANTES da geração.
+    expect(mockGenerateContent).not.toHaveBeenCalled();
+
+    usageSpy.mockRestore();
+    contextSpy.mockRestore();
+  });
+
+  it('gerar foto registra o gasto no billing (recordUsage) — antes esse gasto era invisível', async () => {
+    const aiBudget = await import('../lib/aiBudget.js');
+    const spy = vi.spyOn(aiBudget, 'recordUsage').mockResolvedValue(undefined);
+
+    (generateWithRetry as ReturnType<typeof vi.fn>).mockResolvedValue({
+      text: JSON.stringify([
+        { slideIndex: 1, action: 'generate-photo', generatePrompt: 'produto em uso' },
+      ]),
+    });
+    mockGenerateContent.mockResolvedValue({
+      candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: 'aGVsbG8=' } }] } }],
+      usageMetadata: { totalTokenCount: 500 },
+    });
+    prismaMock.asset.create.mockResolvedValue({ id: 'a1' });
+
+    const skeleton = skeletonBase([{}, { imageHint: 'foto do produto' }]);
+    await resolveSlideImages({ ...baseParams, skeleton });
+
+    expect(spy).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ totalTokenCount: 500 }));
+    spy.mockRestore();
+  });
+
+  it('teto de IA estourado: pula a geração de foto (não tenta nenhum modelo) em vez de gastar mesmo assim', async () => {
+    const aiBudget = await import('../lib/aiBudget.js');
+    const spy = vi.spyOn(aiBudget, 'assertWithinBudget').mockRejectedValue(new Error('teto estourado'));
+
+    (generateWithRetry as ReturnType<typeof vi.fn>).mockResolvedValue({
+      text: JSON.stringify([
+        { slideIndex: 1, action: 'generate-photo', generatePrompt: 'produto em uso' },
+      ]),
+    });
+
+    const skeleton = skeletonBase([{}, { imageHint: 'foto do produto' }]);
+    const { resolved: result } = await resolveSlideImages({ ...baseParams, skeleton });
+
+    expect(result.size).toBe(0);
+    expect(mockGenerateContent).not.toHaveBeenCalled();
+    spy.mockRestore();
   });
 
   it('backstop: ignora "generate-svg" se allowSvgLayouts=false mesmo se o modelo escolher essa ação', async () => {
@@ -202,10 +356,48 @@ describe('resolveSlideImages', () => {
     });
 
     const skeleton = skeletonBase([{}, { imageHint: 'ícone' }]);
-    const result = await resolveSlideImages({ ...baseParams, skeleton, allowSvgLayouts: false });
+    const { resolved: result } = await resolveSlideImages({ ...baseParams, skeleton, allowSvgLayouts: false });
 
     expect(result.size).toBe(0);
     // só a chamada de decisão deve ter ocorrido, nenhuma segunda chamada pra gerar SVG
     expect(generateWithRetry).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('resolveImageCandidateDecisions', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const candidates = [
+    { slideIndex: 1, hint: 'foto de pessoa no escritório', assetUrl: 'https://cdn.example.com/talvez.png', assetName: 'foto-generica.jpg' },
+  ];
+
+  it('"accept": usa o asset da biblioteca já sugerido, sem chamar IA nenhuma', async () => {
+    const result = await resolveImageCandidateDecisions(candidates, 'accept', {
+      brandName: 'Marca X', width: 1080, height: 1080, brandId: 'brand-1',
+    });
+
+    expect(result.get(1)).toEqual({ imageUrl: 'https://cdn.example.com/talvez.png' });
+    expect(mockGenerateContent).not.toHaveBeenCalled();
+    expect(prismaMock.asset.create).not.toHaveBeenCalled();
+  });
+
+  it('"regenerate": ignora o candidato da biblioteca e gera uma foto nova pro slide', async () => {
+    (generateWithRetry as ReturnType<typeof vi.fn>).mockResolvedValue({ text: 'aprovado' }); // autoverificação
+    mockGenerateContent.mockResolvedValue({
+      candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: 'aGVsbG8=' } }] } }],
+    });
+    prismaMock.asset.create.mockResolvedValue({ id: 'a1' });
+
+    const result = await resolveImageCandidateDecisions(candidates, 'regenerate', {
+      brandName: 'Marca X', width: 1080, height: 1080, brandId: 'brand-1',
+    });
+
+    expect(result.get(1)?.imageUrl).toBe('https://r2.example.com/brands/brand-1/generated/gerado.png');
+    expect(uploadFileToR2).toHaveBeenCalledTimes(1);
+    expect(prismaMock.asset.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ source: 'ai-generated' }) }),
+    );
   });
 });

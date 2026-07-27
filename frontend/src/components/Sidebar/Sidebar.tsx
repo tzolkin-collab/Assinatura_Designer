@@ -47,6 +47,7 @@ function getBrandNav(marca: string): NavItem[] {
   return [
     { label: 'Galeria', href: `/${marca}/galeria`, icon: <Eye size={18} /> },
     { label: 'Fábrica', href: `/${marca}/fabrica`, icon: <Factory size={18} /> },
+    { label: 'Apresentações Publicadas', href: `/${marca}/apresentacoes`, icon: <Globe size={18} /> },
 
     {
       label: 'Configurações',
@@ -123,7 +124,7 @@ export default function Sidebar() {
   const knownRoots = [
     'galeria', 'projetos', 'configuracoes', 'convite', 'registro', 'extras', 'login', 'onboarding',
     // Sub-rotas de marca cujo nome poderia colidir com o slug de uma marca homônima.
-    'fabrica', 'editor', 'equipe',
+    'fabrica', 'editor', 'equipe', 'apresentacoes',
   ];
   const urlMarca = segments.length > 0 && !knownRoots.includes(segments[0]) ? segments[0] : null;
 

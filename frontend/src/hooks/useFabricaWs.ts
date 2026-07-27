@@ -175,8 +175,9 @@ export function useFabricaWs(brandSlug: string, initialSessionId?: string | null
       // final entrega — sem receber o design inteiro a cada slide. Dual-formato:
       // html-design guarda os slides no topo do envelope; ir-design em ir.slides.
       case 'design:slide': {
-        const { index, slide, envelope } = data as {
+        const { index, total, slide, envelope } = data as {
           index: number;
+          total: number;
           slide: unknown;
           envelope: { kind?: string; postId?: string; ir?: { slides?: unknown[] }; slides?: unknown[] } & Record<string, unknown>;
         };
@@ -202,6 +203,10 @@ export function useFabricaWs(brandSlug: string, initialSessionId?: string | null
               ...(accumulate ? prevEnv : envelope),
               ...envelope,
               slides: baseSlides,
+              // Total real (não o length do array, que só cresce até o maior índice
+              // já chegado) — deixa a UI saber "faltam N" desde o primeiro slide,
+              // em vez do contador crescer de forma imprevisível a cada delta.
+              totalSlides: total,
             };
             return [merged as unknown as DesignPage];
           }
@@ -214,6 +219,7 @@ export function useFabricaWs(brandSlug: string, initialSessionId?: string | null
             ...(canAccumulateIr ? prevEnv : envelope),
             ...envelope,
             ir: { ...(envelope.ir ?? {}), ...(canAccumulateIr ? prevEnv?.ir : {}), slides: baseSlides },
+            totalSlides: total,
           };
           return [merged as unknown as DesignPage];
         });

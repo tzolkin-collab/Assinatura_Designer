@@ -353,7 +353,7 @@ export default function EditorPage() {
               </span>
             )}
           </div>
-          <div style={{ borderRadius: 12, overflow: 'hidden', border: inspecionando ? '2px solid var(--color-brand, #FF6B35)' : '1px solid var(--color-border, rgba(0,0,0,0.1))', background: '#fff', aspectRatio: `${canvasW} / ${canvasH}`, maxHeight: '68vh' }}>
+          <div style={{ position: 'relative', borderRadius: 12, overflow: 'hidden', border: inspecionando ? '2px solid var(--color-brand, #FF6B35)' : '1px solid var(--color-border, rgba(0,0,0,0.1))', background: '#fff', aspectRatio: `${canvasW} / ${canvasH}`, maxHeight: '68vh' }}>
             <HtmlSlideRenderer content={content} activeSlide={safeSlide} onSlideChange={setActiveSlide} hideNav inspectorMode={inspecionando} />
           </div>
           {slideCount > 1 && (

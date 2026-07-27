@@ -15,13 +15,16 @@ export type WorkerStatus = 'idle' | 'running' | 'done' | 'error';
 
 export type ReviewMode = 'auto' | 'manual';
 
-export type FabricaQuestionKind = 'palette' | 'format' | 'priority' | 'brief' | 'style' | 'generic';
+export type FabricaQuestionKind = 'palette' | 'format' | 'priority' | 'brief' | 'style' | 'generic' | 'image-candidates' | 'font-compare';
 
 export interface FabricaQuestionOption {
   id: string;
   label: string;
   description?: string;
   value?: string;
+  /** Miniatura clicável (ex.: comparação de fonte original vs sugerida) — a
+   *  opção em si já É a escolha, a imagem só ilustra o que ela representa. */
+  imageUrl?: string;
 }
 
 export interface FabricaQuestion {
@@ -34,6 +37,10 @@ export interface FabricaQuestion {
   mode: ReviewMode;
   field?: string;
   helperText?: string;
+  /** Miniaturas SÓ ilustrativas mostradas acima das opções (ex.: bundle de N
+   *  candidatos de imagem da biblioteca) — ao contrário de options[].imageUrl,
+   *  não são clicáveis nem correspondem 1:1 a uma opção. */
+  previewImages?: Array<{ url: string; label: string }>;
 }
 
 export interface PresentationConfig {

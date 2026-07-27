@@ -4,7 +4,7 @@ import { useParams } from 'next/navigation';
 import PageHeader from '@/components/ui/PageHeader';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
-import { ArrowLeft, Download, FileDown, Loader2, Maximize2, X, Folder, FolderPlus, ChevronRight, ChevronDown, Plus, Trash2, LayoutGrid, List, Sparkles, MessageSquareText, ExternalLink, Edit3, FolderInput, PenLine, Send, Presentation, Image as LucideImage } from 'lucide-react';
+import { ArrowLeft, Download, FileDown, Loader2, Maximize2, X, Folder, FolderPlus, ChevronRight, ChevronDown, Plus, Trash2, LayoutGrid, List, Sparkles, MessageSquareText, ExternalLink, Edit3, FolderInput, PenLine, Send, Presentation, Image as LucideImage, Globe, Check, Copy } from 'lucide-react';
 import Link from 'next/link';
 import Image from 'next/image';
 import styles from './brand-galeria.module.css';
@@ -12,6 +12,7 @@ import { useBrandPosts, useBrand, type Post } from '@/lib/hooks';
 import { useState, useEffect, useMemo } from 'react';
 import { api, getApiErrorMessage } from '@/lib/api';
 import { exportarDeck, type DeckFileFormat } from '@/lib/deckFile';
+import { publishPost, unpublishPost } from '@/lib/presentationHosting';
 import { useBrandPermissions } from '@/hooks/useBrandPermissions';
 import { extractChatHistory, extractDimensions, extractPreviewSource, extractSessionId, extractUsedAssets, getAspectRatioTag, type FabricaChatHistoryMessage, type HtmlDesignPostContent } from '@/lib/designContent';
 import dynamic from 'next/dynamic';
@@ -78,6 +79,77 @@ export default function BrandGaleriaPage() {
   const { posts, loading, error, mutate } = useBrandPosts(slug);
   const { brand } = useBrand(slug);
   const [activePreviewPost, setActivePreviewPost] = useState<Post | null>(null);
+
+  // Publicar apresentação — link público navegável, diferente dos downloads.
+  const [hostAutoplay, setHostAutoplay] = useState(false);
+  const [hostShowCounter, setHostShowCounter] = useState(true);
+  const [publishingHost, setPublishingHost] = useState(false);
+  const [hostErro, setHostErro] = useState<string | null>(null);
+  const [hostCopiado, setHostCopiado] = useState(false);
+  const [hostQrDataUrl, setHostQrDataUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!activePreviewPost) return;
+    const hc = activePreviewPost.hostingConfig ?? {};
+    setHostShowCounter(hc.showCounter !== false);
+    setHostAutoplay(!!hc.autoplay);
+    setHostErro(null);
+    setHostCopiado(false);
+  }, [activePreviewPost?.id]);
+
+  const publicHostUrl = activePreviewPost?.publicSlug
+    ? `${typeof window !== 'undefined' ? window.location.origin : ''}/apresentacao/${activePreviewPost.publicSlug}`
+    : '';
+
+  // QR code — mesmo link do botão "Copiar", só que num formato pra escanear.
+  useEffect(() => {
+    if (!publicHostUrl) { setHostQrDataUrl(null); return; }
+    let cancelled = false;
+    import('qrcode').then(({ default: QRCode }) =>
+      QRCode.toDataURL(publicHostUrl, { margin: 1, width: 176 }),
+    ).then((dataUrl) => { if (!cancelled) setHostQrDataUrl(dataUrl); })
+      .catch(() => { if (!cancelled) setHostQrDataUrl(null); });
+    return () => { cancelled = true; };
+  }, [publicHostUrl]);
+
+  const handlePublishPresentation = async () => {
+    if (!activePreviewPost) return;
+    setPublishingHost(true);
+    setHostErro(null);
+    try {
+      const result = await publishPost(activePreviewPost.id, { autoplay: hostAutoplay, showCounter: hostShowCounter });
+      setActivePreviewPost((prev) => prev ? { ...prev, publicSlug: result.publicSlug, publishedAt: result.publishedAt } : prev);
+      if (mutate) mutate();
+    } catch (err) {
+      setHostErro(getApiErrorMessage(err, 'Falha ao publicar a apresentação.'));
+    } finally {
+      setPublishingHost(false);
+    }
+  };
+
+  const handleUnpublishPresentation = async () => {
+    if (!activePreviewPost) return;
+    setPublishingHost(true);
+    setHostErro(null);
+    try {
+      await unpublishPost(activePreviewPost.id);
+      setActivePreviewPost((prev) => prev ? { ...prev, publicSlug: null, publishedAt: null } : prev);
+      if (mutate) mutate();
+    } catch (err) {
+      setHostErro(getApiErrorMessage(err, 'Falha ao despublicar.'));
+    } finally {
+      setPublishingHost(false);
+    }
+  };
+
+  const handleCopyPublicHostUrl = () => {
+    if (!publicHostUrl) return;
+    navigator.clipboard?.writeText(publicHostUrl).then(() => {
+      setHostCopiado(true);
+      setTimeout(() => setHostCopiado(false), 1500);
+    }).catch(() => {});
+  };
+
   const [activeCanvaExportPost, setActiveCanvaExportPost] = useState<Post | null>(null);
   const [canvaFormat, setCanvaFormat] = useState<'png' | 'pptx' | 'html'>('png');
   const [mostrarCanvaInstrucoes, setMostrarCanvaInstrucoes] = useState(false);
@@ -757,6 +829,73 @@ export default function BrandGaleriaPage() {
                       )}
                     </div>
                   </div>
+
+                  {/* Seção: Publicar apresentação — link público vivo, diferente dos downloads acima */}
+                  {htmlContent && (
+                    <div className={styles.adobePanelSection}>
+                      <h4 className={styles.adobeSectionTitle}>Publicar Apresentação</h4>
+                      <p className={styles.hostSectionHint}>
+                        Gera uma página pública navegável (sem login) com o design atual — um link vivo pra compartilhar, não um arquivo.
+                      </p>
+
+                      {activePreviewPost.publicSlug ? (
+                        <>
+                          <div className={styles.hostPublicUrlRow}>
+                            <span className={styles.hostPublicUrlText} title={publicHostUrl}>{publicHostUrl}</span>
+                            <button type="button" className={styles.hostIconBtn} onClick={handleCopyPublicHostUrl} title="Copiar link">
+                              {hostCopiado ? <Check size={13} /> : <Copy size={13} />}
+                            </button>
+                            <a href={publicHostUrl} target="_blank" rel="noreferrer" className={styles.hostIconBtn} title="Abrir em nova aba">
+                              <ExternalLink size={13} />
+                            </a>
+                          </div>
+                          {hostQrDataUrl && (
+                            <div className={styles.hostQrRow}>
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img src={hostQrDataUrl} alt="QR code do link público" width={132} height={132} className={styles.hostQrImage} />
+                            </div>
+                          )}
+                          {hostErro && <p className={styles.hostErrorText}>{hostErro}</p>}
+                          <div className={styles.adobeBtnGrid}>
+                            <button
+                              className={styles.adobeSecondaryBtn}
+                              onClick={(e) => { e.stopPropagation(); void handleUnpublishPresentation(); }}
+                              disabled={publishingHost}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <Globe size={14} style={{ opacity: 0.7 }} />
+                                <span>{publishingHost ? 'Despublicando…' : 'Despublicar'}</span>
+                              </div>
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <label className={styles.hostToggleLabel}>
+                            <input type="checkbox" checked={hostShowCounter} onChange={(e) => setHostShowCounter(e.target.checked)} />
+                            Mostrar contador de slides (ex.: &quot;2 / 6&quot;)
+                          </label>
+                          <label className={styles.hostToggleLabel}>
+                            <input type="checkbox" checked={hostAutoplay} onChange={(e) => setHostAutoplay(e.target.checked)} />
+                            Avançar automaticamente (autoplay)
+                          </label>
+                          {hostErro && <p className={styles.hostErrorText}>{hostErro}</p>}
+                          <div className={styles.adobeBtnGrid}>
+                            <button
+                              className={styles.adobeSecondaryBtn}
+                              onClick={(e) => { e.stopPropagation(); void handlePublishPresentation(); }}
+                              disabled={publishingHost}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <Globe size={14} style={{ opacity: 0.7 }} />
+                                <span>{publishingHost ? 'Publicando…' : 'Publicar apresentação'}</span>
+                              </div>
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
 
                   {/* Seção: Organização e Pastas */}
                   {canEdit && (

@@ -98,6 +98,8 @@ export interface FabricaSession {
    */
   pendingPlan?: {
     format: 'presentation' | 'carousel';
+    /** Proporção pedida pro Design (1:1 default) — apresentação ignora, sempre 16:9. */
+    aspectRatio?: string;
     skeleton: Array<{ title: string; goal: string; layout_type: string; order: number; copy?: string }>;
     sourceCopy?: string;
     brief: string;
@@ -108,8 +110,28 @@ export interface FabricaSession {
    */
   pendingStyleProof?: {
     format: 'presentation' | 'carousel';
+    aspectRatio?: string;
     postId: string;
     skeleton: Array<{ title: string; goal: string; layout_type: string; order: number; copy?: string }>;
+    brief: string;
+    sourceCopy?: string;
+  } | null;
+  /**
+   * Bundle de reaproveitamento "meio-termo" da Biblioteca de Mídia: a IA achou um
+   * asset que talvez sirva mas não tem certeza — em vez de decidir sozinha, o
+   * pipeline pausa e mostra o(s) candidato(s) pro usuário aprovar ou pedir pra
+   * gerar do zero. `enrichedSkeleton` já traz as imagens NÃO-ambíguas resolvidas
+   * (mesmo shape que SlideSkeletonItem, com imageUrl/svgMarkup quando aplicável).
+   */
+  pendingImageCandidates?: {
+    format: 'presentation' | 'carousel';
+    aspectRatio?: string;
+    postId: string;
+    enrichedSkeleton: Array<{
+      title: string; goal: string; layout_type: string; order: number;
+      copy?: string; imageHint?: string; imageUrl?: string; svgMarkup?: string;
+    }>;
+    candidates: Array<{ slideIndex: number; hint: string; assetUrl: string; assetName: string }>;
     brief: string;
     sourceCopy?: string;
   } | null;
@@ -199,6 +221,7 @@ export async function createSession(
     pendingReview: null,
     pendingPlan: null,
     pendingStyleProof: null,
+    pendingImageCandidates: null,
     messages: [],
     currentDesign: [],
     workerStatus: 'idle',

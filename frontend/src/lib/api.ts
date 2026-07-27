@@ -3,7 +3,14 @@
 export const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
 
 interface FetchOptions extends RequestInit {
-  requireAuth?: boolean;
+  /**
+   * `true` (default) = obrigatório, redireciona pro /login se não houver token.
+   * `false` = nunca manda o header, mesmo se houver um token salvo.
+   * `'optional'` = manda o token SE existir, mas não exige nem redireciona se
+   * não houver — usado pela apresentação pública, que serve tanto visitante
+   * anônimo quanto o próprio designer logado (que aí ganha poderes extra).
+   */
+  requireAuth?: boolean | 'optional';
 }
 
 export class ApiError extends Error {
@@ -63,10 +70,11 @@ async function apiFetch<T>(endpoint: string, options: FetchOptions = {}): Promis
     const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
     if (token) {
       headersConfig['Authorization'] = `Bearer ${token}`;
-    } else if (typeof window !== 'undefined') {
+    } else if (requireAuth === true && typeof window !== 'undefined') {
       window.location.href = '/login';
       throw new ApiError(401, 'Missing token, redirecting to login');
     }
+    // requireAuth === 'optional' e sem token: segue anônimo, sem redirecionar.
   }
 
   const response = await fetchComRedeAmigavel(`${API_BASE}${endpoint}`, {
@@ -74,7 +82,10 @@ async function apiFetch<T>(endpoint: string, options: FetchOptions = {}): Promis
     ...customOptions,
   });
 
-  if (response.status === 401 && typeof window !== 'undefined') {
+  // Uma rota 'optional' nunca deveria devolver 401 por causa do token (ela
+  // sempre atende, com ou sem login) — só desloga automaticamente quando a
+  // auth era de fato obrigatória.
+  if (response.status === 401 && requireAuth === true && typeof window !== 'undefined') {
     localStorage.removeItem('auth_token');
     document.cookie = 'auth_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
     window.location.href = '/login';

@@ -108,6 +108,10 @@ brandsRouter.get('/:slug', async (req: Request, res: Response, next: NextFunctio
 });
 
 // GET /api/brands/:slug/posts - Get all posts for a brand (must belong to user)
+// ?published=true devolve só as apresentações hospedadas (publicSlug setado),
+// com um select enxuto (sem slides) — a lista de "Apresentações Publicadas"
+// da sidebar não precisa do conteúdo inteiro de cada post, só o suficiente
+// pra mostrar o link e o status.
 brandsRouter.get('/:slug/posts', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { userId } = (req as AuthRequest).user!;
@@ -117,11 +121,25 @@ brandsRouter.get('/:slug/posts', async (req: Request, res: Response, next: NextF
       select: { id: true },
     });
     if (!brand) throw createError(404, 'Brand not found');
+
+    if (req.query.published === 'true') {
+      const posts = await prisma.post.findMany({
+        where: { brandId: brand.id, publishedAt: { not: null } },
+        orderBy: { publishedAt: 'desc' },
+        select: {
+          id: true, name: true, type: true, previewUrl: true,
+          publicSlug: true, publishedAt: true, hostingConfig: true, updatedAt: true,
+        },
+      });
+      res.json({ data: posts });
+      return;
+    }
+
     const posts = await prisma.post.findMany({
       where: { brandId: brand.id },
       orderBy: { createdAt: 'desc' },
-      include: { 
-        folder: true, 
+      include: {
+        folder: true,
         slides: { orderBy: { position: 'asc' } },
         createdBy: { select: { id: true, name: true, email: true } }
       },
