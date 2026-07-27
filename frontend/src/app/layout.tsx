@@ -19,6 +19,14 @@ export const metadata: Metadata = {
   title: 'Designer - Assinatura Marca Própria',
   description: 'Plataforma interna de criação e gestão de branding para redes sociais.',
   manifest: '/manifest.json',
+  icons: {
+    icon: [
+      { url: '/icons/app-icon.svg', type: 'image/svg+xml' },
+      { url: '/icon.svg', type: 'image/svg+xml' },
+    ],
+    shortcut: '/icons/app-icon.svg',
+    apple: '/icons/app-icon.svg',
+  },
 };
 
 export const viewport: Viewport = {
