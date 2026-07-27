@@ -1,0 +1,202 @@
+﻿.wrapper {
+  position: relative;
+  width: 100%;
+}
+
+/* ── Trigger button ── */
+.trigger {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+  text-align: left;
+}
+
+.trigger:hover {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.triggerOpen {
+  background: rgba(139, 92, 246, 0.1);
+  border-color: rgba(139, 92, 246, 0.3);
+  color: rgba(139, 92, 246, 0.9);
+}
+
+.triggerIcon { flex-shrink: 0; }
+.triggerLabel { flex: 1; }
+
+/* ── Panel ── */
+.panel {
+  margin-top: 6px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  background: rgba(14, 14, 18, 0.85);
+  backdrop-filter: blur(8px);
+  animation: slideDown 0.15s ease;
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.loading {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+  text-align: center;
+  padding: 8px 0;
+}
+
+/* ── Empty state ── */
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 0;
+  text-align: center;
+}
+
+.emptyIcon { color: rgba(255, 255, 255, 0.2); }
+
+.emptyText {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.4);
+  line-height: 1.5;
+}
+
+.emptyLink {
+  color: rgba(139, 92, 246, 0.8);
+  text-decoration: none;
+}
+
+.emptyLink:hover { color: rgba(139, 92, 246, 1); text-decoration: underline; }
+
+/* ── Content ── */
+.content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ── Section ── */
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.35);
+}
+
+/* ── Logo ── */
+.logo {
+  max-height: 40px;
+  max-width: 100%;
+  object-fit: contain;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  padding: 4px 8px;
+  align-self: flex-start;
+}
+
+/* ── Palette ── */
+.palette {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.swatch {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+
+.swatchColor {
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  flex-shrink: 0;
+}
+
+.swatchHex {
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.35);
+  font-family: 'SF Mono', monospace;
+  letter-spacing: -0.02em;
+}
+
+/* ── Fonts ── */
+.fonts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.fontChip {
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* ── Guideline ── */
+.guideline {
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.45);
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ── Asset grid ── */
+.assetGrid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+}
+
+.assetThumb {
+  aspect-ratio: 1;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+}
+
+.assetImg {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}

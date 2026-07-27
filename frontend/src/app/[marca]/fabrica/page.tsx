@@ -14,6 +14,7 @@ const FolderPicker = dynamic(() => import('@/components/Fabrica/FolderPicker'), 
 const ArtifactPanel = dynamic(() => import('@/components/Fabrica/ArtifactPanel').then(mod => ({ default: mod.ArtifactPanel })), { ssr: false });
 const AiSpendBadge = dynamic(() => import('@/components/AiUsage/AiSpendBadge'), { ssr: false });
 import { ChatMessageRow } from '@/components/Fabrica/ChatMessageRow';
+import BrandBundlePanel from '@/components/Fabrica/BrandBundlePanel';
 import { useFabricaWs } from '@/hooks/useFabricaWs';
 import { API_BASE } from '@/lib/api';
 import { useBrandPermissions } from '@/hooks/useBrandPermissions';
@@ -703,6 +704,10 @@ export default function FabricaPage() {
                 ))}
               </div>
             )}
+
+            {/* Referências que a IA vai usar na geração — visíveis ANTES de
+                gerar, junto dos demais controles de pré-envio (destino, anexo). */}
+            <BrandBundlePanel slug={marca} />
 
             {/* Destino do deck, escolhido ANTES de gerar — sem isto ele nascia solto
                 na raiz e só era achado caçando na galeria. */}
