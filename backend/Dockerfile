@@ -10,24 +10,28 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends openssl ca-certificates unzip \
     && rm -rf /var/lib/apt/lists/*
 
-ENV NODE_ENV=production
 # Impede o postinstall do Puppeteer de baixar o Chrome durante `npm ci`.
 # O binário é instalado explicitamente na etapa 4 (após as libs de SO do
 # playwright install-deps estarem disponíveis), o que é mais confiável.
 ENV PUPPETEER_SKIP_DOWNLOAD=true
 
-# 1) Dependências (inclui devDeps: precisamos de tsc/prisma CLI no build e do
-#    prisma CLI em runtime para `migrate deploy`). `npm ci` ignora NODE_ENV.
+# 1) Dependências. NODE_ENV=production faz `npm ci` pular devDependencies
+#    (TypeScript, @types/*, vitest, supertest etc.), quebrando o `tsc`.
+#    --include=dev força a instalação de devDeps independente do NODE_ENV.
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm ci --include=dev
 
 # 2) Client do Prisma (precisa do schema antes de gerar)
 COPY prisma ./prisma
 RUN npx prisma generate
 
-# 3) Código + build TypeScript -> dist/
+# 3) Código + build TypeScript -> dist/ (tests já excluídos no tsconfig.json)
 COPY . .
 RUN npm run build
+
+# Apenas agora definimos NODE_ENV=production para que o runtime do Express
+# rode em modo produção (sem stack traces, modos otimizados, etc.).
+ENV NODE_ENV=production
 
 # 4) Chromium para o Puppeteer (src/lib/htmlRaster.ts usa puppeteer-cluster, NÃO
 #    playwright). Instalamos só as libs de SO do chromium via playwright
