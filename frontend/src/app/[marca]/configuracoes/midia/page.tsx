@@ -6,7 +6,7 @@ import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import {
   ArrowLeft, Upload, Image as ImageIcon, FileText, Trash2, Loader2,
-  HardDrive, FileImage, Sparkles, Images, Layers, Camera,
+  HardDrive, FileImage, Sparkles, Images, Layers, Camera, Tag,
 } from 'lucide-react';
 import PageHeader from '@/components/ui/PageHeader';
 import Card from '@/components/ui/Card';
@@ -21,7 +21,7 @@ const DrivePopup = dynamic(() => import('@/components/Fabrica/DrivePopup').then(
 const CanvaPopup = dynamic(() => import('@/components/Fabrica/CanvaPopup').then((m) => ({ default: m.CanvaPopup })), { ssr: false });
 const BrandbookUploaderModal = dynamic(() => import('@/components/Brandbook/BrandbookUploaderModal'), { ssr: false });
 
-type AssetSource = 'upload' | 'drive' | 'canva' | 'asana' | 'ai-generated' | 'brandbook' | 'unsplash';
+type AssetSource = 'upload' | 'drive' | 'canva' | 'asana' | 'ai-generated' | 'brandbook' | 'branding' | 'unsplash';
 
 interface Asset {
   id: string;
@@ -40,6 +40,7 @@ const SOURCE_LABEL: Record<string, string> = {
   asana: 'Asana',
   'ai-generated': 'Gerado por IA',
   brandbook: 'Brandbook',
+  branding: 'Branding',
   unsplash: 'Unsplash',
 };
 
@@ -50,6 +51,7 @@ const SOURCE_ICON: Record<string, typeof HardDrive> = {
   asana: FileText,
   'ai-generated': Sparkles,
   brandbook: Layers,
+  branding: Tag,
   unsplash: Camera,
 };
 
