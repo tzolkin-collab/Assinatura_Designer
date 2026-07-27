@@ -30,12 +30,6 @@ const CONFIG_SECTIONS = [
     icon: <Eye size={20} />,
   },
   {
-    key: 'canva',
-    label: 'Integração Canva',
-    description: 'Conecte seu perfil do Canva para exportar apresentações e designs prontos direto para sua conta do Canva.',
-    icon: <PlugZap size={20} />,
-  },
-  {
     key: 'equipe',
     label: 'Equipe e Permissões',
     description: 'Convide clientes e designers e defina quem pode editar ou apenas visualizar.',
