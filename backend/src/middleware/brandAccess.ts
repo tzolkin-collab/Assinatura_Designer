@@ -20,7 +20,7 @@ export const OWNER_ONLY: BrandRole[] = ['OWNER'];
 export const FORBIDDEN_MESSAGE = 'Você não tem permissão para realizar esta ação na marca.';
 
 export interface BrandRequest extends AuthRequest {
-  brand?: { id: string; slug: string };
+  brand?: { id: string; slug: string; name: string };
   brandRole?: BrandRole;
 }
 
@@ -45,7 +45,7 @@ export function requireBrandRole(allowed: BrandRole[]) {
 
       const brand = await prisma.brand.findUnique({
         where: { slug },
-        select: { id: true, slug: true },
+        select: { id: true, slug: true, name: true },
       });
       if (!brand) return next(createError(404, 'Marca não encontrada.'));
 

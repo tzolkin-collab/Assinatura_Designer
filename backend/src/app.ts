@@ -72,7 +72,7 @@ app.use('/api/google', googlePublicRouter);
 app.use('/api/google', requireAuth, googleRouter);
 app.use('/api/brands/:brandId/members', requireAuth, teamRouter);
 app.use('/api/brands/:brandId/assets', requireAuth, assetsRouter);
-app.use('/api/brands/:brandSlug/memory', requireAuth, memoryRoutes);
+app.use('/api/brands/:slug/memory', requireAuth, memoryRoutes);
 app.use('/api/notifications', requireAuth, notificationsRouter);
 // Apresentação hospedada (Fase 5): página pública, sem sessão nossa — quem acessa
 // é o visitante do link, não um usuário logado.

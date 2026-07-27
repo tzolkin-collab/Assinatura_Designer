@@ -5,7 +5,7 @@ import { createError } from '../middleware/errorHandler.js';
 import type { AuthRequest } from '../middleware/auth.js';
 import { mergeSlidesIntoPost } from '../lib/postHelper.js';
 import { deleteFromR2 } from '../lib/r2.js';
-import { requireBrandRole, ANY_MEMBER, type BrandRequest } from '../middleware/brandAccess.js';
+import { requireBrandRole, ANY_MEMBER, EDITORS, type BrandRequest } from '../middleware/brandAccess.js';
 import { getUsage, getBilling } from '../lib/aiBudget.js';
 
 import multer from 'multer';
@@ -16,10 +16,11 @@ export const brandsRouter = Router();
 const brandbookUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 
 // POST /api/brands/:slug/brandbook/ingest - Upload e processamento do Brandbook
-brandsRouter.post('/:slug/brandbook/ingest', brandbookUpload.array('files', 15), async (req: Request, res: Response, next: NextFunction) => {
+// Requer papel EDITOR+ para evitar que um usuário autenticado processe o brandbook de outra marca
+brandsRouter.post('/:slug/brandbook/ingest', requireBrandRole(EDITORS), brandbookUpload.array('files', 15), async (req: BrandRequest, res: Response, next: NextFunction) => {
   try {
-    const { userId } = (req as AuthRequest).user!;
-    const slug = req.params.slug as string;
+    const { userId } = req.user!;
+    const slug = req.brand!.slug;
     const files = (req.files as Express.Multer.File[]) || [];
 
     if (files.length === 0) {
@@ -39,10 +40,11 @@ brandsRouter.post('/:slug/brandbook/ingest', brandbookUpload.array('files', 15),
 });
 
 // POST /api/brands/:slug/brandbook/ingest-canva - Importar e analisar Brandbook direto do Canva
-brandsRouter.post('/:slug/brandbook/ingest-canva', async (req: Request, res: Response, next: NextFunction) => {
+// Requer papel EDITOR+ para evitar que um usuário autenticado processe o brandbook de outra marca
+brandsRouter.post('/:slug/brandbook/ingest-canva', requireBrandRole(EDITORS), async (req: BrandRequest, res: Response, next: NextFunction) => {
   try {
-    const { userId } = (req as AuthRequest).user!;
-    const slug = req.params.slug as string;
+    const { userId } = req.user!;
+    const slug = req.brand!.slug;
     let { designId, designUrl } = req.body;
 
     if (!designId && designUrl) {
@@ -115,19 +117,13 @@ brandsRouter.post('/:slug/brandbook/ingest-canva', async (req: Request, res: Res
 });
 
 // POST /api/brands/:slug/brandbook/confirm-logo - Confirmar substituição de logo oficial
-brandsRouter.post('/:slug/brandbook/confirm-logo', async (req: Request, res: Response, next: NextFunction) => {
+// Requer papel EDITOR+ (mesmo padrão das rotas de ingest acima)
+brandsRouter.post('/:slug/brandbook/confirm-logo', requireBrandRole(EDITORS), async (req: BrandRequest, res: Response, next: NextFunction) => {
   try {
-    const { userId } = (req as AuthRequest).user!;
-    const slug = req.params.slug as string;
+    const brand = req.brand!;
     const { logoUrl } = req.body;
 
     if (!logoUrl) throw createError(400, 'logoUrl é obrigatório');
-
-    const brand = await prisma.brand.findFirst({
-      where: { slug, members: { some: { userId, role: { in: ['OWNER', 'ADMIN', 'EDITOR'] } } } },
-    });
-
-    if (!brand) throw createError(404, 'Marca não encontrada ou sem permissão');
 
     await prisma.brandConfig.upsert({
       where: { brandId: brand.id },
@@ -141,6 +137,37 @@ brandsRouter.post('/:slug/brandbook/confirm-logo', async (req: Request, res: Res
         logoUrl,
       },
     });
+
+    // Sync: upsert de Asset com source 'branding' para que a logo apareça
+    // na Biblioteca de Mídia sem precisar de upload duplicado no R2.
+    // Usa o nome do arquivo da URL como identificador único dentro da marca.
+    const fileName = logoUrl.split('/').pop() ?? 'logo';
+    const existingLogoAsset = await prisma.asset.findFirst({
+      where: { brandId: brand.id, source: 'branding' },
+    });
+    if (existingLogoAsset) {
+      await prisma.asset.update({
+        where: { id: existingLogoAsset.id },
+        data: { url: logoUrl, name: fileName, updatedAt: new Date() },
+      });
+    } else {
+      const ext = fileName.split('.').pop()?.toLowerCase() ?? 'svg';
+      const fileType = ext === 'svg' ? 'image/svg+xml'
+        : ext === 'png' ? 'image/png'
+        : ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg'
+        : 'image/png';
+      await prisma.asset.create({
+        data: {
+          brandId: brand.id,
+          name: `Logo — ${brand.name}`,
+          url: logoUrl,
+          fileType,
+          sizeBytes: 0,
+          source: 'branding',
+          tags: ['logo', 'branding'],
+        },
+      });
+    }
 
     res.json({ message: 'Logo oficial atualizada com sucesso', data: { logoUrl } });
   } catch (error) {
