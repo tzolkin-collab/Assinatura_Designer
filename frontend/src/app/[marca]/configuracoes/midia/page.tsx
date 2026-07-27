@@ -5,7 +5,7 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import {
-  ArrowLeft, Upload, Image as ImageIcon, FileType2, Trash2, Loader2,
+  ArrowLeft, Upload, Image as ImageIcon, FileText, Trash2, Loader2,
   HardDrive, FileImage, Sparkles, Images,
 } from 'lucide-react';
 import PageHeader from '@/components/ui/PageHeader';
@@ -45,7 +45,7 @@ const SOURCE_ICON: Record<AssetSource, typeof HardDrive> = {
   upload: Upload,
   drive: HardDrive,
   canva: FileImage,
-  asana: FileType2,
+  asana: FileText,
   'ai-generated': Sparkles,
 };
 
@@ -351,7 +351,7 @@ export default function MidiaPage() {
                   {asset.fileType.startsWith('image/') ? (
                     <img src={asset.url} alt={asset.name} className={styles.thumbImg} />
                   ) : (
-                    <FileType2 size={32} style={{ color: 'var(--color-text-tertiary)' }} />
+                    <FileText size={32} style={{ color: 'var(--color-text-tertiary)' }} />
                   )}
                 </div>
                 <div className={styles.cardBody}>
