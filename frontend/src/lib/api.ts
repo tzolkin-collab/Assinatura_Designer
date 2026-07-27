@@ -92,6 +92,10 @@ async function apiFetch<T>(endpoint: string, options: FetchOptions = {}): Promis
     window.location.href = '/login';
   }
 
+  if (response.status === 304) {
+    return [] as unknown as T;
+  }
+
   const data = await response.json().catch(() => null);
 
   if (!response.ok) {
@@ -102,7 +106,11 @@ async function apiFetch<T>(endpoint: string, options: FetchOptions = {}): Promis
     );
   }
 
-  return data.data;
+  if (data && typeof data === 'object' && 'data' in data) {
+    return data.data;
+  }
+
+  return data as T;
 }
 
 export const api = {

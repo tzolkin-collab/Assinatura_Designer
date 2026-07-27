@@ -26,6 +26,9 @@ import { publicPresentationsRouter } from './routes/publicPresentations.js';
 
 const app = express();
 
+// Desabilita ETags em rotas de API para evitar respostas 304 sem corpo em requisições dinâmicas
+app.disable('etag');
+
 // Confia em 1 hop de reverse proxy (Vercel/Render/etc.) para que `req.ip`
 // reflita o cliente real — necessário para o rate limiting por IP.
 app.set('trust proxy', 1);
