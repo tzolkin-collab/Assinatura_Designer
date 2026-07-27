@@ -10,6 +10,7 @@ import { hashInviteToken } from '../lib/invites.js';
 import { z } from 'zod';
 import { parseBody } from '../lib/validate.js';
 import { encryptToken } from '../lib/tokenCrypto.js';
+import { requireAuth, AuthRequest } from '../middleware/auth.js';
 
 export const authRouter = Router();
 
@@ -209,8 +210,6 @@ authRouter.post('/login', rateLimit({ windowSec: 900, max: config.isDev ? 200 : 
   }
 });
 
-// A protected route to test auth
-import { requireAuth, AuthRequest } from '../middleware/auth.js';
 authRouter.get('/me', requireAuth, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const user = await prisma.user.findUnique({
