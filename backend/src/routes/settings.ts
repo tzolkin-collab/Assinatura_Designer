@@ -96,6 +96,40 @@ settingsRouter.put('/:slug/config', async (req: AuthRequest, res: Response, next
       },
     });
 
+    // Sync Logo → Asset: sem isto, a logo salva pela página Branding ficava
+    // invisível na Biblioteca de Mídia (só o confirm-logo do Brandbook criava
+    // o Asset). Mesmo padrão do brands.ts confirm-logo.
+    if (typeof logoUrl === 'string' && logoUrl.trim()) {
+      const brand = await prisma.brand.findUnique({ where: { id: brandId }, select: { name: true } });
+      const fileName = logoUrl.split('/').pop() ?? 'logo';
+      const existingLogoAsset = await prisma.asset.findFirst({
+        where: { brandId, source: 'branding' },
+      });
+      if (existingLogoAsset) {
+        await prisma.asset.update({
+          where: { id: existingLogoAsset.id },
+          data: { url: logoUrl, name: fileName },
+        });
+      } else {
+        const ext = fileName.split('.').pop()?.toLowerCase() ?? 'svg';
+        const fileType = ext === 'svg' ? 'image/svg+xml'
+          : ext === 'png' ? 'image/png'
+          : ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg'
+          : 'image/png';
+        await prisma.asset.create({
+          data: {
+            brandId,
+            name: `Logo — ${brand?.name ?? req.params.slug}`,
+            url: logoUrl,
+            fileType,
+            sizeBytes: 0,
+            source: 'branding',
+            tags: ['logo', 'branding'],
+          },
+        });
+      }
+    }
+
     res.json({ data: config });
   } catch (error) {
     next(error);
