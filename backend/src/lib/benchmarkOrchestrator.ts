@@ -346,12 +346,19 @@ export async function runAutoResearchCycle(brandId: string, slug: string): Promi
     // Instagram de todo mundo sai em 2 execuções do ator, não 2×N).
     const collectedCandidates = await collectAllCandidates(competitors.map(toCandidate));
 
+    // Busca todas as referências em lote para evitar problema de N+1 queries
+    const allCreatedRefIds = previousCandidates.flatMap((c) => c.createdReferenceIds ?? []);
+    const fetchedRefs = await prisma.reference.findMany({
+      where: { id: { in: allCreatedRefIds } },
+    });
+    const refsById = new Map(fetchedRefs.map((r) => [r.id, r]));
+
     for (const candidate of collectedCandidates) {
       const prevCandidate = previousCandidates.find((c) => c.name.toLowerCase() === candidate.name.toLowerCase());
       if (!prevCandidate?.createdReferenceIds?.length) continue; // descoberta nova: v1 não auto-cria, ver plano
 
       for (const refId of prevCandidate.createdReferenceIds) {
-        const ref = await prisma.reference.findUnique({ where: { id: refId } });
+        const ref = refsById.get(refId);
         if (!ref?.analysisUrl) continue;
         await analyzeReferenceFromCollectedMaterial(refId, slug, ref.name, ref.analysisUrl, ref.sourceType, candidate.collected ?? {})
           .catch((err) => logger.error('Falha ao re-analisar referência (pesquisa automática)', { refId, error: (err as Error).message }));
