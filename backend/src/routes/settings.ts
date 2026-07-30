@@ -5,7 +5,6 @@ import bcrypt from 'bcrypt';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import crypto from 'crypto';
 import multer from 'multer';
-import { generateWithRetry } from '../lib/geminiRetry.js';
 import { config } from '../config.js';
 import type { Prisma, BrandRole } from '@prisma/client';
 import prisma from '../lib/prisma.js';
