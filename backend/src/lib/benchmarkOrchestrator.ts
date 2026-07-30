@@ -358,15 +358,18 @@ export async function runAutoResearchCycle(brandId: string, slug: string): Promi
       }
     }
 
+    const refIdsToFail: string[] = [];
     for (const prevCandidate of previousCandidates) {
       const stillFound = competitors.some((f) => f.name.toLowerCase() === prevCandidate.name.toLowerCase());
       if (stillFound || !prevCandidate.createdReferenceIds?.length) continue;
-      for (const refId of prevCandidate.createdReferenceIds) {
-        await prisma.reference.update({
-          where: { id: refId },
-          data: { status: 'FAILED', insightsText: 'Não foi possível re-confirmar este concorrente na última pesquisa automática.' },
-        }).catch(() => {});
-      }
+      refIdsToFail.push(...prevCandidate.createdReferenceIds);
+    }
+
+    if (refIdsToFail.length > 0) {
+      await prisma.reference.updateMany({
+        where: { id: { in: refIdsToFail } },
+        data: { status: 'FAILED', insightsText: 'Não foi possível re-confirmar este concorrente na última pesquisa automática.' },
+      }).catch(() => {});
     }
 
     await synthesizeBenchmarkSummary(brandId);
