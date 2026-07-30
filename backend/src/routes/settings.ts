@@ -1,5 +1,4 @@
 import { Router, Response, NextFunction } from 'express';
-import dns from 'dns/promises';
 import { GoogleGenAI, Type, Schema } from '@google/genai';
 import bcrypt from 'bcrypt';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
