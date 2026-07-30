@@ -72,7 +72,6 @@ canvaRouter.get('/auth-url', async (req: AuthRequest, res: Response, next: NextF
 canvaPublicRouter.get('/callback', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { code, state, error: canvaError, error_description: canvaErrorDescription } = req.query;
-    console.log('[Canva OAuth callback]', req.originalUrl, { code: !!code, state: !!state, canvaError, canvaErrorDescription });
 
     if (canvaError) {
       throw createError(400, `Canva OAuth error: ${canvaError}${canvaErrorDescription ? ` - ${canvaErrorDescription}` : ''}`);
