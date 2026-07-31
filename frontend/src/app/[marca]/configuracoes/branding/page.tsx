@@ -34,6 +34,7 @@ interface BrandConfig {
   guidelines: string;
   logoUrl?: string;
   presentationConfig?: PresentationConfig;
+  ignoreAiCostLimit?: boolean;
 }
 
 interface LogoSuggestions {
@@ -83,6 +84,7 @@ export default function BrandingPage() {
     allowGeneratedGraphics: true,
     allowSvgLayouts: true,
   });
+  const [ignoreAiCostLimit, setIgnoreAiCostLimit] = useState(false);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [extracting, setExtracting] = useState(false);
@@ -94,6 +96,7 @@ export default function BrandingPage() {
     primaryFonts: [primaryFont, secondaryFont].filter(Boolean),
     logoUrl,
     presentationConfig,
+    ignoreAiCostLimit,
     guidelinesData: JSON.stringify(guidelinesData)
   });
   
@@ -133,6 +136,9 @@ export default function BrandingPage() {
         if (cfg.presentationConfig) {
           setPresentationConfig((prev) => ({ ...prev, ...cfg.presentationConfig }));
         }
+        if (cfg.ignoreAiCostLimit !== undefined) {
+          setIgnoreAiCostLimit(cfg.ignoreAiCostLimit);
+        }
         if (cfg.guidelines) {
           try {
             const parsed = JSON.parse(cfg.guidelines);
@@ -154,6 +160,7 @@ export default function BrandingPage() {
             allowGeneratedGraphics: true,
             allowSvgLayouts: true,
           },
+          ignoreAiCostLimit: cfg.ignoreAiCostLimit ?? false,
           guidelinesData: cfg.guidelines || JSON.stringify({
             name: 'Nome da Marca',
             history: 'Resumo sobre o que a marca faz e sua essência',
@@ -177,6 +184,7 @@ export default function BrandingPage() {
         guidelines: JSON.stringify(guidelinesData),
         logoUrl,
         presentationConfig,
+        ignoreAiCostLimit,
       });
       setInitialStateStr(currentStateStr);
       setToast({ message: 'Configurações de branding salvas com sucesso!', type: 'success' });
@@ -232,6 +240,7 @@ export default function BrandingPage() {
               guidelines: JSON.stringify(guidelinesData),
               logoUrl: result.url,
               presentationConfig,
+              ignoreAiCostLimit,
             });
             setToast({ message: 'Logo salvo com sucesso!', type: 'success' });
           } catch {
@@ -521,6 +530,16 @@ export default function BrandingPage() {
                     onChange={(e) => setPresentationConfig(prev => ({ ...prev, allowSvgLayouts: e.target.checked }))}
                   />
                   Permitir composições SVG/CSS
+                </label>
+              </div>
+              <div className={styles.typeRow} style={{ marginTop: 12 }}>
+                <label className={styles.textInput} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <input
+                    type="checkbox"
+                    checked={ignoreAiCostLimit}
+                    onChange={(e) => setIgnoreAiCostLimit(e.target.checked)}
+                  />
+                  Ignorar Limite de Custo de IA
                 </label>
               </div>
             </div>

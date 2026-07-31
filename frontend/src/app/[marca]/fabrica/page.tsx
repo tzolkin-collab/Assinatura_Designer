@@ -493,6 +493,14 @@ export default function FabricaPage() {
                   key={msg.id}
                   message={msg}
                   isStreamingMsg={isStreaming && isLastAiMsg}
+                  onApproveImage={(url) => {
+                    const approveMsg = `Adorei a imagem ${url}. Por favor, aplique ela no meu design usando [EDIT].`;
+                    sendMessage(approveMsg);
+                  }}
+                  onRegenerateImage={(prompt) => {
+                    const regenMsg = `Pode gerar outra imagem para esse prompt? "${prompt}"`;
+                    sendMessage(regenMsg);
+                  }}
                 />
               );
             })

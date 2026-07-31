@@ -58,6 +58,7 @@ export interface PipelineParams {
    *  DUPLICADO e deixava o anterior zumbi em GENERATING. Com o id no job, o
    *  retry continua exatamente no mesmo post. */
   postId?: string;
+  imagePreference?: 'force-ai' | 'unsplash' | 'unsplash-remix';
   /** Roteiro PRÉ-APROVADO pelo usuário no chat (fluxo copy-first): quando
    *  presente, o pipeline NÃO replaneja — gera exatamente estes slides, com a
    *  copy verbatim que cada item carrega. */
@@ -269,7 +270,7 @@ async function runPipelineInner(
       resolvedImages = await resolveImageCandidateDecisions(
         params.imageCandidateDecision.candidates,
         params.imageCandidateDecision.decision,
-        { brandName: brand.name, width, height, brandId: brand.id, postId },
+        { brandName: brand.name, width, height, brandId: brand.id, postId, imagePreference: params.imagePreference },
       ).catch((err) => {
         logger.error('Falha ao aplicar decisão do bundle de imagens; seguindo sem essas imagens', { error: (err as Error).message });
         return new Map<number, ResolvedSlideImage>();
@@ -285,6 +286,7 @@ async function runPipelineInner(
         postId,
         allowGeneratedGraphics: brand.presentationConfig?.allowGeneratedGraphics,
         allowSvgLayouts: brand.presentationConfig?.allowSvgLayouts,
+        imagePreference: params.imagePreference,
       }).catch((err) => {
         logger.error('Resolução de imagens dos slides falhou; seguindo sem imagens geradas', { error: (err as Error).message });
         return { resolved: new Map<number, ResolvedSlideImage>(), pendingCandidates: [] as AmbiguousImageCandidate[] };

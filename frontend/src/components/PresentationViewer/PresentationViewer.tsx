@@ -134,17 +134,47 @@ export default function PresentationViewer({
   useEffect(() => {
     if (!slug) return;
     let cancelled = false;
-    const poll = () => {
-      fetchPresentationChat(slug).then((state) => {
+
+    // Busca o estado inicial e histórico de mensagens
+    fetchPresentationChat(slug).then((state) => {
+      if (cancelled) return;
+      setChatEnabled(state.enabled);
+      if (isOwner) setChatMessages(state.messages);
+    }).catch(() => {});
+
+    // Conecta ao fluxo de eventos em tempo real (SSE) sobre HTTP
+    let es: EventSource | null = null;
+    try {
+      es = new EventSource(`/api/public/presentations/${slug}/events`);
+
+      es.addEventListener('new_message', (evt: MessageEvent) => {
         if (cancelled) return;
-        setChatEnabled(state.enabled);
-        if (isOwner) setChatMessages(state.messages);
-      }).catch(() => {});
+        try {
+          const payload = JSON.parse(evt.data);
+          if (payload.message) {
+            setChatMessages((prev) => {
+              if (prev.some((m) => m.id === payload.message.id)) return prev;
+              return [...prev, payload.message];
+            });
+          }
+        } catch {}
+      });
+
+      es.addEventListener('chat_toggle', (evt: MessageEvent) => {
+        if (cancelled) return;
+        try {
+          const payload = JSON.parse(evt.data);
+          setChatEnabled(!!payload.enabled);
+        } catch {}
+      });
+    } catch {}
+
+    return () => {
+      cancelled = true;
+      es?.close();
     };
-    poll();
-    const t = setInterval(poll, CHAT_POLL_MS);
-    return () => { cancelled = true; clearInterval(t); };
   }, [slug, isOwner]);
+
 
   const unreadCount = Math.max(0, chatMessages.length - seenCount);
 

@@ -70,7 +70,7 @@ settingsRouter.get('/:slug/config', async (req: AuthRequest, res: Response, next
 settingsRouter.put('/:slug/config', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const brandId = await getBrandId(req.params.slug as string, req.user?.userId);
-    const { agentPrompt, primaryFonts, colors, guidelines, logoUrl, presentationConfig, autoResearchEnabled, autoResearchInterval } = req.body;
+    const { agentPrompt, primaryFonts, colors, guidelines, logoUrl, presentationConfig, autoResearchEnabled, autoResearchInterval, ignoreAiCostLimit } = req.body;
 
     const normalizedPresentationConfig =
       presentationConfig === undefined
@@ -81,7 +81,7 @@ settingsRouter.put('/:slug/config', async (req: AuthRequest, res: Response, next
       where: { brandId },
       update: {
         agentPrompt, primaryFonts, colors, guidelines, logoUrl, presentationConfig: normalizedPresentationConfig,
-        autoResearchEnabled, autoResearchInterval,
+        autoResearchEnabled, autoResearchInterval, ignoreAiCostLimit,
       },
       create: {
         brandId,
@@ -91,6 +91,7 @@ settingsRouter.put('/:slug/config', async (req: AuthRequest, res: Response, next
         guidelines: guidelines || '',
         logoUrl,
         presentationConfig: normalizedPresentationConfig,
+        ignoreAiCostLimit: !!ignoreAiCostLimit,
         autoResearchEnabled: !!autoResearchEnabled,
         autoResearchInterval: autoResearchInterval ? Number(autoResearchInterval) : 14,
       },

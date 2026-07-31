@@ -9,9 +9,10 @@ datasource db {
 model User {
   id                 String          @id @default(uuid())
   email              String          @unique
-  password           String
+  password           String?
   name               String
   role               Role            @default(DESIGNER)
+  googleId           String?         @unique
   createdAt          DateTime        @default(now())
   updatedAt          DateTime        @updatedAt
   asanaToken         String?
@@ -46,6 +47,7 @@ model User {
   @@index([canvaOauthState])
   @@index([asanaOauthState])
   @@index([googleOauthState])
+  @@index([googleId])
 }
 
 enum BrandRole {
@@ -96,9 +98,13 @@ model Asset {
   postId String?
   post   Post?   @relation(fields: [postId], references: [id], onDelete: SetNull)
 
+  folderId String?
+  folder   Folder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
+
   @@index([brandId])
   @@index([source])
   @@index([postId])
+  @@index([folderId])
 }
 
 model Notification {
@@ -142,6 +148,7 @@ model BrandConfig {
   updatedAt          DateTime @updatedAt
   brandId            String   @unique
   presentationConfig Json?
+  ignoreAiCostLimit  Boolean  @default(false)
   // Pesquisa automática de benchmark é por marca (substitui o antigo toggle
   // por-referência em Reference.autoSyncEnabled/autoSyncInterval, mantidos no
   // schema mas sem leitor/escritor novo — ver benchmarkOrchestrator.ts).
@@ -283,8 +290,10 @@ model Folder {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   brandId   String
+  type      FolderType @default(POST)
   brand     Brand    @relation(fields: [brandId], references: [id], onDelete: Cascade)
   posts     Post[]
+  assets    Asset[]
 
   parentId  String?
   parent    Folder?  @relation("FolderHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
@@ -340,6 +349,11 @@ enum PostStatus {
   GENERATING
   READY
   FAILED
+}
+
+enum FolderType {
+  POST
+  MEDIA
 }
 
 /// Convite de equipe. Guarda só o HASH do token (SHA-256) — o token cru existe

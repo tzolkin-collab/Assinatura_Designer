@@ -47,6 +47,7 @@ function getBrandNav(marca: string): NavItem[] {
   return [
     { label: 'Galeria', href: `/${marca}/galeria`, icon: <Eye size={18} /> },
     { label: 'Fábrica', href: `/${marca}/fabrica`, icon: <Factory size={18} /> },
+    { label: 'Editor', href: `/${marca}/editor`, icon: <PenTool size={18} /> },
     { label: 'Apresentações Publicadas', href: `/${marca}/apresentacoes`, icon: <Globe size={18} /> },
 
     {

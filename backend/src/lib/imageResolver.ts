@@ -92,6 +92,35 @@ async function fetchAssetImageBase64(url: string): Promise<{ mimeType: string; d
   }
 }
 
+async function extractPromptFromImage(url: string, brandName: string): Promise<string | null> {
+  const asset = await fetchAssetImageBase64(url);
+  if (!asset) return null;
+
+  try {
+    const response = await generateWithRetry(ai, {
+      model: config.models.fast,
+      contents: [{
+        role: 'user',
+        parts: [
+          {
+            text: `Analise esta fotografia e extraia um prompt de geração de imagem extremamente detalhado (estilo Midjourney) baseado nela. 
+Foque em iluminação, composição, cores, ângulos e estilo fotográfico. 
+Não inclua nenhum texto, palavras soltas ou logos. Apenas a descrição fotográfica pura.
+O objetivo é recriar esta exata sensação visual, mas adaptada para a marca: ${brandName}.
+Responda APENAS com o prompt em inglês, sem aspas ou introduções.`,
+          },
+          { inlineData: { mimeType: asset.mimeType, data: asset.data } },
+        ],
+      }],
+      config: { temperature: 0.2 },
+    }, config.models.fast);
+    return response.text?.trim() || null;
+  } catch (err) {
+    logger.warn('Falha ao extrair prompt da imagem do Unsplash para Remix', { error: (err as Error).message });
+    return null;
+  }
+}
+
 // ── Passo 1: decide reaproveitar, gerar ou pular, para cada slide com imageHint ──
 async function decideImagePlan(
   slidesNeedingImage: Array<{ index: number; title: string; hint: string }>,
@@ -166,7 +195,7 @@ Retorne APENAS um array JSON:
 }
 
 // ── Passo 2a: gera uma foto/cena via modelo de imagem (bytes crus, sem upload) ──
-async function generatePhotoBuffer(
+export async function generatePhotoBuffer(
   prompt: string,
   brandName: string,
   width: number,
@@ -257,11 +286,19 @@ async function critiquePhotoCoherence(buffer: Buffer, mimeType: string, descript
 
 // Fração do teto diário de tokens da marca já consumida — usado pra decidir se
 // vale mais buscar uma foto real (Unsplash) do que gerar mais uma por IA.
-async function shouldPreferUnsplashForCost(): Promise<boolean> {
+export async function shouldPreferUnsplashForCost(explicitBrandSlug?: string): Promise<boolean> {
   if (config.aiPhotoFallbackUsageRatio <= 0) return false;
   try {
-    const { brandSlug } = getAiContext();
+    const brandSlug = explicitBrandSlug || getAiContext().brandSlug;
     if (!brandSlug) return false;
+    
+    // Verifica se a marca pediu para ignorar o limite de custo
+    const brand = await prisma.brand.findUnique({
+      where: { slug: brandSlug },
+      include: { config: true }
+    });
+    if (brand?.config?.ignoreAiCostLimit) return false;
+
     const usage = await getUsage(brandSlug);
     if (!usage.brandBudget || usage.brandBudget <= 0) return false;
     return (usage.brandTokens ?? 0) / usage.brandBudget >= config.aiPhotoFallbackUsageRatio;
@@ -290,27 +327,39 @@ async function resolvePhoto(
   width: number,
   height: number,
   brandId: string,
+  imagePreference?: 'force-ai' | 'unsplash' | 'unsplash-remix'
 ): Promise<ResolvedPhoto | null> {
-  if (await shouldPreferUnsplashForCost()) {
+  let actualPrompt = prompt;
+
+  if (imagePreference === 'unsplash-remix') {
     const fromUnsplash = await searchUnsplashPhoto(prompt, width, height, brandId);
     if (fromUnsplash) {
-      logger.info('Gasto de IA elevado — usando foto do Unsplash em vez de gerar', { brandId });
+      logger.info('Remix IA: Extraindo prompt da imagem do Unsplash', { url: fromUnsplash.url });
+      const extractedPrompt = await extractPromptFromImage(fromUnsplash.url, brandName);
+      if (extractedPrompt) {
+        actualPrompt = extractedPrompt;
+      }
+    }
+  } else if (imagePreference === 'unsplash' || (imagePreference !== 'force-ai' && await shouldPreferUnsplashForCost(brandId))) {
+    const fromUnsplash = await searchUnsplashPhoto(prompt, width, height, brandId);
+    if (fromUnsplash) {
+      if (imagePreference !== 'unsplash') logger.info('Gasto de IA elevado — usando foto do Unsplash em vez de gerar', { brandId });
       return { url: fromUnsplash.url, source: 'unsplash', credit: fromUnsplash.photographerName };
     }
     // Unsplash não achou nada bom pro termo — não desiste, tenta gerar mesmo assim.
   }
 
-  const generated = await generatePhotoBuffer(prompt, brandName, width, height);
+  const generated = await generatePhotoBuffer(actualPrompt, brandName, width, height);
   if (generated) {
-    const aprovada = await critiquePhotoCoherence(generated.buffer, generated.mimeType, prompt);
+    const aprovada = await critiquePhotoCoherence(generated.buffer, generated.mimeType, actualPrompt);
     if (aprovada) {
       const url = await uploadFileToR2(generated.buffer, `gerado-${Date.now()}.png`, generated.mimeType, `brands/${brandId}/generated`);
       return { url, source: 'ai-generated' };
     }
-    logger.info('Foto gerada reprovada na autoverificação de coerência — tentando Unsplash antes de desistir', { prompt: prompt.slice(0, 80) });
+    logger.info('Foto gerada reprovada na autoverificação de coerência — tentando Unsplash antes de desistir', { prompt: actualPrompt.slice(0, 80) });
   }
 
-  const fallback = await searchUnsplashPhoto(prompt, width, height, brandId);
+  const fallback = await searchUnsplashPhoto(actualPrompt, width, height, brandId);
   if (fallback) return { url: fallback.url, source: 'unsplash', credit: fallback.photographerName };
 
   return null;
@@ -357,6 +406,7 @@ export interface ResolveSlideImagesParams {
   /** Configuráveis em Presentation Config da marca. Default true — desligar é opt-out. */
   allowGeneratedGraphics?: boolean;
   allowSvgLayouts?: boolean;
+  imagePreference?: 'force-ai' | 'unsplash' | 'unsplash-remix';
 }
 
 export interface ResolveSlideImagesResult {
@@ -442,7 +492,7 @@ export async function resolveSlideImages(params: ResolveSlideImagesParams): Prom
     }
 
     if (decision.action === 'generate-photo') {
-      const photo = await resolvePhoto(decision.generatePrompt, params.brandName, params.width, params.height, params.brandId);
+      const photo = await resolvePhoto(decision.generatePrompt, params.brandName, params.width, params.height, params.brandId, params.imagePreference);
       if (photo) {
         generatedCount++;
         results.set(decision.slideIndex, { imageUrl: photo.url });
@@ -486,7 +536,7 @@ export async function resolveSlideImages(params: ResolveSlideImagesParams): Prom
 export async function resolveImageCandidateDecisions(
   candidates: AmbiguousImageCandidate[],
   decision: 'accept' | 'regenerate',
-  params: Pick<ResolveSlideImagesParams, 'brandName' | 'width' | 'height' | 'brandId' | 'createdById' | 'postId'>,
+  params: Pick<ResolveSlideImagesParams, 'brandName' | 'width' | 'height' | 'brandId' | 'createdById' | 'postId' | 'imagePreference'>,
 ): Promise<Map<number, ResolvedSlideImage>> {
   const results = new Map<number, ResolvedSlideImage>();
 
@@ -496,7 +546,7 @@ export async function resolveImageCandidateDecisions(
   }
 
   for (const c of candidates) {
-    const photo = await resolvePhoto(c.hint, params.brandName, params.width, params.height, params.brandId);
+    const photo = await resolvePhoto(c.hint, params.brandName, params.width, params.height, params.brandId, params.imagePreference);
     if (!photo) continue;
     results.set(c.slideIndex, { imageUrl: photo.url });
     const name = photo.source === 'unsplash'

@@ -251,6 +251,41 @@ assetsRouter.delete('/:assetId', requireBrandRole(EDITORS), async (req: BrandReq
   } catch (error) {
     next(error);
   }
+// PATCH /api/brands/:brandId/assets/:assetId
+const patchAssetSchema = z.object({
+  name: z.string().trim().min(1).optional(),
+  folderId: z.string().nullable().optional(),
+});
+
+assetsRouter.patch('/:assetId', requireBrandRole(EDITORS), async (req: BrandRequest, res: Response, next: NextFunction) => {
+  try {
+    const assetId = req.params.assetId as string;
+    const brand = req.brand!;
+    const { name, folderId } = parseBody(patchAssetSchema, req.body);
+
+    const asset = await prisma.asset.findFirst({
+      where: { id: assetId, brandId: brand.id },
+      select: { id: true },
+    });
+    if (!asset) throw createError(404, 'Asset não encontrado nesta marca.');
+
+    if (folderId) {
+      const folder = await prisma.folder.findFirst({
+        where: { id: folderId, brandId: brand.id, type: 'MEDIA' },
+        select: { id: true },
+      });
+      if (!folder) throw createError(404, 'Pasta pai não encontrada ou não é do tipo MEDIA.');
+    }
+
+    const updated = await prisma.asset.update({
+      where: { id: asset.id },
+      data: { name, folderId },
+    });
+
+    res.json({ data: updated });
+  } catch (error) {
+    next(error);
+  }
 });
 
 // POST /api/brands/:brandId/assets/:assetId/export-canva

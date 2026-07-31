@@ -99,18 +99,65 @@ Conforme o que você seleciona, o painel lateral de propriedades se adapta:
 
 ---
 
-## 4. Biblioteca de Mídia: Uploads e Reutilização
+## 4. Brandbook Inteligente — Memória Visual da Marca
 
-A **Biblioteca de Mídia** armazena todas as imagens, ícones, logotipos e fontes personalizados da marca.
+O **Brandbook Inteligente** é o coração da identidade visual no Designer Assinatura. Ele centraliza diretrizes de marca, paleta de cores, logotipos e grafismos vetoriais — e toda essa informação alimenta a IA para garantir consistência em cada design gerado.
+
+### Como adicionar o Brandbook da marca:
+1. Acesse **Configurações** > **Biblioteca de Mídia**.
+2. Clique em **Adicionar Brandbook Completo** (botão laranja com ícone de estrela).
+3. Escolha a forma de importação:
+   - **Arquivos (PDF / ZIP / SVG / PNG):** Arraste ou selecione o manual da marca em um dos formatos suportados.
+   - **Importar do Canva:** Cole a URL ou ID de um design/template criado no Canva (ex: \`https://www.canva.com/design/DAG.../edit\`).
+4. Clique em **Processar e Indexar Brandbook** (ou **Importar e Indexar do Canva**).
+
+### O que a IA extrai automaticamente:
+| Informação | O que acontece |
+|---|---|
+| 📜 **Diretrizes de Marca** | Tom de voz, regras de identidade visual, proibições e personalidade da marca salvas na memória da IA. |
+| 🎨 **Paleta de Cores** | Todos os hexadecimais detectados são indexados e ficam disponíveis como atalhos de cor no editor. |
+| 🔡 **Tipografias Primárias** | Os nomes das famílias de fontes são registrados para padronização dos designs gerados. |
+| 🖼️ **Logotipos (LOGOTYPE)** | O logotipo oficial é detectado automaticamente. O sistema pede confirmação antes de substituir o logo atual. |
+| ✦ **Grafismos de Marca (GRAPHIC_ELEMENT)** | Estrelas, grafismos de moldura, separadores e padrões de fundo são vetorizados e catalogados. |
+| 🔧 **Ícones e Ilustrações (ILLUSTRATION)** | Conjuntos de ícones de linha (caixas, sacolas, relógios, etc.) são pescados e indexados na biblioteca de mídia. |
+
+### Resultado visível após a indexação:
+- Uma tela de confirmação exibe a paleta de cores detectada, a contagem de SVGs classificados por tipo e um preview do logotipo detectado.
+- Se um novo logotipo foi identificado, você pode clicar em **Substituir pela Nova Logo** para atualizá-lo oficialmente na marca.
+- Todos os SVGs ficam disponíveis na **Biblioteca de Mídia** filtráveis pela tag \`brandbook\`.
+
+### Guia de Prompts para criar assets com IA externa:
+Se você quiser criar assets antes de subir o Brandbook, use este prompt base no **Midjourney, DALL-E 3 ou Recraft v3**:
+\`\`\`
+Vector brand identity kit for "[Nome da Marca]", minimalist visual identity,
+flat vector shapes, brand mark logo, graphic patterns, decorative borders and icons,
+isolated on clean white background, brand color palette [Sua Paleta Hex]
+--no realistic, 3d, photo
+\`\`\`
+Dica: Gere os vetores no **Recraft.ai** e converta para SVG antes do upload, ou deixe a IA do Designer pescar e vetorizar automaticamente ao subir a imagem/PDF.
+
+---
+
+## 5. Biblioteca de Mídia: Uploads e Reutilização
+
+A **Biblioteca de Mídia** armazena todas as imagens, ícones, logotipos e grafismos vetoriais da marca.
 
 ### Como gerenciar e usar assets:
 - **Upload Centralizado:** Vá em **Configurações** > **Biblioteca de Mídia** para fazer upload de arquivos usando arrastar e soltar (Drag & Drop).
 - **Formatos Suportados:** Imagens estáticas (PNG, JPG, WEBP) e vetores (SVG).
+- **Fontes de Assets:** Cada arquivo é rotulado com a sua origem — *Upload*, *Drive*, *Canva*, *Gerado por IA* ou *Brandbook*.
+- **Filtros:** Use os chips de filtro por fonte e por tags para localizar rapidamente ícones, logotipos ou grafismos específicos.
 - **Uso no Editor:** Dentro do editor visual, clique em uma caixa de imagem e selecione **Substituir Imagem**. Um modal abrirá listando todos os arquivos da biblioteca da marca, permitindo trocar o ativo instantaneamente ou fazer o upload de um novo direto pelo editor.
 
 ---
-
-## 5. Co-criação e Histórico de Versões (Undo/Redo)
+`,
+  },
+  {
+    slug: 'documentacao-tecnica',
+    emoji: '🛠️',
+    title: 'Documentação Técnica',
+    description: 'Guia arquitetural, modelo de dados, segurança RBAC, agentes de IA, Brandbook Inteligente e integração Canva.',
+    markdown: `# Documentação Técnica — Designer Assinatura
 
 Editar criativos gerados por IA exige segurança. O Designer Assinatura conta com mecanismos para você testar ideias sem medo de perder o progresso.
 

@@ -19,6 +19,12 @@ export interface PresentationChatMessage {
 
 const enabledKey = (slug: string) => `presentation:chat:${slug}:enabled`;
 const messagesKey = (slug: string) => `presentation:chat:${slug}:messages`;
+export const eventsChannel = (slug: string) => `presentation:chat:${slug}:events`;
+
+export function createPresentationSubscriber() {
+  return redis.duplicate();
+}
+
 
 export async function isChatEnabled(slug: string): Promise<boolean> {
   const val = await redis.get(enabledKey(slug));
@@ -31,6 +37,10 @@ export async function setChatEnabled(slug: string, enabled: boolean): Promise<vo
   } else {
     await redis.del(enabledKey(slug));
   }
+  // Notifica ouvintes em tempo real (SSE) sobre alteração de status do chat
+  try {
+    await redis.publish(eventsChannel(slug), JSON.stringify({ type: 'chat_toggle', enabled }));
+  } catch {}
 }
 
 export async function addChatMessage(slug: string, text: string): Promise<PresentationChatMessage | null> {
@@ -43,6 +53,12 @@ export async function addChatMessage(slug: string, text: string): Promise<Presen
   // Teto de tamanho — uma apresentação lotada não deve crescer a lista pra sempre.
   await redis.ltrim(key, -MAX_MESSAGES, -1);
   await redis.expire(key, TTL_SECONDS);
+
+  // Transmite a nova mensagem instantaneamente via SSE (0ms de latência)
+  try {
+    await redis.publish(eventsChannel(slug), JSON.stringify({ type: 'new_message', message }));
+  } catch {}
+
   return message;
 }
 
@@ -59,3 +75,4 @@ export async function getChatMessages(slug: string): Promise<PresentationChatMes
 export async function clearChat(slug: string): Promise<void> {
   await Promise.all([redis.del(enabledKey(slug)), redis.del(messagesKey(slug))]);
 }
+

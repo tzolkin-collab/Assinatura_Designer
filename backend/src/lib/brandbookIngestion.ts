@@ -159,8 +159,43 @@ export async function processBrandbookIngest({
   const imagePartsForGemini: Array<{ inlineData: { mimeType: string; data: string } }> = [];
   const rawSvgsToProcess: Array<{ filename: string; buffer: Buffer }> = [];
 
+  // Encontra ou cria a pasta "Brandbooks" (MEDIA)
+  let brandbooksFolder = await prisma.folder.findFirst({
+    where: { brandId: brand.id, type: 'MEDIA', name: 'Brandbooks' },
+  });
+  if (!brandbooksFolder) {
+    brandbooksFolder = await prisma.folder.create({
+      data: { brandId: brand.id, type: 'MEDIA', name: 'Brandbooks' },
+    });
+  }
+
   for (const file of files) {
     const filename = file.originalname.toLowerCase();
+
+    // Salva o arquivo RAW no R2 e no banco
+    try {
+      const rawR2Url = await uploadFileToR2(
+        file.buffer, 
+        file.originalname, 
+        file.mimetype || 'application/octet-stream', 
+        `brands/${brand.id}/brandbooks_raw`
+      );
+      await prisma.asset.create({
+        data: {
+          brandId: brand.id,
+          name: file.originalname,
+          url: rawR2Url,
+          fileType: file.mimetype || 'application/octet-stream',
+          sizeBytes: file.size,
+          source: 'brandbook',
+          tags: ['brandbook-raw'],
+          uploadedBy: uploadedByUserId ?? null,
+          folderId: brandbooksFolder.id,
+        },
+      });
+    } catch (rawSaveErr) {
+      console.warn(`Falha ao salvar arquivo RAW ${file.originalname}:`, rawSaveErr);
+    }
 
     let isZipHandled = false;
 
@@ -253,6 +288,7 @@ export async function processBrandbookIngest({
           tags: ['brandbook', classification],
           brandId: brand.id,
           uploadedBy: uploadedByUserId ?? null,
+          folderId: brandbooksFolder.id,
         },
       });
 
@@ -361,6 +397,7 @@ Formato do JSON de resposta:
                   tags: ['brandbook', 'ai-reconstructed', classification],
                   brandId: brand.id,
                   uploadedBy: uploadedByUserId ?? null,
+                  folderId: brandbooksFolder.id,
                 },
               });
 

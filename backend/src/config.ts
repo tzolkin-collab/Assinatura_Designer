@@ -1,4 +1,12 @@
 import dotenv from 'dotenv';
+import fs from 'fs';
+import path from 'path';
+
+// Carrega .env.local primeiro (prioridade)
+if (fs.existsSync(path.resolve(process.cwd(), '.env.local'))) {
+  dotenv.config({ path: path.resolve(process.cwd(), '.env.local') });
+}
+// Fallback para .env padrão (variáveis que já foram carregadas pelo .env.local não serão sobrescritas)
 dotenv.config();
 
 /**

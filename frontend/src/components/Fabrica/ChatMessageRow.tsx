@@ -53,9 +53,11 @@ interface ChatMessageRowProps {
    *  liga o cursor piscante (aiTextStreaming). Fica false (estável) para
    *  todas as mensagens antigas, então nunca invalida o memo delas. */
   isStreamingMsg: boolean;
+  onApproveImage?: (url: string) => void;
+  onRegenerateImage?: (prompt: string) => void;
 }
 
-function ChatMessageRowImpl({ message, isStreamingMsg }: ChatMessageRowProps) {
+function ChatMessageRowImpl({ message, isStreamingMsg, onApproveImage, onRegenerateImage }: ChatMessageRowProps) {
   if (message.role === 'user') {
     const asanaSplit = message.content.split('\n\n[Contexto Asana]\n');
     const mainText = asanaSplit[0];
@@ -102,9 +104,37 @@ function ChatMessageRowImpl({ message, isStreamingMsg }: ChatMessageRowProps) {
       </div>
       <div className={s.aiBubble}>
         {message.thinking && <ThinkingBlock thinking={message.thinking} />}
-        <div className={`${s.aiText} ${isStreamingMsg ? s.aiTextStreaming : ''}`}>
-          <ReactMarkdown>{message.content}</ReactMarkdown>
-        </div>
+        {message.content && (
+          <div className={`${s.aiText} ${isStreamingMsg ? s.aiTextStreaming : ''}`}>
+            <ReactMarkdown>{message.content}</ReactMarkdown>
+          </div>
+        )}
+        {message.imageProposal && (
+          <div className={s.imageProposalWidget}>
+            {message.imageProposal.status === 'generating' && (
+              <div className={s.imageProposalLoading}>
+                <span className={s.imageProposalSpinner} />
+                <span>Gerando imagem...</span>
+              </div>
+            )}
+            {message.imageProposal.status === 'error' && (
+              <div className={s.imageProposalError}>
+                <span>Erro ao gerar imagem: {message.imageProposal.error}</span>
+                <button type="button" onClick={() => onRegenerateImage?.(message.imageProposal!.prompt)}>Tentar Novamente</button>
+              </div>
+            )}
+            {message.imageProposal.status === 'done' && message.imageProposal.url && (
+              <div className={s.imageProposalDone}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={message.imageProposal.url} alt="Imagem gerada" className={s.imageProposalImg} />
+                <div className={s.imageProposalActions}>
+                  <button type="button" className={s.imageProposalApproveBtn} onClick={() => onApproveImage?.(message.imageProposal!.url!)}>Aprovar e Usar</button>
+                  <button type="button" className={s.imageProposalRegenBtn} onClick={() => onRegenerateImage?.(message.imageProposal!.prompt)}>Pedir Outra</button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

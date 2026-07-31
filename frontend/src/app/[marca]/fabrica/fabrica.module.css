@@ -589,6 +589,96 @@
   animation: slideUpFadeMsg 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
+/* -- Image Proposal Widget -- */
+.imageProposalWidget {
+  margin-top: 12px;
+  background-color: var(--color-surface);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 12px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.imageProposalLoading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.imageProposalSpinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(0, 0, 0, 0.1);
+  border-top-color: var(--color-brand);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+.imageProposalError {
+  color: #ef4444;
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.imageProposalError button {
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  background: transparent;
+  color: var(--color-text);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.imageProposalDone {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.imageProposalImg {
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  object-fit: cover;
+}
+
+.imageProposalActions {
+  display: flex;
+  gap: 8px;
+}
+
+.imageProposalApproveBtn, .imageProposalRegenBtn {
+  flex: 1;
+  padding: 8px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+  border: none;
+}
+
+.imageProposalApproveBtn {
+  background-color: var(--color-brand);
+  color: white;
+}
+
+.imageProposalRegenBtn {
+  background-color: rgba(0, 0, 0, 0.04);
+  color: var(--color-text);
+}
+
+.imageProposalApproveBtn:hover, .imageProposalRegenBtn:hover {
+  opacity: 0.8;
+}
+
 /* ── Pergunta ativa (accordion na thread) ────────────────────────────────────── */
 
 .questionAccordion {

@@ -3,16 +3,14 @@
 // dependências pesadas — Redis, WS, filas — que tornam mock-completo frágil pra
 // uma função pura como esta).
 
-// Terceiro segmento da tag é OU "proof" OU uma proporção (retrato/story pro Design
-// — apresentação sempre ignora e fica 16:9). "x" em vez de ":" no segmento de
-// proporção pra não colidir com o separador dos segmentos da própria tag.
 const ASPECT_TOKENS = ['1x1', '4x5', '3x4', '9x16', '16x9'] as const;
-const DISPATCH_TAG_SOURCE = String.raw`\[DISPATCH:(presentation|carousel)(?::(proof|1x1|4x5|3x4|9x16|16x9))?\]`;
+const DISPATCH_TAG_SOURCE = String.raw`\[DISPATCH:([^\]]+)\]`;
 
 export interface ParsedDispatchTag {
   format: 'presentation' | 'carousel';
   isProof: boolean;
   aspectRatio?: string;
+  imagePreference?: 'force-ai' | 'unsplash' | 'unsplash-remix';
 }
 
 function parseAspectRatio(token?: string): string | undefined {
@@ -23,10 +21,27 @@ function parseAspectRatio(token?: string): string | undefined {
 export function parseDispatchTag(response: string): ParsedDispatchTag | null {
   const match = response.match(new RegExp(DISPATCH_TAG_SOURCE, 'i'));
   if (!match) return null;
+  
+  const parts = match[1].toLowerCase().split(':');
+  const formatToken = parts[0];
+  if (formatToken !== 'presentation' && formatToken !== 'carousel') return null;
+
+  for (let i = 1; i < parts.length; i++) {
+    const p = parts[i];
+    if (p !== 'proof' && p !== 'force-ai' && p !== 'unsplash' && p !== 'unsplash-remix' && !(ASPECT_TOKENS as readonly string[]).includes(p)) {
+      return null;
+    }
+  }
+
+  const isProof = parts.includes('proof');
+  const aspectRatioToken = parts.find(p => (ASPECT_TOKENS as readonly string[]).includes(p));
+  const imagePreference = parts.find(p => p === 'force-ai' || p === 'unsplash' || p === 'unsplash-remix') as 'force-ai' | 'unsplash' | 'unsplash-remix' | undefined;
+
   return {
-    format: match[1] as 'presentation' | 'carousel',
-    isProof: match[2]?.toLowerCase() === 'proof',
-    aspectRatio: parseAspectRatio(match[2]),
+    format: formatToken,
+    isProof,
+    aspectRatio: parseAspectRatio(aspectRatioToken),
+    imagePreference,
   };
 }
 

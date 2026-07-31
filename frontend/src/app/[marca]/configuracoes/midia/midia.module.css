@@ -192,3 +192,206 @@
   border: 1px dashed var(--color-border);
   border-radius: var(--radius-xl);
 }
+
+.layout {
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+  margin-top: 24px;
+}
+
+.sidebar {
+  width: 260px;
+  flex-shrink: 0;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: 16px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  position: sticky;
+  top: 24px;
+  max-height: calc(100vh - 100px);
+  overflow-y: auto;
+}
+
+.main {
+  flex: 1;
+  min-width: 0;
+}
+
+.sidebarHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0 16px;
+}
+
+.sidebarHeader h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.addFolderBtn {
+  background: none;
+  border: none;
+  padding: 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--color-text-secondary);
+}
+
+.addFolderBtn:hover {
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+}
+
+.folderList {
+  display: flex;
+  flex-direction: column;
+  padding: 0 8px;
+}
+
+.folderRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  transition: background 0.15s, color 0.15s;
+}
+
+.folderRow:hover {
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+}
+
+.folderCardActive {
+  background: rgba(79,70,229,0.08);
+  color: var(--color-brand);
+}
+
+.folderCardActive:hover {
+  background: rgba(79,70,229,0.12);
+  color: var(--color-brand);
+}
+
+.folderCardDragOver {
+  background: rgba(79,70,229,0.15) !important;
+  outline: 2px dashed var(--color-brand);
+  outline-offset: -2px;
+}
+
+.folderChevron {
+  background: none;
+  border: none;
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: inherit;
+  opacity: 0.5;
+  border-radius: 4px;
+}
+
+.folderChevron:hover:not(:disabled) {
+  opacity: 1;
+  background: var(--color-border);
+}
+
+.folderChevron:disabled {
+  cursor: default;
+}
+
+.chevronPlaceholder {
+  width: 18px;
+  height: 18px;
+}
+
+.folderName {
+  flex: 1;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  user-select: none;
+}
+
+.closeBtn {
+  background: none;
+  border: none;
+  padding: 4px;
+  color: inherit;
+  opacity: 0;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.folderRow:hover .closeBtn {
+  opacity: 0.5;
+}
+
+.closeBtn:hover {
+  opacity: 1 !important;
+  background: var(--color-border);
+}
+
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modalContent {
+  background: var(--color-surface);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  width: 100%;
+  max-width: 400px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1);
+  border: 1px solid var(--color-border);
+}
+
+.modalHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.modalTitle {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.folderForm {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.folderInput {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  background: var(--color-bg-secondary);
+}
+
+.folderInput:focus {
+  outline: none;
+  border-color: var(--color-brand);
+  background: var(--color-surface);
+}

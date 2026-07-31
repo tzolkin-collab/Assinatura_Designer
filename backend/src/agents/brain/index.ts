@@ -32,6 +32,7 @@ import { parseRequestedSlideCount } from '../pipeline.js';
 import { extractBracketedJson, stripBracketedJson, mapDeviationsToEdits } from '../../lib/tagExtract.js';
 import { parseDispatchTag, stripDispatchTag } from '../../lib/dispatchTag.js';
 import { brainTools, executeSkill } from './skills.js';
+import { generatePhotoBuffer } from '../../lib/imageResolver.js';
 
 const ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
 
@@ -105,12 +106,15 @@ function stripQuestionTag(content: string): string {
   return stripBracketedJson(
     stripBracketedJson(
       stripBracketedJson(
-        stripDispatchTag(content),
-        'QUESTION',
+        stripBracketedJson(
+          stripDispatchTag(content),
+          'QUESTION',
+        ),
+        'EDIT',
       ),
-      'EDIT',
+      'MEMORY',
     ),
-    'MEMORY',
+    'GENERATE_IMAGE',
   );
 }
 
@@ -872,6 +876,17 @@ async function detectAndDispatch(
     semArteParaEditar = true;
   }
 
+  // [GENERATE_IMAGE:{...}] — gera uma imagem avulsa no chat para aprovação.
+  const genImageMatch = extractBracketedJson(response, 'GENERATE_IMAGE');
+  if (genImageMatch) {
+    // Processa a imagem em background sem travar.
+    handleImageGeneration(sessionId, session, genImageMatch.json).catch(err => {
+      logger.error('Erro na geração de imagem avulsa', { error: err.message });
+      ws.emit(sessionId, 'image:proposal:error', { message: 'Falha ao gerar imagem' });
+    });
+    // Continua executando (pode haver dispatch ou mais tags junto).
+  }
+
   // [DISPATCH:presentation], [DISPATCH:carousel], [DISPATCH:presentation:proof]
   // ou [DISPATCH:carousel:9x16] (proporção pro Design — ver lib/dispatchTag.ts)
   const dispatch = parseDispatchTag(response);
@@ -891,7 +906,40 @@ async function detectAndDispatch(
     return;
   }
 
-  const { format, isProof, aspectRatio } = dispatch;
+  const { format, isProof, aspectRatio, imagePreference } = dispatch;
+
+  // Intercepta geração se o limite de IA estiver alto e o usuário ainda não decidiu.
+  if (!imagePreference) {
+    const { shouldPreferUnsplashForCost } = await import('../../lib/imageResolver.js');
+    if (await shouldPreferUnsplashForCost(session.brandSlug)) {
+      await updateSession(sessionId, {
+        phase: 'listening',
+        workerStatus: 'idle',
+        activeQuestion: {
+          id: randomUUID(),
+          kind: 'generic',
+          question: 'O limite mensal de imagens por IA desta marca está alto. Deseja usar imagens reais gratuitas (Unsplash) para economizar, ou forçar a geração de imagens por IA?',
+          options: [
+            { id: 'unsplash', label: 'Usar imagens do Unsplash (Econômico)', description: 'Usa imagens de banco de imagens gratuitas' },
+            { id: 'force-ai', label: 'Forçar geração por IA', description: 'Consome a cota mensal mesmo assim' },
+            { id: 'unsplash-remix', label: 'Remix IA (Baseado no Unsplash)', description: 'Extrai o prompt perfeito de uma foto real e recria' },
+          ],
+          allowFreeform: false,
+          allowSkip: false,
+          mode: session.reviewMode,
+        }
+      });
+      const atual = await getSession(sessionId);
+      if (atual) emitSessionState(sessionId, atual);
+      // Injeta uma instrução interna no histórico para que a IA saiba como re-despachar após a resposta
+      await appendMessage(sessionId, {
+        role: 'system',
+        content: `A geração foi pausada por controle de custos. Após o usuário responder a pergunta sobre IA vs Unsplash, re-emita a tag de geração incluindo o modificador escolhido (ex: [DISPATCH:${format}:force-ai], [DISPATCH:${format}:unsplash] ou [DISPATCH:${format}:unsplash-remix]).`,
+        timestamp: Date.now(),
+      });
+      return;
+    }
+  }
 
   // Concatena as intenções do usuário para formar o brief completo (essencial para edições)
   const fullBrief = session.messages
@@ -925,7 +973,7 @@ async function detectAndDispatch(
   // Enfileira a geração (durável, com retry) — não bloqueia o stream. O erro
   // aqui é só de enfileiramento (ex.: Redis fora); falhas da geração em si são
   // tratadas no worker (queue.ts) e notificadas via ws.
-  enqueuePipeline({ sessionId, brief: fullBrief, format, generateStyleProofOnly: isProof, attachmentImages, aspectRatio }).catch(err => {
+  enqueuePipeline({ sessionId, brief: fullBrief, format, generateStyleProofOnly: isProof, attachmentImages, aspectRatio, imagePreference }).catch(err => {
     logger.error('Falha ao enfileirar o pipeline', { error: (err as Error).message });
     ws.error(sessionId, `Erro ao iniciar a geração: ${err instanceof Error ? err.message : String(err)}`);
   });
@@ -1116,4 +1164,44 @@ async function applySlideEdits(
   ws.token(sessionId, resumo + aviso);
 
   return { outcome: 'editado', changed };
+}
+
+// ── Geração de Imagem Avulsa (Rascunho) ───────────────────────────────────────
+
+async function handleImageGeneration(
+  sessionId: string,
+  session: NonNullable<Awaited<ReturnType<typeof getSession>>>,
+  payload: string,
+): Promise<void> {
+  let prompt: string;
+  let id: string;
+  try {
+    const data = JSON.parse(payload);
+    prompt = data.prompt;
+    id = data.id || randomUUID().slice(0, 8);
+    if (!prompt) throw new Error('Sem prompt');
+  } catch (err) {
+    logger.warn('JSON inválido na tag GENERATE_IMAGE', { payload });
+    return;
+  }
+
+  // Avisa o cliente que começou a gerar
+  ws.emit(sessionId, 'image:proposal:start', { id, prompt });
+
+  try {
+    const brandName = session.brandSlug;
+    // 1080x1080 padrão para rascunhos de chat
+    const result = await generatePhotoBuffer(prompt, brandName, 1080, 1080);
+    if (!result) {
+      throw new Error('Falha na geração (modelo retornou null ou estourou teto)');
+    }
+
+    const filename = `chat-gen-${id}.png`;
+    const url = await uploadFileToR2(result.buffer, filename, result.mimeType, `brands/${session.brandSlug}/chat-attachments`);
+
+    ws.emit(sessionId, 'image:proposal:done', { id, prompt, url });
+  } catch (err) {
+    logger.error('Erro na geração de imagem avulsa', { error: (err as Error).message });
+    ws.emit(sessionId, 'image:proposal:error', { id, message: (err as Error).message });
+  }
 }

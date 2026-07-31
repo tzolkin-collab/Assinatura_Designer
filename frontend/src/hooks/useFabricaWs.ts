@@ -25,6 +25,13 @@ export interface FabricaMessage {
   timestamp: number;
   attachments?: FabricaAttachment[];
   thinking?: string;
+  imageProposal?: {
+    id: string;
+    prompt: string;
+    status: 'generating' | 'done' | 'error';
+    url?: string;
+    error?: string;
+  };
 }
 
 export interface FabricaNotification {
@@ -158,6 +165,27 @@ export function useFabricaWs(brandSlug: string, initialSessionId?: string | null
           }
           return prev;
         });
+        break;
+      }
+
+      case 'image:proposal:start': {
+        const { id, prompt } = data as { id: string; prompt: string };
+        setMsgs(prev => [
+          ...prev,
+          { id: `proposal-${id}`, role: 'assistant', content: '', timestamp: Date.now(), imageProposal: { id, prompt, status: 'generating' } }
+        ]);
+        break;
+      }
+
+      case 'image:proposal:done': {
+        const { id, url } = data as { id: string; url: string };
+        setMsgs(prev => prev.map(m => m.id === `proposal-${id}` ? { ...m, imageProposal: { ...m.imageProposal!, status: 'done', url } } : m));
+        break;
+      }
+
+      case 'image:proposal:error': {
+        const { id, message } = data as { id: string; message: string };
+        setMsgs(prev => prev.map(m => m.id === `proposal-${id}` ? { ...m, imageProposal: { ...m.imageProposal!, status: 'error', error: message } } : m));
         break;
       }
 

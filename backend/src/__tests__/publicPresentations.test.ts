@@ -1,9 +1,34 @@
 import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 import request from 'supertest';
 import { prismaMock } from './client';
-import { app } from '../app';
 import jwt from 'jsonwebtoken';
-import * as presentationChat from '../lib/presentationChat';
+
+const { mockDuplicate, mockPublish } = vi.hoisted(() => {
+  const mockSub = {
+    on: vi.fn(),
+    subscribe: vi.fn(async () => undefined),
+    unsubscribe: vi.fn(async () => undefined),
+    quit: vi.fn(async () => undefined),
+  };
+  return {
+    mockDuplicate: vi.fn(() => mockSub),
+    mockPublish: vi.fn(async () => 1),
+  };
+});
+
+vi.mock('../lib/redis.js', () => ({
+  redis: {
+    duplicate: mockDuplicate,
+    publish: mockPublish,
+    get: vi.fn(async () => null),
+    set: vi.fn(async () => 'OK'),
+    del: vi.fn(async () => 1),
+    rpush: vi.fn(async () => 1),
+    lrange: vi.fn(async () => []),
+    ltrim: vi.fn(async () => 'OK'),
+    expire: vi.fn(async () => 1),
+  },
+}));
 
 vi.mock('jsonwebtoken', () => ({
   default: {
@@ -19,10 +44,21 @@ vi.mock('../lib/presentationChat', () => ({
   addChatMessage: vi.fn(async () => null),
   getChatMessages: vi.fn(async () => []),
   clearChat: vi.fn(async () => undefined),
+  eventsChannel: vi.fn((slug: string) => `presentation:chat:${slug}:events`),
+  createPresentationSubscriber: vi.fn(() => ({
+    on: vi.fn(),
+    subscribe: vi.fn(async () => undefined),
+    unsubscribe: vi.fn(async () => undefined),
+    quit: vi.fn(async () => undefined),
+  })),
 }));
+
+import { app } from '../app';
+import * as presentationChat from '../lib/presentationChat';
 
 const mockedVerify = jwt.verify as unknown as Mock;
 const auth = (r: request.Test) => r.set('Authorization', 'Bearer token');
+
 
 describe('GET /api/public/presentations/:slug', () => {
   beforeEach(() => {
@@ -256,3 +292,35 @@ describe('POST /api/posts/:id/chat/toggle', () => {
     expect(prismaMock.post.findFirst).not.toHaveBeenCalled();
   });
 });
+
+describe('GET /api/public/presentations/:slug/events (SSE)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('404 se a apresentação não existe/não está publicada', async () => {
+    prismaMock.post.findFirst.mockResolvedValue(null);
+    const res = await request(app).get('/api/public/presentations/nao-existe/events');
+    expect(res.status).toBe(404);
+  });
+
+  it('inicia o streaming com headers SSE (text/event-stream)', async () => {
+    prismaMock.post.findFirst.mockResolvedValue({ id: 'post-1' });
+
+    const res = await new Promise<any>((resolve) => {
+      const req = request(app)
+        .get('/api/public/presentations/abc123/events')
+        .parse((r, cb) => {
+          resolve(r);
+          cb(null, '');
+        });
+      req.end();
+    });
+
+    expect(res.headers['content-type']).toContain('text/event-stream');
+    expect(res.headers['cache-control']).toContain('no-cache');
+  });
+});
+
+
+

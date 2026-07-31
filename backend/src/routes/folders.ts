@@ -17,6 +17,7 @@ export const foldersRouter = Router();
 const createFolderSchema = z.object({
   name: z.string().trim().min(1, 'Folder name is required'),
   parentId: z.string().nullish(),
+  type: z.enum(['POST', 'MEDIA']).optional(),
 });
 
 const patchFolderSchema = z
@@ -28,7 +29,7 @@ const patchFolderSchema = z
     message: 'Informe ao menos um campo: name ou parentId.',
   });
 
-const FOLDER_FIELDS = { id: true, name: true, parentId: true, createdAt: true } as const;
+const FOLDER_FIELDS = { id: true, name: true, parentId: true, type: true, createdAt: true } as const;
 
 /**
  * Resolve o pai de uma pasta: precisa existir E ser da mesma marca. Sem esta
@@ -72,8 +73,11 @@ foldersRouter.get('/:slug', requireBrandRole(ANY_MEMBER), async (req: BrandReque
   try {
     const brand = req.brand!;
 
+    const typeParam = req.query.type as string | undefined;
+    const typeFilter = typeParam === 'MEDIA' ? 'MEDIA' : 'POST';
+
     const folders = await prisma.folder.findMany({
-      where: { brandId: brand.id },
+      where: { brandId: brand.id, type: typeFilter },
       select: FOLDER_FIELDS,
       orderBy: { createdAt: 'desc' },
     });
@@ -87,14 +91,16 @@ foldersRouter.get('/:slug', requireBrandRole(ANY_MEMBER), async (req: BrandReque
 // POST /api/folders/:brandSlug — cria pasta, opcionalmente dentro de outra.
 foldersRouter.post('/:slug', requireBrandRole(EDITORS), async (req: BrandRequest, res: Response, next: NextFunction) => {
   try {
-    const { name, parentId } = parseBody(createFolderSchema, req.body);
+    const { name, parentId, type } = parseBody(createFolderSchema, req.body);
 
     const brand = req.brand!;
 
     if (parentId) await assertParentInBrand(parentId, brand.id);
 
+    const folderType = type === 'MEDIA' ? 'MEDIA' : 'POST';
+
     const folder = await prisma.folder.create({
-      data: { name, brandId: brand.id, parentId: parentId ?? null },
+      data: { name, brandId: brand.id, parentId: parentId ?? null, type: folderType },
       select: FOLDER_FIELDS,
     });
 

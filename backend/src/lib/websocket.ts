@@ -20,7 +20,10 @@ export type WsEventType =
   | 'notification'
   | 'session:state'
   | 'thinking'
-  | 'error';
+  | 'error'
+  | 'image:proposal:start'
+  | 'image:proposal:done'
+  | 'image:proposal:error';
 
 export interface WsEvent {
   type: WsEventType;

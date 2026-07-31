@@ -1,0 +1,1 @@
+import 'dotenv/config'; import { prisma } from './src/lib/prisma'; async function main() { const posts = await prisma.post.findUnique({ where: { id: '1ebf049e-bdf7-4862-b83c-343f5a13e868' }, include: { generatedAssets: true } }); console.log('Post Assets:', JSON.stringify(posts.generatedAssets, null, 2)); } main().finally(() => prisma.$disconnect());

@@ -144,7 +144,12 @@ export default function EditorPage() {
     }
   }, [postId]);
 
-  useEffect(() => { void carregar(); }, [carregar]);
+  useEffect(() => {
+    void carregar();
+    if (postId && marca) {
+      localStorage.setItem(`editor_last_post_${marca}`, postId);
+    }
+  }, [carregar, postId, marca]);
 
   const carregarVersoes = useCallback(async () => {
     try {

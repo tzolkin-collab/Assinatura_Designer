@@ -11,6 +11,7 @@ import { z } from 'zod';
 import { parseBody } from '../lib/validate.js';
 import { encryptToken } from '../lib/tokenCrypto.js';
 import { requireAuth, AuthRequest } from '../middleware/auth.js';
+import { generateOAuthState, exchangeAuthorizationCode } from '../lib/connectorOAuth.js';
 
 export const authRouter = Router();
 
@@ -188,7 +189,7 @@ authRouter.post('/login', rateLimit({ windowSec: 900, max: config.isDev ? 200 : 
     const { email, password } = parseBody(loginSchema, req.body);
 
     const user = await prisma.user.findUnique({ where: { email } });
-    if (!user) {
+    if (!user || !user.password) {
       // Gasta o mesmo tempo de um compare real para não vazar a existência do email.
       await bcrypt.compare(password, DUMMY_PASSWORD_HASH);
       throw createError(401, 'Invalid credentials');
@@ -205,6 +206,162 @@ authRouter.post('/login', rateLimit({ windowSec: 900, max: config.isDev ? 200 : 
         token,
       }
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── Google OAuth Login ──────────────────────────────────────────────────────
+
+const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
+const GOOGLE_USERINFO_URL = 'https://www.googleapis.com/oauth2/v3/userinfo';
+
+function parseCookies(req: Request): Record<string, string> {
+  const list: Record<string, string> = {};
+  const rc = req.headers.cookie;
+  if (rc) {
+    rc.split(';').forEach((cookie) => {
+      const parts = cookie.split('=');
+      if (parts.length >= 2) {
+        list[parts[0].trim()] = decodeURIComponent(parts.slice(1).join('=').trim());
+      }
+    });
+  }
+  return list;
+}
+
+function getFrontendUrl(): string {
+  const corsOrigins = config.corsOrigin.split(',').map((s) => s.trim()).filter(Boolean);
+  return corsOrigins[0] || 'http://localhost:3000';
+}
+
+// GET /api/auth/google/login — inicia fluxo de login via Google OAuth2
+authRouter.get('/google/login', (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const clientId = process.env.GOOGLE_CLIENT_ID;
+    if (!clientId) {
+      throw createError(500, 'GOOGLE_CLIENT_ID não está configurado no .env');
+    }
+
+    const redirectPath = (req.query.redirect as string) || '/galeria';
+    const redirectUri = process.env.GOOGLE_OAUTH_LOGIN_REDIRECT_URI || `${req.protocol}://${req.get('host')}/api/auth/google/callback`;
+
+    const stateNonce = generateOAuthState();
+    const stateValue = `${stateNonce}:${redirectPath}`;
+
+    res.setHeader(
+      'Set-Cookie',
+      `oauth_login_state=${encodeURIComponent(stateValue)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=600`
+    );
+
+    const params = new URLSearchParams({
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      response_type: 'code',
+      scope: 'openid email profile',
+      state: stateNonce,
+      prompt: 'select_account',
+    });
+
+    const url = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
+
+    if (req.headers.accept?.includes('application/json') || req.query.json === 'true') {
+      res.json({ data: { url } });
+    } else {
+      res.redirect(url);
+    }
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/auth/google/callback — callback público do Google OAuth2 para login
+authRouter.get('/google/callback', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { code, state, error } = req.query as { code?: string; state?: string; error?: string };
+
+    if (error) {
+      throw createError(400, `Google OAuth error: ${error}`);
+    }
+    if (!code || !state) {
+      throw createError(400, 'Code e state são obrigatórios.');
+    }
+
+    const cookies = parseCookies(req);
+    const rawStateCookie = cookies['oauth_login_state'] || '';
+    const [savedNonce, savedRedirect] = rawStateCookie.split(':');
+
+    if (!savedNonce || savedNonce !== state) {
+      throw createError(400, 'Estado OAuth (CSRF) inválido ou expirado. Tente novamente.');
+    }
+
+    const clientId = process.env.GOOGLE_CLIENT_ID;
+    const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+    const redirectUri = process.env.GOOGLE_OAUTH_LOGIN_REDIRECT_URI || `${req.protocol}://${req.get('host')}/api/auth/google/callback`;
+
+    if (!clientId || !clientSecret) {
+      throw createError(500, 'Credenciais do Google (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET) não configuradas no .env');
+    }
+
+    // Troca o code pelos tokens
+    const tokens = await exchangeAuthorizationCode(GOOGLE_TOKEN_URL, {
+      code,
+      client_id: clientId,
+      client_secret: clientSecret,
+      redirect_uri: redirectUri,
+      grant_type: 'authorization_code',
+    });
+
+    // Busca dados do usuário no Google UserInfo
+    const userInfoRes = await fetch(GOOGLE_USERINFO_URL, {
+      headers: { Authorization: `Bearer ${tokens.access_token}` },
+    });
+
+    if (!userInfoRes.ok) {
+      const errText = await userInfoRes.text().catch(() => '');
+      throw createError(500, `Falha ao buscar perfil do usuário no Google: ${errText.slice(0, 200)}`);
+    }
+
+    const userInfo = (await userInfoRes.json()) as { sub: string; email: string; name?: string };
+
+    if (!userInfo.email) {
+      throw createError(400, 'A conta do Google não forneceu um endereço de email válido.');
+    }
+
+    const normalizedEmail = userInfo.email.trim().toLowerCase();
+
+    // 1. Busca por googleId
+    let user = await prisma.user.findUnique({ where: { googleId: userInfo.sub } });
+
+    if (!user) {
+      // 2. Busca por email para vincular conta existente
+      const existingUser = await prisma.user.findUnique({ where: { email: normalizedEmail } });
+      if (existingUser) {
+        user = await prisma.user.update({
+          where: { id: existingUser.id },
+          data: { googleId: userInfo.sub },
+        });
+      } else {
+        // 3. Cria nova conta
+        user = await prisma.user.create({
+          data: {
+            email: normalizedEmail,
+            name: userInfo.name || normalizedEmail.split('@')[0],
+            googleId: userInfo.sub,
+          },
+        });
+        ensureInternalTeamMemberships().catch(() => {});
+      }
+    }
+
+    const token = jwt.sign({ userId: user.id, role: user.role }, config.jwtSecret, { expiresIn: '7d' });
+
+    // Limpa o cookie de estado
+    res.setHeader('Set-Cookie', 'oauth_login_state=; Path=/; HttpOnly; Max-Age=0');
+
+    const frontendUrl = getFrontendUrl();
+    const finalRedirect = savedRedirect && savedRedirect.startsWith('/') ? savedRedirect : '/galeria';
+    res.redirect(`${frontendUrl}/auth/callback?token=${encodeURIComponent(token)}&next=${encodeURIComponent(finalRedirect)}`);
   } catch (error) {
     next(error);
   }
@@ -241,3 +398,4 @@ authRouter.get('/me', requireAuth, async (req: AuthRequest, res: Response, next:
     next(error);
   }
 });
+

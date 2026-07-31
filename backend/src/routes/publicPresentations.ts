@@ -5,7 +5,7 @@ import { config } from '../config.js';
 import { createError } from '../middleware/errorHandler.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { mergeSlidesIntoPost } from '../lib/postHelper.js';
-import { isChatEnabled, addChatMessage, getChatMessages } from '../lib/presentationChat.js';
+import { isChatEnabled, addChatMessage, getChatMessages, eventsChannel, createPresentationSubscriber } from '../lib/presentationChat.js';
 
 // Rota pública (sem sessão nossa) — quem acessa é qualquer visitante com o link,
 // não um usuário logado. Nunca devolve brandId/createdById/status ou qualquer
@@ -110,6 +110,64 @@ publicPresentationsRouter.get(
   },
 );
 
+// GET /api/public/presentations/:slug/events — SSE (Server-Sent Events) em tempo real:
+// Transmite novas mensagens de perguntas e status do chat (chat_toggle) sem necessidade de polling.
+publicPresentationsRouter.get(
+  '/:slug/events',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const slug = req.params.slug as string;
+      const post = await prisma.post.findFirst({
+        where: { publicSlug: slug, publishedAt: { not: null } },
+        select: { id: true },
+      });
+      if (!post) throw createError(404, 'Apresentação não encontrada ou não publicada');
+
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache, no-transform');
+      res.setHeader('Connection', 'keep-alive');
+      res.setHeader('X-Accel-Buffering', 'no');
+      res.flushHeaders?.();
+
+      // Envia evento inicial de heartbeat/ping
+      res.write(': ping\n\n');
+
+      const heartbeat = setInterval(() => {
+        try {
+          res.write(': ping\n\n');
+        } catch {
+          clearInterval(heartbeat);
+        }
+      }, 15000);
+
+      const channel = eventsChannel(slug);
+      const subClient = createPresentationSubscriber();
+
+      subClient.on('message', (chan, rawMessage) => {
+        if (chan === channel) {
+          try {
+            const payload = JSON.parse(rawMessage);
+            const eventName = payload.type || 'message';
+            res.write(`event: ${eventName}\ndata: ${JSON.stringify(payload)}\n\n`);
+          } catch {
+            res.write(`data: ${rawMessage}\n\n`);
+          }
+        }
+      });
+
+      await subClient.subscribe(channel);
+
+      req.on('close', () => {
+        clearInterval(heartbeat);
+        subClient.unsubscribe(channel).catch(() => {});
+        subClient.quit().catch(() => {});
+      });
+    } catch (error) {
+      next(error);
+    }
+  },
+);
+
 // POST /api/public/presentations/:slug/chat — a plateia manda uma pergunta.
 // Rate limit bem mais apertado que o de leitura: é o único ponto de escrita
 // anônima desta rota inteira.
@@ -138,3 +196,4 @@ publicPresentationsRouter.post(
     }
   },
 );
+
