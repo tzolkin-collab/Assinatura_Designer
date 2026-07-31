@@ -170,7 +170,8 @@ Regras Importantes:
 3. Distribua os tipos de slides (layout_type) para criar um ritmo visual dinâmico.
 4. ${countRule}
 5. imageHint é opcional e raro — a maioria dos slides deve usar tipografia/gradiente/forma, não foto. Só preencha quando uma imagem/foto/ilustração real agregar (ex: produto, pessoa, cenário, ícone complexo). Descreva o CONTEÚDO visual, não o estilo.
-6. Retorne APENAS o array JSON limpo, sem marcações de código markdown (como \`\`\`json).${copyBlock.rules}
+6. Retorne APENAS o array JSON limpo, sem marcações de código markdown (como \`\`\`json).
+7. FIDELIDADE ESTRITA (ZERO INVENÇÃO): NUNCA invente estatísticas, porcentagens, valores financeiros ou fatos que não constem no briefing ou no contexto da marca. Se o briefing não fornecer um dado numérico, use explicações qualitativas ou marcadores explícitos.${copyBlock.rules}
 
 ## Briefing do usuário:
 ${params.brief}
