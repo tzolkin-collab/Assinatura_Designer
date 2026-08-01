@@ -251,6 +251,8 @@ assetsRouter.delete('/:assetId', requireBrandRole(EDITORS), async (req: BrandReq
   } catch (error) {
     next(error);
   }
+});
+
 // PATCH /api/brands/:brandId/assets/:assetId
 const patchAssetSchema = z.object({
   name: z.string().trim().min(1).optional(),

@@ -35,7 +35,7 @@ describe('Hierarquia de pastas', () => {
       expect(res.status).toBe(201);
       expect(res.body.data.parentId).toBe('pai');
       expect(prismaMock.folder.create).toHaveBeenCalledWith(
-        expect.objectContaining({ data: { name: 'Campanha', brandId: 'brand-1', parentId: 'pai' } }),
+        expect.objectContaining({ data: { name: 'Campanha', brandId: 'brand-1', parentId: 'pai', type: 'POST' } }),
       );
     });
 
@@ -58,7 +58,7 @@ describe('Hierarquia de pastas', () => {
       expect(res.status).toBe(201);
       expect(prismaMock.folder.findFirst).not.toHaveBeenCalled(); // nem procura pai
       expect(prismaMock.folder.create).toHaveBeenCalledWith(
-        expect.objectContaining({ data: { name: 'Raiz', brandId: 'brand-1', parentId: null } }),
+        expect.objectContaining({ data: { name: 'Raiz', brandId: 'brand-1', parentId: null, type: 'POST' } }),
       );
     });
   });
