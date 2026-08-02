@@ -1,5 +1,5 @@
 import { getAiContext } from "./aiContext.js";
-import { recordStep } from "./generationTracing.js";
+import { recordStep, ensureRun } from "./generationTracing.js";
 import { GoogleGenAI } from '@google/genai';
 import { assertWithinBudget, recordUsage } from './aiBudget.js';
 import { acquireSlot, releaseSlot, onRateLimited, onSuccess } from './aiThrottle.js';
@@ -602,9 +602,9 @@ export async function generateWithRetry(
       await recordUsage(model, result.usageMetadata);
     } catch (err) {
       try {
-          if (!ctx.runId) { ctx.runId = crypto.randomUUID(); await import('./generationTracing.js').then(m => m.openRun)({ id: ctx.runId, brandId: ctx.brandSlug || 'unknown', feature: ctx.feature || 'utility' }); }
-          recordStep({
-            runId: ctx.runId,
+          const runId = await ensureRun();
+          if (runId) recordStep({
+            runId,
             kind: 'MODEL',
             role: Object.entries(config.models).find(([_, m]) => m === preferido)?.[0] || 'utility',
             model,
@@ -619,10 +619,9 @@ export async function generateWithRetry(
     }
 
     try {
-      if (!ctx.runId) { ctx.runId = crypto.randomUUID(); await import('./generationTracing.js').then(m => m.openRun)({ id: ctx.runId, brandId: ctx.brandSlug || 'unknown', feature: ctx.feature || 'utility' }); }
-
-      recordStep({
-        runId: ctx.runId,
+      const runId = await ensureRun();
+      if (runId) recordStep({
+        runId,
         kind: 'MODEL',
         role: Object.entries(config.models).find(([_, m]) => m === preferido)?.[0] || 'utility',
         model,
@@ -661,16 +660,19 @@ async function* meterStream(
 
   for await (const chunk of stream) {
     if (chunk.usageMetadata) ultimoUso = chunk.usageMetadata;
-    if (typeof chunk.text === 'function') fullResponse += chunk.text();
+    // `text` é getter no @google/genai, não método — o resto do código já lê
+    // assim (`response.text ?? ...`). Testar por 'function' dava sempre falso e
+    // a resposta do chat nunca entrava no trace.
+    fullResponse += chunk.text ?? '';
     yield chunk;
   }
   await recordUsage(model, ultimoUso as Parameters<typeof recordUsage>[1]);
 
   const ctx = getAiContext();
   try {
-    if (!ctx.runId) { ctx.runId = crypto.randomUUID(); await import('./generationTracing.js').then(m => m.openRun)({ id: ctx.runId, brandId: ctx.brandSlug || 'unknown', feature: ctx.feature || 'utility' }); }
-    recordStep({
-      runId: ctx.runId,
+    const runId = await ensureRun();
+    if (runId) recordStep({
+      runId,
       kind: 'MODEL',
       role: Object.entries(config.models).find(([_, m]) => m === preferido)?.[0] || 'utility',
       model,
