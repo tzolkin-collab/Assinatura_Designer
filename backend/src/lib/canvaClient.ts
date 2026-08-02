@@ -22,7 +22,8 @@ export { generateOAuthState };
 
 // ── Authorization URL Builder ──
 
-export function buildAuthorizationUrl(codeChallenge: string, state: string): string {
+export function buildAuthorizationUrl(codeChallenge: string, state: string, redirectUri?: string): string {
+  const finalRedirectUri = redirectUri || config.canvaRedirectUri;
   const params = new URLSearchParams({
     code_challenge: codeChallenge,
     code_challenge_method: 'S256',
@@ -30,7 +31,7 @@ export function buildAuthorizationUrl(codeChallenge: string, state: string): str
     response_type: 'code',
     client_id: config.canvaClientId,
     state,
-    redirect_uri: config.canvaRedirectUri,
+    redirect_uri: finalRedirectUri,
   });
   return `${CANVA_AUTH_BASE}/authorize?${params.toString()}`;
 }
@@ -54,13 +55,15 @@ export interface CanvaTokenResponse {
 
 export async function exchangeCodeForTokens(
   code: string,
-  codeVerifier: string
+  codeVerifier: string,
+  redirectUri?: string
 ): Promise<CanvaTokenResponse> {
+  const finalRedirectUri = redirectUri || config.canvaRedirectUri;
   const body = new URLSearchParams({
     grant_type: 'authorization_code',
     code,
     code_verifier: codeVerifier,
-    redirect_uri: config.canvaRedirectUri,
+    redirect_uri: finalRedirectUri,
   });
 
   const response = await fetch(CANVA_TOKEN_URL, {
