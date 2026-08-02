@@ -9,6 +9,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
  * viaja sozinho: quem entra no pipeline abre um escopo e todo mundo lá dentro lê.
  */
 export interface AiContext {
+  runId?: string;
   brandSlug?: string;
   sessionId?: string;
   userId?: string;
