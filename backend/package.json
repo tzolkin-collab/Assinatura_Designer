@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Backend API for Assinatura Design Studio",
   "main": "dist/server.js",
+  "packageManager": "pnpm@11.18.0",
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "dev:local": "cross-env PORT=4000 NODE_ENV=development tsx watch src/server.ts",
