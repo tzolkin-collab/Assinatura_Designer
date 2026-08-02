@@ -1,3 +1,5 @@
+import { getAiContext } from "./aiContext.js";
+import { recordStep } from "./generationTracing.js";
 import { GoogleGenAI } from '@google/genai';
 import { assertWithinBudget, recordUsage } from './aiBudget.js';
 import { acquireSlot, releaseSlot, onRateLimited, onSuccess } from './aiThrottle.js';
@@ -545,6 +547,23 @@ function withTimeout(params: GenerateContentParams, model: string): GenerateCont
 /**
  * Chama ai.models.generateContent com retry, fallback dentro do tier e teto de gasto.
  */
+function extractPromptText(params: GenerateContentParams): string | undefined {
+  if (typeof params.contents === 'string') return params.contents;
+  if (Array.isArray(params.contents)) {
+    return params.contents.map(c => {
+      if (typeof c === 'string') return c;
+      if (typeof c === 'object' && c && 'role' in c) {
+        if (Array.isArray(c.parts)) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          return c.parts.map((p: any) => p.text || '').join('');
+        }
+      }
+      return '';
+    }).join('\n');
+  }
+  return JSON.stringify(params.contents);
+}
+
 export async function generateWithRetry(
   ai: GoogleGenAI,
   params: GenerateContentParams,
@@ -561,10 +580,62 @@ export async function generateWithRetry(
   // ~10 chamadas pedindo flash-lite rodavam no tier "rápido" (3.5-flash, ~6x o
   // preço) sem ninguém pedir — item 3.3 da auditoria de 07-15.
   const preferido = preferredModel ?? params.model;
+  const attemptedModels: string[] = [];
+  const startTime = Date.now();
+  const ctx = getAiContext();
 
-  return runWithFallback(buildModelList(preferido), hooks, async (model) => {
-    const result = await ai.models.generateContent(withTimeout(params, model));
-    await recordUsage(model, result.usageMetadata);
+  const customHooks: GeminiRetryHooks = {
+    onFallback: (info) => {
+      if (!attemptedModels.includes(info.fromModel)) attemptedModels.push(info.fromModel);
+      if (!attemptedModels.includes(info.toModel)) attemptedModels.push(info.toModel);
+      hooks?.onFallback?.(info);
+    },
+    onRetry: hooks?.onRetry,
+  };
+
+  return runWithFallback(buildModelList(preferido), customHooks, async (model) => {
+    if (!attemptedModels.includes(model)) attemptedModels.push(model);
+
+    let result;
+    try {
+      result = await ai.models.generateContent(withTimeout(params, model));
+      await recordUsage(model, result.usageMetadata);
+    } catch (err) {
+      try {
+          if (!ctx.runId) { ctx.runId = crypto.randomUUID(); await import('./generationTracing.js').then(m => m.openRun)({ id: ctx.runId, brandId: ctx.brandSlug || 'unknown', feature: ctx.feature || 'utility' }); }
+          recordStep({
+            runId: ctx.runId,
+            kind: 'MODEL',
+            role: Object.entries(config.models).find(([_, m]) => m === preferido)?.[0] || 'utility',
+            model,
+            tier: tierOf(model),
+            attemptedModels,
+            promptText: extractPromptText(params),
+            error: err instanceof Error ? err.message : String(err),
+            latencyMs: Date.now() - startTime,
+          });
+        } catch (_) { /* fail-open */ }
+      throw err;
+    }
+
+    try {
+      if (!ctx.runId) { ctx.runId = crypto.randomUUID(); await import('./generationTracing.js').then(m => m.openRun)({ id: ctx.runId, brandId: ctx.brandSlug || 'unknown', feature: ctx.feature || 'utility' }); }
+
+      recordStep({
+        runId: ctx.runId,
+        kind: 'MODEL',
+        role: Object.entries(config.models).find(([_, m]) => m === preferido)?.[0] || 'utility',
+        model,
+        tier: tierOf(model),
+        attemptedModels,
+        promptText: extractPromptText(params),
+        responseText: result.text,
+        inputTokens: result.usageMetadata?.promptTokenCount,
+        outputTokens: result.usageMetadata?.candidatesTokenCount,
+        latencyMs: Date.now() - startTime,
+      });
+    } catch (_) { /* fail-open */ }
+
     return result;
   });
 }
@@ -576,13 +647,42 @@ type StreamResult = Awaited<ReturnType<InstanceType<typeof GoogleGenAI>['models'
  * o gasto do chat ficaria fora da conta — e o teto seria furado pelo caminho mais
  * usado do produto.
  */
-async function* meterStream(stream: StreamResult, model: string): StreamResult {
-  let ultimoUso: unknown;
+async function* meterStream(
+  stream: StreamResult,
+  model: string,
+  params: GenerateContentParams,
+  attemptedModels: string[],
+  startTime: number,
+  preferido: string
+): StreamResult {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let ultimoUso: any;
+  let fullResponse = '';
+
   for await (const chunk of stream) {
     if (chunk.usageMetadata) ultimoUso = chunk.usageMetadata;
+    if (typeof chunk.text === 'function') fullResponse += chunk.text();
     yield chunk;
   }
   await recordUsage(model, ultimoUso as Parameters<typeof recordUsage>[1]);
+
+  const ctx = getAiContext();
+  try {
+    if (!ctx.runId) { ctx.runId = crypto.randomUUID(); await import('./generationTracing.js').then(m => m.openRun)({ id: ctx.runId, brandId: ctx.brandSlug || 'unknown', feature: ctx.feature || 'utility' }); }
+    recordStep({
+      runId: ctx.runId,
+      kind: 'MODEL',
+      role: Object.entries(config.models).find(([_, m]) => m === preferido)?.[0] || 'utility',
+      model,
+      tier: tierOf(model),
+      attemptedModels,
+      promptText: extractPromptText(params),
+      responseText: fullResponse,
+      inputTokens: ultimoUso?.promptTokenCount,
+      outputTokens: ultimoUso?.candidatesTokenCount,
+      latencyMs: Date.now() - startTime,
+    });
+  } catch (_) { /* fail-open */ }
 }
 
 /**
@@ -596,9 +696,23 @@ export async function generateStreamWithRetry(
 ): Promise<StreamResult> {
   await assertWithinBudget();
 
+  const preferido = preferredModel ?? params.model;
+  const attemptedModels: string[] = [];
+  const startTime = Date.now();
+
+  const customHooks: GeminiRetryHooks = {
+    onFallback: (info) => {
+      if (!attemptedModels.includes(info.fromModel)) attemptedModels.push(info.fromModel);
+      if (!attemptedModels.includes(info.toModel)) attemptedModels.push(info.toModel);
+      hooks?.onFallback?.(info);
+    },
+    onRetry: hooks?.onRetry,
+  };
+
   // Mesma regra do generateWithRetry: params.model vale como preferência.
-  return runWithFallback(buildModelList(preferredModel ?? params.model), hooks, async (model) => {
+  return runWithFallback(buildModelList(preferido), customHooks, async (model) => {
+    if (!attemptedModels.includes(model)) attemptedModels.push(model);
     const result = await ai.models.generateContentStream(withTimeout(params, model));
-    return meterStream(result, model);
+    return meterStream(result, model, params, attemptedModels, startTime, preferido);
   });
 }
