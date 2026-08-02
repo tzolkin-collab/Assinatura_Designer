@@ -55,9 +55,10 @@ interface ChatMessageRowProps {
   isStreamingMsg: boolean;
   onApproveImage?: (url: string) => void;
   onRegenerateImage?: (prompt: string) => void;
+  onOpenRoteiro?: (url: string) => void;
 }
 
-function ChatMessageRowImpl({ message, isStreamingMsg, onApproveImage, onRegenerateImage }: ChatMessageRowProps) {
+function ChatMessageRowImpl({ message, isStreamingMsg, onApproveImage, onRegenerateImage, onOpenRoteiro }: ChatMessageRowProps) {
   if (message.role === 'user') {
     const asanaSplit = message.content.split('\n\n[Contexto Asana]\n');
     const mainText = asanaSplit[0];
@@ -106,7 +107,31 @@ function ChatMessageRowImpl({ message, isStreamingMsg, onApproveImage, onRegener
         {message.thinking && <ThinkingBlock thinking={message.thinking} />}
         {message.content && (
           <div className={`${s.aiText} ${isStreamingMsg ? s.aiTextStreaming : ''}`}>
-            <ReactMarkdown>{message.content}</ReactMarkdown>
+            <ReactMarkdown
+              components={{
+                a: ({ node, ...props }) => {
+                  if (props.href && props.href.includes('/roteiros/')) {
+                    return (
+                      <button 
+                        type="button" 
+                        onClick={(e) => { e.preventDefault(); onOpenRoteiro?.(props.href!); }}
+                        style={{
+                          display: 'inline-flex', alignItems: 'center', gap: '6px', 
+                          background: 'var(--color-bg-elevated)', border: '1px solid var(--color-border-subtle)',
+                          padding: '6px 12px', borderRadius: '6px', fontSize: '13px', fontWeight: 500,
+                          cursor: 'pointer', color: 'var(--color-text-primary)', marginTop: '8px'
+                        }}
+                      >
+                        📝 Ver Roteiro Detalhado
+                      </button>
+                    );
+                  }
+                  return <a {...props} target="_blank" rel="noopener noreferrer" />;
+                }
+              }}
+            >
+              {message.content}
+            </ReactMarkdown>
           </div>
         )}
         {message.imageProposal && (

@@ -169,9 +169,9 @@ Regras Importantes:
 2. O último slide deve ser sempre um encerramento ou chamada de ação (ex: closing).
 3. Distribua os tipos de slides (layout_type) para criar um ritmo visual dinâmico.
 4. ${countRule}
-5. imageHint é opcional e raro — a maioria dos slides deve usar tipografia/gradiente/forma, não foto. Só preencha quando uma imagem/foto/ilustração real agregar (ex: produto, pessoa, cenário, ícone complexo). Descreva o CONTEÚDO visual, não o estilo.
+5. imageHint: preencha quando uma imagem/foto/ilustração AGREGAR ao slide (produto, pessoa, cenário, dados visuais, ícone complexo, equipe, depoimento). Descreva o CONTEÚDO visual, não o estilo. Equilíbrio de mercado: cerca de 30-50% dos slides devem ter imageHint — NEM todo slide precisa de imagem, MAS não force tipografia-only quando uma foto tornaria o slide mais impactante. Slides de métricas, citações e listas funcionam melhor sem imagem.
 6. Retorne APENAS o array JSON limpo, sem marcações de código markdown (como \`\`\`json).
-7. FIDELIDADE ESTRITA (ZERO INVENÇÃO): NUNCA invente estatísticas, porcentagens, valores financeiros ou fatos que não constem no briefing ou no contexto da marca. Se o briefing não fornecer um dado numérico, use explicações qualitativas ou marcadores explícitos.${copyBlock.rules}
+7. DADOS E MÉTRICAS: Se o briefing incluir números, use-os com fidelidade absoluta. Se NÃO incluir, use linguagem qualitativa persuasiva e forte (ex: "referência no setor", "crescimento expressivo", "índice de satisfação acima da média"). NUNCA insira marcadores como '[Inserir % real]' — o texto do slide deve ser pronto para publicação, sem buracos. Se houver métricas pesquisadas na seção de contexto da marca, USE-AS com citação.${copyBlock.rules}
 
 ## Briefing do usuário:
 ${params.brief}

@@ -12,6 +12,7 @@ const DrivePopup = dynamic(() => import('@/components/Fabrica/DrivePopup').then(
 import { NotificationCard } from '@/components/Fabrica/NotificationCard';
 const FolderPicker = dynamic(() => import('@/components/Fabrica/FolderPicker'), { ssr: false });
 const ArtifactPanel = dynamic(() => import('@/components/Fabrica/ArtifactPanel').then(mod => ({ default: mod.ArtifactPanel })), { ssr: false });
+import { RealtimePreview } from '@/components/Fabrica/RealtimePreview';
 const AiSpendBadge = dynamic(() => import('@/components/AiUsage/AiSpendBadge'), { ssr: false });
 import { ChatMessageRow } from '@/components/Fabrica/ChatMessageRow';
 import BrandBundlePanel from '@/components/Fabrica/BrandBundlePanel';
@@ -785,32 +786,25 @@ export default function FabricaPage() {
             <div className={s.previewEmptyGradient} />
             <div className={s.previewEmptyContent}>
               {workerStatus === 'running' ? (
-                <div className={s.buildView}>
-                  <div className={s.buildStage}>
-                    <div className={s.buildSkeleton}>
-                      <div className={s.buildSkBlock} />
-                      <div className={s.buildSkLine} />
-                      <div className={s.buildSkLine} />
-                      <div className={s.buildSkLine} />
-                    </div>
-                  </div>
-                  <div className={s.previewProgressWrap}>
+                <div className={s.buildView} style={{ padding: 0 }}>
+                  <RealtimePreview messages={messages} isGenerating={true} />
+                  
+                  <div className={s.previewProgressWrap} style={{ position: 'absolute', bottom: 16, left: 16, right: 16, zIndex: 10 }}>
                     <div className={s.previewProgressBar} style={{ width: `${Math.max(4, progress)}%` }} />
                   </div>
-                  <p className={s.previewProgressLabel}>{progressLabel || 'Preparando...'} · {progress}%</p>
+                  <p className={s.previewProgressLabel} style={{ position: 'absolute', bottom: 32, left: 16, zIndex: 10, color: '#333', background: 'rgba(255,255,255,0.8)', padding: '2px 8px', borderRadius: 4 }}>
+                    {progressLabel || 'Preparando...'} · {progress}%
+                  </p>
+                  
                   <button
                     type="button"
                     className={s.previewCancelBtn}
                     onClick={cancelGeneration}
                     title="Parar geração"
+                    style={{ position: 'absolute', top: 16, right: 16, zIndex: 10 }}
                   >
                     Parar Geração
                   </button>
-                  <div className={s.buildFilmstrip}>
-                    {Array.from({ length: 4 }).map((_, i) => (
-                      <div key={i} className={s.buildFilmCard} />
-                    ))}
-                  </div>
                 </div>
               ) : (
                 <>
