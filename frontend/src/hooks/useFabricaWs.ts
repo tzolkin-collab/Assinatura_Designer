@@ -44,6 +44,15 @@ function getToken(): string | null {
   return localStorage.getItem('auth_token');
 }
 
+// `job:error` e `error` descrevem o MESMO incidente com frequência, e cada um
+// empilhava sua própria linha — a falha aparecia duas vezes seguidas, idêntica.
+// Repetir o texto imediatamente é ruído, não informação nova.
+function appendSystemMessage(prev: FabricaMessage[], content: string): FabricaMessage[] {
+  const last = prev[prev.length - 1];
+  if (last?.role === 'system' && last.content === content) return prev;
+  return [...prev, { id: crypto.randomUUID(), role: 'system', content, timestamp: Date.now() }];
+}
+
 function normalizeUiMessage(message: string): string {
   if (!message) return 'Houve uma falha temporária.';
   // Conta sem crédito TAMBÉM chega como 429 — e o backend já explica isso direito. Sem
@@ -266,6 +275,10 @@ export function useFabricaWs(brandSlug: string, initialSessionId?: string | null
         if (pid) setPid(pid);
         setWStatus('done');
         setP(100);
+        // O label descreve a etapa EM CURSO ("desenhando slide 3"). Mantê-lo depois
+        // do fim deixava a tela afirmando que algo ainda acontece — barra em 100%
+        // com texto de trabalho em andamento ao lado.
+        setLabel('');
         setStreaming(false);
         actionsRef.current.streamingMsgIdRef.current = null;
         break;
@@ -274,22 +287,23 @@ export function useFabricaWs(brandSlug: string, initialSessionId?: string | null
       case 'job:error': {
         const errMsg = normalizeUiMessage((data.message ?? 'Erro na geração') as string);
         setWStatus('error');
+        setLabel('');
         setStreaming(false);
         actionsRef.current.streamingMsgIdRef.current = null;
-        setMsgs(prev => [
-          ...prev,
-          { id: crypto.randomUUID(), role: 'system', content: errMsg, timestamp: Date.now() },
-        ]);
+        setMsgs(prev => appendSystemMessage(prev, errMsg));
         break;
       }
 
       case 'notification': {
+        // NÃO encerra o streaming. A notificação é assíncrona ao texto: quando ela
+        // chegava no meio de uma fala, o `setStreaming(false)` + limpeza do ref
+        // órfãos a mensagem em construção — o resto dos tokens não tinha mais onde
+        // ser concatenado e a frase morria pela metade na tela. Quem encerra a fala
+        // é o `agent:end`; quem encerra o trabalho é o `job:done`.
         setNotif({
           kind: (data.kind as FabricaNotification['kind']) ?? 'done',
           message: (data.message as string) ?? '',
         });
-        setStreaming(false);
-        actionsRef.current.streamingMsgIdRef.current = null;
         break;
       }
 
@@ -314,26 +328,31 @@ export function useFabricaWs(brandSlug: string, initialSessionId?: string | null
         setQuestion(question);
         // IDs determinísticos por posição: o rehydrate reusa os mesmos IDs a cada
         // session:state, então o React reconcilia (sem remontar/piscar/perder scroll).
-        setMsgs(
-          msgs
-            .filter(m => m.role === 'user' || m.role === 'assistant')
-            .map((m, i) => ({
-              id: `srv-${i}`,
-              role: m.role as 'user' | 'assistant',
-              content: m.content,
-              timestamp: m.timestamp,
-              attachments: m.attachments,
-            })),
-        );
+        const doServidor = msgs
+          .filter(m => m.role === 'user' || m.role === 'assistant')
+          .map((m, i) => ({
+            id: `srv-${i}`,
+            role: m.role as 'user' | 'assistant',
+            content: m.content,
+            timestamp: m.timestamp,
+            attachments: m.attachments,
+          }));
+        // Mensagens `system` (erros, avisos) existem só no cliente — o servidor não
+        // as guarda no histórico da sessão. Substituir a lista inteira pelo que veio
+        // dele apagava todas elas, e o rehydrate roda a CADA reconexão automática de
+        // socket: bastava uma oscilação de rede para o rastro da falha sumir da tela
+        // sem ninguém ter fechado nada.
+        setMsgs(prev => {
+          const locais = prev.filter(m => m.role === 'system');
+          if (locais.length === 0) return doServidor;
+          return [...doServidor, ...locais].sort((a, b) => a.timestamp - b.timestamp);
+        });
         break;
       }
 
       case 'error': {
         const msg = normalizeUiMessage((data.message ?? 'Erro desconhecido') as string);
-        setMsgs(prev => [
-          ...prev,
-          { id: crypto.randomUUID(), role: 'system', content: msg, timestamp: Date.now() },
-        ]);
+        setMsgs(prev => appendSystemMessage(prev, msg));
         setStreaming(false);
         actionsRef.current.streamingMsgIdRef.current = null;
         break;

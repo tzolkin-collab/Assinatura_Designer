@@ -408,18 +408,6 @@ export default function FabricaPage() {
         />
       )}
 
-      {/* Notification card */}
-      <NotificationCard
-        notification={notification}
-        reviewMode={reviewMode}
-        marca={marca}
-        postId={postId}
-        onApprove={approve}
-        onDecline={decline}
-        onSetMode={setReviewMode}
-        onDismiss={clearNotification}
-      />
-
       {/* ── Left panel: chat ───────────────────────────────────────────────── */}
       <aside className={s.chatPanel}>
 
@@ -604,36 +592,14 @@ export default function FabricaPage() {
             </div>
           )}
 
-          {/* Generation progress row */}
+          {/* Marca de atividade — o progresso NUMÉRICO mora no preview, e só lá.
+              Barra, percentual, etapa e "parar" apareciam aqui e lá ao mesmo tempo:
+              o mesmo label renderizado duas vezes na tela, competindo por atenção.
+              Aqui fica apenas o sinal de que a Fábrica está viva, sem repetir dado. */}
           {workerStatus === 'running' && (
-            <div className={s.progressRow} role="status">
-              <div className={s.progressHeader}>
-                <span className={s.progressEyebrow}>Fábrica em execução</span>
-                <div className={s.progressRight}>
-                  <span className={s.progressValue}>{progress}%</span>
-                  <button
-                    type="button"
-                    className={s.cancelBtn}
-                    onClick={cancelGeneration}
-                    title="Parar geração"
-                  >
-                    Parar
-                  </button>
-                </div>
-              </div>
-              <div className={s.progressLabelBox}>
-                <Loader2 size={16} className={s.spin} />
-                <p className={s.progressLabel}>{progressLabel || 'Gerando...'}</p>
-              </div>
-              <div
-                className={s.progressTrack}
-                role="progressbar"
-                aria-valuenow={progress}
-                aria-valuemin={0}
-                aria-valuemax={100}
-              >
-                <div className={s.progressBar} style={{ width: `${progress}%` }} />
-              </div>
+            <div className={s.chatActivity} role="status">
+              <Loader2 size={13} className={s.spin} />
+              <span>Gerando…</span>
             </div>
           )}
         </div>
@@ -780,6 +746,46 @@ export default function FabricaPage() {
 
       {/* ── Right panel: preview ───────────────────────────────────────────── */}
       <main className={s.previewPanel}>
+
+        {/* Modo de revisão: configuração PERMANENTE da sessão. Morava dentro do
+            card de notificação — some quando o card some, e o usuário perdia o
+            controle sem entender por quê. Aqui fica sempre alcançável, ao lado do
+            preview, que é onde a revisão de fato acontece. */}
+        <div className={s.previewBar}>
+          <span className={s.previewBarLabel}>Aprovação</span>
+          <div className={s.modeToggle} role="group" aria-label="Modo de aprovação">
+            <button
+              type="button"
+              className={`${s.modeBtn} ${reviewMode === 'auto' ? s.modeBtnOn : ''}`}
+              onClick={() => setReviewMode('auto')}
+              aria-pressed={reviewMode === 'auto'}
+              title="A Fábrica aprova sozinha e segue"
+            >
+              Auto
+            </button>
+            <button
+              type="button"
+              className={`${s.modeBtn} ${reviewMode === 'manual' ? s.modeBtnOn : ''}`}
+              onClick={() => setReviewMode('manual')}
+              aria-pressed={reviewMode === 'manual'}
+              title="Cada peça espera sua aprovação"
+            >
+              Manual
+            </button>
+          </div>
+        </div>
+
+        {/* Ancorado, não flutuante: como bloco no fluxo ele empurra o preview em
+            vez de cobrir justamente a arte sobre a qual você precisa decidir. */}
+        <NotificationCard
+          notification={notification}
+          marca={marca}
+          postId={postId}
+          onApprove={approve}
+          onDecline={decline}
+          onDismiss={clearNotification}
+        />
+
         {currentDesign.length === 0 ? (
           <div className={s.previewEmpty}>
             <div className={s.previewEmptyGradient} />

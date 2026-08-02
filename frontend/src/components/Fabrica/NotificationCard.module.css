@@ -1,0 +1,143 @@
+/* Acentos por tipo. Ficavam cravados em hex dentro do TSX, junto com o resto do
+   estilo — mudar a identidade visual exigia editar JavaScript. Aqui viram tokens
+   locais, e o que é do design system global vem de globals.css. */
+.card {
+  --accent: var(--color-brand);
+  --accent-text: var(--color-text);
+
+  margin: var(--space-3) var(--space-4) 0;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-hover);
+  border-top: 2px solid var(--accent);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+.done {
+  --accent: #22c55e;
+  --accent-text: #166534;
+}
+
+.review {
+  --accent: #f59e0b;
+  --accent-text: #92400e;
+}
+
+.error {
+  --accent: var(--color-error);
+  --accent-text: #991b1b;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-3) 0;
+}
+
+.badge {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-full);
+  background: var(--accent);
+  flex-shrink: 0;
+}
+
+.label {
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--accent-text);
+}
+
+.dismiss {
+  display: flex;
+  align-items: center;
+  background: none;
+  border: none;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: var(--radius-sm);
+  transition: color var(--transition-fast);
+}
+
+.dismiss:hover {
+  color: var(--color-text);
+}
+
+.message {
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  margin: var(--space-2) var(--space-3) 0;
+  line-height: var(--leading-normal);
+}
+
+.declineWrap {
+  padding: var(--space-2) var(--space-3) 0;
+}
+
+.declineInput {
+  width: 100%;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border-hover);
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  font-size: var(--text-xs);
+  font-family: inherit;
+  padding: 7px 9px;
+  resize: none;
+  outline: none;
+  box-sizing: border-box;
+  line-height: var(--leading-normal);
+}
+
+.declineInput:focus {
+  border-color: var(--color-brand);
+}
+
+.actions {
+  display: flex;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3) var(--space-3);
+  flex-wrap: wrap;
+}
+
+.btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--text-xs);
+  padding: 5px 11px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.btnPrimary {
+  font-weight: 500;
+  background: var(--color-brand);
+  border: 1px solid var(--color-brand);
+  color: #fff;
+}
+
+.btnPrimary:hover {
+  background: var(--color-accent-hover);
+  border-color: var(--color-accent-hover);
+}
+
+.btnSecondary {
+  background: var(--color-bg);
+  border: 1px solid var(--color-border-hover);
+  color: var(--color-text-secondary);
+}
+
+.btnSecondary:hover {
+  background: var(--color-bg-secondary);
+}
