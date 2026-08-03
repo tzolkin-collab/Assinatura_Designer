@@ -11,6 +11,7 @@
 
 import { GoogleGenAI } from '@google/genai';
 import { config } from '../config.js';
+import { CONVERSION_RULES, isSupportedMimeType, normalizeImage } from './imageNormalizer.js';
 import { generateWithRetry } from './geminiRetry.js';
 import { assertWithinBudget, recordUsage, getUsage } from './aiBudget.js';
 import { getAiContext } from './aiContext.js';
@@ -85,6 +86,39 @@ async function fetchAssetImageBase64(url: string): Promise<{ mimeType: string; d
     if (!mimeType.startsWith('image/')) return null;
     const buffer = Buffer.from(await res.arrayBuffer());
     if (buffer.length > MAX_ASSET_BYTES) return null;
+
+    // O Gemini só enxerga pixel: recusa `image/svg+xml` (e heic/heif/gif/avif)
+    // com HTTP 400. E como a decisão do deck inteiro é UMA chamada só, um único
+    // SVG na biblioteca derrubava tudo — nenhum slide recebia imagem. Medido em
+    // produção: "Falha ao decidir plano de imagens" com
+    // "Unsupported MIME type: image/svg+xml", numa marca cuja biblioteca é toda
+    // de ícones SVG de brandbook.
+    //
+    // O `startsWith('image/')` acima não pega isso porque svg+xml passa nele. A
+    // tabela que sabe o que o modelo aceita já existe em imageNormalizer
+    // (`CONVERSION_RULES.aiReady`) — aqui a gente usa, convertendo o que não é
+    // aiReady em vez de descartar, pra o modelo continuar julgando pelo visual e
+    // não só pelo nome.
+    if (isSupportedMimeType(mimeType) && !CONVERSION_RULES[mimeType].aiReady) {
+      try {
+        const normalizada = await normalizeImage(buffer, mimeType, { maxDimension: 1024 });
+        return { mimeType: normalizada.mimeType, data: normalizada.buffer.toString('base64') };
+      } catch (err) {
+        // Rede de segurança: conversão que falha tira ESTE asset da lista visual,
+        // nunca derruba a decisão dos outros slides.
+        logger.warn('Asset não pôde ser convertido pra formato que o modelo aceita — segue só por nome/tags', {
+          url, mimeType, error: (err as Error).message,
+        });
+        return null;
+      }
+    }
+
+    // Formato desconhecido da tabela: não arrisca mandar e tomar 400.
+    if (!isSupportedMimeType(mimeType)) {
+      logger.warn('Asset em formato fora da tabela de conversão — não anexado à decisão visual', { url, mimeType });
+      return null;
+    }
+
     return { mimeType, data: buffer.toString('base64') };
   } catch (err) {
     logger.warn('Falha ao baixar asset existente pra decisão visual de reuso', { url, error: (err as Error).message });
