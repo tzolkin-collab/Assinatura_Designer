@@ -16,7 +16,7 @@ function LoginContent() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState(searchParams.get('error') || '');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -149,6 +149,15 @@ export default function LoginPage() {
     <Suspense fallback={
       <div className={styles.page}>
         <div className={styles.card}>
+          <div className={styles.logoArea}>
+            <img
+              src="/assinatura-logo.svg"
+              alt="Assinatura Design Studio"
+              className={styles.logo}
+              width={140}
+              height={40}
+            />
+          </div>
           <p className={styles.hint}>Carregando...</p>
         </div>
       </div>

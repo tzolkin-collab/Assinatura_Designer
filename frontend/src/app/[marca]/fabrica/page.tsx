@@ -12,6 +12,7 @@ const DrivePopup = dynamic(() => import('@/components/Fabrica/DrivePopup').then(
 import { NotificationCard } from '@/components/Fabrica/NotificationCard';
 const FolderPicker = dynamic(() => import('@/components/Fabrica/FolderPicker'), { ssr: false });
 const ArtifactPanel = dynamic(() => import('@/components/Fabrica/ArtifactPanel').then(mod => ({ default: mod.ArtifactPanel })), { ssr: false });
+import { RealtimePreview } from '@/components/Fabrica/RealtimePreview';
 const AiSpendBadge = dynamic(() => import('@/components/AiUsage/AiSpendBadge'), { ssr: false });
 import { ChatMessageRow } from '@/components/Fabrica/ChatMessageRow';
 import BrandBundlePanel from '@/components/Fabrica/BrandBundlePanel';
@@ -408,18 +409,6 @@ export default function FabricaPage() {
         />
       )}
 
-      {/* Notification card */}
-      <NotificationCard
-        notification={notification}
-        reviewMode={reviewMode}
-        marca={marca}
-        postId={postId}
-        onApprove={approve}
-        onDecline={decline}
-        onSetMode={setReviewMode}
-        onDismiss={clearNotification}
-      />
-
       {/* ── Left panel: chat ───────────────────────────────────────────────── */}
       <aside className={s.chatPanel}>
 
@@ -604,36 +593,14 @@ export default function FabricaPage() {
             </div>
           )}
 
-          {/* Generation progress row */}
+          {/* Marca de atividade — o progresso NUMÉRICO mora no preview, e só lá.
+              Barra, percentual, etapa e "parar" apareciam aqui e lá ao mesmo tempo:
+              o mesmo label renderizado duas vezes na tela, competindo por atenção.
+              Aqui fica apenas o sinal de que a Fábrica está viva, sem repetir dado. */}
           {workerStatus === 'running' && (
-            <div className={s.progressRow} role="status">
-              <div className={s.progressHeader}>
-                <span className={s.progressEyebrow}>Fábrica em execução</span>
-                <div className={s.progressRight}>
-                  <span className={s.progressValue}>{progress}%</span>
-                  <button
-                    type="button"
-                    className={s.cancelBtn}
-                    onClick={cancelGeneration}
-                    title="Parar geração"
-                  >
-                    Parar
-                  </button>
-                </div>
-              </div>
-              <div className={s.progressLabelBox}>
-                <Loader2 size={16} className={s.spin} />
-                <p className={s.progressLabel}>{progressLabel || 'Gerando...'}</p>
-              </div>
-              <div
-                className={s.progressTrack}
-                role="progressbar"
-                aria-valuenow={progress}
-                aria-valuemin={0}
-                aria-valuemax={100}
-              >
-                <div className={s.progressBar} style={{ width: `${progress}%` }} />
-              </div>
+            <div className={s.chatActivity} role="status">
+              <Loader2 size={13} className={s.spin} />
+              <span>Gerando…</span>
             </div>
           )}
         </div>
@@ -780,37 +747,70 @@ export default function FabricaPage() {
 
       {/* ── Right panel: preview ───────────────────────────────────────────── */}
       <main className={s.previewPanel}>
+
+        {/* Modo de revisão: configuração PERMANENTE da sessão. Morava dentro do
+            card de notificação — some quando o card some, e o usuário perdia o
+            controle sem entender por quê. Aqui fica sempre alcançável, ao lado do
+            preview, que é onde a revisão de fato acontece. */}
+        <div className={s.previewBar}>
+          <span className={s.previewBarLabel}>Aprovação</span>
+          <div className={s.modeToggle} role="group" aria-label="Modo de aprovação">
+            <button
+              type="button"
+              className={`${s.modeBtn} ${reviewMode === 'auto' ? s.modeBtnOn : ''}`}
+              onClick={() => setReviewMode('auto')}
+              aria-pressed={reviewMode === 'auto'}
+              title="A Fábrica aprova sozinha e segue"
+            >
+              Auto
+            </button>
+            <button
+              type="button"
+              className={`${s.modeBtn} ${reviewMode === 'manual' ? s.modeBtnOn : ''}`}
+              onClick={() => setReviewMode('manual')}
+              aria-pressed={reviewMode === 'manual'}
+              title="Cada peça espera sua aprovação"
+            >
+              Manual
+            </button>
+          </div>
+        </div>
+
+        {/* Ancorado, não flutuante: como bloco no fluxo ele empurra o preview em
+            vez de cobrir justamente a arte sobre a qual você precisa decidir. */}
+        <NotificationCard
+          notification={notification}
+          marca={marca}
+          postId={postId}
+          onApprove={approve}
+          onDecline={decline}
+          onDismiss={clearNotification}
+        />
+
         {currentDesign.length === 0 ? (
           <div className={s.previewEmpty}>
             <div className={s.previewEmptyGradient} />
             <div className={s.previewEmptyContent}>
               {workerStatus === 'running' ? (
-                <div className={s.buildView}>
-                  <div className={s.buildStage}>
-                    <div className={s.buildSkeleton}>
-                      <div className={s.buildSkBlock} />
-                      <div className={s.buildSkLine} />
-                      <div className={s.buildSkLine} />
-                      <div className={s.buildSkLine} />
-                    </div>
-                  </div>
-                  <div className={s.previewProgressWrap}>
+                <div className={s.buildView} style={{ padding: 0 }}>
+                  <RealtimePreview messages={messages} isGenerating={true} />
+                  
+                  <div className={s.previewProgressWrap} style={{ position: 'absolute', bottom: 16, left: 16, right: 16, zIndex: 10 }}>
                     <div className={s.previewProgressBar} style={{ width: `${Math.max(4, progress)}%` }} />
                   </div>
-                  <p className={s.previewProgressLabel}>{progressLabel || 'Preparando...'} · {progress}%</p>
+                  <p className={s.previewProgressLabel} style={{ position: 'absolute', bottom: 32, left: 16, zIndex: 10, color: '#333', background: 'rgba(255,255,255,0.8)', padding: '2px 8px', borderRadius: 4 }}>
+                    {progressLabel || 'Preparando...'} · {progress}%
+                  </p>
+                  
                   <button
                     type="button"
                     className={s.previewCancelBtn}
                     onClick={cancelGeneration}
                     title="Parar geração"
+                    style={{ position: 'absolute', top: 16, right: 16, zIndex: 10 }}
                   >
                     Parar Geração
                   </button>
-                  <div className={s.buildFilmstrip}>
-                    {Array.from({ length: 4 }).map((_, i) => (
-                      <div key={i} className={s.buildFilmCard} />
-                    ))}
-                  </div>
                 </div>
               ) : (
                 <>

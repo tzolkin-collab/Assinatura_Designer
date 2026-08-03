@@ -18,6 +18,7 @@ describe('auth — OAuth Google Login', () => {
     vi.restoreAllMocks();
     process.env.GOOGLE_CLIENT_ID = 'test-client-id';
     process.env.GOOGLE_CLIENT_SECRET = 'test-client-secret';
+    delete process.env.GOOGLE_ALLOWED_EMAILS;
   });
 
   describe('GET /api/auth/google/login', () => {
@@ -96,6 +97,28 @@ describe('auth — OAuth Google Login', () => {
 
       const decoded = jwt.decode(token!) as { userId: string };
       expect(decoded.userId).toBe('new-user-id');
+    });
+
+    it('bloqueia login e redireciona com mensagem de erro quando GOOGLE_ALLOWED_EMAILS nao permite o dominio', async () => {
+      process.env.GOOGLE_ALLOWED_EMAILS = '@assinaturamarcapropria.com';
+
+      vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+        if (url.toString().includes('userinfo')) {
+          return {
+            ok: true,
+            json: async () => ({ sub: 'google-999', email: 'invasor@gmail.com', name: 'Invasor' }),
+          } as Response;
+        }
+        return { ok: false } as Response;
+      });
+
+      const res = await request(app)
+        .get('/api/auth/google/callback?code=valid-code&state=test-state-nonce')
+        .set('Cookie', ['oauth_login_state=test-state-nonce%3A%2Fgaleria']);
+
+      expect(res.status).toBe(302);
+      expect(res.headers.location).toContain('/login?error=');
+      expect(decodeURIComponent(res.headers.location)).toContain('invasor@gmail.com');
     });
   });
 });

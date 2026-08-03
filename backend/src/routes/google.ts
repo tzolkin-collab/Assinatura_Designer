@@ -1,5 +1,5 @@
 import { Router, type Response as ExpressResponse, type NextFunction } from 'express';
-import createError from 'http-errors';
+import { createError } from '../middleware/errorHandler.js';
 import prisma from '../lib/prisma.js';
 import { config } from '../config.js';
 import { requireAuth, type AuthRequest } from '../middleware/auth.js';

@@ -143,7 +143,6 @@ type Props = {
 };
 
 export default function PresentationWizard({ value, onChange, onEnterInsumos, generating }: Props) {
-  const [step, setStep] = useState<0 | 1>(0);
   const [fileError, setFileError] = useState<string>('');
   const [refDragActive, setRefDragActive] = useState(false);
 
@@ -159,13 +158,7 @@ export default function PresentationWizard({ value, onChange, onEnterInsumos, ge
     return LAYOUTS.find((l) => l.id === value.layoutId) ?? null;
   }, [value.layoutId]);
 
-  const canNextFrom0 = value.layoutId !== null;
   const canProceed = value.layoutId !== null;
-
-  const stepStatus = {
-    0: value.layoutId !== null,
-    1: true,
-  } as const;
 
   const attachRefFile = async (file: File) => {
     if (file.size > 15 * 1024 * 1024) {
@@ -182,50 +175,21 @@ export default function PresentationWizard({ value, onChange, onEnterInsumos, ge
 
   return (
     <div className={styles.wizard}>
-      <div className={styles.stepper}>
-        <button
-          type="button"
-          className={[styles.stepPill, step === 0 ? styles.stepActive : '', stepStatus[0] ? styles.stepDone : ''].join(' ')}
-          onClick={() => setStep(0)}
-        >
-          <LayoutTemplate size={16} />
-          Layout
-        </button>
-        <button
-          type="button"
-          className={[styles.stepPill, step === 1 ? styles.stepActive : '', stepStatus[1] ? styles.stepDone : ''].join(' ')}
-          onClick={() => setStep(1)}
-        >
-          <FileText size={16} />
-          Estrutura
-        </button>
-        <button
-          type="button"
-          className={[styles.stepPill, ''].join(' ')}
-          onClick={onEnterInsumos}
-          disabled={!canProceed}
-        >
-          <AlignLeft size={16} />
-          Insumos
-        </button>
+      <div className={styles.wizardHeader}>
+        <Sparkles size={24} className={styles.wizardHeaderIcon} />
+        <div className={styles.wizardHeaderTexts}>
+          <div className={styles.wizardTitle}>Configuração da Apresentação</div>
+          <div className={styles.wizardSubtitle}>Defina o estilo e estrutura. O conteúdo guiará o resto.</div>
+        </div>
       </div>
 
-      {step === 0 && (
-        <div className={styles.panel}>
-          <div className={styles.panelHeader}>
-            <div className={styles.panelTitle}>
-              <div className={styles.title}>1) Escolha o layout</div>
-              <div className={styles.subtitle}>Selecione a estrutura base do slide. Você pode trocar depois.</div>
-            </div>
-            <div className={styles.actions}>
-              <Button size="sm" variant="secondary" onClick={() => onChange({ ...value, layoutId: null })}>
-                Limpar
-              </Button>
-              <Button size="sm" onClick={() => setStep(1)} disabled={!canNextFrom0}>
-                Próximo
-              </Button>
-            </div>
+      <div className={styles.panel}>
+        <div className={styles.panelHeader}>
+          <div className={styles.panelTitle}>
+            <div className={styles.title}>1) Escolha o layout base</div>
+            <div className={styles.subtitle}>A IA usará isso como referência principal, mas otimizará por slide.</div>
           </div>
+        </div>
 
           <div className={styles.layoutGrid}>
             {LAYOUTS.map((l) => (
@@ -258,24 +222,14 @@ export default function PresentationWizard({ value, onChange, onEnterInsumos, ge
             </div>
           )}
         </div>
-      )}
 
-      {step === 1 && (
-        <div className={styles.panel}>
-          <div className={styles.panelHeader}>
-            <div className={styles.panelTitle}>
-              <div className={styles.title}>2) Tamanho e estrutura</div>
-              <div className={styles.subtitle}>Defina formato, quantidade e densidade. Dimensões: {dims.label}</div>
-            </div>
-            <div className={styles.actions}>
-              <Button size="sm" variant="secondary" onClick={() => setStep(0)}>
-                Voltar
-              </Button>
-              <Button size="sm" onClick={onEnterInsumos} disabled={generating}>
-                {generating ? 'Gerando...' : 'Começar'}
-              </Button>
-            </div>
+      <div className={styles.panel}>
+        <div className={styles.panelHeader}>
+          <div className={styles.panelTitle}>
+            <div className={styles.title}>2) Tamanho e estrutura</div>
+            <div className={styles.subtitle}>Defina formato, quantidade e densidade. Dimensões: {dims.label}</div>
           </div>
+        </div>
 
           <Card padding="md" config>
             <div className={styles.fieldGroup}>
@@ -405,7 +359,12 @@ export default function PresentationWizard({ value, onChange, onEnterInsumos, ge
           </Card>
 
         </div>
-      )}
+      
+      <div className={styles.wizardFooter}>
+        <Button size="lg" className={styles.startBtn} onClick={onEnterInsumos} disabled={generating || !canProceed}>
+          {generating ? <span className={styles.spinIcon}><Sparkles size={18}/> Gerando Apresentação...</span> : <><Sparkles size={18} /> Começar a Criar</>}
+        </Button>
+      </div>
     </div>
   );
 }
