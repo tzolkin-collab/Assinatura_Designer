@@ -18,7 +18,7 @@ import { extractJsonObject } from '../lib/jsonHelper.js';
 import { GoogleGenAI } from '@google/genai';
 import { config } from '../config.js';
 import { generateWithRetry } from '../lib/geminiRetry.js';
-import { runWithAiContext, enrichAiContext } from '../lib/aiContext.js';
+import { runWithAiContext, enrichAiContext, getAiContext } from '../lib/aiContext.js';
 import { openRun, closeRun } from '../lib/generationTracing.js';
 import { logger } from '../lib/logger.js';
 
@@ -103,29 +103,18 @@ export async function runPipeline(params: PipelineParams): Promise<void> {
   return runWithAiContext(
     { sessionId, brandSlug: session.brandSlug, feature: 'pipeline', requestId: sessionId, postId: params.postId },
     async () => {
-      // O run nasce AQUI, e não dentro do geminiRetry, porque só neste ponto
-      // existem brief, formato e proporção — o que responde "o que foi pedido",
-      // metade da razão de haver trace. Aberto o run, o id vai para o contexto e
-      // todo step da geração cai debaixo dele sem precisar ser passado adiante.
-      const runId = await openRun({
-        brandSlug: session.brandSlug,
-        postId: params.postId,
-        sessionId,
-        requestId: sessionId,
-        feature: 'pipeline',
-        brief: params.brief,
-        format: params.format,
-        aspectRatio: params.aspectRatio,
-      });
-      if (runId) enrichAiContext({ runId });
-
+      // Quem ABRE o run é o runPipelineInner, logo depois de criar o Post — antes
+      // disso a FK `GenerationRun.postId` não fecha. Aqui só o fechamento: o id
+      // volta pelo AiContext, que é o mesmo objeto dentro deste escopo.
       try {
         await runPipelineInner(params, session);
         // COMPLETED aqui significa "o pipeline retornou sem lançar". Falha que o
         // runPipelineInner trata por dentro (ws.error e retorno normal) não vira
         // FAILED — quem quiser esse detalhe olha o `error` dos steps.
+        const runId = getAiContext().runId;
         if (runId) await closeRun(runId, { status: 'COMPLETED' });
       } catch (error) {
+        const runId = getAiContext().runId;
         if (runId) {
           await closeRun(runId, {
             status: 'FAILED',
@@ -289,6 +278,27 @@ async function runPipelineInner(
         logger.error('Falha ao pré-criar Post/Slides no banco', { error: (dbErr as Error).message });
       }
     }
+
+    // ── Trace: o run nasce AQUI, e não no runPipeline ──────────────────────────
+    // Tentativa anterior abria o run no topo do runPipeline, antes desta criação.
+    // `GenerationRun.postId` é FK para Post, e o Post ainda não existia — toda
+    // abertura estourava com `GenerationRun_postId_fkey`, o fail-open engolia, e
+    // o `runId` nulo levava junto o closeRun (o run ficava RUNNING para sempre) e
+    // o brief/formato, que eram a razão de abrir aqui em vez de no geminiRetry.
+    //
+    // Depois do Post existir, a FK fecha. O id vai para o AiContext, e o
+    // runPipeline o lê de volta no fim para fechar o run.
+    const runId = await openRun({
+      brandSlug: session.brandSlug,
+      postId,
+      sessionId,
+      requestId: sessionId,
+      feature: 'pipeline',
+      brief: params.brief,
+      format: params.format,
+      aspectRatio: params.aspectRatio,
+    });
+    if (runId) enrichAiContext({ runId });
 
     // ── 1.5. Imagens dos slides que pedem (reaproveita da biblioteca ou gera) ──
     await checkCancelled();
