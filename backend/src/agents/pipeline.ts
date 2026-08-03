@@ -18,7 +18,8 @@ import { extractJsonObject } from '../lib/jsonHelper.js';
 import { GoogleGenAI } from '@google/genai';
 import { config } from '../config.js';
 import { generateWithRetry } from '../lib/geminiRetry.js';
-import { runWithAiContext } from '../lib/aiContext.js';
+import { runWithAiContext, enrichAiContext } from '../lib/aiContext.js';
+import { openRun, closeRun } from '../lib/generationTracing.js';
 import { logger } from '../lib/logger.js';
 
 const ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
@@ -100,8 +101,40 @@ export async function runPipeline(params: PipelineParams): Promise<void> {
   // Abre o contexto: daqui para baixo, todo log e toda chamada de IA (planner,
   // lotes, reviewer) sabem de que marca e de que sessão são, sem receber parâmetro.
   return runWithAiContext(
-    { sessionId, brandSlug: session.brandSlug, feature: 'pipeline', requestId: sessionId },
-    () => runPipelineInner(params, session),
+    { sessionId, brandSlug: session.brandSlug, feature: 'pipeline', requestId: sessionId, postId: params.postId },
+    async () => {
+      // O run nasce AQUI, e não dentro do geminiRetry, porque só neste ponto
+      // existem brief, formato e proporção — o que responde "o que foi pedido",
+      // metade da razão de haver trace. Aberto o run, o id vai para o contexto e
+      // todo step da geração cai debaixo dele sem precisar ser passado adiante.
+      const runId = await openRun({
+        brandSlug: session.brandSlug,
+        postId: params.postId,
+        sessionId,
+        requestId: sessionId,
+        feature: 'pipeline',
+        brief: params.brief,
+        format: params.format,
+        aspectRatio: params.aspectRatio,
+      });
+      if (runId) enrichAiContext({ runId });
+
+      try {
+        await runPipelineInner(params, session);
+        // COMPLETED aqui significa "o pipeline retornou sem lançar". Falha que o
+        // runPipelineInner trata por dentro (ws.error e retorno normal) não vira
+        // FAILED — quem quiser esse detalhe olha o `error` dos steps.
+        if (runId) await closeRun(runId, { status: 'COMPLETED' });
+      } catch (error) {
+        if (runId) {
+          await closeRun(runId, {
+            status: 'FAILED',
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+        throw error;
+      }
+    },
   );
 }
 
