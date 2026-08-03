@@ -106,26 +106,54 @@ Responda APENAS com JSON:
 
 // ── Crítico do caminho HTML: render fiel (chromium) -> visão ────────────────────
 export async function runHtmlReviewer(content: HtmlDesignContent, brandContext: string, objective: string): Promise<ReviewResult> {
-  let images: string[] = [];
   // Amostra ESPALHADA pelo deck (capa, encerramento e o meio distribuído) —
   // antes era slice(0, 8): num deck de 200, 96% dos slides nunca eram vistos
   // e o slide 150 quebrado passava reto pelo QA.
   const indexes = sampleSlideIndexes(content.slides.length, config.reviewerSampleSize);
-  try {
-    images = await Promise.all(
-      indexes.map((i) =>
-        renderHtmlToBase64(buildSlideDocument(content.slides[i]!, content.fonts, content.width, content.height), {
-          width: content.width,
-          height: content.height,
-          maxDim: 768,
-        }),
-      ),
-    );
-  } catch (err) {
-    logger.error('Render HTML da revisão falhou; aprovando por segurança', { error: (err as Error).message });
+
+  // O erro de UM slide não pode desligar o QA do deck. Antes era um
+  // `Promise.all` cru: o chromium falhando em renderizar uma única lâmina
+  // rejeitava a amostra inteira, caía no catch e a função retornava
+  // `approved: true`. Ou seja, a etapa que existe para REPROVAR arte ruim se
+  // desligava sozinha e carimbava aprovado — em silêncio, num produto cujo
+  // problema é justamente qualidade.
+  //
+  // Agora cada render falha por conta própria e sai da amostra; o reviewer
+  // critica o que sobrou. Aprovar por segurança fica reservado ao caso em que
+  // NADA renderizou, que é o único em que realmente não há o que julgar.
+  const renderizados = await Promise.all(
+    indexes.map(async (i) => {
+      try {
+        const img = await renderHtmlToBase64(
+          buildSlideDocument(content.slides[i]!, content.fonts, content.width, content.height),
+          { width: content.width, height: content.height, maxDim: 768 },
+        );
+        return { i, img };
+      } catch (err) {
+        logger.warn('Slide não renderizou para a revisão; segue sem ele na amostra', {
+          slideIndex: i, error: (err as Error).message,
+        });
+        return null;
+      }
+    }),
+  );
+
+  const amostra = renderizados.filter((r): r is { i: number; img: string } => r !== null);
+
+  if (amostra.length === 0) {
+    logger.error('Nenhum slide renderizou para a revisão; aprovando por segurança', {
+      tentados: indexes.length,
+    });
     return { approved: true, score: 70, deviations: [], feedback: 'Revisão visual indisponível', correctionInstructions: undefined };
   }
-  return critiqueRenderedSlides(images, brandContext, objective, indexes);
+
+  if (amostra.length < indexes.length) {
+    logger.warn('Revisão visual rodando com amostra parcial', {
+      renderizados: amostra.length, tentados: indexes.length,
+    });
+  }
+
+  return critiqueRenderedSlides(amostra.map((a) => a.img), brandContext, objective, amostra.map((a) => a.i));
 }
 
 /**
