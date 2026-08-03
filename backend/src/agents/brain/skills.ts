@@ -2,6 +2,7 @@ import { Type, type Tool, type FunctionDeclaration } from '@google/genai';
 import prisma from '../../lib/prisma.js';
 import { getBrandMemory, updateBrandMemory } from '../../lib/redis.js';
 import { tryDecryptToken, encryptToken } from '../../lib/tokenCrypto.js';
+import { uploadFileToR2 } from '../../lib/r2.js';
 import { config } from '../../config.js';
 import { refreshOAuthToken, isTokenExpiringSoon } from '../../lib/connectorOAuth.js';
 import { logger } from '../../lib/logger.js';
@@ -59,9 +60,24 @@ const listAsanaProjectsSchema: FunctionDeclaration = {
   description: 'Lista os projetos do Asana do usuário para encontrar o projectId correto antes de criar uma tarefa.',
 };
 
+const generateRoteiroLinkSchema: FunctionDeclaration = {
+  name: 'generateRoteiroLink',
+  description: 'Gera um link compartilhável para um roteiro em Markdown. Use isso quando criar um roteiro detalhado para aprovação da usuária. Retorna a URL pública.',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      markdownContent: {
+        type: Type.STRING,
+        description: 'O conteúdo completo do roteiro formatado em Markdown.',
+      },
+    },
+    required: ['markdownContent'],
+  },
+};
+
 export const brainTools: Tool[] = [
   {
-    functionDeclarations: [updateMemorySchema, createAsanaTaskSchema, listAsanaProjectsSchema],
+    functionDeclarations: [updateMemorySchema, createAsanaTaskSchema, listAsanaProjectsSchema, generateRoteiroLinkSchema],
   },
 ];
 
@@ -127,6 +143,12 @@ export async function executeSkill(
       
       await updateBrandMemory(context.brandSlug, { preferences: prefs });
       return { success: true, message: `Memória atualizada com sucesso. Chave ${args.key} foi ${args.action === 'add' ? 'adicionada' : 'removida'}.` };
+    }
+
+    if (name === 'generateRoteiroLink') {
+      const buffer = Buffer.from(args.markdownContent || '', 'utf8');
+      const url = await uploadFileToR2(buffer, 'roteiro.md', 'text/markdown', 'roteiros');
+      return { success: true, url };
     }
 
     if (name === 'listAsanaProjects') {
