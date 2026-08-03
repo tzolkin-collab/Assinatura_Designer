@@ -362,6 +362,65 @@ describe('resolveSlideImages', () => {
     // só a chamada de decisão deve ter ocorrido, nenhuma segunda chamada pra gerar SVG
     expect(generateWithRetry).toHaveBeenCalledTimes(1);
   });
+
+  it('não usa o mesmo asset duas vezes no deck — o segundo slide gera em vez de repetir', async () => {
+    // Regressão medida em produção: uma peça de 4 slides saiu com 10 <img> e só 5
+    // imagens distintas, o mesmo ícone de brandbook três vezes. O modelo julga
+    // cada slide isolado e nunca enxerga que já usou aquele arquivo.
+    prismaMock.asset.findMany.mockResolvedValue([
+      { url: 'https://cdn.example.com/icon-grafico.svg', name: 'icon-bar-graph-arrow.svg', tags: ['brandbook'] },
+    ]);
+    (generateWithRetry as ReturnType<typeof vi.fn>).mockResolvedValue({
+      text: JSON.stringify([
+        { slideIndex: 0, action: 'reuse', assetUrl: 'https://cdn.example.com/icon-grafico.svg' },
+        { slideIndex: 1, action: 'reuse', assetUrl: 'https://cdn.example.com/icon-grafico.svg' },
+      ]),
+    });
+
+    const skeleton = skeletonBase([
+      { imageHint: 'gráfico de crescimento' },
+      { imageHint: 'equipe comemorando resultado' },
+    ]);
+    const { resolved: result } = await resolveSlideImages({ ...baseParams, skeleton });
+
+    // O primeiro fica com o asset; o segundo NÃO recebe a mesma URL.
+    expect(result.get(0)).toEqual({ imageUrl: 'https://cdn.example.com/icon-grafico.svg' });
+    expect(result.get(1)?.imageUrl).not.toBe('https://cdn.example.com/icon-grafico.svg');
+    // E a duplicata vira geração a partir do hint, em vez de virar slide vazio.
+    expect(mockGenerateContent).toHaveBeenCalled();
+  });
+
+  it('asset SVG é convertido antes de ir pro modelo, em vez de derrubar a decisão do deck', async () => {
+    // Regressão medida em produção: a decisão é UMA chamada pro deck inteiro, e
+    // o Gemini recusa image/svg+xml com 400. Um único SVG na biblioteca fazia
+    // "Falha ao decidir plano de imagens" e NENHUM slide recebia imagem.
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      headers: { get: (h: string) => (h === 'content-type' ? 'image/svg+xml' : null) },
+      arrayBuffer: async () => new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"/>').buffer,
+    })));
+    prismaMock.asset.findMany.mockResolvedValue([
+      { url: 'https://cdn.example.com/icon.svg', name: 'icon-checkmark.svg', tags: ['brandbook'] },
+    ]);
+    (generateWithRetry as ReturnType<typeof vi.fn>).mockResolvedValue({
+      text: JSON.stringify([
+        { slideIndex: 1, action: 'reuse', assetUrl: 'https://cdn.example.com/icon.svg' },
+      ]),
+    });
+
+    const skeleton = skeletonBase([{}, { imageHint: 'ícone de confirmação' }]);
+    const { resolved: result } = await resolveSlideImages({ ...baseParams, skeleton });
+
+    // A decisão completou e o slide recebeu imagem — antes o deck inteiro ficava vazio.
+    expect(result.get(1)).toEqual({ imageUrl: 'https://cdn.example.com/icon.svg' });
+
+    // E o que foi anexado ao modelo NÃO é svg+xml.
+    const chamada = (generateWithRetry as ReturnType<typeof vi.fn>).mock.calls[0]![1] as
+      | { contents?: Array<{ parts?: Array<{ inlineData?: { mimeType: string } }> }> }
+      | undefined;
+    const anexos = chamada?.contents?.[0]?.parts?.filter((p) => p.inlineData) ?? [];
+    for (const a of anexos) expect(a.inlineData!.mimeType).not.toBe('image/svg+xml');
+  });
 });
 
 describe('resolveImageCandidateDecisions', () => {

@@ -301,6 +301,8 @@ QUALIDADE (nível "designer humano postaria sem retrabalho"):
 - Cor: paleta da marca. Ouse com fundos escuros/vibrantes e gradientes. Evite o clichê "gradiente roxo sobre branco".
 - Copy REAL em português (nunca "Texto", "Lorem", placeholders).
 - Visual: prefira gradientes CSS, formas geométricas e tipografia forte. Para fotos/logo, <img> com URLs https REAIS. Sem texto embutido em imagem. Se a URL do Logo não foi fornecida acima, NÃO adicione nenhum logo genérico nem placeholder quadrado. Apenas omita o logo da composição.
+- LOGO: só na CAPA (primeiro slide) e no ENCERRAMENTO (último). Em slide de conteúdo, nunca — nem no canto, nem em marca d'água.
+- SLIDE SEM IMAGEM É UM RESULTADO VÁLIDO, não um buraco a tapar. Layouts como list-3-columns, process-flow e comparison vivem de tipografia, forma e cor — é assim que eles devem ficar. Se nenhuma imagem foi fornecida para o slide, resolva com composição: escala tipográfica, blocos de cor, linhas, numeração grande, espaço negativo. NUNCA preencha o vazio com o logo da marca, com ícone repetido nem com imagem de outro slide — isso empobrece a peça mais do que o espaço vazio.
 - Marque editáveis com data-editable="true" e data-role="headline|subtitle|body|cta|image".
 - NUNCA invente dado factual da empresa que não foi fornecido acima (telefone, e-mail, endereço, site, CNPJ, nome de produto específico, texto institucional de rodapé). Use SOMENTE o nome da marca, o logo e o que estiver em Diretrizes/Instruções do agente/Referências. Se o layout pedir uma info de contato que não veio nesses campos, prefira um CTA genérico ("Fale conosco", "Saiba mais", "Acesse o link na bio") a inventar um número ou endereço que pareça real.
 

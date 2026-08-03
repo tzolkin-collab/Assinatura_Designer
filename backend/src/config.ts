@@ -66,9 +66,24 @@ export const config = {
     fast: process.env.GEMINI_FAST_MODEL || 'gemini-2.5-flash',
     /** Tarefas mecânicas (classificar, extrair, sugerir): o mais barato que funciona. */
     utility: process.env.GEMINI_UTILITY_MODEL || 'gemini-2.5-flash-lite',
-    /** Geração de imagem/foto (lib/imageResolver.ts). Fallback pro flash-image se o pro estourar cota. */
-    image: process.env.GEMINI_IMAGE_MODEL || 'gemini-3-pro-image-preview',
-    imageFallback: process.env.GEMINI_IMAGE_FALLBACK_MODEL || 'gemini-2.5-flash-image',
+    /**
+     * Geração de imagem/foto (lib/imageResolver.ts) — a família "Nano Banana".
+     *
+     * Medido contra a API em 03/08/2026, mesmo prompt, 1K:
+     *   gemini-3.1-flash-image        17s   ← primário
+     *   gemini-3-pro-image            36s   ← fallback
+     *   gemini-3-pro-image-preview    31s   (primário anterior, ainda responde)
+     *   gemini-2.5-flash-image        503   (fallback anterior — legado, morto)
+     *
+     * O fallback anterior era o `gemini-2.5-flash-image`, que a documentação
+     * marca como legado e que devolveu 503 na hora. Ou seja: quando o primário
+     * falhava não havia rede nenhuma — o loop tentava o legado, tomava 503 e
+     * retornava sem imagem, com um `logger.warn` que ninguém lê. Agora os dois
+     * degraus existem e respondem, e o primário é ~2x mais rápido: com o teto de
+     * 6 imagens por deck, são ~1min40 em vez de ~3min só de imagem.
+     */
+    image: process.env.GEMINI_IMAGE_MODEL || 'gemini-3.1-flash-image',
+    imageFallback: process.env.GEMINI_IMAGE_FALLBACK_MODEL || 'gemini-3-pro-image',
   },
   // Teto de tokens de "thinking" na geração. O modelo pro às vezes gasta quase
   // todo o maxOutputTokens pensando e trunca o JSON (finishReason MAX_TOKENS →

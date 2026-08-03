@@ -12,6 +12,7 @@
 import { GoogleGenAI } from '@google/genai';
 import { ensureRun, recordStep } from './generationTracing.js';
 import { config } from '../config.js';
+import { CONVERSION_RULES, isSupportedMimeType, normalizeImage } from './imageNormalizer.js';
 import { generateWithRetry } from './geminiRetry.js';
 import { assertWithinBudget, recordUsage, getUsage } from './aiBudget.js';
 import { getAiContext } from './aiContext.js';
@@ -86,6 +87,39 @@ async function fetchAssetImageBase64(url: string): Promise<{ mimeType: string; d
     if (!mimeType.startsWith('image/')) return null;
     const buffer = Buffer.from(await res.arrayBuffer());
     if (buffer.length > MAX_ASSET_BYTES) return null;
+
+    // O Gemini só enxerga pixel: recusa `image/svg+xml` (e heic/heif/gif/avif)
+    // com HTTP 400. E como a decisão do deck inteiro é UMA chamada só, um único
+    // SVG na biblioteca derrubava tudo — nenhum slide recebia imagem. Medido em
+    // produção: "Falha ao decidir plano de imagens" com
+    // "Unsupported MIME type: image/svg+xml", numa marca cuja biblioteca é toda
+    // de ícones SVG de brandbook.
+    //
+    // O `startsWith('image/')` acima não pega isso porque svg+xml passa nele. A
+    // tabela que sabe o que o modelo aceita já existe em imageNormalizer
+    // (`CONVERSION_RULES.aiReady`) — aqui a gente usa, convertendo o que não é
+    // aiReady em vez de descartar, pra o modelo continuar julgando pelo visual e
+    // não só pelo nome.
+    if (isSupportedMimeType(mimeType) && !CONVERSION_RULES[mimeType].aiReady) {
+      try {
+        const normalizada = await normalizeImage(buffer, mimeType, { maxDimension: 1024 });
+        return { mimeType: normalizada.mimeType, data: normalizada.buffer.toString('base64') };
+      } catch (err) {
+        // Rede de segurança: conversão que falha tira ESTE asset da lista visual,
+        // nunca derruba a decisão dos outros slides.
+        logger.warn('Asset não pôde ser convertido pra formato que o modelo aceita — segue só por nome/tags', {
+          url, mimeType, error: (err as Error).message,
+        });
+        return null;
+      }
+    }
+
+    // Formato desconhecido da tabela: não arrisca mandar e tomar 400.
+    if (!isSupportedMimeType(mimeType)) {
+      logger.warn('Asset em formato fora da tabela de conversão — não anexado à decisão visual', { url, mimeType });
+      return null;
+    }
+
     return { mimeType, data: buffer.toString('base64') };
   } catch (err) {
     logger.warn('Falha ao baixar asset existente pra decisão visual de reuso', { url, error: (err as Error).message });
@@ -157,6 +191,8 @@ ${assetsBlock}
 
 ## Regras de decisão:
 1. "reuse": SÓ quando um asset da lista corresponde de verdade ao que o slide precisa — julgue pela IMAGEM anexada quando disponível (não só pelo nome/tags; um arquivo mal nomeado pode ser exatamente o que o slide precisa, e um nome parecido pode ser visualmente errado). Não force um encaixe genérico — um asset de "logo" não serve pra "foto de produto em uso".
+1a. ÍCONE E MARCA NÃO SÃO IMAGEM DE CONTEÚDO. Ícone (pictograma simples: seta, alvo, check, relógio, gráfico de barras), logotipo, símbolo e elemento gráfico de brandbook servem para DECORAR um layout — nunca para ocupar o lugar da imagem que o slide pede. Se o hint pede foto, cena, produto, pessoa ou ambiente, um ícone NÃO serve, por mais que o tema combine: um "icon-bar-graph-arrow" não atende "foto de equipe comemorando crescimento". Nesses casos escolha "generate-photo" (ou "skip" se estiver desligado), nunca "reuse".
+1b. NÃO REPITA O MESMO ASSET no deck. Cada asset pode ser usado em no máximo UM slide. Se o mesmo arquivo parece servir para dois slides, escolha o slide em que ele serve melhor e decida outra coisa para o outro.
 ${allowGeneratedGraphics ? '2. "generate-photo": quando o slide precisa de uma foto/cena realista (produto, pessoa, ambiente) e nada na biblioteca serve de verdade (visualmente).' : '2. Geração de foto está DESLIGADA para esta marca — nunca escolha "generate-photo". Se nada na biblioteca serve, use "skip".'}
 ${allowSvgLayouts ? '3. "generate-svg": quando o slide precisa de um ícone, ilustração vetorial simples ou gráfico decorativo complexo (não uma foto realista) e nada na biblioteca serve.' : '3. Geração de SVG está DESLIGADA para esta marca — nunca escolha "generate-svg". Se nada na biblioteca serve, use "skip".'}
 4. "skip": quando não vale a pena gerar (raro — só se o hint for vago demais pra virar prompt de imagem), ou quando a ação necessária está desligada acima.
@@ -512,6 +548,36 @@ export async function resolveSlideImages(params: ResolveSlideImagesParams): Prom
   const allowSvgLayouts = params.allowSvgLayouts !== false;
 
   const decisions = await decideImagePlan(slidesNeedingImage, existingAssets, allowGeneratedGraphics, allowSvgLayouts);
+
+  // ── Trava de repetição ──────────────────────────────────────────────────────
+  // Medido em produção: uma peça de 4 slides saiu com 10 <img> e apenas 5
+  // imagens distintas — o mesmo `icon-bar-graph-arrow.svg` três vezes, o mesmo
+  // `icon-target-bullseye.svg` outras três. A regra de prompt sozinha não
+  // segura isso, porque o modelo julga cada slide isoladamente e nunca vê que
+  // já usou aquele asset. A checagem tem de ser aqui, onde existe a visão do
+  // deck inteiro.
+  //
+  // Repetição não vira slide vazio: a decisão duplicada é convertida em geração
+  // a partir do próprio hint. Imagem nova é melhor que a mesma de novo, e o teto
+  // de `maxGeneratedImagesPerDeck` continua valendo logo abaixo.
+  const urlsJaUsadas = new Set<string>();
+  for (const decision of decisions) {
+    if (decision.action !== 'reuse' || !decision.assetUrl) continue;
+    if (!urlsJaUsadas.has(decision.assetUrl)) {
+      urlsJaUsadas.add(decision.assetUrl);
+      continue;
+    }
+    const item = params.skeleton.find((_, i) => i === decision.slideIndex);
+    const hint = item?.imageHint?.trim();
+    logger.info('Asset repetido no mesmo deck — convertendo reuso em geração', {
+      slideIndex: decision.slideIndex,
+      assetUrl: decision.assetUrl,
+    });
+    decision.action = hint && allowGeneratedGraphics ? 'generate-photo' : 'skip';
+    decision.generatePrompt = hint;
+    decision.assetUrl = undefined;
+    decision.confidence = undefined;
+  }
 
   let generatedCount = 0;
   const budget = Math.max(0, config.maxGeneratedImagesPerDeck);
