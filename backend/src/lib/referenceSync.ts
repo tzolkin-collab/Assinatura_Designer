@@ -7,6 +7,7 @@ import { isPublicHttpUrlResolved } from './validate.js';
 import prisma from './prisma.js';
 import { GoogleGenAI, Type, Schema } from '@google/genai';
 import { generateWithRetry } from './geminiRetry.js';
+import { CONVERSION_RULES, isSupportedMimeType, normalizeImage } from './imageNormalizer.js';
 import { logger } from './logger.js';
 import { fetchInstagramProfileReview, type InstagramProfileReview } from './apifyInstagram.js';
 import { fetchWebsiteReview, type WebsitePage } from './apifyWebsiteCrawler.js';
@@ -63,8 +64,38 @@ async function downloadImageAsBase64(url: string, fallbackMimeType: string): Pro
     if (!res.ok) return null;
     const buffer = Buffer.from(await res.arrayBuffer());
     const mimeType = res.headers.get('content-type')?.split(';')[0] || fallbackMimeType;
+
+    // Estas imagens viram `inlineData` numa chamada ao Gemini (ver o `parts` mais
+    // abaixo), e a visão dele só aceita raster: recusa `image/svg+xml`,
+    // `image/gif`, heic e afins com HTTP 400. Aqui não havia validação nenhuma —
+    // o `content-type` que o site do concorrente devolvesse ia direto pro modelo.
+    //
+    // Como a análise manda TODAS as imagens da referência numa chamada só, um
+    // logo em SVG no site de um concorrente derrubaria a análise inteira daquela
+    // referência. É o mesmo modo de falha que deixou a geração de imagem morta
+    // por duas semanas em imageResolver.ts — mesma causa, outro arquivo.
+    if (!isSupportedMimeType(mimeType)) {
+      logger.warn('Imagem de referência em formato que o modelo não aceita — descartada', { url, mimeType });
+      return null;
+    }
+    if (!CONVERSION_RULES[mimeType].aiReady) {
+      try {
+        const normalizada = await normalizeImage(buffer, mimeType, { maxDimension: 1024 });
+        return { base64: normalizada.buffer.toString('base64'), mimeType: normalizada.mimeType };
+      } catch (err) {
+        logger.warn('Imagem de referência não pôde ser convertida — descartada', {
+          url, mimeType, error: (err as Error).message,
+        });
+        return null;
+      }
+    }
+
     return { base64: buffer.toString('base64'), mimeType };
-  } catch {
+  } catch (err) {
+    // Antes este catch era mudo (`catch { return null }`): falha de rede na
+    // coleta de referência sumia sem deixar rastro, e o benchmark simplesmente
+    // saía mais pobre sem ninguém saber por quê.
+    logger.warn('Falha ao baixar imagem de referência', { url, error: (err as Error).message });
     return null;
   }
 }
