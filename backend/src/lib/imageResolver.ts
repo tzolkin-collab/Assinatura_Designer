@@ -10,6 +10,7 @@
 // "reaproveitar, não repetir" pedida pelo dono do produto.
 
 import { GoogleGenAI } from '@google/genai';
+import { ensureRun, recordStep } from './generationTracing.js';
 import { config } from '../config.js';
 import { generateWithRetry } from './geminiRetry.js';
 import { assertWithinBudget, recordUsage, getUsage } from './aiBudget.js';
@@ -229,7 +230,10 @@ REGRAS:
   }
 
   const imageModels = [config.models.image, config.models.imageFallback];
+  const tentados: string[] = [];
+  const inicio = Date.now();
   for (const model of imageModels) {
+    tentados.push(model);
     try {
       const response = await ai.models.generateContent({
         model,
@@ -246,10 +250,45 @@ REGRAS:
 
       const [mimePart, base64] = dataUrl.split(',');
       const mimeType = /^data:(.+);base64$/.exec(mimePart ?? '')?.[1] || 'image/png';
+
+      // O prompt criativo da imagem não existia em lugar nenhum depois da
+      // geração — só a foto final. Sem ele não dá para comparar por que uma peça
+      // antiga saiu melhor que uma nova.
+      const runIdOk = await ensureRun();
+      if (runIdOk) {
+        recordStep({
+          runId: runIdOk,
+          kind: 'IMAGE',
+          name: 'generatePhotoBuffer',
+          model,
+          attemptedModels: tentados,
+          promptText: creativePrompt,
+          inputTokens: response.usageMetadata?.promptTokenCount,
+          outputTokens: response.usageMetadata?.candidatesTokenCount,
+          latencyMs: Date.now() - inicio,
+          metadata: { aspectRatio, width, height, mimeType, bytes: base64?.length ?? 0 },
+        });
+      }
+
       return { buffer: Buffer.from(base64 ?? '', 'base64'), mimeType };
     } catch (err) {
       logger.warn(`Geração de foto falhou no modelo ${model}`, { error: (err as Error).message });
     }
+  }
+
+  // Falha em todos os modelos também é dado: um slide sem foto tem explicação.
+  const runIdFail = await ensureRun();
+  if (runIdFail) {
+    recordStep({
+      runId: runIdFail,
+      kind: 'IMAGE',
+      name: 'generatePhotoBuffer',
+      attemptedModels: tentados,
+      promptText: creativePrompt,
+      latencyMs: Date.now() - inicio,
+      error: 'Nenhum modelo de imagem retornou imagem utilizável',
+      metadata: { aspectRatio, width, height },
+    });
   }
   return null;
 }
@@ -301,7 +340,31 @@ export async function shouldPreferUnsplashForCost(explicitBrandSlug?: string): P
 
     const usage = await getUsage(brandSlug);
     if (!usage.brandBudget || usage.brandBudget <= 0) return false;
-    return (usage.brandTokens ?? 0) / usage.brandBudget >= config.aiPhotoFallbackUsageRatio;
+
+    const ratio = (usage.brandTokens ?? 0) / usage.brandBudget;
+    const preferUnsplash = ratio >= config.aiPhotoFallbackUsageRatio;
+
+    // Esta decisão troca arte generativa por banco de imagem por motivo de
+    // ORÇAMENTO, e muda a peça sem avisar ninguém. Era invisível: uma arte podia
+    // sair pior simplesmente por ter sido gerada perto do fim da cota do dia, e
+    // não havia como saber depois. Agora fica no rastro, com os números.
+    const runId = await ensureRun();
+    if (runId) {
+      recordStep({
+        runId,
+        kind: 'TOOL',
+        name: 'shouldPreferUnsplashForCost',
+        metadata: {
+          preferUnsplash,
+          ratio: Number(ratio.toFixed(4)),
+          threshold: config.aiPhotoFallbackUsageRatio,
+          brandTokens: usage.brandTokens ?? 0,
+          brandBudget: usage.brandBudget,
+        },
+      });
+    }
+
+    return preferUnsplash;
   } catch (err) {
     logger.warn('Falha ao checar gasto de IA pra decidir fallback de foto', { error: (err as Error).message });
     return false;

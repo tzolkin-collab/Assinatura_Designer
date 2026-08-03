@@ -7,6 +7,9 @@ import { ws } from '../../lib/websocket.js';
 // sistema de camadas nanoBanana) foram removidos — sem chamador desde a virada
 // pro html-design, ver docs/PLANO-CONSOLIDACAO.md.
 
+import { recordStep } from '../../lib/generationTracing.js';
+import { getAiContext } from '../../lib/aiContext.js';
+
 export type DesignToolName = 'set_design';
 
 export async function executeTool(
@@ -15,6 +18,16 @@ export async function executeTool(
   sessionId: string,
   currentPages: unknown[],
 ): Promise<unknown[]> {
+  const ctx = getAiContext();
+  if (ctx.runId) {
+    recordStep({
+      runId: ctx.runId,
+      kind: 'TOOL',
+      name: tool,
+      metadata: { argsCount: args.pages?.length, currentCount: currentPages?.length }
+    });
+  }
+
   if (tool !== 'set_design') return currentPages;
 
   const pages = args.pages;

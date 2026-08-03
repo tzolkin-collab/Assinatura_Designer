@@ -122,62 +122,63 @@ model Notification {
 }
 
 model Brand {
-  id               String            @id @default(uuid())
-  slug             String            @unique
-  name             String
-  color            String?           @default("#f0bfbf")
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
-  config           BrandConfig?
-  folders          Folder[]
-  posts            Post[]
-  refs             Reference[]
-  members          BrandMember[]
-  assets           Asset[]
-  accessRequests   AccessRequest[]
-  invites          Invite[]
+  id             String          @id @default(uuid())
+  slug           String          @unique
+  name           String
+  color          String?         @default("#f0bfbf")
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  config         BrandConfig?
+  folders        Folder[]
+  posts          Post[]
+  refs           Reference[]
+  members        BrandMember[]
+  assets         Asset[]
+  accessRequests AccessRequest[]
+  invites        Invite[]
+  generationRuns GenerationRun[]
 }
 
 model BrandConfig {
-  id                 String   @id @default(uuid())
-  agentPrompt        String
-  primaryFonts       String[]
-  colors             String[]
-  guidelines         String
-  logoUrl            String?
-  updatedAt          DateTime @updatedAt
-  brandId            String   @unique
-  presentationConfig Json?
-  ignoreAiCostLimit  Boolean  @default(false)
+  id                        String    @id @default(uuid())
+  agentPrompt               String
+  primaryFonts              String[]
+  colors                    String[]
+  guidelines                String
+  logoUrl                   String?
+  updatedAt                 DateTime  @updatedAt
+  brandId                   String    @unique
+  presentationConfig        Json?
+  ignoreAiCostLimit         Boolean   @default(false)
   // Pesquisa automática de benchmark é por marca (substitui o antigo toggle
   // por-referência em Reference.autoSyncEnabled/autoSyncInterval, mantidos no
   // schema mas sem leitor/escritor novo — ver benchmarkOrchestrator.ts).
-  autoResearchEnabled  Boolean   @default(false)
-  autoResearchInterval Int       @default(14)
-  lastAutoResearchAt   DateTime?
+  autoResearchEnabled       Boolean   @default(false)
+  autoResearchInterval      Int       @default(14)
+  lastAutoResearchAt        DateTime?
   // Estado da sessão de "Configurar Benchmark" em andamento (descoberta →
   // pergunta pendente → confirmação → análise). Ver BenchmarkSession em
   // benchmarkOrchestrator.ts para o shape tipado em TS.
-  benchmarkSession     Json?
+  benchmarkSession          Json?
   // Resumo consolidado (markdown) sintetizado a partir de TODAS as
   // referências ANALYZED — não a análise de 1 concorrente, mas o panorama:
   // padrões recorrentes, oportunidades de diferenciação, paleta/tom
   // recomendados. Vira contexto extra pro artista (ver brandContext.ts).
-  benchmarkSummary     String?
+  benchmarkSummary          String?
   benchmarkSummaryUpdatedAt DateTime?
-  brand              Brand    @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  brand                     Brand     @relation(fields: [brandId], references: [id], onDelete: Cascade)
 }
 
 model Reference {
-  id           String     @id @default(uuid())
-  name         String
-  status       RefStatus  @default(PENDING)
-  insights     Int        @default(0)
-  insightsText String?
-  analysisUrl  String?
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
-  brandId      String
+  id               String     @id @default(uuid())
+  name             String
+  status           RefStatus  @default(PENDING)
+  insights         Int        @default(0)
+  insightsText     String?
+  analysisUrl      String?
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+  brandId          String
   archetype        String?
   density          String?
   imageUrl         String?
@@ -201,36 +202,37 @@ model Reference {
 }
 
 model Post {
-  id             String     @id @default(uuid())
-  name           String?    @db.VarChar(255)
-  type           PostType
-  status         PostStatus @default(DRAFT)
-  content        Json?
-  previewUrl     String?
-  createdAt      DateTime   @default(now())
-  updatedAt      DateTime   @updatedAt
-  brandId        String
-  folderId       String?
-  createdById    String?
-  canvaDesignId  String?
-  canvaExportUrl String?
-  canvaDesignName String?
-  canvaSyncEnabled Boolean    @default(false)
+  id                String          @id @default(uuid())
+  name              String?         @db.VarChar(255)
+  type              PostType
+  status            PostStatus      @default(DRAFT)
+  content           Json?
+  previewUrl        String?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  brandId           String
+  folderId          String?
+  createdById       String?
+  canvaDesignId     String?
+  canvaExportUrl    String?
+  canvaDesignName   String?
+  canvaSyncEnabled  Boolean         @default(false)
   canvaLastSyncedAt DateTime?
   // Hospedagem pública (Fase 5, Fatia 1 — navegação): slug curto e opaco pra URL
   // pública; publishedAt null = não hospedado (a checagem de "está publicado" é
   // sempre AND com publicSlug, nunca só um dos dois). hostingConfig guarda toggles
   // de apresentação (autoplay, contador) — nasce pronto pra formsEnabled/
   // liveSyncEnabled de fases futuras sem precisar de nova migration.
-  publicSlug     String?    @unique
-  publishedAt    DateTime?
-  hostingConfig  Json?
-  brand          Brand      @relation(fields: [brandId], references: [id], onDelete: Cascade)
-  folder         Folder?    @relation(fields: [folderId], references: [id])
-  createdBy      User?      @relation(fields: [createdById], references: [id], onDelete: SetNull)
-  slides         Slide[]
-  versions       PostVersion[]
-  generatedAssets Asset[]
+  publicSlug        String?         @unique
+  publishedAt       DateTime?
+  hostingConfig     Json?
+  brand             Brand           @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  folder            Folder?         @relation(fields: [folderId], references: [id])
+  createdBy         User?           @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  slides            Slide[]
+  versions          PostVersion[]
+  generatedAssets   Asset[]
+  generationRuns    GenerationRun[]
 
   @@index([brandId])
   @@index([folderId])
@@ -285,19 +287,19 @@ model Slide {
 }
 
 model Folder {
-  id        String   @id @default(uuid())
+  id        String     @id @default(uuid())
   name      String
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
   brandId   String
   type      FolderType @default(POST)
-  brand     Brand    @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  brand     Brand      @relation(fields: [brandId], references: [id], onDelete: Cascade)
   posts     Post[]
   assets    Asset[]
 
-  parentId  String?
-  parent    Folder?  @relation("FolderHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
-  children  Folder[] @relation("FolderHierarchy")
+  parentId String?
+  parent   Folder?  @relation("FolderHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children Folder[] @relation("FolderHierarchy")
 
   @@index([brandId])
 }
@@ -395,4 +397,73 @@ model AccessRequest {
   @@unique([userId, brandId])
   @@index([brandId])
   @@index([userId])
+}
+
+// ----------------------------------------------------------------------
+// Rastreabilidade de geração
+//
+// Nota sobre expurgo: Estas tabelas armazenam as entradas e saídas cruas do LLM.
+// O volume de dados cresce rapidamente de forma proporcional ao uso de IAs.
+// Recomenda-se implementar no futuro uma rotina de expurgo que remova
+// (ou mova para cold storage) execuções antigas, mantendo apenas
+// registros recentes para auditoria.
+// ----------------------------------------------------------------------
+
+enum GenerationStatus {
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+enum StepKind {
+  MODEL
+  TOOL
+  IMAGE
+}
+
+model GenerationRun {
+  id                String           @id @default(uuid())
+  postId            String?
+  post              Post?            @relation(fields: [postId], references: [id], onDelete: Cascade)
+  brandId           String
+  brand             Brand            @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  sessionId         String?
+  requestId         String?
+  feature           String
+  brief             String?          @db.Text
+  format            String?
+  aspectRatio       String?
+  status            GenerationStatus
+  error             String?          @db.Text
+  startedAt         DateTime?
+  finishedAt        DateTime?
+  totalInputTokens  Int              @default(0)
+  totalOutputTokens Int              @default(0)
+  steps             GenerationStep[]
+
+  @@index([postId])
+  @@index([brandId, startedAt])
+}
+
+model GenerationStep {
+  id              String        @id @default(uuid())
+  runId           String
+  run             GenerationRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  seq             Int
+  kind            StepKind
+  role            String?
+  name            String?
+  model           String?
+  tier            String?
+  attemptedModels String[]
+  promptText      String?       @db.Text
+  responseText    String?       @db.Text
+  inputTokens     Int?
+  outputTokens    Int?
+  latencyMs       Int?
+  error           String?       @db.Text
+  metadata        Json?
+  createdAt       DateTime      @default(now())
+
+  @@index([runId, seq])
 }
