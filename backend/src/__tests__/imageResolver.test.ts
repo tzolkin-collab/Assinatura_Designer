@@ -362,6 +362,33 @@ describe('resolveSlideImages', () => {
     // só a chamada de decisão deve ter ocorrido, nenhuma segunda chamada pra gerar SVG
     expect(generateWithRetry).toHaveBeenCalledTimes(1);
   });
+
+  it('não usa o mesmo asset duas vezes no deck — o segundo slide gera em vez de repetir', async () => {
+    // Regressão medida em produção: uma peça de 4 slides saiu com 10 <img> e só 5
+    // imagens distintas, o mesmo ícone de brandbook três vezes. O modelo julga
+    // cada slide isolado e nunca enxerga que já usou aquele arquivo.
+    prismaMock.asset.findMany.mockResolvedValue([
+      { url: 'https://cdn.example.com/icon-grafico.svg', name: 'icon-bar-graph-arrow.svg', tags: ['brandbook'] },
+    ]);
+    (generateWithRetry as ReturnType<typeof vi.fn>).mockResolvedValue({
+      text: JSON.stringify([
+        { slideIndex: 0, action: 'reuse', assetUrl: 'https://cdn.example.com/icon-grafico.svg' },
+        { slideIndex: 1, action: 'reuse', assetUrl: 'https://cdn.example.com/icon-grafico.svg' },
+      ]),
+    });
+
+    const skeleton = skeletonBase([
+      { imageHint: 'gráfico de crescimento' },
+      { imageHint: 'equipe comemorando resultado' },
+    ]);
+    const { resolved: result } = await resolveSlideImages({ ...baseParams, skeleton });
+
+    // O primeiro fica com o asset; o segundo NÃO recebe a mesma URL.
+    expect(result.get(0)).toEqual({ imageUrl: 'https://cdn.example.com/icon-grafico.svg' });
+    expect(result.get(1)?.imageUrl).not.toBe('https://cdn.example.com/icon-grafico.svg');
+    // E a duplicata vira geração a partir do hint, em vez de virar slide vazio.
+    expect(mockGenerateContent).toHaveBeenCalled();
+  });
 });
 
 describe('resolveImageCandidateDecisions', () => {
