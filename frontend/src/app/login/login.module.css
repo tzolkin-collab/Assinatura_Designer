@@ -25,16 +25,17 @@
   align-items: center;
   gap: var(--space-2);
   margin-bottom: var(--space-8);
-  background-color: rgb(255, 253, 242);
-  padding: 15px;
-  margin-inline: 120px;
-  border-radius: 360px;
 }
 
 .logo {
-  height: 50px;
+  height: 40px;
   width: auto;
   object-fit: contain;
+}
+
+.logoSub {
+  font-size: var(--text-sm);
+  color: var(--color-text-tertiary);
 }
 
 /* ── Form ── */

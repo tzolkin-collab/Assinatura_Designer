@@ -28,6 +28,20 @@ export const canvaRouter = Router();
 // `state` (gerado por nós e conferido no banco), não o JWT.
 export const canvaPublicRouter = Router();
 
+function getFrontendUrl(): string {
+  const corsOrigins = config.corsOrigin.split(',').map((s) => s.trim()).filter(Boolean);
+  return corsOrigins[0] || 'http://localhost:3000';
+}
+
+function getCanvaRedirectUri(req: AuthRequest): string {
+  if (process.env.CANVA_REDIRECT_URI) {
+    return process.env.CANVA_REDIRECT_URI;
+  }
+  const proto = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'http';
+  const host = (req.headers['x-forwarded-host'] as string) || req.get('host');
+  return `${proto}://${host}/api/canva/callback`;
+}
+
 // ── GET /api/canva/auth-url ──
 // Gera a URL de autorização do Canva e guarda PKCE verifier + state no usuário.
 // Rate limit de 10/min por IP evita spam do início do OAuth.
@@ -56,7 +70,8 @@ canvaRouter.get('/auth-url', async (req: AuthRequest, res: Response, next: NextF
           },
         });
 
-        const authUrl = buildAuthorizationUrl(codeChallenge, state);
+        const redirectUri = getCanvaRedirectUri(req);
+        const authUrl = buildAuthorizationUrl(codeChallenge, state, redirectUri);
         res.json({ data: { authUrl, state } });
       } catch (innerError) {
         next(innerError);
@@ -100,7 +115,8 @@ canvaPublicRouter.get('/callback', async (req: AuthRequest, res: Response, next:
     }
 
     // Exchange code for tokens
-    const tokens = await exchangeCodeForTokens(code, user.canvaCodeVerifier);
+    const redirectUri = getCanvaRedirectUri(req);
+    const tokens = await exchangeCodeForTokens(code, user.canvaCodeVerifier, redirectUri);
     const expiresAt = new Date(Date.now() + tokens.expires_in * 1000);
 
     await prisma.user.update({
@@ -130,7 +146,8 @@ canvaPublicRouter.get('/callback', async (req: AuthRequest, res: Response, next:
     }
 
     // Volta para a tela global de integrações do designer.
-    res.redirect(`${config.corsOrigin}/configuracoes/integracoes?connected=canva`);
+    const frontendUrl = getFrontendUrl();
+    res.redirect(`${frontendUrl}/configuracoes/integracoes?connected=canva`);
   } catch (error) {
     next(error);
   }

@@ -235,6 +235,15 @@ function getFrontendUrl(): string {
   return corsOrigins[0] || 'http://localhost:3000';
 }
 
+function getRedirectUri(req: Request): string {
+  if (process.env.GOOGLE_OAUTH_LOGIN_REDIRECT_URI) {
+    return process.env.GOOGLE_OAUTH_LOGIN_REDIRECT_URI;
+  }
+  const proto = (req.headers['x-forwarded-proto'] as string) || req.protocol || 'http';
+  const host = (req.headers['x-forwarded-host'] as string) || req.get('host');
+  return `${proto}://${host}/api/auth/google/callback`;
+}
+
 // GET /api/auth/google/login — inicia fluxo de login via Google OAuth2
 authRouter.get('/google/login', (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -244,7 +253,7 @@ authRouter.get('/google/login', (req: Request, res: Response, next: NextFunction
     }
 
     const redirectPath = (req.query.redirect as string) || '/galeria';
-    const redirectUri = process.env.GOOGLE_OAUTH_LOGIN_REDIRECT_URI || `${req.protocol}://${req.get('host')}/api/auth/google/callback`;
+    const redirectUri = getRedirectUri(req);
 
     const stateNonce = generateOAuthState();
     const stateValue = `${stateNonce}:${redirectPath}`;
@@ -297,7 +306,7 @@ authRouter.get('/google/callback', async (req: Request, res: Response, next: Nex
 
     const clientId = process.env.GOOGLE_CLIENT_ID;
     const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-    const redirectUri = process.env.GOOGLE_OAUTH_LOGIN_REDIRECT_URI || `${req.protocol}://${req.get('host')}/api/auth/google/callback`;
+    const redirectUri = getRedirectUri(req);
 
     if (!clientId || !clientSecret) {
       throw createError(500, 'Credenciais do Google (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET) não configuradas no .env');
@@ -329,6 +338,23 @@ authRouter.get('/google/callback', async (req: Request, res: Response, next: Nex
     }
 
     const normalizedEmail = userInfo.email.trim().toLowerCase();
+
+    // Validação de domínios/e-mails permitidos (GOOGLE_ALLOWED_EMAILS)
+    const allowedEmailsEnv = process.env.GOOGLE_ALLOWED_EMAILS;
+    if (allowedEmailsEnv) {
+      const allowedList = allowedEmailsEnv.split(',').map((e) => e.trim().toLowerCase()).filter(Boolean);
+      const isAllowed = allowedList.some((allowed) => {
+        if (allowed.startsWith('@')) {
+          return normalizedEmail.endsWith(allowed);
+        }
+        return normalizedEmail === allowed;
+      });
+      if (!isAllowed) {
+        const frontendUrl = getFrontendUrl();
+        const errMsg = encodeURIComponent(`Acesso permitido apenas para e-mails cadastrados (${allowedEmailsEnv}). O e-mail ${normalizedEmail} não tem permissão.`);
+        return res.redirect(`${frontendUrl}/login?error=${errMsg}`);
+      }
+    }
 
     // 1. Busca por googleId
     let user = await prisma.user.findUnique({ where: { googleId: userInfo.sub } });
