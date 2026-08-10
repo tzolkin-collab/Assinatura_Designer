@@ -9,6 +9,7 @@ import prisma from '../lib/prisma.js';
 import { getBilling } from '../lib/aiBudget.js';
 import { assertBrandAccess, ANY_MEMBER, EDITORS } from '../middleware/brandAccess.js';
 import { createError } from '../middleware/errorHandler.js';
+import { normalizarLogoParaFundoEscuro } from '../lib/logoTransparency.js';
 import { config as appConfig } from '../config.js';
 import { AuthRequest } from '../middleware/auth.js';
 import { z } from 'zod';
@@ -69,6 +70,12 @@ settingsRouter.put('/:slug/config', async (req: AuthRequest, res: Response, next
     const brandId = await getBrandId(req.params.slug as string, req.user?.userId);
     const { agentPrompt, primaryFonts, colors, guidelines, logoUrl, presentationConfig, autoResearchEnabled, autoResearchInterval, ignoreAiCostLimit } = req.body;
 
+    // Mesma normalização do confirm-logo do brandbook: sem isto, salvar pela
+    // página de Branding reintroduz o logo opaco que o outro caminho corrigiu.
+    const logoFinal = typeof logoUrl === 'string' && logoUrl.trim()
+      ? await normalizarLogoParaFundoEscuro(logoUrl)
+      : logoUrl;
+
     const normalizedPresentationConfig =
       presentationConfig === undefined
         ? undefined
@@ -77,7 +84,7 @@ settingsRouter.put('/:slug/config', async (req: AuthRequest, res: Response, next
     const config = await prisma.brandConfig.upsert({
       where: { brandId },
       update: {
-        agentPrompt, primaryFonts, colors, guidelines, logoUrl, presentationConfig: normalizedPresentationConfig,
+        agentPrompt, primaryFonts, colors, guidelines, logoUrl: logoFinal, presentationConfig: normalizedPresentationConfig,
         autoResearchEnabled, autoResearchInterval, ignoreAiCostLimit,
       },
       create: {
@@ -86,7 +93,7 @@ settingsRouter.put('/:slug/config', async (req: AuthRequest, res: Response, next
         primaryFonts: primaryFonts || [],
         colors: colors || [],
         guidelines: guidelines || '',
-        logoUrl,
+        logoUrl: logoFinal,
         presentationConfig: normalizedPresentationConfig,
         ignoreAiCostLimit: !!ignoreAiCostLimit,
         autoResearchEnabled: !!autoResearchEnabled,
@@ -97,16 +104,16 @@ settingsRouter.put('/:slug/config', async (req: AuthRequest, res: Response, next
     // Sync Logo → Asset: sem isto, a logo salva pela página Branding ficava
     // invisível na Biblioteca de Mídia (só o confirm-logo do Brandbook criava
     // o Asset). Mesmo padrão do brands.ts confirm-logo.
-    if (typeof logoUrl === 'string' && logoUrl.trim()) {
+    if (typeof logoFinal === 'string' && logoFinal.trim()) {
       const brand = await prisma.brand.findUnique({ where: { id: brandId }, select: { name: true } });
-      const fileName = logoUrl.split('/').pop() ?? 'logo';
+      const fileName = logoFinal.split('/').pop() ?? 'logo';
       const existingLogoAsset = await prisma.asset.findFirst({
         where: { brandId, source: 'branding' },
       });
       if (existingLogoAsset) {
         await prisma.asset.update({
           where: { id: existingLogoAsset.id },
-          data: { url: logoUrl, name: fileName },
+          data: { url: logoFinal, name: fileName },
         });
       } else {
         const ext = fileName.split('.').pop()?.toLowerCase() ?? 'svg';
@@ -118,7 +125,7 @@ settingsRouter.put('/:slug/config', async (req: AuthRequest, res: Response, next
           data: {
             brandId,
             name: `Logo — ${brand?.name ?? req.params.slug}`,
-            url: logoUrl,
+            url: logoFinal,
             fileType,
             sizeBytes: 0,
             source: 'branding',

@@ -4,6 +4,7 @@ import { uploadFileToR2 } from './r2.js';
 import { createError } from '../middleware/errorHandler.js';
 import { GoogleGenAI } from '@google/genai';
 import { config } from '../config.js';
+import { normalizarLogoParaFundoEscuro } from './logoTransparency.js';
 
 export type SVGClassification = 'LOGOTYPE' | 'GRAPHIC_ELEMENT' | 'ILLUSTRATION';
 
@@ -450,6 +451,7 @@ Formato do JSON de resposta:
       logoNeedsConfirmation = true;
     } else if (!currentLogoUrl) {
       // Se não havia logo, define como oficial automaticamente
+      detectedLogoUrl = await normalizarLogoParaFundoEscuro(detectedLogoUrl);
       await prisma.brandConfig.upsert({
         where: { brandId: brand.id },
         update: { logoUrl: detectedLogoUrl },

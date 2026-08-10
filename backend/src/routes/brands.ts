@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import prisma from '../lib/prisma.js';
 import { ensureInternalTeamMemberships } from '../lib/internalTeam.js';
 import { createError } from '../middleware/errorHandler.js';
+import { normalizarLogoParaFundoEscuro } from '../lib/logoTransparency.js';
 import type { AuthRequest } from '../middleware/auth.js';
 import { mergeSlidesIntoPost } from '../lib/postHelper.js';
 import { deleteFromR2 } from '../lib/r2.js';
@@ -125,30 +126,34 @@ brandsRouter.post('/:slug/brandbook/confirm-logo', requireBrandRole(EDITORS), as
 
     if (!logoUrl) throw createError(400, 'logoUrl é obrigatório');
 
+    // Logo exportado de Canva/Word chega opaco e vira caixa branca em slide
+    // escuro. Devolve a URL original quando não há o que converter.
+    const logoFinal = await normalizarLogoParaFundoEscuro(logoUrl);
+
     await prisma.brandConfig.upsert({
       where: { brandId: brand.id },
-      update: { logoUrl },
+      update: { logoUrl: logoFinal },
       create: {
         brandId: brand.id,
         agentPrompt: `Você é o assistente de design da marca ${brand.name}.`,
         guidelines: '',
         colors: [],
         primaryFonts: ['Inter'],
-        logoUrl,
+        logoUrl: logoFinal,
       },
     });
 
     // Sync: upsert de Asset com source 'branding' para que a logo apareça
     // na Biblioteca de Mídia sem precisar de upload duplicado no R2.
     // Usa o nome do arquivo da URL como identificador único dentro da marca.
-    const fileName = logoUrl.split('/').pop() ?? 'logo';
+    const fileName = logoFinal.split('/').pop() ?? 'logo';
     const existingLogoAsset = await prisma.asset.findFirst({
       where: { brandId: brand.id, source: 'branding' },
     });
     if (existingLogoAsset) {
       await prisma.asset.update({
         where: { id: existingLogoAsset.id },
-        data: { url: logoUrl, name: fileName, updatedAt: new Date() },
+        data: { url: logoFinal, name: fileName, updatedAt: new Date() },
       });
     } else {
       const ext = fileName.split('.').pop()?.toLowerCase() ?? 'svg';
@@ -160,7 +165,7 @@ brandsRouter.post('/:slug/brandbook/confirm-logo', requireBrandRole(EDITORS), as
         data: {
           brandId: brand.id,
           name: `Logo — ${brand.name}`,
-          url: logoUrl,
+          url: logoFinal,
           fileType,
           sizeBytes: 0,
           source: 'branding',
@@ -169,7 +174,9 @@ brandsRouter.post('/:slug/brandbook/confirm-logo', requireBrandRole(EDITORS), as
       });
     }
 
-    res.json({ message: 'Logo oficial atualizada com sucesso', data: { logoUrl } });
+    // Devolve a URL EFETIVA: se houve conversão, o frontend precisa passar a
+    // exibir a transparente, não a que o usuário acabou de enviar.
+    res.json({ message: 'Logo oficial atualizada com sucesso', data: { logoUrl: logoFinal } });
   } catch (error) {
     next(error);
   }
