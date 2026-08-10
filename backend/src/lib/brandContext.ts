@@ -23,11 +23,6 @@ export type ResolvedBrandContext = DesignDocumentBrandContext & {
     palette: string[];
     insightsText: string | null;
   }>;
-  /** Resumo ÚNICO sintetizado a partir de TODAS as referências analisadas do
-   *  benchmark (padrões recorrentes, oportunidades de diferenciação, paleta/
-   *  tom recomendados) — ver `benchmarkOrchestrator.ts`. Contexto extra além
-   *  do detalhe por-referência já listado acima. */
-  benchmarkSummary?: string | null;
   /** Imagens do pool de assets da marca (upload/Drive/Asana) — o artista as usa em
    *  vez de inventar fotos de banco quando fizer sentido para o layout. Nome junto
    *  (antes era só URL crua — o artista escolhia sem nenhuma pista do conteúdo). */
@@ -93,7 +88,6 @@ export async function resolveBrandContext(slug: string): Promise<ResolvedBrandCo
       insightsText: ref.insightsText,
     })),
     assetUrls: brand.assets.map((a) => ({ url: a.url, name: `${a.name}${a.tags.length ? ` [${a.tags.join(',')}]` : ''}` })),
-    benchmarkSummary: brand.config?.benchmarkSummary,
   };
 }
 
@@ -124,7 +118,6 @@ export function buildBrandContextSummary(context: ResolvedBrandContext): string 
     context.presentationConfig?.boldness ? `Nível de ousadia: ${context.presentationConfig.boldness}` : '',
     context.presentationConfig?.autoMode !== undefined ? `Modo automático padrão: ${context.presentationConfig.autoMode ? 'ativo' : 'desativado'}` : '',
     referenceLines.length > 0 ? `Referências analisadas:\n${referenceLines.join('\n')}` : '',
-    context.benchmarkSummary?.trim() ? `Resumo consolidado do benchmark (panorama competitivo):\n${context.benchmarkSummary.trim()}` : '',
   ].filter(Boolean).join('\n');
 }
 
@@ -150,6 +143,5 @@ export function buildBrandAssistantInstruction(context: ResolvedBrandContext): s
           return `- ${reference.name}${descriptors ? ` | ${descriptors}` : ''}${palette ? ` | ${palette}` : ''}`;
         }).join('\n')}`
       : '',
-    context.benchmarkSummary?.trim() ? `Consolidated Benchmark Summary (competitive landscape):\n${context.benchmarkSummary.trim()}` : '',
   ].filter(Boolean).join('\n');
 }

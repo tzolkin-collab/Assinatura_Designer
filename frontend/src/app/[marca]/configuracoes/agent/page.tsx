@@ -30,7 +30,7 @@ const DEFAULT_PROMPT = `Você é um assistente de design especializado em criaç
 
 ## Capacidades
 - Gerar briefings detalhados para posts
-- Analisar benchmarks de concorrentes
+- Analisar referências de marcas
 - Sugerir paletas e composições
 - Criar textos publicitários
 
