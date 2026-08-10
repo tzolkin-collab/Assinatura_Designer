@@ -26,7 +26,7 @@ const CONFIG_SECTIONS = [
   {
     key: 'referencias',
     label: 'Referências',
-    description: 'Benchmarks e análises de marcas concorrentes via Gemini.',
+    description: 'Marcas de referência analisadas pelo agente.',
     icon: <Eye size={20} />,
   },
   {

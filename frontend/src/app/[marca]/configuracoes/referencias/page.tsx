@@ -4,7 +4,7 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import ReactMarkdown from 'react-markdown';
 import Image from 'next/image';
-import { ArrowLeft, ExternalLink, RefreshCw, X, Loader2, ImageIcon, Search, Wrench, Plus, FileText, ChevronDown, ChevronUp } from 'lucide-react';
+import { ArrowLeft, ExternalLink, RefreshCw, X, Loader2, ImageIcon, Wrench } from 'lucide-react';
 import PageHeader from '@/components/ui/PageHeader';
 import Button from '@/components/ui/Button';
 import Card from '@/components/ui/Card';
@@ -38,46 +38,6 @@ interface Reference {
   updatedAt: string;
 }
 
-interface BenchmarkInstagramPost {
-  imageUrl: string;
-  caption?: string;
-  likesCount?: number;
-  commentsCount?: number;
-}
-
-interface BenchmarkCollected {
-  website?: Array<{ url: string; title?: string; screenshotUrl?: string }> | null;
-  instagram?: {
-    username?: string;
-    fullName?: string;
-    biography?: string;
-    followersCount?: number;
-    verified?: boolean;
-    posts: BenchmarkInstagramPost[];
-  } | null;
-}
-
-interface BenchmarkCandidate {
-  id: string;
-  name: string;
-  websiteUrl?: string;
-  instagramUrl?: string;
-  reason?: string;
-  confirmed: boolean;
-  collected?: BenchmarkCollected;
-}
-
-interface BenchmarkSession {
-  status: 'DISCOVERING' | 'AWAITING_QUESTION' | 'AWAITING_CONFIRMATION' | 'ANALYZING' | 'DONE' | 'FAILED';
-  recommended: string[];
-  candidates: BenchmarkCandidate[];
-  pendingQuestion?: { text: string; options?: string[] };
-  round: number;
-  error?: string;
-}
-
-const RECOMMENDED_SLOTS = 5;
-const PROCESSING_STATUSES: BenchmarkSession['status'][] = ['DISCOVERING', 'ANALYZING', 'AWAITING_QUESTION'];
 
 export default function ReferenciasPage() {
   const params = useParams();
@@ -95,9 +55,6 @@ export default function ReferenciasPage() {
   const [autoResearchEnabled, setAutoResearchEnabled] = useState(false);
   const [autoResearchInterval, setAutoResearchInterval] = useState(14);
   const [savingTools, setSavingTools] = useState(false);
-  const [benchmarkSummary, setBenchmarkSummary] = useState<string | null>(null);
-  const [benchmarkSummaryUpdatedAt, setBenchmarkSummaryUpdatedAt] = useState<string | null>(null);
-  const [summaryOpen, setSummaryOpen] = useState(false);
 
   // "+ referência avulsa" (secundário, sem descoberta)
   const [avulsoOpen, setAvulsoOpen] = useState(false);
@@ -108,16 +65,6 @@ export default function ReferenciasPage() {
   const [createError, setCreateError] = useState('');
   const avulsoNameRef = useRef<HTMLInputElement>(null);
 
-  // "Configurar Benchmark"
-  const [benchmarkOpen, setBenchmarkOpen] = useState(false);
-  const [recommendedInputs, setRecommendedInputs] = useState<string[]>(Array(RECOMMENDED_SLOTS).fill(''));
-  const [session, setSession] = useState<BenchmarkSession | null>(null);
-  const [startingBenchmark, setStartingBenchmark] = useState(false);
-  const [answerText, setAnswerText] = useState('');
-  const [answering, setAnswering] = useState(false);
-  const [selections, setSelections] = useState<Record<string, boolean>>({});
-  const [confirming, setConfirming] = useState(false);
-  const [benchmarkError, setBenchmarkError] = useState('');
 
   const fetchRefs = useCallback(() => {
     api.get<Reference[]>(`/settings/${slug}/referencias`)
@@ -129,12 +76,10 @@ export default function ReferenciasPage() {
   }, [slug]);
 
   const fetchToolsConfig = useCallback(() => {
-    api.get<{ autoResearchEnabled?: boolean; autoResearchInterval?: number; benchmarkSummary?: string | null; benchmarkSummaryUpdatedAt?: string | null }>(`/settings/${slug}/config`)
+    api.get<{ autoResearchEnabled?: boolean; autoResearchInterval?: number }>(`/settings/${slug}/config`)
       .then((data) => {
         setAutoResearchEnabled(!!data?.autoResearchEnabled);
         setAutoResearchInterval(data?.autoResearchInterval ?? 14);
-        setBenchmarkSummary(data?.benchmarkSummary ?? null);
-        setBenchmarkSummaryUpdatedAt(data?.benchmarkSummaryUpdatedAt ?? null);
       })
       .catch(() => {});
   }, [slug]);
@@ -155,69 +100,6 @@ export default function ReferenciasPage() {
     const timer = setTimeout(fetchRefs, 5000);
     return () => clearTimeout(timer);
   }, [refs, fetchRefs]);
-
-  // Ao abrir o modal, busca a sessão que já existir no backend — sem isso, um
-  // reload durante uma descoberta em andamento reaparecia sempre no
-  // formulário em branco, perdendo o progresso já feito.
-  useEffect(() => {
-    if (!benchmarkOpen) return;
-    api.get<BenchmarkSession | null>(`/settings/${slug}/referencias/benchmark`)
-      .then((data) => { if (data) setSession(data); })
-      .catch(() => {});
-  }, [benchmarkOpen, slug]);
-
-  // Poll da sessão de benchmark enquanto ainda estiver processando. Usa uma
-  // ref pro status (não `session` no dependency array): a descoberta real
-  // pode levar dezenas de segundos (Google Search grounding), então o GET
-  // costuma voltar `null` (ainda sem sessão persistida) nos primeiros polls —
-  // se o reagendamento dependesse de `session` mudar de referência, uma
-  // resposta `null` (que não atualiza o state) travava o polling pra sempre.
-  const sessionStatusRef = useRef<BenchmarkSession['status'] | null>(null);
-  useEffect(() => { sessionStatusRef.current = session?.status ?? null; }, [session]);
-
-  useEffect(() => {
-    if (!benchmarkOpen) return;
-    let cancelled = false;
-    const poll = () => {
-      if (cancelled) return;
-      if (sessionStatusRef.current && !PROCESSING_STATUSES.includes(sessionStatusRef.current)) return;
-      api.get<BenchmarkSession | null>(`/settings/${slug}/referencias/benchmark`)
-        .then((data) => { if (data && !cancelled) setSession(data); })
-        .catch(() => {})
-        .finally(() => { if (!cancelled) setTimeout(poll, 3000); });
-    };
-    const timer = setTimeout(poll, 3000);
-    return () => { cancelled = true; clearTimeout(timer); };
-  }, [benchmarkOpen, slug]);
-
-  // Ao chegar em AWAITING_CONFIRMATION, marca todos os candidatos como selecionados por padrão
-  useEffect(() => {
-    if (session?.status === 'AWAITING_CONFIRMATION') {
-      setSelections((prev) => {
-        const next = { ...prev };
-        for (const c of session.candidates) {
-          if (!(c.id in next)) next[c.id] = c.confirmed;
-        }
-        return next;
-      });
-    }
-  }, [session]);
-
-  // Sessão concluída: recarrega as referências (os novos concorrentes já
-  // aparecem como abas em PENDENTE/analisando) e fecha o modal.
-  useEffect(() => {
-    if (session?.status === 'DONE') {
-      fetchRefs();
-      fetchToolsConfig(); // o resumo consolidado de branding pode ter sido atualizado
-      const timer = setTimeout(() => {
-        setBenchmarkOpen(false);
-        setSession(null);
-        setRecommendedInputs(Array(RECOMMENDED_SLOTS).fill(''));
-        setSelections({});
-      }, 1500);
-      return () => clearTimeout(timer);
-    }
-  }, [session?.status, fetchRefs, fetchToolsConfig]);
 
   const handleSaveTools = async (enabled: boolean, interval: number) => {
     setSavingTools(true);
@@ -291,55 +173,6 @@ export default function ReferenciasPage() {
     }
   };
 
-  const handleStartBenchmark = async () => {
-    setStartingBenchmark(true);
-    setBenchmarkError('');
-    try {
-      const recommended = recommendedInputs.map((n) => n.trim()).filter(Boolean);
-      const initial = await api.post<BenchmarkSession>(`/settings/${slug}/referencias/benchmark`, { recommended });
-      setSession(initial);
-    } catch (err) {
-      setBenchmarkError(err instanceof ApiError ? err.message : 'Erro ao iniciar o benchmark.');
-    } finally {
-      setStartingBenchmark(false);
-    }
-  };
-
-  const handleAnswerQuestion = async (answer: string) => {
-    if (!answer.trim()) return;
-    setAnswering(true);
-    try {
-      await api.post(`/settings/${slug}/referencias/benchmark/responder`, { answer: answer.trim() });
-      setSession((prev) => prev ? { ...prev, status: 'DISCOVERING' } : prev);
-      setAnswerText('');
-    } catch (err) {
-      setBenchmarkError(err instanceof ApiError ? err.message : 'Erro ao responder.');
-    } finally {
-      setAnswering(false);
-    }
-  };
-
-  const handleConfirmCandidates = async () => {
-    if (!session) return;
-    setConfirming(true);
-    try {
-      const candidates = session.candidates.map((c) => ({ id: c.id, confirmed: selections[c.id] ?? c.confirmed }));
-      await api.post(`/settings/${slug}/referencias/benchmark/confirmar`, { candidates });
-      setSession((prev) => prev ? { ...prev, status: 'ANALYZING' } : prev);
-    } catch (err) {
-      setBenchmarkError(err instanceof ApiError ? err.message : 'Erro ao confirmar candidatos.');
-    } finally {
-      setConfirming(false);
-    }
-  };
-
-  const closeBenchmarkModal = () => {
-    setBenchmarkOpen(false);
-    setSession(null);
-    setBenchmarkError('');
-    setRecommendedInputs(Array(RECOMMENDED_SLOTS).fill(''));
-    setSelections({});
-  };
 
   const statusLabel = (status: Reference['status']) => {
     if (status === 'ANALYZED') return 'Analisado';
@@ -367,14 +200,8 @@ export default function ReferenciasPage() {
       </Link>
 
       <PageHeader
-        title="Referências & Benchmarks"
-        description="O bot descobre os concorrentes da marca sozinho e monta o benchmark completo — até 5 marcas, site + Instagram."
-        actions={
-          <Button size="sm" onClick={() => setBenchmarkOpen(true)}>
-            <Search size={14} />
-            Configurar Benchmark
-          </Button>
-        }
+        title="Referências"
+        description="Marcas de referência analisadas pelo agente — site e Instagram."
       />
 
       <div className={styles.toolsPanel}>
@@ -385,7 +212,7 @@ export default function ReferenciasPage() {
             </div>
             <div>
               <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--color-text)', display: 'block' }}>Pesquisa automática</span>
-              <span style={{ fontSize: 12, color: 'var(--color-text-tertiary)' }}>Refaz a descoberta e a análise do benchmark inteiro periodicamente</span>
+              <span style={{ fontSize: 12, color: 'var(--color-text-tertiary)' }}>Reanalisa as referências da marca periodicamente</span>
             </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -417,42 +244,13 @@ export default function ReferenciasPage() {
         </button>
       </div>
 
-      {benchmarkSummary && (
-        <div className={styles.toolsPanel}>
-          <button
-            type="button"
-            onClick={() => setSummaryOpen((v) => !v)}
-            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <div style={{ padding: '6px', backgroundColor: 'var(--color-bg-secondary)', borderRadius: '6px' }}>
-                <FileText size={16} color="var(--color-brand)" />
-              </div>
-              <div style={{ textAlign: 'left' }}>
-                <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--color-text)', display: 'block' }}>Resumo do Branding</span>
-                <span style={{ fontSize: 12, color: 'var(--color-text-tertiary)' }}>
-                  Sintetizado a partir das referências analisadas do benchmark
-                  {benchmarkSummaryUpdatedAt ? ` · atualizado em ${new Date(benchmarkSummaryUpdatedAt).toLocaleDateString('pt-BR')}` : ''}
-                </span>
-              </div>
-            </div>
-            {summaryOpen ? <ChevronUp size={16} color="var(--color-text-tertiary)" /> : <ChevronDown size={16} color="var(--color-text-tertiary)" />}
-          </button>
-          {summaryOpen && (
-            <div className={styles.markdownWrapper} style={{ marginTop: 'var(--space-3)' }}>
-              <ReactMarkdown>{benchmarkSummary}</ReactMarkdown>
-            </div>
-          )}
-        </div>
-      )}
-
       {loading ? (
         <div className={styles.loadingState}>
           <Loader2 className={styles.spinner} />
           <p>Carregando referências...</p>
         </div>
       ) : refs.length === 0 ? (
-        <p className={styles.empty}>Nenhuma referência ainda. Clique em &quot;Configurar Benchmark&quot; para o bot descobrir os concorrentes.</p>
+        <p className={styles.empty}>Nenhuma referência ainda. Use &quot;+ referência avulsa&quot; para adicionar uma marca.</p>
       ) : (
         <>
           <div className={styles.refTabs}>
@@ -664,158 +462,6 @@ export default function ReferenciasPage() {
         </div>
       )}
 
-      {/* "Configurar Benchmark" Modal */}
-      {benchmarkOpen && (
-        <div className={styles.modalOverlay} onClick={session?.status === 'ANALYZING' ? undefined : closeBenchmarkModal}>
-          <div className={styles.modal} style={{ maxWidth: 560 }} onClick={(e) => e.stopPropagation()}>
-            <div className={styles.modalHeader}>
-              <h2 className={styles.modalTitle}>Configurar Benchmark</h2>
-              <button className={styles.modalClose} onClick={closeBenchmarkModal}>
-                <X size={18} />
-              </button>
-            </div>
-
-            {!session && (
-              <div className={styles.modalForm}>
-                <p className={styles.formHint}>
-                  Recomende até {RECOMMENDED_SLOTS} concorrentes conhecidos (opcional) — os slots que deixar em branco, o bot pesquisa e preenche sozinho.
-                </p>
-                <div className={styles.recommendedInputsGrid}>
-                  {recommendedInputs.map((value, i) => (
-                    <input
-                      key={i}
-                      className={styles.formInput}
-                      value={value}
-                      onChange={(e) => setRecommendedInputs((prev) => prev.map((v, idx) => idx === i ? e.target.value : v))}
-                      placeholder={`Concorrente ${i + 1}`}
-                    />
-                  ))}
-                </div>
-                {benchmarkError && <p className={styles.formError}>{benchmarkError}</p>}
-                <div className={styles.modalActions}>
-                  <Button type="button" variant="secondary" size="sm" onClick={closeBenchmarkModal}>
-                    Cancelar
-                  </Button>
-                  <Button type="button" size="sm" disabled={startingBenchmark} onClick={handleStartBenchmark}>
-                    {startingBenchmark ? 'Buscando...' : 'Buscar concorrentes'}
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            {session && (session.status === 'DISCOVERING' || session.status === 'ANALYZING') && (
-              <div className={styles.loadingState}>
-                <Loader2 className={styles.spinner} />
-                <p>{session.status === 'DISCOVERING' ? 'Pesquisando concorrentes e coletando material...' : 'Analisando os concorrentes confirmados...'}</p>
-              </div>
-            )}
-
-            {session?.status === 'AWAITING_QUESTION' && session.pendingQuestion && (
-              <div className={styles.modalForm}>
-                <div className={styles.questionCard}>
-                  <p style={{ margin: 0, fontSize: 14, color: 'var(--color-text)' }}>{session.pendingQuestion.text}</p>
-                  {session.pendingQuestion.options && session.pendingQuestion.options.length > 0 ? (
-                    session.pendingQuestion.options.map((opt) => (
-                      <button key={opt} type="button" className={styles.questionOption} disabled={answering} onClick={() => handleAnswerQuestion(opt)}>
-                        {opt}
-                      </button>
-                    ))
-                  ) : (
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      <input
-                        className={styles.formInput}
-                        style={{ flex: 1 }}
-                        value={answerText}
-                        onChange={(e) => setAnswerText(e.target.value)}
-                        placeholder="Sua resposta..."
-                        onKeyDown={(e) => { if (e.key === 'Enter') handleAnswerQuestion(answerText); }}
-                      />
-                      <Button type="button" size="sm" disabled={answering || !answerText.trim()} onClick={() => handleAnswerQuestion(answerText)}>
-                        Responder
-                      </Button>
-                    </div>
-                  )}
-                </div>
-                {benchmarkError && <p className={styles.formError}>{benchmarkError}</p>}
-              </div>
-            )}
-
-            {session?.status === 'AWAITING_CONFIRMATION' && (
-              <div className={styles.modalForm}>
-                <p className={styles.formHint}>Confira o material coletado e desmarque quem não quiser analisar.</p>
-                <div className={styles.candidateList}>
-                  {session.candidates.map((c) => {
-                    const thumbs = [
-                      ...(c.collected?.instagram?.posts.map((p) => p.imageUrl) ?? []),
-                      ...(c.collected?.website?.map((p) => p.screenshotUrl).filter((u): u is string => !!u) ?? []),
-                    ];
-                    return (
-                      <div key={c.id} className={styles.candidateCard}>
-                        <div className={styles.candidateHeader}>
-                          <input
-                            type="checkbox"
-                            className={styles.candidateCheckbox}
-                            checked={selections[c.id] ?? c.confirmed}
-                            onChange={(e) => setSelections((prev) => ({ ...prev, [c.id]: e.target.checked }))}
-                          />
-                          <div style={{ flex: 1 }}>
-                            <strong style={{ fontSize: 14, color: 'var(--color-text)' }}>{c.name}</strong>
-                            {c.reason && <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--color-text-secondary)' }}>{c.reason}</p>}
-                            {c.collected?.instagram && (
-                              <p style={{ margin: '2px 0 0', fontSize: 12, color: 'var(--color-text-tertiary)' }}>
-                                {c.collected.instagram.biography}
-                                {c.collected.instagram.followersCount ? ` · ${c.collected.instagram.followersCount.toLocaleString('pt-BR')} seguidores` : ''}
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                        {thumbs.length > 0 && (
-                          <div className={styles.galleryGrid}>
-                            {thumbs.slice(0, 6).map((url, i) => (
-                              <div key={i} className={styles.galleryThumb}>
-                                <Image src={url} alt={`${c.name} — ${i + 1}`} fill style={{ objectFit: 'cover' }} unoptimized />
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-                {benchmarkError && <p className={styles.formError}>{benchmarkError}</p>}
-                <div className={styles.modalActions}>
-                  <Button type="button" variant="secondary" size="sm" onClick={closeBenchmarkModal}>
-                    Cancelar
-                  </Button>
-                  <Button type="button" size="sm" disabled={confirming} onClick={handleConfirmCandidates}>
-                    {confirming ? 'Confirmando...' : 'Confirmar e Analisar'}
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            {session?.status === 'DONE' && (
-              <div className={styles.loadingState}>
-                <p>Benchmark configurado! As referências já aparecem como abas na página.</p>
-              </div>
-            )}
-
-            {session?.status === 'FAILED' && (
-              <div className={styles.modalForm}>
-                <p className={styles.formError}>{session.error || 'Algo deu errado ao configurar o benchmark.'}</p>
-                <div className={styles.modalActions}>
-                  <Button type="button" variant="secondary" size="sm" onClick={closeBenchmarkModal}>
-                    Fechar
-                  </Button>
-                  <Button type="button" size="sm" onClick={handleStartBenchmark}>
-                    Tentar de novo
-                  </Button>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

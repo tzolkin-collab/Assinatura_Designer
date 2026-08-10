@@ -19,7 +19,6 @@ import { getCanvaDesignName } from './canvaSync.js';
 import { runDeckExport, type DeckExportParams } from './deckExport.js';
 import { runAssetCapture, type AssetCaptureParams } from './assetCapture.js';
 import { analyzeReferenceBackground } from './referenceSync.js';
-import { runAutoResearchCycle } from './benchmarkOrchestrator.js';
 import { logger } from './logger.js';
 
 const QUEUE_NAME = 'pipeline';
@@ -335,26 +334,7 @@ export function startReferenceSyncWorker(): Worker {
   refSyncWorker = new Worker(
     REF_SYNC_QUEUE_NAME,
     async (job) => {
-      if (job.name === 'sync-cron') {
-        // "Pesquisa automática" é por marca (BrandConfig.autoResearchEnabled),
-        // não mais por referência — substitui o antigo scan de
-        // Reference.autoSyncEnabled (mantido no schema, sem leitor a partir
-        // daqui). Ver benchmarkOrchestrator.ts para o motivo da troca.
-        const dueBrands = await prisma.brandConfig.findMany({
-          where: { autoResearchEnabled: true },
-          include: { brand: true },
-        });
-        const now = Date.now();
-        for (const cfg of dueBrands) {
-          const daysSince = (now - (cfg.lastAutoResearchAt?.getTime() ?? 0)) / (1000 * 60 * 60 * 24);
-          if (daysSince >= cfg.autoResearchInterval) {
-            await referenceSyncQueue.add('benchmark-refresh', { brandId: cfg.brandId, slug: cfg.brand.slug });
-          }
-        }
-      } else if (job.name === 'benchmark-refresh') {
-        const data = job.data as { brandId: string; slug: string };
-        await runAutoResearchCycle(data.brandId, data.slug);
-      } else if (job.name === 'sync-single') {
+      if (job.name === 'sync-single') {
         const data = job.data as { refId: string; slug: string; name: string; analysisUrl: string; sourceType: 'WEBSITE' | 'INSTAGRAM' };
         await analyzeReferenceBackground(data.refId, data.slug, data.name, data.analysisUrl, data.sourceType);
       }
@@ -362,12 +342,8 @@ export function startReferenceSyncWorker(): Worker {
     { connection: makeConnection(), concurrency: 1 }
   );
 
-  referenceSyncQueue.add('sync-cron', {} as any, {
-    repeat: { pattern: '0 4 * * *' },
-    jobId: 'daily-reference-sync-cron'
-  });
 
-  console.log(`  ├─ Worker:       fila "${REF_SYNC_QUEUE_NAME}" (concorrência 1) + Cron (4am)`);
+  console.log(`  ├─ Worker:       fila "${REF_SYNC_QUEUE_NAME}" (concorrência 1)`);
   return refSyncWorker;
 }
 

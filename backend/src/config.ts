@@ -26,6 +26,15 @@ const DEFAULT_MODEL_PRICES: Record<string, ModelPrice> = {
   'gemini-3.5-flash': { input: 0.3, output: 2.5 },
   'gemini-2.5-flash': { input: 0.3, output: 2.5 },
   'gemini-2.5-flash-lite': { input: 0.1, output: 0.4 },
+  // Modelos de IMAGEM. Faltavam aqui, e como o preço de reserva
+  // (AI_USD_PER_MILLION_TOKENS) é 0, toda geração de imagem entrava na
+  // contabilidade como US$ 0,00 — justo a parte mais cara por token.
+  // O Gemini cobra a imagem em tokens de saída, então o cálculo normal de
+  // computeCost já serve: 1K ≈ 1120 tokens, 2K ≈ 1680, 4K ≈ 2520.
+  // A US$ 60/M isso dá $0,067 / $0,101 / $0,151 por imagem no flash.
+  'gemini-3.1-flash-image': { input: 0.5, output: 60.0 },
+  'gemini-3.1-flash-lite-image': { input: 0.25, output: 30.0 },
+  'gemini-3-pro-image': { input: 2.0, output: 120.0 },
 };
 
 function parseModelPrices(raw: string | undefined): Record<string, ModelPrice> {
