@@ -19,7 +19,7 @@ export function extractJsonObject(raw: string): unknown {
   throw new Error('AI response did not contain valid JSON');
 }
 
-function tryParseJson(raw: string): unknown | undefined {
+export function tryParseJson(raw: string): unknown | undefined {
   try {
     return JSON.parse(raw) as unknown;
   } catch {
