@@ -183,7 +183,34 @@ export function assetsBlock(assetUrls: Array<{ url: string; name: string }> | un
   if (!assetUrls || assetUrls.length === 0) return '';
   // Antes era só a URL crua — o artista não tinha nem o nome do arquivo pra saber
   // do que se trata antes de decidir onde/se usar.
-  return `Imagens reais da marca (prefira estas a fotos de banco quando fizer sentido no layout):\n${assetUrls.slice(0, 8).map((a) => `- ${a.name}: ${a.url}`).join('\n')}`;
+  //
+  // Ícone e foto competiam pelo mesmo teto de 8, e o corte costumava comer justamente
+  // os ícones (nome mais longo, ordem alfabética). Só que ícone de brandbook é o
+  // sistema de design da marca — é o que preenche selo de card e etapa de processo.
+  // Separados, cada família tem seu teto e o artista vê que existem as duas coisas.
+  const ehVetor = (a: { name: string; url: string }) =>
+    /\.svg($|\?)/i.test(a.url) || /\bicon|icone|logo|sparkle|chevron|badge\b/i.test(a.name);
+  const vetores = assetUrls.filter(ehVetor);
+  const fotos = assetUrls.filter((a) => !ehVetor(a));
+
+  const blocos: string[] = [];
+  if (fotos.length) {
+    blocos.push(
+      `Imagens reais da marca (prefira estas a fotos de banco quando fizer sentido no layout):\n${fotos
+        .slice(0, 8)
+        .map((a) => `- ${a.name}: ${a.url}`)
+        .join('\n')}`,
+    );
+  }
+  if (vetores.length) {
+    blocos.push(
+      `Ícones e vetores do brandbook — use DENTRO dos componentes (selo circular do card, etapa da esteira, marcador de lista). NÃO são substitutos de foto, e nunca devem aparecer soltos ou repetidos no mesmo slide:\n${vetores
+        .slice(0, 16)
+        .map((a) => `- ${a.name}: ${a.url}`)
+        .join('\n')}`,
+    );
+  }
+  return blocos.join('\n\n');
 }
 
 // Antes só o planner e o revisor viam isto (via texto solto em brandContext.ts);
@@ -302,6 +329,7 @@ QUALIDADE (nível "designer humano postaria sem retrabalho"):
 - Copy REAL em português (nunca "Texto", "Lorem", placeholders).
 - Visual: prefira gradientes CSS, formas geométricas e tipografia forte. Para fotos/logo, <img> com URLs https REAIS. Sem texto embutido em imagem. Se a URL do Logo não foi fornecida acima, NÃO adicione nenhum logo genérico nem placeholder quadrado. Apenas omita o logo da composição.
 - LOGO: como CABEÇALHO FIXO, discreto — mesmo canto, mesmo tamanho em todos os slides (altura entre 3% e 5% da altura do slide). Na CAPA ele pode ser maior e fazer parte da composição. O que é PROIBIDO é o logo virar elemento de preenchimento: ampliado para ocupar área vazia, centralizado no meio do slide, repetido, ou usado como marca d'água grande.
+- LOGO SOBRE FUNDO ESCURO: a arte do logo costuma ser escura sobre transparente, então em fundo escuro ela some. Quando o fundo atrás do logo for escuro, aplique filter:brightness(0) invert(1) no <img> do logo para deixá-lo branco. Em fundo claro, use o logo sem filtro. Confira SEMPRE se o logo tem contraste contra o fundo onde você o colocou.
 - SLIDE SEM IMAGEM É UM RESULTADO VÁLIDO, e é o caso MAIS COMUM: numa apresentação boa, a maioria dos slides não tem foto. Layouts como list-3-columns, process-flow e comparison vivem de tipografia, forma e cor. Se nenhuma imagem foi fornecida, resolva com um COMPONENTE ESTRUTURAL da lista abaixo — não com espaço vazio e não com enchimento. NUNCA tape um vazio com logo ampliado, ícone repetido ou imagem de outro slide.
 - PREENCHA O QUADRO. O componente escolhido deve ocupar a largura útil do slide. Um bloco de conteúdo espremido em 60% da largura, com o restante vazio, é ERRO de composição — ou o componente cresce, ou a tipografia cresce, ou o layout muda.
 - Marque editáveis com data-editable="true" e data-role="headline|subtitle|body|cta|image".
