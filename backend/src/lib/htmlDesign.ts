@@ -301,10 +301,40 @@ QUALIDADE (nível "designer humano postaria sem retrabalho"):
 - Cor: paleta da marca. Ouse com fundos escuros/vibrantes e gradientes. Evite o clichê "gradiente roxo sobre branco".
 - Copy REAL em português (nunca "Texto", "Lorem", placeholders).
 - Visual: prefira gradientes CSS, formas geométricas e tipografia forte. Para fotos/logo, <img> com URLs https REAIS. Sem texto embutido em imagem. Se a URL do Logo não foi fornecida acima, NÃO adicione nenhum logo genérico nem placeholder quadrado. Apenas omita o logo da composição.
-- LOGO: só na CAPA (primeiro slide) e no ENCERRAMENTO (último). Em slide de conteúdo, nunca — nem no canto, nem em marca d'água.
-- SLIDE SEM IMAGEM É UM RESULTADO VÁLIDO, não um buraco a tapar. Layouts como list-3-columns, process-flow e comparison vivem de tipografia, forma e cor — é assim que eles devem ficar. Se nenhuma imagem foi fornecida para o slide, resolva com composição: escala tipográfica, blocos de cor, linhas, numeração grande, espaço negativo. NUNCA preencha o vazio com o logo da marca, com ícone repetido nem com imagem de outro slide — isso empobrece a peça mais do que o espaço vazio.
+- LOGO: como CABEÇALHO FIXO, discreto — mesmo canto, mesmo tamanho em todos os slides (altura entre 3% e 5% da altura do slide). Na CAPA ele pode ser maior e fazer parte da composição. O que é PROIBIDO é o logo virar elemento de preenchimento: ampliado para ocupar área vazia, centralizado no meio do slide, repetido, ou usado como marca d'água grande.
+- SLIDE SEM IMAGEM É UM RESULTADO VÁLIDO, e é o caso MAIS COMUM: numa apresentação boa, a maioria dos slides não tem foto. Layouts como list-3-columns, process-flow e comparison vivem de tipografia, forma e cor. Se nenhuma imagem foi fornecida, resolva com um COMPONENTE ESTRUTURAL da lista abaixo — não com espaço vazio e não com enchimento. NUNCA tape um vazio com logo ampliado, ícone repetido ou imagem de outro slide.
+- PREENCHA O QUADRO. O componente escolhido deve ocupar a largura útil do slide. Um bloco de conteúdo espremido em 60% da largura, com o restante vazio, é ERRO de composição — ou o componente cresce, ou a tipografia cresce, ou o layout muda.
 - Marque editáveis com data-editable="true" e data-role="headline|subtitle|body|cta|image".
 - NUNCA invente dado factual da empresa que não foi fornecido acima (telefone, e-mail, endereço, site, CNPJ, nome de produto específico, texto institucional de rodapé). Use SOMENTE o nome da marca, o logo e o que estiver em Diretrizes/Instruções do agente/Referências. Se o layout pedir uma info de contato que não veio nesses campos, prefira um CTA genérico ("Fale conosco", "Saiba mais", "Acesse o link na bio") a inventar um número ou endereço que pareça real.
+
+COMPONENTES ESTRUTURAIS (o vocabulário para slide sem foto):
+Todo slide de conteúdo deve ter UM componente que codifique a LÓGICA do que está sendo dito. Escolha
+pelo tipo de conteúdo, não por variedade. Todos são HTML+CSS puro — sem imagem, sem SVG externo.
+- GRADE DE CARDS: 3 a 5 cards lado a lado, cada um com um selo circular no topo, um título curto e uma
+  linha de apoio. Para conceitos paralelos, benefícios, dores. É o mais reaproveitável.
+- ESTEIRA DE ETAPAS: blocos encaixados em sequência (chevron via clip-path), cor diferente por etapa.
+  Para processo, jornada, fases. A cor ORDENA, não decora.
+- LISTA NUMERADA COM FILETE: 3 a 4 linhas, numeral pequeno à esquerda (01/02/03), título e corpo em
+  colunas, separadas por borda de 1px. Para argumentos que se acumulam.
+- FÓRMULA: termos em caixas ligados por operadores (+ + + =), o último em destaque. Para "o que somado
+  gera o quê".
+- ÓRBITA: um bloco central e 3 cards ao redor ligados por linhas tracejadas. Para "tudo converge para".
+- ESCALA: barra horizontal em gradiente com marcações nomeadas e um indicador posicionado. Para
+  maturidade, temperatura, progresso.
+- COMPARAÇÃO: duas colunas com fundos contrastantes, mesma estrutura interna. Para antes/depois, nós/eles.
+- FAIXA DE FECHO: barra no rodapé com selo circular à esquerda e uma frase de síntese. Fecha o slide e
+  ancora a composição na base. Cabe em quase todos.
+- CARTÕES DE MÍDIA DESLOCADOS: quando houver 2 a 3 imagens, cards com deslocamento vertical entre si e
+  legenda curta. Nunca as imagens soltas em fila reta.
+
+REGISTRO VISUAL: leia "Nível de ousadia" nas diretrizes da marca acima.
+- "safe" -> EDITORIAL: pesos finos (200-300), letter-spacing largo, filetes de 1px, muito espaço
+  negativo, paleta de 2 neutros + 1 acento. Componentes discretos, sem preenchimento sólido.
+- "bold" -> COMERCIAL: caixa alta pesada e condensada (700-900), blocos de cor saturada, cards com
+  fundo cheio, selos circulares preenchidos. Componentes densos, quadro cheio.
+- "balanced" ou ausente -> meio-termo: display pesado no título, corpo em peso regular, componentes com
+  borda em vez de preenchimento sólido.
+Escolha UM registro e mantenha nos slides todos. Misturar os dois é o erro mais visível.
 
 COESÃO: mantenha a MESMA direção de arte dos slides anteriores, mas VARIE o layout.
 
