@@ -1,8 +1,9 @@
 // Resolve, ANTES do artista escrever HTML, qual imagem cada slide com `imageHint`
 // deve usar: reaproveita um asset já existente na Biblioteca de Mídia da marca
-// quando ele serve para a premissa do slide, ou gera um novo (foto via modelo de
-// imagem, ou SVG via texto para ícone/ilustração vetorial simples) — nunca as duas
-// coisas pro mesmo slide. Roda uma vez por deck, num único call de decisão (barato),
+// quando ele serve para a premissa do slide, ou gera uma foto nova. Desenho
+// vetorial NÃO passa por aqui — o artista desenha SVG inline no HTML, que é o
+// que funciona; a ação "generate-svg" existiu, pedia path data a um modelo de
+// TEXTO e nunca produziu um asset sequer em produção. Roda uma vez por deck, num único call de decisão (barato),
 // e respeita um teto de gerações por deck (`config.maxGeneratedImagesPerDeck`).
 //
 // Gerado com sucesso, o asset novo entra na biblioteca (source:'ai-generated') pra
@@ -37,7 +38,7 @@ export interface ResolvedSlideImage {
 
 type ImageDecision = {
   slideIndex: number;
-  action: 'reuse' | 'generate-photo' | 'generate-svg' | 'skip';
+  action: 'reuse' | 'generate-photo' | 'skip';
   assetUrl?: string;
   generatePrompt?: string;
   /** Só relevante para "reuse": o quanto o modelo está certo de que o asset serve
@@ -161,7 +162,6 @@ async function decideImagePlan(
   slidesNeedingImage: Array<{ index: number; title: string; hint: string }>,
   existingAssets: ExistingBrandAsset[],
   allowGeneratedGraphics: boolean,
-  allowSvgLayouts: boolean,
 ): Promise<ImageDecision[]> {
   if (slidesNeedingImage.length === 0) return [];
 
@@ -178,7 +178,7 @@ async function decideImagePlan(
     .map((s) => `- Slide ${s.index}: "${s.title}" — precisa de: ${s.hint}`)
     .join('\n');
 
-  const actionsAllowed = ['"reuse"', allowGeneratedGraphics ? '"generate-photo"' : null, allowSvgLayouts ? '"generate-svg"' : null, '"skip"']
+  const actionsAllowed = ['"reuse"', allowGeneratedGraphics ? '"generate-photo"' : null, '"skip"']
     .filter(Boolean).join('|');
 
   const prompt = `Você decide, para cada slide abaixo, se a Biblioteca de Mídia da marca já tem uma imagem que SERVE de verdade pra premissa dele, ou se precisa gerar uma nova.
@@ -195,7 +195,7 @@ ${assetsBlock}
    ATENÇÃO ao que isto NÃO proíbe: ícone de brandbook usado DENTRO de um componente do layout (selo de card, etapa de processo, marcador de lista) é uso correto e desejável — é o sistema de design da marca. Essa colocação é decidida pelo artista no HTML, não aqui. Não escolha "skip" por medo de ícone; escolha "skip" só quando realmente não há imagem principal a resolver.
 1b. NÃO REPITA O MESMO ASSET no deck. Cada asset pode ser usado em no máximo UM slide. Se o mesmo arquivo parece servir para dois slides, escolha o slide em que ele serve melhor e decida outra coisa para o outro.
 ${allowGeneratedGraphics ? '2. "generate-photo": quando o slide precisa de uma foto/cena realista (produto, pessoa, ambiente) e nada na biblioteca serve de verdade (visualmente).' : '2. Geração de foto está DESLIGADA para esta marca — nunca escolha "generate-photo". Se nada na biblioteca serve, use "skip".'}
-${allowSvgLayouts ? '3. "generate-svg": quando o slide precisa de um ícone, ilustração vetorial simples ou gráfico decorativo complexo (não uma foto realista) e nada na biblioteca serve.' : '3. Geração de SVG está DESLIGADA para esta marca — nunca escolha "generate-svg". Se nada na biblioteca serve, use "skip".'}
+3. Desenho vetorial (ícone, diagrama, gráfico) NÃO se resolve aqui: o artista desenha SVG inline direto no HTML do slide, com CSS. Nunca escolha uma ação de imagem para isso.
 4. "skip": quando não vale a pena gerar (raro — só se o hint for vago demais pra virar prompt de imagem), ou quando a ação necessária está desligada acima.
 5. Para "reuse", "assetUrl" DEVE ser uma URL exata da lista acima.
 6. Para "generate-photo"/"generate-svg" (só se permitido), "generatePrompt" é uma descrição visual completa e específica (cena, composição, luz, estilo) pronta pra virar prompt de geração — não repita o hint cru.
@@ -466,34 +466,6 @@ async function resolvePhoto(
 }
 
 // ── Passo 2b: gera SVG (ícone/ilustração vetorial) via texto — inline no HTML ───
-async function generateSvgMarkup(prompt: string, brandColors: string[]): Promise<string | null> {
-  const svgPrompt = `Crie um ícone ou ilustração vetorial SVG para: ${prompt}
-
-Paleta disponível: ${brandColors.length > 0 ? brandColors.join(', ') : 'livre, harmônica'}
-
-REGRAS:
-- Retorne SOMENTE a tag <svg>...</svg> completa e válida, sem markdown, sem explicação.
-- viewBox definido, sem width/height fixos em px (o CSS externo controla o tamanho).
-- Estilo flat/moderno, poucas cores, traços limpos. Nada fotorrealista — é vetor.
-- Sem <script>, sem <foreignObject>, sem referência a recursos externos.`;
-
-  try {
-    const response = await generateWithRetry(ai, {
-      model: config.models.fast,
-      contents: [{ role: 'user', parts: [{ text: svgPrompt }] }],
-      config: { temperature: 0.6 },
-    }, config.models.fast);
-
-    let raw = (response.text ?? '').trim();
-    raw = raw.replace(/^```(?:svg|xml|html)?\s*/i, '').replace(/```$/, '').trim();
-    const match = /<svg[\s\S]*?<\/svg>/i.exec(raw);
-    return match ? match[0] : null;
-  } catch (err) {
-    logger.warn('Geração de SVG falhou', { error: (err as Error).message });
-    return null;
-  }
-}
-
 export interface ResolveSlideImagesParams {
   brandId: string;
   brandName: string;
@@ -503,9 +475,8 @@ export interface ResolveSlideImagesParams {
   skeleton: SlideSkeletonItem[];
   createdById?: string;
   postId?: string;
-  /** Configuráveis em Presentation Config da marca. Default true — desligar é opt-out. */
+  /** Configurável em Presentation Config da marca. Default true — desligar é opt-out. */
   allowGeneratedGraphics?: boolean;
-  allowSvgLayouts?: boolean;
   imagePreference?: 'force-ai' | 'unsplash' | 'unsplash-remix';
 }
 
@@ -546,9 +517,8 @@ export async function resolveSlideImages(params: ResolveSlideImagesParams): Prom
   }).catch(() => [] as ExistingBrandAsset[]);
 
   const allowGeneratedGraphics = params.allowGeneratedGraphics !== false;
-  const allowSvgLayouts = params.allowSvgLayouts !== false;
 
-  const decisions = await decideImagePlan(slidesNeedingImage, existingAssets, allowGeneratedGraphics, allowSvgLayouts);
+  const decisions = await decideImagePlan(slidesNeedingImage, existingAssets, allowGeneratedGraphics);
 
   // ── Trava de repetição ──────────────────────────────────────────────────────
   // Medido em produção: uma peça de 4 slides saiu com 10 <img> e apenas 5
@@ -611,7 +581,6 @@ export async function resolveSlideImages(params: ResolveSlideImagesParams): Prom
     // Segunda trava (o prompt já pede pra não escolher a ação desligada, isto é
     // o backstop caso o modelo ignore a instrução).
     if (decision.action === 'generate-photo' && !allowGeneratedGraphics) continue;
-    if (decision.action === 'generate-svg' && !allowSvgLayouts) continue;
 
     if (generatedCount >= budget) {
       logger.info('Teto de imagens geradas do deck atingido — slide fica sem imagem', {
@@ -642,14 +611,6 @@ export async function resolveSlideImages(params: ResolveSlideImagesParams): Prom
             tags: [photo.source],
           },
         }).catch((err) => logger.error('Falha ao salvar imagem gerada na biblioteca', { error: (err as Error).message }));
-      }
-    } else if (decision.action === 'generate-svg') {
-      const svg = await generateSvgMarkup(decision.generatePrompt, params.brandColors);
-      if (svg) {
-        generatedCount++;
-        results.set(decision.slideIndex, { svgMarkup: svg });
-        // SVG fica inline no HTML do slide (não é arquivo hospedado) — não vira
-        // Asset da biblioteca; reaproveitamento de SVG é por prompt, não por URL.
       }
     }
   }

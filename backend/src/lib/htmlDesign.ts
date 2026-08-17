@@ -335,6 +335,11 @@ QUALIDADE (nível "designer humano postaria sem retrabalho"):
 - Marque editáveis com data-editable="true" e data-role="headline|subtitle|body|cta|image".
 - NUNCA invente dado factual da empresa que não foi fornecido acima (telefone, e-mail, endereço, site, CNPJ, nome de produto específico, texto institucional de rodapé). Use SOMENTE o nome da marca, o logo e o que estiver em Diretrizes/Instruções do agente/Referências. Se o layout pedir uma info de contato que não veio nesses campos, prefira um CTA genérico ("Fale conosco", "Saiba mais", "Acesse o link na bio") a inventar um número ou endereço que pareça real.
 
+DESENHO VETORIAL: para diagrama geométrico (círculos que se cruzam, gráfico de barras, linha do
+tempo, medidor, seta de fluxo), desenhe <svg> INLINE no próprio HTML, com viewBox e sem width/height
+fixos. É o caminho certo — não peça imagem para isso. Formas simples e poucas cores; não tente
+desenhar letra, logotipo ou figura realista em SVG, que sai deformado.
+
 COMPONENTES ESTRUTURAIS (o vocabulário para slide sem foto):
 Todo slide de conteúdo deve ter UM componente que codifique a LÓGICA do que está sendo dito. Escolha
 pelo tipo de conteúdo, não por variedade. Todos são HTML+CSS puro — sem imagem, sem SVG externo.
@@ -637,6 +642,12 @@ export interface EditHtmlSlideInput {
   width: number;
   height: number;
   isolate?: boolean;
+  /** Instruções JÁ APLICADAS a este slide, da mais antiga para a mais recente.
+   *  Sem isto cada edição chegava sem passado e "agora um pouco menor" não tinha
+   *  a que se referir — o usuário era obrigado a reescrever a frase inteira toda
+   *  vez. Só as instruções, não o HTML de cada passo: o slide atual já é o
+   *  resultado acumulado delas. */
+  previousInstructions?: string[];
   /** Elemento selecionado pelo usuário no preview (seletor estilo "inspecionar"):
    *  a instrução deve ser aplicada NELE. Elimina a ambiguidade de "o título" num
    *  slide com três títulos. */
@@ -660,8 +671,17 @@ export async function editHtmlSlide(
 - Recuse alterações que exijam reestruturação ou modificações fora do escopo deste slide.`
     : '';
 
+  // O histórico entra como CONTEXTO, não como pedido: o slide já reflete essas
+  // edições. Repetí-las faria o modelo aplicar tudo de novo.
+  const historico = (input.previousInstructions ?? []).filter((t) => t.trim()).slice(-6);
+  const listaHistorico = historico.map((t, i) => `${i + 1}. ${t}`).join('\n');
+  const blocoHistorico = historico.length
+    ? `\nEdições JÁ APLICADAS a este slide, da mais antiga para a mais recente:\n${listaHistorico}\nO HTML abaixo JÁ inclui todas elas — não as repita. Use-as apenas para entender referências da instrução nova ("de novo", "um pouco menos", "volta ao anterior", "igual ao que fiz no título").`
+    : '';
+
   const systemInstruction = `Você é um designer editando UM slide existente de ${input.width}x${input.height}px (dentro de um container .slide-root já presente).
 Você recebe o HTML e o CSS atuais e UMA instrução do usuário. Aplique a instrução fazendo o MÍNIMO de mudanças necessárias — preserve TODO o resto idêntico (estrutura, outros elementos, classes, textos não citados).
+${blocoHistorico}
 ${isolateRules}
 Retorne SOMENTE JSON puro: { "html": "...", "css": "..." }
 

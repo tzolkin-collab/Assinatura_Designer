@@ -90,10 +90,14 @@ postsRouter.post('/render-batch', async (req: AuthRequest, res: Response, next: 
 postsRouter.post('/:id/edit-slide', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const id = req.params.id as string;
-    const { slideIndex, instruction, isolate, target } = (req.body ?? {}) as {
+    const { slideIndex, instruction, isolate, target, previousInstructions } = (req.body ?? {}) as {
       slideIndex?: number;
       instruction?: string;
       isolate?: boolean;
+      /** Instruções já aplicadas a este slide, para o modelo resolver referências
+       *  como "de novo" ou "um pouco menos". Vem do cliente porque é ele quem
+       *  sabe o que ESTE usuário pediu nesta sessão de edição. */
+      previousInstructions?: unknown;
       /** Elemento clicado no preview (seletor "inspecionar" do editor). */
       target?: { identifier?: string; path?: string; text?: string; outerHTML?: string };
     };
@@ -107,6 +111,15 @@ postsRouter.post('/:id/edit-slide', async (req: AuthRequest, res: Response, next
           text: typeof target.text === 'string' ? target.text.slice(0, 200) : undefined,
           outerHTML: typeof target.outerHTML === 'string' ? target.outerHTML.slice(0, 1000) : undefined,
         }
+      : undefined;
+
+    // Mesmo tratamento do target: vira prompt, não vai para o banco. Teto de 6 e
+    // 300 chars cada — o suficiente para dar referência sem inchar o contexto.
+    const historicoInstrucoes = Array.isArray(previousInstructions)
+      ? previousInstructions
+          .filter((t): t is string => typeof t === 'string' && t.trim().length > 0)
+          .slice(-6)
+          .map((t) => t.trim().slice(0, 300))
       : undefined;
 
     const post = await prisma.post.findFirst({
@@ -154,6 +167,7 @@ postsRouter.post('/:id/edit-slide', async (req: AuthRequest, res: Response, next
       {
         slide: content.slides[idx],
         instruction,
+        previousInstructions: historicoInstrucoes,
         brand: {
           name: brand.name,
           colors: brand.colors,

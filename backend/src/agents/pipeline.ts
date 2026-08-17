@@ -328,7 +328,6 @@ async function runPipelineInner(
         skeleton,
         postId,
         allowGeneratedGraphics: brand.presentationConfig?.allowGeneratedGraphics,
-        allowSvgLayouts: brand.presentationConfig?.allowSvgLayouts,
         imagePreference: params.imagePreference,
       }).catch((err) => {
         logger.error('Resolução de imagens dos slides falhou; seguindo sem imagens geradas', { error: (err as Error).message });

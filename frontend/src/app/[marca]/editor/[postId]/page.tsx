@@ -183,7 +183,14 @@ export default function EditorPage() {
     try {
       const resp = await api.post<{ slideIndex: number; slide: SlideCode }>(
         `/posts/${postId}/edit-slide`,
-        { slideIndex: safeSlide, instruction: texto, ...(alvo ? { target: alvo } : {}) },
+        {
+          slideIndex: safeSlide,
+          instruction: texto,
+          // Sem isto cada edição chegava sem passado: "agora um pouco menor" não
+          // tinha a que se referir e obrigava a reescrever a frase inteira.
+          previousInstructions: editLog,
+          ...(alvo ? { target: alvo } : {}),
+        },
       );
       aplicarSlide(resp.slideIndex, resp.slide);
       setEditLog(prev => [...prev.slice(-5), alvo?.identifier ? `[${alvo.identifier}] ${texto}` : texto]);
@@ -194,7 +201,7 @@ export default function EditorPage() {
     } finally {
       setEditando(false);
     }
-  }, [instrucao, editando, content, postId, safeSlide, aplicarSlide, alvo]);
+  }, [instrucao, editando, content, postId, safeSlide, aplicarSlide, alvo, editLog]);
 
   const restaurar = useCallback(async (versionId: string) => {
     setRestaurando(versionId);
@@ -412,6 +419,9 @@ export default function EditorPage() {
                 )}
                 {editLog.length > 0 && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                    <div style={{ fontSize: 11, color: 'var(--color-text-muted, #6b7280)' }}>
+                      A IA recebe estas edições como contexto — dá para dizer &quot;agora um pouco menos&quot;.
+                    </div>
                     {editLog.map((m, i) => (
                       <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--color-text-secondary, #555)' }}>
                         <Check size={11} /> {m}
@@ -425,7 +435,11 @@ export default function EditorPage() {
                 <textarea
                   value={instrucao}
                   onChange={(e) => setInstrucao(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void editarComIA(); } }}
+                  onKeyDown={(e) => {
+                    // Enter agora quebra linha. Numa textarea de 3 linhas, enviar
+                    // no Enter disparava a edição no meio de uma frase.
+                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void editarComIA(); }
+                  }}
                   placeholder='Ex: "deixa o título maior", "troca o fundo para o verde da marca", "resume o parágrafo"'
                   rows={3}
                   disabled={editando}
@@ -434,6 +448,9 @@ export default function EditorPage() {
                 <Button onClick={() => void editarComIA()} disabled={editando || !instrucao.trim()}>
                   {editando ? 'Editando…' : 'Aplicar no slide'}
                 </Button>
+                <span style={{ fontSize: 11, color: 'var(--color-text-muted, #6b7280)', marginTop: -4 }}>
+                  Enter quebra linha · {typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform) ? '⌘' : 'Ctrl'}+Enter aplica
+                </span>
               </div>
             )}
 
