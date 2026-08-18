@@ -318,10 +318,17 @@ export function useFabricaWs(brandSlug: string, initialSessionId?: string | null
         // voltava a "Preparando… · 0%" com a geração já adiantada.
         const prog = data.progress as number | undefined;
         const progLabel = data.progressLabel as string | undefined;
+        // O workerStatus é o portão de TODO o bloco de progresso na tela. Sem
+        // restaurá-lo, quem dava F5 no meio de uma geração via o estado vazio
+        // ("o design aparece aqui durante a geração") até o PRÓXIMO job:progress
+        // — e entre dois tiques da etapa do artista passam-se minutos: 127s e 182s
+        // medidos em produção. Restaurar o progresso sem isto não adiantava nada.
+        const wstat = data.workerStatus as WorkerStatus | undefined;
         const msgs = (data.messages ?? []) as Array<{
           role: string; content: string; timestamp: number; attachments?: FabricaAttachment[];
         }>;
         if (p) setPh(p);
+        if (wstat) setWStatus(wstat);
         if (typeof prog === 'number') setP(prog);
         if (typeof progLabel === 'string') setLabel(progLabel);
         if (d.length > 0) {

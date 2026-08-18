@@ -342,6 +342,32 @@ async function withSessionLock<T>(sessionId: string, fn: () => Promise<T>): Prom
  * INTEIRA (o brain, ao recuperar uma sessão do Post) reescreve as três keys, e isso
  * não pode entrelaçar com um append de mensagem no meio.
  */
+/**
+ * Grava SÓ o progresso, sem passar pelo lock da sessão.
+ *
+ * `updateSession` serializa por sessão (cadeia de promessas + lock no Redis)
+ * porque patches genéricos podem carregar design e histórico. Progresso não tem
+ * nada disso: são dois campos independentes, sem invariante com o resto e sem
+ * read-modify-write. Passá-lo pelo lock colocava cada tique na frente das
+ * escritas reais da geração — vinte tiques × três idas ao Redis, enfileirados no
+ * caminho crítico do trabalho que eles apenas descrevem.
+ *
+ * Mantém a mesma guarda do updateSession: não ressuscita sessão expirada.
+ */
+export async function setSessionProgress(
+  sessionId: string,
+  progress: number,
+  progressLabel: string,
+): Promise<void> {
+  const existe = await redis.exists(sessionMetaKey(sessionId));
+  if (!existe) return;
+  await redis
+    .multi()
+    .hset(sessionMetaKey(sessionId), metaToHash({ progress, progressLabel, updatedAt: Date.now() }))
+    .expire(sessionMetaKey(sessionId), SESSION_TTL)
+    .exec();
+}
+
 export async function updateSession(
   sessionId: string,
   patch: Partial<FabricaSession>,
