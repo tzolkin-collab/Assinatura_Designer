@@ -117,6 +117,7 @@ export function buildBrandContextSummary(context: ResolvedBrandContext): string 
     context.presentationConfig?.photoPreference ? `Preferência de fotos: ${context.presentationConfig.photoPreference}` : '',
     context.presentationConfig?.boldness ? `Nível de ousadia: ${context.presentationConfig.boldness}` : '',
     context.presentationConfig?.autoMode !== undefined ? `Modo automático padrão: ${context.presentationConfig.autoMode ? 'ativo' : 'desativado'}` : '',
+    context.presentationConfig?.allowSvgLayouts === false ? 'Desenho vetorial: NÃO use <svg> inline nesta marca — resolva com CSS puro.' : '',
     referenceLines.length > 0 ? `Referências analisadas:\n${referenceLines.join('\n')}` : '',
   ].filter(Boolean).join('\n');
 }

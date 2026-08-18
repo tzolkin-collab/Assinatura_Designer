@@ -178,23 +178,6 @@ describe('resolveSlideImages', () => {
     );
   });
 
-  it('gera um SVG inline e NÃO cria Asset (reaproveitamento de SVG é por prompt, não por URL)', async () => {
-    (generateWithRetry as ReturnType<typeof vi.fn>)
-      .mockResolvedValueOnce({
-        text: JSON.stringify([
-          { slideIndex: 1, action: 'generate-svg', generatePrompt: 'ícone de gráfico crescente' },
-        ]),
-      })
-      .mockResolvedValueOnce({ text: '<svg viewBox="0 0 24 24"><path d="M0 0h24v24H0z"/></svg>' });
-
-    const skeleton = skeletonBase([{}, { imageHint: 'ícone de crescimento' }]);
-    const { resolved: result } = await resolveSlideImages({ ...baseParams, skeleton });
-
-    expect(result.get(1)?.svgMarkup).toContain('<svg');
-    expect(uploadFileToR2).not.toHaveBeenCalled();
-    expect(prismaMock.asset.create).not.toHaveBeenCalled();
-  });
-
   it('respeita o teto de gerações por deck — além do teto, o slide fica sem imagem', async () => {
     const { config } = await import('../config.js');
     const original = config.maxGeneratedImagesPerDeck;
@@ -348,7 +331,11 @@ describe('resolveSlideImages', () => {
     spy.mockRestore();
   });
 
-  it('backstop: ignora "generate-svg" se allowSvgLayouts=false mesmo se o modelo escolher essa ação', async () => {
+  // generate-svg foi removido: pedir path data a um modelo de TEXTO nunca produziu
+  // um asset em produção (0 em 258 slides). Desenho vetorial agora é <svg> inline
+  // escrito pelo artista no HTML. Se o modelo ainda escolher a ação antiga, ela
+  // simplesmente não existe mais e o slide fica sem imagem — sem segunda chamada.
+  it('ignora ação desconhecida do modelo sem disparar segunda chamada', async () => {
     (generateWithRetry as ReturnType<typeof vi.fn>).mockResolvedValue({
       text: JSON.stringify([
         { slideIndex: 1, action: 'generate-svg', generatePrompt: 'ícone qualquer' },
@@ -356,10 +343,9 @@ describe('resolveSlideImages', () => {
     });
 
     const skeleton = skeletonBase([{}, { imageHint: 'ícone' }]);
-    const { resolved: result } = await resolveSlideImages({ ...baseParams, skeleton, allowSvgLayouts: false });
+    const { resolved: result } = await resolveSlideImages({ ...baseParams, skeleton });
 
     expect(result.size).toBe(0);
-    // só a chamada de decisão deve ter ocorrido, nenhuma segunda chamada pra gerar SVG
     expect(generateWithRetry).toHaveBeenCalledTimes(1);
   });
 
