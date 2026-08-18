@@ -20,6 +20,20 @@ async function resolveBrandId(slug: string): Promise<string | null> {
   return brand.id;
 }
 
+// Ao contrário da marca, isto NÃO pode ser cacheado por resultado negativo: o
+// post costuma nascer segundos depois da primeira chamada de IA da mesma
+// geração, e um "não existe" memorizado deixaria o run solto para sempre.
+// Só o positivo é cacheado — post não deixa de existir no meio de uma geração.
+const postsConhecidos = new Set<string>();
+
+async function postExists(postId: string): Promise<boolean> {
+  if (postsConhecidos.has(postId)) return true;
+  const post = await prisma.post.findUnique({ where: { id: postId }, select: { id: true } });
+  if (!post) return false;
+  postsConhecidos.add(postId);
+  return true;
+}
+
 function truncate(text?: string): string | undefined {
   if (!text) return text;
   if (text.length <= MAX_TEXT_LENGTH) return text;
@@ -65,11 +79,20 @@ export async function openRun(run: GenerationTraceRun): Promise<string | null> {
       return null;
     }
 
+    // Mesma lógica da marca, agora para o post: `postId` também é FK, e o
+    // AiContext costuma carregar o id do post ANTES de a linha existir — ele é
+    // gerado no enfileiramento e só vira registro adiante, no pipeline. Toda
+    // chamada de IA antes disso estourava GenerationRun_postId_fkey e caía no
+    // fail-open, ou seja, os primeiros passos de cada geração ficavam sem
+    // rastro. Sem post existente o run nasce solto; sessionId e requestId
+    // continuam permitindo correlacionar.
+    const postId = run.postId && (await postExists(run.postId)) ? run.postId : undefined;
+
     const id = randomUUID();
     await prisma.generationRun.create({
       data: {
         id,
-        postId: run.postId,
+        postId,
         brandId,
         sessionId: run.sessionId,
         requestId: run.requestId,
