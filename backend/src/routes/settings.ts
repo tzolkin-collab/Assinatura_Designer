@@ -10,6 +10,7 @@ import { getBilling } from '../lib/aiBudget.js';
 import { assertBrandAccess, ANY_MEMBER, EDITORS } from '../middleware/brandAccess.js';
 import { createError } from '../middleware/errorHandler.js';
 import { normalizarLogoParaFundoEscuro } from '../lib/logoTransparency.js';
+import { normalizarParaFormulario } from '../lib/brandGuidelines.js';
 import { config as appConfig } from '../config.js';
 import { AuthRequest } from '../middleware/auth.js';
 import { z } from 'zod';
@@ -57,9 +58,20 @@ const getBrandId = async (slug: string, userId?: string, roles: BrandRole[] = ED
 settingsRouter.get('/:slug/config', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const brandId = await getBrandId(req.params.slug as string, req.user?.userId, ANY_MEMBER);
-    const config = await prisma.brandConfig.findUnique({ where: { brandId } });
+    const [config, marca] = await Promise.all([
+      prisma.brandConfig.findUnique({ where: { brandId } }),
+      prisma.brand.findUnique({ where: { id: brandId }, select: { name: true } }),
+    ]);
 
-    res.json({ data: config });
+    // Normaliza na LEITURA em vez de corrigir só na escrita: as marcas que já
+    // ficaram com o formato quebrado voltam a exibir certo na hora, e o próximo
+    // save da página grava a versão limpa. Sem isto o frontend cairia no catch
+    // dele, que enterra tudo em `history` e reseta o nome para o placeholder.
+    const data = config
+      ? { ...config, guidelines: JSON.stringify(normalizarParaFormulario(config.guidelines, marca?.name)) }
+      : config;
+
+    res.json({ data });
   } catch (error) {
     next(error);
   }

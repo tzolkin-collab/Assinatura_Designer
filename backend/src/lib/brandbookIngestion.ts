@@ -5,6 +5,7 @@ import { createError } from '../middleware/errorHandler.js';
 import { GoogleGenAI } from '@google/genai';
 import { config } from '../config.js';
 import { normalizarLogoParaFundoEscuro } from './logoTransparency.js';
+import { mesclarGuidelines } from './brandGuidelines.js';
 
 export type SVGClassification = 'LOGOTYPE' | 'GRAPHIC_ELEMENT' | 'ILLUSTRATION';
 
@@ -435,11 +436,14 @@ Formato do JSON de resposta:
   const currentFonts = brand.config?.primaryFonts ?? [];
   const mergedFonts = Array.from(new Set([...currentFonts, ...aiFonts])).filter(Boolean);
 
+  // Concatenar texto aqui quebrava o formato: a página de Branding grava
+  // `guidelines` como JSON, e "JSON + texto colado" deixa de ser JSON. A página
+  // então caía no catch, enterrava tudo dentro de `history` e resetava o nome
+  // para o placeholder. mesclarGuidelines entende os dois formatos e sempre
+  // devolve JSON que a página reabre sem perder campo.
   const currentGuidelines = brand.config?.guidelines ?? '';
   const newGuidelines = aiGuidelines
-    ? currentGuidelines
-      ? `${currentGuidelines}\n\n### Atualização do Brandbook:\n${aiGuidelines}`
-      : aiGuidelines
+    ? mesclarGuidelines(currentGuidelines, aiGuidelines)
     : currentGuidelines;
 
   const currentLogoUrl = brand.config?.logoUrl ?? null;
