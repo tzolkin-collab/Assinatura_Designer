@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import { config } from '../config.js';
 import { publish, sessionChannel, onEvent, subscribe, initEventBus, type BusEvent } from './eventBus.js';
 import { logger } from './logger.js';
+import { setSessionProgress } from './redis.js';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -188,6 +189,14 @@ export function broadcast(sessionId: string, event: WsEvent): void {
   publish(sessionChannel(sessionId), event as BusEvent);
 }
 
+function persistirProgresso(sessionId: string, percent: number, label: string): void {
+  void setSessionProgress(sessionId, percent, label).catch((err) => {
+    logger.warn('Progresso não persistido na sessão (fail-open)', {
+      sessionId, error: err instanceof Error ? err.message : String(err),
+    });
+  });
+}
+
 export const ws = {
   emit: (sessionId: string, type: WsEventType, data: unknown) =>
     broadcast(sessionId, { type, data }),
@@ -215,14 +224,29 @@ export const ws = {
     payload: { index: number; total: number; slide: unknown; envelope: unknown },
   ) => broadcast(sessionId, { type: 'design:slide', data: payload }),
 
-  progress: (sessionId: string, percent: number, label: string) =>
-    broadcast(sessionId, { type: 'job:progress', data: { percent, label } }),
+  // Emite E PERSISTE. O broadcast só alcança socket aberto; sem gravar, quem
+  // reconecta recebe um session:state sem progresso e vê "Preparando… · 0%" com
+  // a geração já na metade. Fire-and-forget e fora do lock da sessão:
+  // telemetria de estado nunca pode derrubar, atrasar nem entrar na fila da
+  // geração que ela descreve.
+  progress: (sessionId: string, percent: number, label: string) => {
+    broadcast(sessionId, { type: 'job:progress', data: { percent, label } });
+    persistirProgresso(sessionId, percent, label);
+  },
 
-  done: (sessionId: string, postId: string) =>
-    broadcast(sessionId, { type: 'job:done', data: { postId } }),
+  // Zera o progresso guardado junto com o fim. Sem isto o último valor emitido
+  // (tipicamente < 100, com um rótulo tipo "Desenhando slide 6...") ficava na
+  // sessão até o TTL, e o session:state de uma reabertura afirmava que uma
+  // geração já concluída estava em andamento.
+  done: (sessionId: string, postId: string) => {
+    broadcast(sessionId, { type: 'job:done', data: { postId } });
+    persistirProgresso(sessionId, 0, '');
+  },
 
-  error: (sessionId: string, message: string) =>
-    broadcast(sessionId, { type: 'job:error', data: { message } }),
+  error: (sessionId: string, message: string) => {
+    broadcast(sessionId, { type: 'job:error', data: { message } });
+    persistirProgresso(sessionId, 0, '');
+  },
 
   notify: (sessionId: string, payload: NotificationPayload) =>
     broadcast(sessionId, { type: 'notification', data: payload }),

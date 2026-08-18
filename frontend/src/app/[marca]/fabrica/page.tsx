@@ -25,6 +25,18 @@ import s from './fabrica.module.css';
 
 type Attachment = { name: string; mimeType: string; dataBase64: string };
 
+// O arquivo é convertido a base64 no NAVEGADOR e vai inteiro pelo WebSocket —
+// não há upload nem teto em lugar nenhum da pilha. Com um anexo só isso já era
+// arriscado; liberando vários, sem limite, uma seleção de PDFs estoura o frame
+// e o request do Gemini.
+//
+// O teto é medido em bytes de ARQUIVO, não do base64: é o número que o usuário
+// vê no explorador e o único que ele consegue conferir. Base64 infla ~33%, então
+// 9MB de arquivo dão ~12MB no fio, dentro do limite de inline data do modelo.
+const MAX_ANEXOS = 5;
+const MAX_BYTES_ARQUIVOS = 9 * 1024 * 1024;
+const MB = (bytes: number) => `${(bytes / 1024 / 1024).toFixed(0)}MB`;
+
 function attachmentPreviewLabel(attachment: Attachment): string {
   if (attachment.mimeType.startsWith('image/')) return `${attachment.name} · imagem`;
   return attachment.name;
@@ -116,7 +128,15 @@ export default function FabricaPage() {
 
   // Input state
   const [input, setInput] = useState('');
-  const [attachment, setAttachment] = useState<Attachment | null>(null);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [attachErro, setAttachErro] = useState<string | null>(null);
+  // Espelho síncrono da lista: o handler precisa decidir sobre o valor ATUAL,
+  // e o estado do React só chega no próximo render.
+  const attachmentsRef = useRef<Attachment[]>([]);
+  const aplicarAnexos = useCallback((lista: Attachment[]) => {
+    attachmentsRef.current = lista;
+    setAttachments(lista);
+  }, []);
   const [questionFreeform, setQuestionFreeform] = useState('');
   const [btwContext, setBtwContext] = useState<string[]>([]);
   const [asanaContext, setAsanaContext] = useState<string[]>([]);
@@ -275,16 +295,17 @@ export default function FabricaPage() {
     }
     
     const outboundAttachments: Attachment[] = [];
-    if (attachment) outboundAttachments.push(attachment);
+    if (attachments.length > 0) outboundAttachments.push(...attachments);
     if (asanaAttachments.length > 0) outboundAttachments.push(...asanaAttachments);
 
     sendMessage(fullMessage, outboundAttachments.length > 0 ? outboundAttachments : undefined);
     setInput('');
-    setAttachment(null);
+    aplicarAnexos([]);
+    setAttachErro(null);
     setAsanaAttachments([]);
     setBtwContext([]);
     setAsanaContext([]);
-  }, [input, isStreaming, btwContext, asanaContext, asanaAttachments, attachment, sendMessage, postId, router, marca]);
+  }, [input, isStreaming, btwContext, asanaContext, asanaAttachments, attachments, aplicarAnexos, sendMessage, postId, router, marca]);
 
   const handleKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (showSlash && filteredSlash.length > 0) {
@@ -296,11 +317,55 @@ export default function FabricaPage() {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
   };
 
+  // Bytes reais do arquivo a partir do base64 (infla 4/3, menos o padding).
+  // Evita carregar um campo a mais no tipo e no que trafega pelo WebSocket.
+  const bytesDe = (a: Attachment) => Math.floor((a.dataBase64.length * 3) / 4);
+
+  // `fileToBase64` de um PDF grande leva segundos, e nesse intervalo o usuário
+  // consegue abrir o seletor de novo. Dois handlers liam o mesmo
+  // `attachments.length` do closure, cada um concluía que cabiam mais dois, e a
+  // caixa terminava acima do teto que existe justamente para não estourar o
+  // frame. A reserva é feita em ref, ANTES do await, então o segundo handler já
+  // enxerga o que o primeiro tomou.
+  const reservaRef = useRef({ vagas: 0, bytes: 0 });
+
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setAttachment(await fileToBase64(file));
+    const escolhidos = Array.from(e.target.files ?? []);
     e.target.value = '';
+    if (escolhidos.length === 0) return;
+    setAttachErro(null);
+
+    const emUso = attachmentsRef.current;
+    const reserva = reservaRef.current;
+    const motivos: string[] = [];
+
+    const espaco = MAX_ANEXOS - emUso.length - reserva.vagas;
+    if (espaco <= 0) { setAttachErro(`Máximo de ${MAX_ANEXOS} anexos por mensagem.`); return; }
+
+    let orcamento = MAX_BYTES_ARQUIVOS - emUso.reduce((t, a) => t + bytesDe(a), 0) - reserva.bytes;
+    const aprovados: File[] = [];
+    for (const f of escolhidos) {
+      if (aprovados.length >= espaco) { motivos.push(`só cabem ${MAX_ANEXOS} anexos por mensagem`); break; }
+      if (f.size > orcamento) { motivos.push(`"${f.name}" não coube em ${MB(MAX_BYTES_ARQUIVOS)} somando os anexos`); continue; }
+      orcamento -= f.size;
+      aprovados.push(f);
+    }
+
+    // Todos os motivos, não só o último: violar contagem E tamanho ao mesmo
+    // tempo dizia apenas "máximo de N anexos", e quem removia arquivos
+    // continuava sendo recusado sem nunca saber que o problema era o tamanho.
+    if (motivos.length > 0) setAttachErro([...new Set(motivos)].join('; ') + '.');
+    if (aprovados.length === 0) return;
+
+    reserva.vagas += aprovados.length;
+    reserva.bytes += aprovados.reduce((t, f) => t + f.size, 0);
+    try {
+      const prontos = await Promise.all(aprovados.map(fileToBase64));
+      aplicarAnexos([...attachmentsRef.current, ...prontos]);
+    } finally {
+      reserva.vagas -= aprovados.length;
+      reserva.bytes -= aprovados.reduce((t, f) => t + f.size, 0);
+    }
   };
 
   const handleNewConversation = useCallback(() => {
@@ -311,12 +376,13 @@ export default function FabricaPage() {
     resetSession();
     router.replace(`/${marca}/fabrica`);
     setInput('');
-    setAttachment(null);
+    aplicarAnexos([]);
+    setAttachErro(null);
     setBtwContext([]);
     setAsanaContext([]);
     setPreviewSlide(0);
     setShowAsana(false);
-  }, [isStreaming, workerStatus, resetSession, router, marca]);
+  }, [isStreaming, workerStatus, resetSession, aplicarAnexos, router, marca]);
 
   const { can, hint: permHint } = useBrandPermissions();
   // Gerar design consome cota do Gemini e cria post: exige papel de edição. Sem isto,
@@ -640,11 +706,25 @@ export default function FabricaPage() {
           )}
 
           {/* Attachment strip */}
-          {attachment && (
-            <div className={s.attachStrip}>
-              <Paperclip size={11} />
-              <span>{attachmentPreviewLabel(attachment)}</span>
-              <button className={s.attachRemove} onClick={() => setAttachment(null)}><X size={11} /></button>
+          {attachments.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '8px' }}>
+              {attachments.map((att, idx) => (
+                <div key={`${att.name}-${idx}`} className={s.attachStrip}>
+                  <Paperclip size={11} />
+                  <span>{attachmentPreviewLabel(att)}</span>
+                  <button
+                    className={s.attachRemove}
+                    aria-label={`Remover ${att.name}`}
+                    onClick={() => { aplicarAnexos(attachmentsRef.current.filter((_, i) => i !== idx)); setAttachErro(null); }}
+                  ><X size={11} /></button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {attachErro && (
+            <div role="status" style={{ fontSize: 12, color: 'var(--color-danger, #b91c1c)', marginBottom: 8 }}>
+              {attachErro}
             </div>
           )}
 
@@ -692,8 +772,8 @@ export default function FabricaPage() {
               <button
                 className={s.iconBtn}
                 onClick={() => fileRef.current?.click()}
-                title={canGenerate ? "Anexar arquivo" : permHint}
-                aria-label="Anexar arquivo"
+                title={canGenerate ? `Anexar arquivos (até ${MAX_ANEXOS})` : permHint}
+                aria-label="Anexar arquivos"
                 disabled={!canGenerate}
               >
                 <Paperclip size={15} />
@@ -701,6 +781,7 @@ export default function FabricaPage() {
               <input
                 ref={fileRef}
                 type="file"
+                multiple
                 accept="image/*,.pdf"
                 className={s.visuallyHidden}
                 onChange={handleFile}
