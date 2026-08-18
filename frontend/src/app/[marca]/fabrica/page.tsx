@@ -25,6 +25,14 @@ import s from './fabrica.module.css';
 
 type Attachment = { name: string; mimeType: string; dataBase64: string };
 
+// O arquivo é convertido a base64 no NAVEGADOR e vai inteiro pelo WebSocket —
+// não há upload nem teto em lugar nenhum da pilha. Com um anexo só isso já era
+// arriscado; liberando vários, sem limite, uma seleção de PDFs estoura o frame
+// e o request do Gemini. Base64 infla ~33%, então 12MB de arquivo viram ~16MB
+// no fio, perto do limite de inline data do modelo.
+const MAX_ANEXOS = 5;
+const MAX_BYTES_TOTAL = 12 * 1024 * 1024;
+
 function attachmentPreviewLabel(attachment: Attachment): string {
   if (attachment.mimeType.startsWith('image/')) return `${attachment.name} · imagem`;
   return attachment.name;
@@ -116,7 +124,8 @@ export default function FabricaPage() {
 
   // Input state
   const [input, setInput] = useState('');
-  const [attachment, setAttachment] = useState<Attachment | null>(null);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [attachErro, setAttachErro] = useState<string | null>(null);
   const [questionFreeform, setQuestionFreeform] = useState('');
   const [btwContext, setBtwContext] = useState<string[]>([]);
   const [asanaContext, setAsanaContext] = useState<string[]>([]);
@@ -275,16 +284,17 @@ export default function FabricaPage() {
     }
     
     const outboundAttachments: Attachment[] = [];
-    if (attachment) outboundAttachments.push(attachment);
+    if (attachments.length > 0) outboundAttachments.push(...attachments);
     if (asanaAttachments.length > 0) outboundAttachments.push(...asanaAttachments);
 
     sendMessage(fullMessage, outboundAttachments.length > 0 ? outboundAttachments : undefined);
     setInput('');
-    setAttachment(null);
+    setAttachments([]);
+    setAttachErro(null);
     setAsanaAttachments([]);
     setBtwContext([]);
     setAsanaContext([]);
-  }, [input, isStreaming, btwContext, asanaContext, asanaAttachments, attachment, sendMessage, postId, router, marca]);
+  }, [input, isStreaming, btwContext, asanaContext, asanaAttachments, attachments, sendMessage, postId, router, marca]);
 
   const handleKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (showSlash && filteredSlash.length > 0) {
@@ -297,10 +307,31 @@ export default function FabricaPage() {
   };
 
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setAttachment(await fileToBase64(file));
+    const escolhidos = Array.from(e.target.files ?? []);
     e.target.value = '';
+    if (escolhidos.length === 0) return;
+    setAttachErro(null);
+
+    const espaco = MAX_ANEXOS - attachments.length;
+    if (espaco <= 0) { setAttachErro(`Máximo de ${MAX_ANEXOS} anexos por mensagem.`); return; }
+
+    const aceitos = escolhidos.slice(0, espaco);
+    const novos = await Promise.all(aceitos.map(fileToBase64));
+
+    // Mede em base64, que é o que trafega de fato.
+    const jaTem = attachments.reduce((t, a) => t + a.dataBase64.length, 0);
+    const cabem: Attachment[] = [];
+    let total = jaTem;
+    for (const a of novos) {
+      if (total + a.dataBase64.length > MAX_BYTES_TOTAL) {
+        setAttachErro(`"${a.name}" não coube — o limite é ${Math.round(MAX_BYTES_TOTAL / 1024 / 1024)}MB somando os anexos.`);
+        break;
+      }
+      total += a.dataBase64.length;
+      cabem.push(a);
+    }
+    if (escolhidos.length > aceitos.length) setAttachErro(`Máximo de ${MAX_ANEXOS} anexos por mensagem.`);
+    if (cabem.length > 0) setAttachments((prev) => [...prev, ...cabem]);
   };
 
   const handleNewConversation = useCallback(() => {
@@ -311,7 +342,8 @@ export default function FabricaPage() {
     resetSession();
     router.replace(`/${marca}/fabrica`);
     setInput('');
-    setAttachment(null);
+    setAttachments([]);
+    setAttachErro(null);
     setBtwContext([]);
     setAsanaContext([]);
     setPreviewSlide(0);
@@ -640,11 +672,25 @@ export default function FabricaPage() {
           )}
 
           {/* Attachment strip */}
-          {attachment && (
-            <div className={s.attachStrip}>
-              <Paperclip size={11} />
-              <span>{attachmentPreviewLabel(attachment)}</span>
-              <button className={s.attachRemove} onClick={() => setAttachment(null)}><X size={11} /></button>
+          {attachments.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '8px' }}>
+              {attachments.map((att, idx) => (
+                <div key={`${att.name}-${idx}`} className={s.attachStrip}>
+                  <Paperclip size={11} />
+                  <span>{attachmentPreviewLabel(att)}</span>
+                  <button
+                    className={s.attachRemove}
+                    aria-label={`Remover ${att.name}`}
+                    onClick={() => { setAttachments((prev) => prev.filter((_, i) => i !== idx)); setAttachErro(null); }}
+                  ><X size={11} /></button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {attachErro && (
+            <div role="status" style={{ fontSize: 12, color: 'var(--color-danger, #b91c1c)', marginBottom: 8 }}>
+              {attachErro}
             </div>
           )}
 
@@ -692,8 +738,8 @@ export default function FabricaPage() {
               <button
                 className={s.iconBtn}
                 onClick={() => fileRef.current?.click()}
-                title={canGenerate ? "Anexar arquivo" : permHint}
-                aria-label="Anexar arquivo"
+                title={canGenerate ? `Anexar arquivos (até ${MAX_ANEXOS})` : permHint}
+                aria-label="Anexar arquivos"
                 disabled={!canGenerate}
               >
                 <Paperclip size={15} />
@@ -701,6 +747,7 @@ export default function FabricaPage() {
               <input
                 ref={fileRef}
                 type="file"
+                multiple
                 accept="image/*,.pdf"
                 className={s.visuallyHidden}
                 onChange={handleFile}
