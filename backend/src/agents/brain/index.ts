@@ -126,6 +126,8 @@ function emitSessionState(sessionId: string, session: NonNullable<Awaited<Return
     workerStatus: session.workerStatus,
     reviewMode: session.reviewMode,
     activeQuestion: session.activeQuestion,
+    progress: session.progress,
+    progressLabel: session.progressLabel,
   });
 }
 

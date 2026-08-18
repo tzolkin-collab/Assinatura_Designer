@@ -89,6 +89,13 @@ export interface FabricaSession {
   folderId?: string | null;
   phase: SessionPhase;
   reviewMode: ReviewMode;
+  /** Último progresso emitido. Persistido de propósito: `ws.progress` é
+   *  fire-and-forget para socket ABERTO — quem estava desconectado (troca de
+   *  aba, wifi, restart do backend) perdia os eventos e, ao reconectar, via
+   *  "Preparando… · 0%" enquanto a geração ia no slide 5 de 7. Guardado aqui,
+   *  o `session:state` do reconnect devolve o estado real. */
+  progress?: number;
+  progressLabel?: string;
   activeQuestion?: FabricaQuestion | null;
   /**
    * Roteiro aguardando aprovação (fluxo copy-first): o brain planeja ANTES de

@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import { config } from '../config.js';
 import { publish, sessionChannel, onEvent, subscribe, initEventBus, type BusEvent } from './eventBus.js';
 import { logger } from './logger.js';
+import { updateSession } from './redis.js';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -215,8 +216,18 @@ export const ws = {
     payload: { index: number; total: number; slide: unknown; envelope: unknown },
   ) => broadcast(sessionId, { type: 'design:slide', data: payload }),
 
-  progress: (sessionId: string, percent: number, label: string) =>
-    broadcast(sessionId, { type: 'job:progress', data: { percent, label } }),
+  // Emite E PERSISTE. O broadcast só alcança socket aberto; sem gravar, quem
+  // reconecta recebe um session:state sem progresso e vê "Preparando… · 0%" com
+  // a geração já na metade. A escrita é fire-and-forget: telemetria de estado
+  // nunca pode derrubar ou atrasar a geração.
+  progress: (sessionId: string, percent: number, label: string) => {
+    broadcast(sessionId, { type: 'job:progress', data: { percent, label } });
+    void updateSession(sessionId, { progress: percent, progressLabel: label }).catch((err) => {
+      logger.warn('Progresso não persistido na sessão (fail-open)', {
+        sessionId, error: err instanceof Error ? err.message : String(err),
+      });
+    });
+  },
 
   done: (sessionId: string, postId: string) =>
     broadcast(sessionId, { type: 'job:done', data: { postId } }),
