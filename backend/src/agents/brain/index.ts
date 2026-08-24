@@ -804,8 +804,25 @@ async function handleUserMessageInner(
       // Executa as tools e devolve para o modelo
       const functionResponseParts: any[] = [];
       for (const call of functionCallsToExecute) {
-        ws.emit(sessionId, 'thinking', { text: `Acionando integração: ${call.name}...` });
-        const result = await executeSkill(call.name, call.args, { userId: latestSession.userId, brandSlug: latestSession.brandSlug });
+        // Evento próprio em vez de texto enfiado no raciocínio: o front consegue
+        // desenhar a ferramenta como ferramenta, e não como mais uma frase no
+        // meio do pensamento. Os dois tipos já existiam no protocolo e nunca
+        // tinham sido emitidos.
+        ws.emit(sessionId, 'agent:tool_call', { name: call.name });
+        let result: unknown;
+        try {
+          result = await executeSkill(call.name, call.args, { userId: latestSession.userId, brandSlug: latestSession.brandSlug });
+          ws.emit(sessionId, 'agent:tool_result', { name: call.name, ok: true });
+        } catch (err) {
+          // Antes só havia o aviso de ABERTURA: uma skill que falhava deixava
+          // "Acionando integração..." pendurado para sempre, e o erro subia e
+          // derrubava o turno inteiro. Agora o modelo recebe a falha como
+          // resposta da função e decide o que dizer.
+          const motivo = err instanceof Error ? err.message : String(err);
+          logger.warn('Skill falhou; devolvendo o erro ao modelo', { skill: call.name, error: motivo });
+          result = { error: motivo };
+          ws.emit(sessionId, 'agent:tool_result', { name: call.name, ok: false, detail: motivo });
+        }
         functionResponseParts.push({
           functionResponse: {
             name: call.name,

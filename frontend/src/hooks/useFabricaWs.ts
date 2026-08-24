@@ -25,6 +25,8 @@ export interface FabricaMessage {
   timestamp: number;
   attachments?: FabricaAttachment[];
   thinking?: string;
+  /** Ferramentas acionadas neste turno, na ordem, com o desfecho de cada uma. */
+  tools?: Array<{ name: string; ok?: boolean; detail?: string }>;
   imageProposal?: {
     id: string;
     prompt: string;
@@ -166,14 +168,61 @@ export function useFabricaWs(brandSlug: string, initialSessionId?: string | null
 
       case 'thinking': {
         const text = (data.text ?? '') as string;
+        if (!text) break;
+        // O raciocínio vem ANTES do primeiro token — o modelo pensa 1,9 a 2,9x
+        // o que escreve, e pensa primeiro. Como a mensagem do assistente só
+        // nascia no `agent:token`, o `if` abaixo nunca casava nessa janela e
+        // TODO o pensamento era descartado no `return prev` — justamente os
+        // segundos em que a tela mostra três pontinhos. Agora a mensagem nasce
+        // aqui também, e o texto ACUMULA em vez de cada fragmento apagar o
+        // anterior (era `thinking: text`, sobrescrevendo).
+        setStreaming(true);
         setMsgs(prev => {
           const last = prev[prev.length - 1];
           const sid = actionsRef.current.streamingMsgIdRef.current;
           if (last?.role === 'assistant' && last.id === sid) {
-            return prev.map(m => m.id === last.id ? { ...m, thinking: text } : m);
+            return prev.map(m => m.id === last.id ? { ...m, thinking: (m.thinking ?? '') + text } : m);
           }
-          return prev;
+          const id = crypto.randomUUID();
+          actionsRef.current.streamingMsgIdRef.current = id;
+          return [...prev, { id, role: 'assistant', content: '', thinking: text, timestamp: Date.now() }];
         });
+        break;
+      }
+
+      // O mesmo padrão do `thinking`: a mensagem nasce aqui se ainda não existe,
+      // porque a ferramenta costuma ser acionada ANTES de o modelo escrever.
+      case 'agent:tool_call': {
+        const name = (data.name ?? '') as string;
+        if (!name) break;
+        setStreaming(true);
+        setMsgs(prev => {
+          const last = prev[prev.length - 1];
+          const sid = actionsRef.current.streamingMsgIdRef.current;
+          if (last?.role === 'assistant' && last.id === sid) {
+            return prev.map(m => m.id === last.id ? { ...m, tools: [...(m.tools ?? []), { name }] } : m);
+          }
+          const id = crypto.randomUUID();
+          actionsRef.current.streamingMsgIdRef.current = id;
+          return [...prev, { id, role: 'assistant', content: '', tools: [{ name }], timestamp: Date.now() }];
+        });
+        break;
+      }
+
+      case 'agent:tool_result': {
+        const name = (data.name ?? '') as string;
+        const ok = data.ok !== false;
+        const detail = data.detail as string | undefined;
+        setMsgs(prev => prev.map(m => {
+          if (m.id !== actionsRef.current.streamingMsgIdRef.current || !m.tools) return m;
+          // Fecha a ÚLTIMA em aberto com esse nome — a mesma ferramenta pode ser
+          // acionada duas vezes no mesmo turno.
+          const i = m.tools.map(t => t.name === name && t.ok === undefined).lastIndexOf(true);
+          if (i < 0) return m;
+          const tools = m.tools.slice();
+          tools[i] = { name, ok, detail };
+          return { ...m, tools };
+        }));
         break;
       }
 
