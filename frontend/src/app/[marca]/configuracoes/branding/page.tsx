@@ -65,10 +65,12 @@ export default function BrandingPage() {
   const slug = params.marca as string;
 
   const [colors, setColors] = useState(['#171717', '#ffffff', '#f4f4f5', '#666666', '#0070f3']);
-  const [primaryFont, setPrimaryFont] = useState('Inter');
-  const [secondaryFont, setSecondaryFont] = useState('SF Mono');
-  const [showPrimaryFonts, setShowPrimaryFonts] = useState(false);
-  const [showSecondaryFonts, setShowSecondaryFonts] = useState(false);
+  // Eram dois escalares. A tela carregava só primaryFonts[0] e [1] e salvava
+  // exatamente dois — enquanto a ingestão do brandbook grava `mergedFonts`, que
+  // não tem teto. Um brandbook que rendesse 4 fontes perdia 2 no primeiro save,
+  // em silêncio. Agora é a lista inteira.
+  const [fonts, setFonts] = useState<string[]>(['Inter', 'SF Mono']);
+  const [fonteAberta, setFonteAberta] = useState<number | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [guidelinesData, setGuidelinesData] = useState({
     name: 'Nome da Marca',
@@ -97,7 +99,7 @@ export default function BrandingPage() {
 
   const currentStateStr = JSON.stringify({
     colors,
-    primaryFonts: [primaryFont, secondaryFont].filter(Boolean),
+    primaryFonts: fonts.map((f) => f.trim()).filter(Boolean),
     logoUrl,
     presentationConfig,
     ignoreAiCostLimit,
@@ -134,8 +136,10 @@ export default function BrandingPage() {
       .then((cfg) => {
         if (!cfg) return;
         if (cfg.colors?.length) setColors(cfg.colors);
-        if (cfg.primaryFonts?.[0]) { setPrimaryFont(cfg.primaryFonts[0]); loadGoogleFont(cfg.primaryFonts[0]); }
-        if (cfg.primaryFonts?.[1]) { setSecondaryFont(cfg.primaryFonts[1]); loadGoogleFont(cfg.primaryFonts[1]); }
+        if (cfg.primaryFonts?.length) {
+          setFonts(cfg.primaryFonts);
+          cfg.primaryFonts.forEach(loadGoogleFont);
+        }
         if (cfg.logoUrl) setLogoUrl(cfg.logoUrl);
         if (cfg.presentationConfig) {
           setPresentationConfig((prev) => ({ ...prev, ...cfg.presentationConfig }));
@@ -153,12 +157,10 @@ export default function BrandingPage() {
         }
         setInitialStateStr(JSON.stringify({
           colors: cfg.colors || ['#171717', '#ffffff', '#f4f4f5', '#666666', '#0070f3'],
-          // Tem que espelhar EXATAMENTE o que o estado vai guardar, não o que o
-          // servidor mandou. Os dois campos da tela têm default, então uma marca
-          // com UMA fonte virava ['Inter'] no retrato e ['Inter','SF Mono'] no
-          // atual — e a tela abria afirmando "alterações não salvas" sem ninguém
-          // ter tocado em nada. Cinco das dez marcas têm uma fonte só.
-          primaryFonts: [cfg.primaryFonts?.[0] ?? 'Inter', cfg.primaryFonts?.[1] ?? 'SF Mono'].filter(Boolean),
+          // Espelha EXATAMENTE o que o estado vai guardar. Quando o retrato saía
+          // do servidor cru e o estado tinha defaults, a tela abria afirmando
+          // "alterações não salvas" sem ninguém ter tocado em nada.
+          primaryFonts: (cfg.primaryFonts?.length ? cfg.primaryFonts : ['Inter', 'SF Mono']).map((f: string) => f.trim()).filter(Boolean),
           logoUrl: cfg.logoUrl || '',
           presentationConfig: cfg.presentationConfig || {
             autoMode: false,
@@ -189,7 +191,7 @@ export default function BrandingPage() {
     try {
       await api.put(`/settings/${slug}/config`, {
         colors,
-        primaryFonts: [primaryFont, secondaryFont].filter(Boolean),
+        primaryFonts: fonts.map((f) => f.trim()).filter(Boolean),
         guidelines: JSON.stringify(guidelinesData),
         logoUrl,
         presentationConfig,
@@ -212,6 +214,12 @@ export default function BrandingPage() {
   // banco guarda o que a ingestão do brandbook colocar. A marca assinatura tem
   // 12 cores; sete delas iam para o artista sem que ninguém pudesse ver nem
   // corrigir. Era a explicação direta do "as cores saem erradas".
+  const setFonte = (i: number, valor: string) =>
+    setFonts((prev) => prev.map((f, idx) => (idx === i ? valor : f)));
+  const addFonte = () => setFonts((prev) => [...prev, '']);
+  const removeFonte = (i: number) =>
+    setFonts((prev) => (prev.length <= 1 ? prev : prev.filter((_, idx) => idx !== i)));
+
   const addColor = () => setColors((prev) => [...prev, '#000000']);
   const removeColor = (index: number) =>
     setColors((prev) => (prev.length <= 1 ? prev : prev.filter((_, i) => i !== index)));
@@ -253,7 +261,7 @@ export default function BrandingPage() {
           try {
             await api.put(`/settings/${slug}/config`, {
               colors,
-              primaryFonts: [primaryFont, secondaryFont].filter(Boolean),
+              primaryFonts: fonts.map((f) => f.trim()).filter(Boolean),
               guidelines: JSON.stringify(guidelinesData),
               logoUrl: result.url,
               presentationConfig,
@@ -306,11 +314,12 @@ export default function BrandingPage() {
       ? logoSuggestions.colors
       : colors;
 
-    const newPrimaryFont = logoSuggestions.fontRecommendation || primaryFont;
+    const newPrimaryFont = logoSuggestions.fontRecommendation || fonts[0] || 'Inter';
 
     setColors(newColors);
     if (logoSuggestions.fontRecommendation) {
-      setPrimaryFont(newPrimaryFont);
+      // A recomendação do logo substitui a PRIMEIRA da lista, sem apagar as demais.
+      setFonts((prev) => [newPrimaryFont, ...prev.slice(1)]);
       loadGoogleFont(newPrimaryFont);
     }
     setLogoSuggestions(null);
@@ -320,7 +329,7 @@ export default function BrandingPage() {
     try {
       await api.put(`/settings/${slug}/config`, {
         colors: newColors,
-        primaryFonts: [newPrimaryFont, secondaryFont].filter(Boolean),
+        primaryFonts: [newPrimaryFont, ...fonts.slice(1)].map((f) => f.trim()).filter(Boolean),
         guidelines: JSON.stringify(guidelinesData),
         logoUrl,
         presentationConfig: {
@@ -583,77 +592,70 @@ export default function BrandingPage() {
 
         <Card padding="md">
           <h3 className={styles.sectionTitle}>Tipografia</h3>
-          <div className={styles.typeRow}>
-            <div className={styles.inputGroup} style={{ position: 'relative' }}>
-              <label className={styles.inputLabel}>Fonte Principal</label>
-              <input
-                className={styles.textInput}
-                value={primaryFont}
-                onChange={(e) => { setPrimaryFont(e.target.value); loadGoogleFont(e.target.value); }}
-                onFocus={() => setShowPrimaryFonts(true)}
-                onBlur={() => setShowPrimaryFonts(false)}
-                style={{ fontFamily: `'${primaryFont}', sans-serif` }}
-                placeholder="Ex: Roboto"
-              />
-              {showPrimaryFonts && (
-                <div className={styles.dropdownList} onMouseDown={(e) => e.preventDefault()}>
-                  {POPULAR_FONTS.filter(f => f.toLowerCase().includes(primaryFont.toLowerCase())).map(font => (
-                    <div
-                      key={font}
-                      className={styles.dropdownItem}
-                      onClick={() => { setPrimaryFont(font); loadGoogleFont(font); setShowPrimaryFonts(false); }}
-                      style={{
-                        fontFamily: `'${font}', sans-serif`,
-                        backgroundColor: primaryFont === font ? 'var(--color-bg-secondary)' : 'transparent',
-                        color: primaryFont === font ? 'var(--color-accent)' : 'inherit',
-                        fontWeight: primaryFont === font ? 600 : 400,
-                      }}
-                    >
-                      {font}
-                    </div>
-                  ))}
-                  {POPULAR_FONTS.filter(f => f.toLowerCase().includes(primaryFont.toLowerCase())).length === 0 && (
-                    <div className={styles.dropdownItem} style={{ color: 'var(--color-text-tertiary)' }}>Nenhuma fonte encontrada</div>
+          <div className={styles.typeRow} style={{ flexDirection: 'column', alignItems: 'stretch', gap: 12 }}>
+            {fonts.map((fonte, i) => (
+              <div key={i} className={styles.inputGroup} style={{ position: 'relative' }}>
+                <label className={styles.inputLabel}>
+                  {i === 0 ? 'Fonte principal' : `Fonte ${i + 1}`}
+                </label>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <input
+                    className={styles.textInput}
+                    value={fonte}
+                    onChange={(e) => { setFonte(i, e.target.value); loadGoogleFont(e.target.value); }}
+                    onFocus={() => setFonteAberta(i)}
+                    onBlur={() => setFonteAberta((atual) => (atual === i ? null : atual))}
+                    style={{ fontFamily: `'${fonte}', sans-serif`, flex: 1 }}
+                    placeholder="Ex: Roboto"
+                  />
+                  {fonts.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => removeFonte(i)}
+                      aria-label={`Remover ${fonte || `fonte ${i + 1}`}`}
+                      style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 12, color: 'var(--color-text-muted, #6b7280)' }}
+                    >Remover</button>
                   )}
                 </div>
-              )}
-            </div>
-
-            <div className={styles.inputGroup} style={{ position: 'relative' }}>
-              <label className={styles.inputLabel}>Fonte Secundária</label>
-              <input
-                className={styles.textInput}
-                value={secondaryFont}
-                onChange={(e) => { setSecondaryFont(e.target.value); loadGoogleFont(e.target.value); }}
-                onFocus={() => setShowSecondaryFonts(true)}
-                onBlur={() => setShowSecondaryFonts(false)}
-                style={{ fontFamily: `'${secondaryFont}', monospace` }}
-                placeholder="Ex: Open Sans"
-              />
-              {showSecondaryFonts && (
-                <div className={styles.dropdownList} onMouseDown={(e) => e.preventDefault()}>
-                  {POPULAR_FONTS.filter(f => f.toLowerCase().includes(secondaryFont.toLowerCase())).map(font => (
-                    <div
-                      key={font}
-                      className={styles.dropdownItem}
-                      onClick={() => { setSecondaryFont(font); loadGoogleFont(font); setShowSecondaryFonts(false); }}
-                      style={{
-                        fontFamily: `'${font}', sans-serif`,
-                        backgroundColor: secondaryFont === font ? 'var(--color-bg-secondary)' : 'transparent',
-                        color: secondaryFont === font ? 'var(--color-accent)' : 'inherit',
-                        fontWeight: secondaryFont === font ? 600 : 400,
-                      }}
-                    >
-                      {font}
-                    </div>
-                  ))}
-                  {POPULAR_FONTS.filter(f => f.toLowerCase().includes(secondaryFont.toLowerCase())).length === 0 && (
-                    <div className={styles.dropdownItem} style={{ color: 'var(--color-text-tertiary)' }}>Nenhuma fonte encontrada</div>
-                  )}
-                </div>
-              )}
-            </div>
+                {fonteAberta === i && (
+                  <div className={styles.dropdownList} onMouseDown={(e) => e.preventDefault()}>
+                    {POPULAR_FONTS.filter(f => f.toLowerCase().includes(fonte.toLowerCase())).map(nome => (
+                      <div
+                        key={nome}
+                        className={styles.dropdownItem}
+                        onClick={() => { setFonte(i, nome); loadGoogleFont(nome); setFonteAberta(null); }}
+                        style={{
+                          fontFamily: `'${nome}', sans-serif`,
+                          backgroundColor: fonte === nome ? 'var(--color-bg-secondary)' : 'transparent',
+                          color: fonte === nome ? 'var(--color-accent)' : 'inherit',
+                          fontWeight: fonte === nome ? 600 : 400,
+                        }}
+                      >
+                        {nome}
+                      </div>
+                    ))}
+                    {POPULAR_FONTS.filter(f => f.toLowerCase().includes(fonte.toLowerCase())).length === 0 && (
+                      <div className={styles.dropdownItem} style={{ color: 'var(--color-text-tertiary)' }}>
+                        Nenhuma na lista — digitando o nome exato de uma Google Font também funciona
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
+          <button
+            type="button"
+            onClick={addFonte}
+            style={{ marginTop: 12, border: '1px dashed var(--color-border, rgba(0,0,0,0.2))', background: 'none', borderRadius: 8, padding: '8px 14px', cursor: 'pointer', fontSize: 13 }}
+          >+ Adicionar fonte</button>
+          {/* O gerador monta o href do Google Fonts com `.slice(0, 4)`. Dizer isso
+              é melhor do que deixar a quinta fonte sumir sem explicação. */}
+          <p style={{ marginTop: 8, fontSize: 12, color: 'var(--color-text-muted, #6b7280)' }}>
+            {fonts.length > 4
+              ? `O gerador carrega as 4 primeiras — as outras ${fonts.length - 4} ficam guardadas, mas não são aplicadas.`
+              : 'Precisa ser o nome exato de uma Google Font. Arquivo próprio (.ttf) ainda não é suportado.'}
+          </p>
         </Card>
 
         <Card padding="md">
