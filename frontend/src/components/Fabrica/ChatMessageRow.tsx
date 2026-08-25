@@ -55,6 +55,7 @@ function ThinkingBlock({ thinking, aoVivo }: { thinking: string; aoVivo: boolean
 // Nome técnico da skill não diz nada a quem usa. O rótulo é o que a ferramenta
 // FAZ, na língua da pessoa.
 const ROTULO_FERRAMENTA: Record<string, string> = {
+  editarSlides: 'Ajustando os slides',
   updateBrandMemory: 'Anotando preferência da marca',
   createAsanaTask: 'Criando tarefa no Asana',
   listAsanaProjects: 'Consultando projetos do Asana',

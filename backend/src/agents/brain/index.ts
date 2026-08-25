@@ -811,8 +811,30 @@ async function handleUserMessageInner(
         ws.emit(sessionId, 'agent:tool_call', { name: call.name });
         let result: unknown;
         try {
-          result = await executeSkill(call.name, call.args, { userId: latestSession.userId, brandSlug: latestSession.brandSlug });
-          ws.emit(sessionId, 'agent:tool_result', { name: call.name, ok: true });
+          // `editarSlides` não passa pelo executeSkill: ela precisa da sessão e
+          // do post, que o contexto das skills não carrega. Reaproveita o mesmo
+          // applySlideEdits do caminho por marcador — snapshot, progresso,
+          // persistência e preview ao vivo saem de graça, idênticos.
+          if (call.name === 'editarSlides') {
+            const r = await applySlideEdits(sessionId, latestSession, JSON.stringify(call.args ?? {}));
+            // O desfecho volta ao MODELO como resposta da função: é ele que
+            // conta ao usuário o que aconteceu, em vez de o código cuspir uma
+            // frase pronta. "sem-arte" é informação, não erro — deixa o modelo
+            // oferecer gerar do zero.
+            result = r.outcome === 'editado'
+              ? { ok: true, editado: true }
+              : r.outcome === 'sem-arte'
+                ? { ok: false, motivo: 'Ainda não existe arte nesta conversa para editar.' }
+                : { ok: false, motivo: r.motivo };
+            ws.emit(sessionId, 'agent:tool_result', {
+              name: call.name,
+              ok: r.outcome === 'editado',
+              detail: r.outcome === 'editado' ? undefined : (r.outcome === 'sem-arte' ? 'nenhuma arte ainda' : r.motivo),
+            });
+          } else {
+            result = await executeSkill(call.name, call.args, { userId: latestSession.userId, brandSlug: latestSession.brandSlug });
+            ws.emit(sessionId, 'agent:tool_result', { name: call.name, ok: true });
+          }
         } catch (err) {
           // Antes só havia o aviso de ABERTURA: uma skill que falhava deixava
           // "Acionando integração..." pendurado para sempre, e o erro subia e

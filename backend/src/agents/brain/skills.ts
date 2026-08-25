@@ -9,6 +9,45 @@ import { logger } from '../../lib/logger.js';
 
 // ── Definitions (Schemas) ──
 
+// Editar o deck era o ÚNICO verbo central do produto que não era ferramenta: o
+// modelo tinha que escrever `[EDIT]{json}` no meio da prosa e um regex tentava
+// parsear. Isso já quebrou em produção — um `]` no payload derrubava o
+// JSON.parse e a Gabi prometia "vou ajustar" com o design intacto, sem erro
+// nenhum. Como ferramenta, ou executa ou dá erro; e o instante da chamada vira
+// um evento que a tela mostra.
+//
+// `index` é 0-BASED por compatibilidade com o caminho antigo, que segue vivo
+// como fallback e é documentado assim no prompt. Mudar a base aqui faria os
+// dois caminhos divergirem em silêncio, que é o pior desfecho possível.
+const editarSlidesSchema: FunctionDeclaration = {
+  name: 'editarSlides',
+  description: 'Edita cirurgicamente slides da arte que JÁ existe nesta conversa, preservando todo o resto idêntico. NÃO regenera a peça. Use sempre que já houver arte e o pedido for localizado (ex.: "mais contraste no slide 2", "troca o título do primeiro"). Se ainda não existe arte nenhuma, NÃO use esta ferramenta.',
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      edits: {
+        type: Type.ARRAY,
+        description: 'Um item para CADA slide a alterar. Não agrupe dois slides num item só.',
+        items: {
+          type: Type.OBJECT,
+          properties: {
+            index: {
+              type: Type.INTEGER,
+              description: 'Índice do slide, começando em ZERO. O primeiro slide é 0, o segundo é 1.',
+            },
+            instruction: {
+              type: Type.STRING,
+              description: 'O que mudar neste slide, concreto e autocontido — sem depender do texto da conversa. Ex.: "escurecer o fundo para garantir contraste WCAG com o texto branco".',
+            },
+          },
+          required: ['index', 'instruction'],
+        },
+      },
+    },
+    required: ['edits'],
+  },
+};
+
 const updateMemorySchema: FunctionDeclaration = {
   name: 'updateBrandMemory',
   description: 'Adiciona ou remove uma regra de design ou preferência visual aprendida sobre a marca. Use isso SEMPRE que o usuário expressar uma preferência (ex: "não gosto de azul", "use fontes serifadas", "nunca use gradientes").',
@@ -77,7 +116,7 @@ const generateRoteiroLinkSchema: FunctionDeclaration = {
 
 export const brainTools: Tool[] = [
   {
-    functionDeclarations: [updateMemorySchema, createAsanaTaskSchema, listAsanaProjectsSchema, generateRoteiroLinkSchema],
+    functionDeclarations: [editarSlidesSchema, updateMemorySchema, createAsanaTaskSchema, listAsanaProjectsSchema, generateRoteiroLinkSchema],
   },
 ];
 
