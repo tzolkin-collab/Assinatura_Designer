@@ -42,6 +42,10 @@ interface LogoSuggestions {
   fontRecommendation: string;
 }
 
+// Estes rótulos são DICA para quem preenche, não contrato: o backend manda a
+// paleta ao artista como `colors.join(', ')` — uma lista sem etiqueta. Nada no
+// sistema lê "a cor de índice 3 é a de texto". Por isso a paleta deixou de ser
+// presa a esta lista: ela dá nome às primeiras e o resto é livre.
 const COLOR_ROLES = [
   { label: 'Cor Primária', desc: 'Direção principal da marca' },
   { label: 'Cor Secundária', desc: 'Apoio e contraste' },
@@ -149,7 +153,12 @@ export default function BrandingPage() {
         }
         setInitialStateStr(JSON.stringify({
           colors: cfg.colors || ['#171717', '#ffffff', '#f4f4f5', '#666666', '#0070f3'],
-          primaryFonts: cfg.primaryFonts || ['Inter', 'SF Mono'],
+          // Tem que espelhar EXATAMENTE o que o estado vai guardar, não o que o
+          // servidor mandou. Os dois campos da tela têm default, então uma marca
+          // com UMA fonte virava ['Inter'] no retrato e ['Inter','SF Mono'] no
+          // atual — e a tela abria afirmando "alterações não salvas" sem ninguém
+          // ter tocado em nada. Cinco das dez marcas têm uma fonte só.
+          primaryFonts: [cfg.primaryFonts?.[0] ?? 'Inter', cfg.primaryFonts?.[1] ?? 'SF Mono'].filter(Boolean),
           logoUrl: cfg.logoUrl || '',
           presentationConfig: cfg.presentationConfig || {
             autoMode: false,
@@ -198,6 +207,14 @@ export default function BrandingPage() {
   const updateColor = (index: number, value: string) => {
     setColors((prev) => prev.map((c, i) => (i === index ? value : c)));
   };
+
+  // A tela desenhava `COLOR_ROLES.map(...)` — cinco casas fixas — enquanto o
+  // banco guarda o que a ingestão do brandbook colocar. A marca assinatura tem
+  // 12 cores; sete delas iam para o artista sem que ninguém pudesse ver nem
+  // corrigir. Era a explicação direta do "as cores saem erradas".
+  const addColor = () => setColors((prev) => [...prev, '#000000']);
+  const removeColor = (index: number) =>
+    setColors((prev) => (prev.length <= 1 ? prev : prev.filter((_, i) => i !== index)));
 
   const processLogoFile = (file: File) => {
     if (file.size > 8 * 1024 * 1024) {
@@ -283,8 +300,10 @@ export default function BrandingPage() {
   const applyLogoSuggestions = async () => {
     if (!logoSuggestions) return;
 
+    // Era `.slice(0, 5)` porque a grade só tinha cinco casas. Com a paleta livre
+    // não há motivo para descartar o que a análise do logo encontrou.
     const newColors = logoSuggestions.colors?.length >= 1
-      ? logoSuggestions.colors.slice(0, 5)
+      ? logoSuggestions.colors
       : colors;
 
     const newPrimaryFont = logoSuggestions.fontRecommendation || primaryFont;
@@ -410,25 +429,41 @@ export default function BrandingPage() {
         <Card padding="md">
           <h3 className={styles.sectionTitle}>Paleta de Cores</h3>
           <div className={styles.colorGrid}>
-            {COLOR_ROLES.map((role, i) => (
+            {colors.map((cor, i) => (
               <div key={i} className={styles.colorItem}>
                 <div className={styles.colorSwatchContainer}>
                   <input
                     type="color"
-                    value={colors[i] || '#000000'}
+                    value={cor || '#000000'}
                     onChange={(e) => updateColor(i, e.target.value)}
                     className={styles.colorInput}
-                    title={colors[i]}
+                    title={cor}
                   />
-                  <span className={styles.swatchLabel}>{colors[i] || '#000000'}</span>
+                  <span className={styles.swatchLabel}>{cor || '#000000'}</span>
                 </div>
                 <div className={styles.colorInfo}>
-                  <p className={styles.colorLabel}>{role.label}</p>
-                  <p className={styles.colorDesc}>{role.desc}</p>
+                  <p className={styles.colorLabel}>{COLOR_ROLES[i]?.label ?? `Cor ${i + 1}`}</p>
+                  <p className={styles.colorDesc}>{COLOR_ROLES[i]?.desc ?? 'Cor adicional da paleta'}</p>
+                  {colors.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => removeColor(i)}
+                      aria-label={`Remover ${cor}`}
+                      style={{ marginTop: 4, border: 'none', background: 'none', cursor: 'pointer', fontSize: 12, color: 'var(--color-text-muted, #6b7280)', padding: 0 }}
+                    >Remover</button>
+                  )}
                 </div>
               </div>
             ))}
           </div>
+          <button
+            type="button"
+            onClick={addColor}
+            style={{ marginTop: 12, border: '1px dashed var(--color-border, rgba(0,0,0,0.2))', background: 'none', borderRadius: 8, padding: '8px 14px', cursor: 'pointer', fontSize: 13 }}
+          >+ Adicionar cor</button>
+          <p style={{ marginTop: 8, fontSize: 12, color: 'var(--color-text-muted, #6b7280)' }}>
+            A paleta inteira vai para o gerador como um conjunto — os nomes acima são referência para você, não papéis que o sistema aplica.
+          </p>
         </Card>
 
         <Card padding="md">
