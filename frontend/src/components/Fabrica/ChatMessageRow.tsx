@@ -16,7 +16,7 @@
 // componente pula o re-render (e o re-parse do Markdown) para elas.
 
 import { memo, useId, useState } from 'react';
-import { ChevronDown, ChevronRight, Sparkles } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Loader2, Sparkles, X as XIcon } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import type { FabricaAttachment, FabricaMessage } from '@/hooks/useFabricaWs';
 import s from '@/app/[marca]/fabrica/fabrica.module.css';
@@ -26,23 +26,58 @@ function attachmentPreviewLabel(attachment: FabricaAttachment): string {
   return attachment.name;
 }
 
-function ThinkingBlock({ thinking }: { thinking: string }) {
-  const [expanded, setExpanded] = useState(false);
+// `aoVivo` = ainda pensando e sem resposta escrita. Nesse estado o bloco abre
+// sozinho: o raciocínio É o conteúdo da espera, e escondê-lo atrás de um clique
+// devolve os três pontinhos que ele veio substituir. Quando a resposta começa,
+// volta a recolher — a menos que a pessoa tenha clicado, e aí a escolha dela manda.
+function ThinkingBlock({ thinking, aoVivo }: { thinking: string; aoVivo: boolean }) {
+  const [manual, setManual] = useState<boolean | null>(null);
+  const expanded = manual ?? aoVivo;
   const bodyId = useId();
   return (
     <div className={s.thinkingBlock}>
       <button
         type="button"
         className={s.thinkingHeader}
-        onClick={() => setExpanded(!expanded)}
+        onClick={() => setManual(!expanded)}
         aria-expanded={expanded}
         aria-controls={bodyId}
       >
         <Sparkles size={11} />
-        <span>{expanded ? 'Ocultar raciocínio' : 'Mostrar raciocínio'}</span>
+        <span>{aoVivo ? 'Pensando…' : expanded ? 'Ocultar raciocínio' : 'Mostrar raciocínio'}</span>
         {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
       </button>
       {expanded && <div id={bodyId} className={s.thinkingBody}>{thinking}</div>}
+    </div>
+  );
+}
+
+// Nome técnico da skill não diz nada a quem usa. O rótulo é o que a ferramenta
+// FAZ, na língua da pessoa.
+const ROTULO_FERRAMENTA: Record<string, string> = {
+  editarSlides: 'Ajustando os slides',
+  updateBrandMemory: 'Anotando preferência da marca',
+  createAsanaTask: 'Criando tarefa no Asana',
+  listAsanaProjects: 'Consultando projetos do Asana',
+  generateRoteiroLink: 'Gerando link do roteiro',
+};
+
+function FerramentasUsadas({ tools }: { tools: NonNullable<FabricaMessage['tools']> }) {
+  return (
+    <div className={s.thinkingBlock}>
+      {tools.map((t, i) => (
+        <div key={`${t.name}-${i}`} className={s.thinkingHeader} style={{ cursor: 'default' }}>
+          {t.ok === undefined
+            ? <Loader2 size={11} className={s.spin} />
+            : t.ok
+              ? <Check size={11} />
+              : <XIcon size={11} />}
+          <span>{ROTULO_FERRAMENTA[t.name] ?? t.name}</span>
+          {t.ok === false && t.detail && (
+            <span style={{ opacity: 0.7 }}>— {t.detail.slice(0, 60)}</span>
+          )}
+        </div>
+      ))}
     </div>
   );
 }
@@ -104,7 +139,16 @@ function ChatMessageRowImpl({ message, isStreamingMsg, onApproveImage, onRegener
         <Sparkles size={11} />
       </div>
       <div className={s.aiBubble}>
-        {message.thinking && <ThinkingBlock thinking={message.thinking} />}
+        {message.thinking && (
+          <ThinkingBlock thinking={message.thinking} aoVivo={isStreamingMsg && !message.content} />
+        )}
+        {message.tools && message.tools.length > 0 && <FerramentasUsadas tools={message.tools} />}
+        {/* Sem isto a espera fica muda: os pontinhos da página só aparecem quando a
+            última mensagem é do usuário, e agora o `thinking` já criou a do
+            assistente antes do primeiro token. */}
+        {isStreamingMsg && !message.content && !message.thinking && !message.tools?.length && (
+          <div className={s.typingDots}><span /><span /><span /></div>
+        )}
         {message.content && (
           <div className={`${s.aiText} ${isStreamingMsg ? s.aiTextStreaming : ''}`}>
             <ReactMarkdown
