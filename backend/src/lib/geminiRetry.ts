@@ -632,11 +632,23 @@ export async function generateWithRetry(
         inputTokens: result.usageMetadata?.promptTokenCount,
         outputTokens: result.usageMetadata?.candidatesTokenCount,
         latencyMs: Date.now() - startTime,
+        metadata: thinkingMetadata(result.usageMetadata),
       });
     } catch (_) { /* fail-open */ }
 
     return result;
   });
+}
+
+/**
+ * Tokens de raciocínio (thinking) não entram em `candidatesTokenCount`, mas o Gemini
+ * os cobra como output. Sem gravá-los, a estimativa de custo por deck
+ * (lib/generationCost.ts) subestimaria justo o modelo mais caro: o "artista" pensa até
+ * `geminiThinkingBudget` tokens por chamada. Vão no metadata do step, sem migration.
+ */
+function thinkingMetadata(usage: { thoughtsTokenCount?: number } | undefined): Record<string, unknown> | undefined {
+  const thinking = Number(usage?.thoughtsTokenCount ?? 0);
+  return Number.isFinite(thinking) && thinking > 0 ? { thinkingTokens: thinking } : undefined;
 }
 
 type StreamResult = Awaited<ReturnType<InstanceType<typeof GoogleGenAI>['models']['generateContentStream']>>;
@@ -683,6 +695,7 @@ async function* meterStream(
       inputTokens: ultimoUso?.promptTokenCount,
       outputTokens: ultimoUso?.candidatesTokenCount,
       latencyMs: Date.now() - startTime,
+      metadata: thinkingMetadata(ultimoUso),
     });
   } catch (_) { /* fail-open */ }
 }
