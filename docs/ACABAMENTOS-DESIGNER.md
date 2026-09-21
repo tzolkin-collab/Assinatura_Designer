@@ -332,6 +332,32 @@ Ordem por dependência: **modelo de marca → entrada de dados → acesso da IA 
 | **5 — Conectores, tenants, MCP** | Catálogo de conectores + ferramentas do bot · spike Adobe · **`Equipe → Marca`** (papéis no time + override por marca) e contexto por usuário · **Canva/Adobe por conta (Pro)**, conforme o spike · servidor MCP | f, e, g, L | L | 1, 3 |
 | **6 — Equipe de workers (só se o benchmark pedir)** | Subir paralelismo (pool configurável por peso do modelo, respeitando `aiThrottle`) · workers de asset em paralelo · loop revisor→corretor automático · camadas (h) | h, dor 3 | M–L | benchmark da Fase 0 |
 
+### 3.1 Cadastro da marca Assinatura em produção (Fase 0): proposta e rollback
+
+**Status: NÃO aplicado.** É mudança em dados de produção do cliente e depende de aprovação explícita. Nada aqui foi escrito no banco.
+
+**Proposta de paleta** (configuração em Configurações › Branding, lista plana, na ordem do brandbook `ID Rebranding`, p. 3):
+
+| # | HEX | RGB | CMYK | Pantone |
+|---|---|---|---|---|
+| 1 | `#582731` | 88, 39, 49 | 0, 56, 44, 65 | 504 C |
+| 2 | `#8A0E2E` | 138, 14, 46 | 0, 90, 67, 46 | 1955 C |
+| 3 | `#D41D59` | 212, 29, 89 | 0, 86, 58, 17 | Rubine Red CP |
+| 4 | `#233766` | 35, 55, 102 | 66, 46, 0, 60 | 534 C |
+| 5 | `#545BAE` | 84, 91, 174 | 52, 48, 0, 32 | 2126 U |
+| 6 | `#E9BDA6` | 233, 189, 166 | 0, 19, 29, 9 | P 55-9 U |
+| 7 (auxiliar) | `#FFFFFF` | 255, 255, 255 | | |
+
+O 7º item **não é do brandbook**: é o branco, que o próprio `ID Rebranding` usa como versão do logo sobre as 6 cores (p. 5 e 6) e é o fundo de texto natural. Sem neutros a lista fica com 6 cores saturadas e o gerador tende a inventar fundos. **Decisão sua:** manter o branco ou ficar só com as 6.
+
+**Fontes:** não alterar agora. Inter (Aileron é um neogrotesco parecido) pode ficar como substituta aprovada de Aileron; **não há Google Font equivalente honesta para Monument Extended**. Depende da resposta dos designers (ver `docs/PEDIDO-PACOTE-DESIGNERS.md`).
+
+**Rollback — valores lidos no app em 21/09/2026 (12 cores; fontes `Inter` e `Rubik`):**
+
+`#d0b49f`, `#1e2522`, `#f9f6f0`, `#3e101f`, `#ffffff`, `#ec4d72`, `#4141a8`, `#1a1a1a`, `#af7487`, `#fdf9f8`, `#3c111c`, `#f6ebe4`
+
+**Efeito esperado:** só as próximas gerações usam a nova paleta. Decks já gerados não mudam. O risco é a qualidade visual das próximas artes mudar de forma perceptível (fundos, contraste); por isso vale gerar 1 carrossel de teste logo depois e comparar.
+
 **Por que não abrir a Fase 6 antes:** mais paralelismo aumenta risco de incoerência entre slides (a "style bible" existe justamente para isso), custo e limite de taxa do Gemini. Sem medir, dá para gastar mais e ganhar pouco.
 
 ---
