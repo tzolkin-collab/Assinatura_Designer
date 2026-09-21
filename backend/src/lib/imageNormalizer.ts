@@ -1,4 +1,5 @@
 import sharp from 'sharp';
+import { sanitizeSvg, looksLikeSvg } from './svgSanitize.js';
 
 // ── Tipos aceitos pelo sistema ──────────────────────────────────────────────
 
@@ -65,18 +66,9 @@ export interface NormalizedImage {
   sizeBytes: number;
 }
 
-// ── Sanitização de SVG ──────────────────────────────────────────────────────
-// Remove vetores de XSS antes de rasterizar.
-
-function sanitizeSvg(buffer: Buffer): Buffer {
-  let svg = buffer.toString('utf-8');
-  svg = svg.replace(/<script[\s\S]*?<\/script>/gi, '');
-  svg = svg.replace(/<foreignObject[\s\S]*?<\/foreignObject>/gi, '');
-  svg = svg.replace(/\son\w+\s*=\s*["'][^"']*["']/gi, '');
-  svg = svg.replace(/href\s*=\s*["']javascript:[^"']*["']/gi, 'href="#"');
-  svg = svg.replace(/xlink:href\s*=\s*["']javascript:[^"']*["']/gi, 'xlink:href="#"');
-  return Buffer.from(svg, 'utf-8');
-}
+// A sanitização de SVG vive em svgSanitize.ts (uma implementação só). Aqui ela roda
+// antes de rasterizar: o sharp/librsvg resolve href externo e <image href=file:...>,
+// então não basta confiar que "vira PNG de qualquer jeito".
 
 // ── Função principal ────────────────────────────────────────────────────────
 
@@ -99,7 +91,9 @@ export async function normalizeImage(
   }
 
   let processBuffer = buffer;
-  if (rule.sanitize) processBuffer = sanitizeSvg(buffer);
+  // O sharp decide o formato pelos BYTES, não pelo mime declarado: um SVG mandado como
+  // image/png escaparia da regra `sanitize` e seria rasterizado sem limpeza.
+  if (rule.sanitize || looksLikeSvg(buffer)) processBuffer = sanitizeSvg(buffer).buffer;
 
   const maxDim = options.maxDimension ?? MAX_DIMENSION;
 
