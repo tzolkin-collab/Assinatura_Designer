@@ -3,6 +3,7 @@
 
 import createDOMPurify, { type WindowLike } from 'dompurify';
 import { JSDOM } from 'jsdom';
+import { pipelineAdviceBlock } from './adviceText.js';
 
 export interface HtmlDesignSlide {
   html: string;
@@ -382,6 +383,7 @@ function buildBatchUserPrompt(
   bible: StyleBible,
   referenceSlides: HtmlDesignSlide[],
   batchSize: number,
+  advice: string[] = [],
 ): string {
   const b = input.brand;
   const endIndex = Math.min(startIndex + batchSize, total);
@@ -435,7 +437,7 @@ ${renderStyleBible(bible)}${refBlock}
 
 Briefing:
 ${input.prompt.slice(0, 6000)}
-
+${advice.length ? `\n${pipelineAdviceBlock(advice)}\n` : ''}
 Gere os slides de ${startIndex + 1} a ${endIndex} (${input.width}x${input.height}px) como array "slides" de objetos {html, css}. Copy final real em português.`;
 }
 
@@ -463,16 +465,73 @@ function pickTextColor(bgHex: string): string {
   return lum > 0.5 ? '#111111' : '#ffffff';
 }
 
+/** Qual lote está prestes a começar (1-based), para rótulos legíveis ("lote 3 de 10"). */
+export interface BatchInfo {
+  batch: number;
+  totalBatches: number;
+  startIndex: number;
+  endIndex: number;
+}
+
+export interface GenerateBatchedOptions {
+  concurrency?: number;
+  /**
+   * Chamado no INÍCIO de cada lote; devolve as orientações do usuário que chegaram
+   * desde o último lote (o chamador as drena e marca como aplicadas). É um callback,
+   * e não uma leitura direta, para este módulo continuar sem saber que existe Redis.
+   * O que devolve passa a valer para este lote E para os seguintes — um lote que já
+   * saiu não é refeito. Falha aqui nunca derruba a geração.
+   */
+  getPendingAdvice?: (info: BatchInfo) => Promise<string[]> | string[];
+  /**
+   * Consultado ANTES de iniciar cada lote. true = interrupção cooperativa: nenhum
+   * lote novo começa, os que já estão em andamento terminam e o que foi gerado até
+   * ali é devolvido (inclusive vazio), sem lançar. Só o lote em curso é "perdido"
+   * para o usuário; nada do que já saiu.
+   */
+  shouldStop?: (info: BatchInfo) => Promise<boolean> | boolean;
+}
+
 export async function generateHtmlDesignBatched(
   generateText: (systemInstruction: string, userPrompt: string) => Promise<string>,
   input: GenerateHtmlDesignInput,
   extractJson: (raw: string) => unknown,
   onSlide?: (partial: HtmlDesignContent, index: number, total: number, completed: number) => void | Promise<void>,
-  options?: { concurrency?: number },
+  options?: GenerateBatchedOptions,
 ): Promise<HtmlDesignContent> {
   const total = Math.max(1, input.slideCount);
   const concurrency = Math.max(1, options?.concurrency ?? 1);
   const batchSize = resolveBatchSize(input.format);
+  const totalBatches = Math.ceil(total / batchSize);
+
+  // Orientações do usuário já em vigor neste deck. Cresce a cada lote que drena
+  // novas; cada lote recebe um SNAPSHOT no início, então os retries dele usam o
+  // mesmo texto e um lote em andamento não muda de instrução no meio.
+  const activeAdvice: string[] = [];
+  let stopped = false;
+
+  const beginBatch = async (startIndex: number): Promise<{ stop: boolean; advice: string[] }> => {
+    if (stopped) return { stop: true, advice: [] };
+    const info: BatchInfo = {
+      batch: Math.floor(startIndex / batchSize) + 1,
+      totalBatches,
+      startIndex,
+      endIndex: Math.min(startIndex + batchSize, total),
+    };
+    // A parada vem ANTES de drenar: quem interrompe leva as orientações pendentes
+    // junto com a mensagem, e drená-las aqui as gastaria num lote que não vai rodar.
+    if (await options?.shouldStop?.(info)) {
+      stopped = true;
+      return { stop: true, advice: [] };
+    }
+    try {
+      const fresh = await options?.getPendingAdvice?.(info);
+      if (fresh?.length) activeAdvice.push(...fresh);
+    } catch (e) {
+      console.warn('[htmlDesign] falha ao buscar orientações do usuário (seguindo sem elas):', e instanceof Error ? e.message : e);
+    }
+    return { stop: false, advice: [...activeAdvice] };
+  };
 
   let fonts: string[] = [];
   let direction = '';
@@ -517,13 +576,13 @@ export async function generateHtmlDesignBatched(
     return out;
   };
 
-  const runBatch = async (startIndex: number, referenceSlides: HtmlDesignSlide[]): Promise<Record<string, unknown>> => {
+  const runBatch = async (startIndex: number, referenceSlides: HtmlDesignSlide[], advice: string[]): Promise<Record<string, unknown>> => {
     let lastErr: unknown;
     for (let attempt = 1; attempt <= MAX_BATCH_RETRIES; attempt++) {
       try {
         const raw = await generateText(
           buildBatchSystemInstruction(input, startIndex, total, bible, batchSize),
-          buildBatchUserPrompt(input, startIndex, total, bible, referenceSlides, batchSize),
+          buildBatchUserPrompt(input, startIndex, total, bible, referenceSlides, batchSize, advice),
         );
         const parsed = extractJson(raw); // lança se não houver JSON válido
         const rec = isRecord(parsed) ? parsed : {};
@@ -578,16 +637,19 @@ export async function generateHtmlDesignBatched(
   // Não é fatal: se falhar após os retries, degradamos para a base da marca +
   // slides de fallback e seguimos. A guarda de "nenhum slide real" no fim ainda
   // marca FAILED se a geração inteira desandar.
-  try {
-    const firstRec = await runBatch(0, []);
-    if (Array.isArray(firstRec.fonts)) fonts = (firstRec.fonts as unknown[]).filter((f): f is string => typeof f === 'string');
-    if (typeof firstRec.reasoning === 'string') direction = firstRec.reasoning;
-    bible.artDirection = direction;
-    if (fonts.length) bible.fonts = fonts;
-    await processBatch(0, parseBatchSlides(firstRec.slides as unknown[], 0));
-  } catch (e) {
-    console.error('[htmlDesign] lote 1 falhou após os retries; degradando para fallback:', e instanceof Error ? e.message : e);
-    await processFallbackBatch(0);
+  const first = await beginBatch(0);
+  if (!first.stop) {
+    try {
+      const firstRec = await runBatch(0, [], first.advice);
+      if (Array.isArray(firstRec.fonts)) fonts = (firstRec.fonts as unknown[]).filter((f): f is string => typeof f === 'string');
+      if (typeof firstRec.reasoning === 'string') direction = firstRec.reasoning;
+      bible.artDirection = direction;
+      if (fonts.length) bible.fonts = fonts;
+      await processBatch(0, parseBatchSlides(firstRec.slides as unknown[], 0));
+    } catch (e) {
+      console.error('[htmlDesign] lote 1 falhou após os retries; degradando para fallback:', e instanceof Error ? e.message : e);
+      await processFallbackBatch(0);
+    }
   }
 
   // Os slides do lote 1 viram referência visual para os lotes paralelos.
@@ -598,8 +660,10 @@ export async function generateHtmlDesignBatched(
   for (let i = batchSize; i < total; i += batchSize) starts.push(i);
 
   await runPool(starts, concurrency, async (startIndex) => {
+    const begin = await beginBatch(startIndex);
+    if (begin.stop) return;
     try {
-      const rec = await runBatch(startIndex, referenceSlides);
+      const rec = await runBatch(startIndex, referenceSlides, begin.advice);
       await processBatch(startIndex, parseBatchSlides(rec.slides as unknown[], startIndex));
     } catch (e) {
       console.error(`[htmlDesign] lote ${startIndex + 1} falhou após os retries; usando fallback:`, e instanceof Error ? e.message : e);
@@ -611,8 +675,9 @@ export async function generateHtmlDesignBatched(
 
   // Guarda: se NADA real foi gerado (todos os lotes caíram no fallback), é falha
   // genuína — melhor marcar FAILED do que entregar um deck só de títulos.
+  // Interrompido a pedido do usuário não é falha: devolvemos o que existe, mesmo vazio.
   const realCount = finalSlides.filter((s) => !s.html.includes('-fallback-')).length;
-  if (realCount === 0) {
+  if (realCount === 0 && !stopped) {
     throw new HtmlDesignValidationError('geração falhou: nenhum slide real gerado (todos os lotes falharam)');
   }
 
