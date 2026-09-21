@@ -56,6 +56,7 @@ function parseBase64Image(data: string) {
 
 import multer from 'multer';
 import { uploadFileToR2 } from '../lib/r2.js';
+import { prepareStorableFile } from '../lib/svgSanitize.js';
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
@@ -66,10 +67,14 @@ uploadRouter.post('/', requireAuth, upload.single('file'), async (req: AuthReque
     const file = req.file;
     if (!file) throw createError(400, 'Nenhum arquivo enviado.');
 
+    // Rota genérica = mais fácil de abusar: o cliente escolhe nome e Content-Type.
+    // SVG sai higienizado como image/svg+xml; HTML vira download (ver svgSanitize.ts).
+    const prepared = prepareStorableFile({ buffer: file.buffer, fileName: file.originalname, mimeType: file.mimetype });
+
     const url = await uploadFileToR2(
-      file.buffer,
+      prepared.buffer,
       file.originalname,
-      file.mimetype,
+      prepared.mimeType,
       `uploads/general` // Pasta genérica
     );
 

@@ -6,6 +6,7 @@ import { GoogleGenAI } from '@google/genai';
 import { config } from '../config.js';
 import { normalizarLogoParaFundoEscuro } from './logoTransparency.js';
 import { mesclarGuidelines } from './brandGuidelines.js';
+import { sanitizeSvg, prepareStorableFile } from './svgSanitize.js';
 
 export type SVGClassification = 'LOGOTYPE' | 'GRAPHIC_ELEMENT' | 'ILLUSTRATION';
 
@@ -176,10 +177,18 @@ export async function processBrandbookIngest({
 
     // Salva o arquivo RAW no R2 e no banco
     try {
+      // "Raw" não quer dizer "sem higiene": o arquivo bruto vai para um bucket público.
+      // SVG sai limpo como image/svg+xml e HTML vira download — antes o mimetype do
+      // cliente ia direto, então um .html ou .svg do brandbook era XSS armazenado.
+      const rawPrepared = prepareStorableFile({
+        buffer: file.buffer,
+        fileName: file.originalname,
+        mimeType: file.mimetype || 'application/octet-stream',
+      });
       const rawR2Url = await uploadFileToR2(
-        file.buffer, 
-        file.originalname, 
-        file.mimetype || 'application/octet-stream', 
+        rawPrepared.buffer,
+        file.originalname,
+        rawPrepared.mimeType,
         `brands/${brand.id}/brandbooks_raw`
       );
       await prisma.asset.create({
@@ -187,8 +196,8 @@ export async function processBrandbookIngest({
           brandId: brand.id,
           name: file.originalname,
           url: rawR2Url,
-          fileType: file.mimetype || 'application/octet-stream',
-          sizeBytes: file.size,
+          fileType: rawPrepared.mimeType,
+          sizeBytes: rawPrepared.buffer.length,
           source: 'brandbook',
           tags: ['brandbook-raw'],
           uploadedBy: uploadedByUserId ?? null,
@@ -275,17 +284,21 @@ export async function processBrandbookIngest({
 
   for (const item of rawSvgsToProcess) {
     try {
+      // A classificação olha o texto ORIGINAL (heurística de string, não executa nada);
+      // o que vai ao R2 é sempre o SVG higienizado. SVG irrecuperável lança
+      // InvalidSvgError e cai no catch abaixo: este item é pulado, os outros seguem.
       const content = item.buffer.toString('utf-8');
       const classification = classifySVG(item.filename, content);
+      const limpo = sanitizeSvg(item.buffer);
 
-      const r2Url = await uploadFileToR2(item.buffer, item.filename, 'image/svg+xml', `brands/${brand.id}/brandbook`);
+      const r2Url = await uploadFileToR2(limpo.buffer, item.filename, 'image/svg+xml', `brands/${brand.id}/brandbook`);
 
       const asset = await prisma.asset.create({
         data: {
           name: item.filename,
           url: r2Url,
           fileType: 'image/svg+xml',
-          sizeBytes: item.buffer.length,
+          sizeBytes: limpo.buffer.length,
           source: 'brandbook',
           tags: ['brandbook', classification],
           brandId: brand.id,
@@ -380,7 +393,9 @@ Formato do JSON de resposta:
                 cleanSvg = cleanSvg.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
               }
 
-              const svgBuffer = Buffer.from(cleanSvg, 'utf-8');
+              // SVG "reconstruído por IA" é texto de modelo (e o modelo leu o brandbook
+              // do usuário): não é mais confiável que upload. Mesma higienização.
+              const svgBuffer = sanitizeSvg(cleanSvg).buffer;
               const filename = item.name || `vetor-ia-${Date.now()}.svg`;
               const classification: SVGClassification =
                 item.classification === 'LOGOTYPE' || item.classification === 'ILLUSTRATION' || item.classification === 'GRAPHIC_ELEMENT'
