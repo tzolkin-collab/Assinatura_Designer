@@ -19,8 +19,19 @@ import { JSDOM } from 'jsdom';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
-/** Mesmo teto do multer (10MB): acima disso não vale a pena montar a árvore. */
-export const MAX_SVG_BYTES = 10 * 1024 * 1024;
+// Teto BEM abaixo do multer (10MB): uma revisão adversarial (lente "robustez") mediu
+// que árvore funda + CSS adversarial dentro deste teto antigo já travava o event loop
+// por até 35s SÍNCRONO — e todo POST de upload/asset/brandbook/chat passa por aqui. Um
+// brandbook real (mesmo com raster embutido em base64) fica bem abaixo de 2MB; o multer
+// segue aceitando até 10MB no corpo da requisição, mas o que chega aqui é recusado cedo.
+export const MAX_SVG_BYTES = 2 * 1024 * 1024;
+
+// Profundidade máxima de aninhamento de tags (<svg><g><g>...). Medido: 1000 níveis
+// (3KB) = 307ms; 10000 (30KB) = 13s; 50000 (150KB) = 35s — quadrático, porque a poda de
+// nó do DOMPurify/jsdom caminha a árvore. 256 é generoso para brandbook/ícone real (que
+// raramente passa de 10-15 níveis) e recusa em microssegundos via `preflightCheck`,
+// antes de montar qualquer árvore.
+export const MAX_SVG_DEPTH = 256;
 
 /**
  * O conteúdo não é um SVG utilizável (sem raiz <svg>, binário, grande demais ou
@@ -110,29 +121,48 @@ function cssUrlAllowed(target: string): boolean {
   return t.startsWith('#') || RASTER_DATA_URI.test(t);
 }
 
+// Tetos de busca à frente para os regex abaixo (em caracteres). Nenhum @import/url()/
+// image-set() legítimo passa disso — brandbook real usa no máximo um caminho de arquivo
+// ou um data-URI de raster pequeno. Existem para trocar `*`/`*?` sem limite (que faz o
+// motor de regex retroceder byte a byte quando NÃO acha o terminador, e falha de novo a
+// cada nova ocorrência do gatilho) por um retrocesso de tamanho fixo: uma revisão
+// adversarial mediu que repetir "@import" seguido de "{" sem ";" (ou "url("/"url(\""/
+// "image-set(" sem fechar) faz o tempo crescer QUADRATICAMENTE com o tamanho da entrada
+// (16KB=150ms, 256KB=13,6s). Com o teto, cada ocorrência custa no máximo O(teto), então
+// o total volta a ser O(tamanho do CSS).
+const CSS_IMPORT_LOOKAHEAD = 500;
+const CSS_URL_LOOKAHEAD = 2048;
+
 function stripCss(css: string, issues: string[]): string {
   let out = css;
 
-  out = out.replace(/@import\b[^;{}]*(?:;|$)/gi, () => {
+  // Termina em `;`, `{`, `}` ou fim da string — o que vier primeiro — em vez de exigir
+  // `;` especificamente. Antes, "@import 'x'" sem ";" antes do bloco seguinte não
+  // combinava com o regex e SOBREVIVIA à limpeza (a garantia "nenhum @import externo
+  // sobrevive" era falsa); `{`/`}` como parada também fecha esse bypass.
+  out = out.replace(new RegExp(`@import\\b[^;{}]{0,${CSS_IMPORT_LOOKAHEAD}}(?:;|(?=[{}])|$)`, 'gi'), () => {
     issues.push('@import');
     return '';
   });
 
-  out = out.replace(/url\(\s*(?:"([^"]*)"|'([^']*)'|([^)]*?))\s*\)/gi, (whole, dq, sq, bare) => {
-    const target = String(dq ?? sq ?? bare ?? '');
-    if (cssUrlAllowed(target)) return whole;
-    issues.push(`url(${target.length > 40 ? `${target.slice(0, 40)}…` : target})`);
-    // `url(#)` é sintaxe válida e não aponta para lugar nenhum: a declaração continua
-    // parseável, só perde o recurso.
-    return 'url(#)';
-  });
+  out = out.replace(
+    new RegExp(`url\\(\\s*(?:"([^"]{0,${CSS_URL_LOOKAHEAD}})"|'([^']{0,${CSS_URL_LOOKAHEAD}})'|([^)]{0,${CSS_URL_LOOKAHEAD}}))\\s*\\)`, 'gi'),
+    (whole, dq, sq, bare) => {
+      const target = String(dq ?? sq ?? bare ?? '');
+      if (cssUrlAllowed(target)) return whole;
+      issues.push(`url(${target.length > 40 ? `${target.slice(0, 40)}…` : target})`);
+      // `url(#)` é sintaxe válida e não aponta para lugar nenhum: a declaração continua
+      // parseável, só perde o recurso.
+      return 'url(#)';
+    },
+  );
 
-  out = out.replace(/(?:-webkit-)?image-set\s*\([^)]*\)/gi, () => {
+  out = out.replace(new RegExp(`(?:-webkit-)?image-set\\s*\\([^)]{0,${CSS_URL_LOOKAHEAD}}\\)`, 'gi'), () => {
     issues.push('image-set()');
     return 'none';
   });
 
-  out = out.replace(/(?:-moz-)?(?:behavior|binding)\s*:[^;}]*/gi, () => {
+  out = out.replace(new RegExp(`(?:-moz-)?(?:behavior|binding)\\s*:[^;}]{0,${CSS_IMPORT_LOOKAHEAD}}`, 'gi'), () => {
     issues.push('behavior/binding');
     return '';
   });
@@ -187,8 +217,25 @@ export function sanitizeCss(css: string): { css: string; issues: string[] } {
 function enforce(root: Element, removed: SvgRemoval[]): void {
   const elements: Element[] = [root, ...Array.from(root.querySelectorAll('*'))];
 
+  // Nós que já saíram da árvore nesta passada — removidos diretamente ou órfãos porque
+  // um ancestral saiu. `querySelectorAll` devolve em ordem de documento (pai antes dos
+  // filhos), então quando chegamos num nó o status do pai já está decidido: um Set com
+  // `has()` em O(1) troca o `root.contains(el)` antigo, que é O(profundidade) e, dentro
+  // do laço sobre todos os elementos, virava O(n²) em árvore funda — o mesmo tipo de
+  // quadrático que o preflight de profundidade evita lá na entrada.
+  const removidos = new Set<Node>();
+
   for (const el of elements) {
-    if (el !== root && !root.contains(el)) continue; // já saiu junto com um ancestral
+    if (el !== root) {
+      const pai = el.parentNode;
+      // `el.remove()` só desliga `el` do pai; os FILHOS de `el` continuam com
+      // `parentNode === el`, então o órfão se propaga automaticamente pela lista sem
+      // precisar caminhar a árvore de novo.
+      if (pai && removidos.has(pai)) {
+        removidos.add(el);
+        continue;
+      }
+    }
 
     const tag = el.localName.toLowerCase();
 
@@ -197,6 +244,7 @@ function enforce(root: Element, removed: SvgRemoval[]): void {
       if (foraDoSvg || tag.includes(':') || FORBIDDEN_TAGS.has(tag)) {
         removed.push({ kind: 'element', name: `<${tag}>`, reason: foraDoSvg ? 'fora do namespace SVG' : 'elemento proibido' });
         el.remove();
+        removidos.add(el);
         continue;
       }
     }
@@ -208,6 +256,7 @@ function enforce(root: Element, removed: SvgRemoval[]): void {
       if (/^on/.test(alvo) || /href$/.test(alvo) || valores.some(hasDangerousScheme)) {
         removed.push({ kind: 'element', name: `<${tag}>`, reason: 'animação que altera evento/href' });
         el.remove();
+        removidos.add(el);
         continue;
       }
     }
@@ -265,28 +314,131 @@ function enforce(root: Element, removed: SvgRemoval[]): void {
   }
 }
 
-// ── API ─────────────────────────────────────────────────────────────────────────
+// ── Preflight (O(n), antes de qualquer árvore) ──────────────────────────────────
+
+const LIMITE_MB = Math.round(MAX_SVG_BYTES / (1024 * 1024));
 
 function toText(input: string | Buffer): string {
   if (typeof input !== 'string') {
-    if (input.length > MAX_SVG_BYTES) throw new InvalidSvgError('SVG muito grande (limite de 10MB).');
+    if (input.length > MAX_SVG_BYTES) throw new InvalidSvgError(`SVG muito grande (limite de ${LIMITE_MB}MB).`);
     // NUL no meio = UTF-16 ou binário. Decodificar como UTF-8 viraria lixo que o
     // parser ignora — melhor recusar do que gravar algo que o browser lê diferente.
     if (input.includes(0)) throw new InvalidSvgError('Arquivo não é um SVG em texto (UTF-8).');
     return semBom(input.toString('utf-8'));
   }
-  if (Buffer.byteLength(input, 'utf-8') > MAX_SVG_BYTES) throw new InvalidSvgError('SVG muito grande (limite de 10MB).');
+  if (Buffer.byteLength(input, 'utf-8') > MAX_SVG_BYTES) throw new InvalidSvgError(`SVG muito grande (limite de ${LIMITE_MB}MB).`);
   return semBom(input);
 }
 
 /**
+ * Verificação O(n) num único passe pelo texto, ANTES de montar qualquer árvore no
+ * jsdom — sem regex sobre o documento inteiro, só um contador de profundidade que soma
+ * em tag de abertura e subtrai em tag de fechamento/self-closing. Existe porque a poda
+ * de nó do DOMPurify/jsdom é O(profundidade) por nó tocado: uma revisão adversarial
+ * mediu 1000 níveis de `<g>` (3KB) em 307ms, 10000 (30KB) em 13s e 50000 (150KB) em
+ * 35s — SÍNCRONO, no event loop inteiro, em toda rota que grava SVG (upload, /assets,
+ * brandbook, anexo de chat). Rejeitar aqui custa microssegundos.
+ *
+ * Não é um parser XML de verdade — não precisa ser: o pior caso de errar por falta de
+ * rigor num markup exótico é subcontar profundidade, e isso ainda cai no teto de
+ * tamanho (MAX_SVG_BYTES) e no try/catch de `sanitizeSvg`. Não há caminho em que um
+ * erro de contagem aqui vire uma sanitização insegura, só uma rejeição tardia.
+ */
+function preflightCheck(text: string): void {
+  const len = text.length;
+  let depth = 0;
+  let i = 0;
+
+  while (i < len) {
+    const lt = text.indexOf('<', i);
+    if (lt === -1) break;
+    const next = text.charCodeAt(lt + 1);
+
+    if (next === 0x2f /* / */) {
+      // tag de fechamento: </tag>
+      const gt = text.indexOf('>', lt + 2);
+      if (gt === -1) break;
+      if (depth > 0) depth--;
+      i = gt + 1;
+      continue;
+    }
+
+    if (next === 0x21 /* ! */) {
+      // comentário, CDATA ou DOCTYPE — não é elemento, não conta para profundidade.
+      if (text.startsWith('<!--', lt)) {
+        const end = text.indexOf('-->', lt + 4);
+        i = end === -1 ? len : end + 3;
+      } else if (text.startsWith('<![CDATA[', lt)) {
+        const end = text.indexOf(']]>', lt + 9);
+        i = end === -1 ? len : end + 3;
+      } else {
+        const gt = text.indexOf('>', lt + 2);
+        i = gt === -1 ? len : gt + 1;
+      }
+      continue;
+    }
+
+    if (next === 0x3f /* ? */) {
+      // <?xml version="1.0"?>
+      const end = text.indexOf('?>', lt + 2);
+      i = end === -1 ? len : end + 2;
+      continue;
+    }
+
+    // Tag de abertura ou self-closing: acha o '>' não citado (ignora '>' dentro de um
+    // valor de atributo entre aspas, ex.: title="a > b").
+    let j = lt + 1;
+    let aspas = 0; // 0 = fora de aspas; senão, o código do caractere de aspa aberta.
+    while (j < len) {
+      const c = text.charCodeAt(j);
+      if (aspas) {
+        if (c === aspas) aspas = 0;
+      } else if (c === 0x22 || c === 0x27 /* " ou ' */) {
+        aspas = c;
+      } else if (c === 0x3e /* > */) {
+        break;
+      }
+      j++;
+    }
+    if (j >= len) break; // tag nunca fecha: deixa o jsdom decidir (ou rejeitar) o resto.
+
+    const autoFechada = text.charCodeAt(j - 1) === 0x2f /* '/' logo antes do '>' */;
+    if (!autoFechada) {
+      depth++;
+      if (depth > MAX_SVG_DEPTH) {
+        throw new InvalidSvgError(`SVG excede a profundidade máxima de aninhamento (${MAX_SVG_DEPTH}).`);
+      }
+    }
+    i = j + 1;
+  }
+}
+
+// ── API ─────────────────────────────────────────────────────────────────────────
+
+/**
  * Devolve o SVG limpo e a lista do que foi removido. Lança InvalidSvgError se, depois
- * da limpeza, não sobrar uma raiz <svg> bem-formada.
+ * da limpeza, não sobrar uma raiz <svg> bem-formada — ou se qualquer etapa (inclusive
+ * um erro inesperado do jsdom/DOMPurify) não puder garantir que o resultado é seguro.
  */
 export function sanitizeSvg(input: string | Buffer): SanitizeSvgResult {
   const text = toText(input);
   if (!/<svg[\s/>]/i.test(text)) throw new InvalidSvgError('Conteúdo não é um SVG (raiz <svg> não encontrada).');
+  preflightCheck(text);
 
+  try {
+    return sanitizeSvgSemProtecao(text);
+  } catch (err) {
+    if (err instanceof InvalidSvgError) throw err;
+    // Nada do que o jsdom/DOMPurify podem lançar numa árvore patológica (TypeError de
+    // remoção, erro de parse interno etc.) pode escapar como 500: vira o mesmo "não
+    // consigo garantir que isto é seguro" dos outros throws. Com o preflight acima,
+    // árvores fundas demais nem chegam aqui — isto cobre qualquer outra entrada que
+    // passe pelo preflight sem disparar o teto e ainda assim confunda o parser.
+    throw new InvalidSvgError(`Falha inesperada ao higienizar SVG: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+function sanitizeSvgSemProtecao(text: string): SanitizeSvgResult {
   const { window, purify } = getEnv();
   const removed: SvgRemoval[] = [];
 

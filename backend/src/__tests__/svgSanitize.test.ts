@@ -7,6 +7,8 @@ import {
   prepareStorableFile,
   looksLikeSvg,
   InvalidSvgError,
+  MAX_SVG_DEPTH,
+  MAX_SVG_BYTES,
 } from '../lib/svgSanitize';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -300,6 +302,95 @@ describe('sanitizeCss', () => {
     const { css, issues } = sanitizeCss('.md\\:flex{fill:red}');
     expect(css).toBe('.md\\:flex{fill:red}');
     expect(issues).toEqual([]);
+  });
+
+  it('@import sem ";" antes de um bloco também é removido (antes sobrevivia ao stripCss)', () => {
+    // A garantia "nenhum @import externo sobrevive" era falsa: o regex antigo só parava
+    // em ";" ou fim de string, então "@import" sem ";" antes do próximo "{"/"}" nunca
+    // combinava e ficava intacto no CSS gravado.
+    const { css, issues } = sanitizeCss(`@import 'https://evil.example/x.css'{.a{fill:red}}`);
+    expect(css).not.toMatch(/@import/i);
+    expect(css).not.toContain('evil.example');
+    expect(issues).toContain('@import');
+  });
+});
+
+// ── Regressão de desempenho: DoS síncrono no event loop ─────────────────────────
+// Uma revisão adversarial (lente "robustez") mediu, contra o código ANTES desta
+// correção: aninhamento profundo de <g> — 1000 níveis (3KB)=307ms, 10000 (30KB)=13s,
+// 50000 (150KB)=35s; e ReDoS nos regex de CSS — @import repetido sem ";" antes de "{":
+// 16KB=150ms, 32KB=228ms, 64KB=911ms, 256KB=13,6s (dobrar o tamanho QUADRUPLICAVA o
+// tempo); o mesmo padrão em url( sem fechar, url(" sem fechar e image-set( sem fechar.
+// O teto abaixo (TETO_MS) é generoso o bastante para não ser "flaky" em CI sob CPU
+// concorrente, mas teria pegado qualquer um destes casos ANTES da correção (13 a 35s).
+describe('sanitizeSvg — regressão de desempenho (DoS síncrono)', () => {
+  // 3000ms é generoso o bastante para não "piscar" sob CPU concorrente (a suíte inteira
+  // roda dezenas de arquivos de teste em paralelo) e continua de 4x a 10x abaixo dos
+  // 13-35s medidos ANTES da correção — a diferença que importa é ordem de grandeza, não
+  // o segundo exato.
+  const TETO_MS = 3000;
+  const XMLNS = 'xmlns="http://www.w3.org/2000/svg"';
+
+  /** Tempo real com Date.now() antes/depois — sem fake timers, é o event loop de verdade. */
+  function medir<T>(fn: () => T): { ms: number; resultado?: T; erro?: unknown } {
+    const t0 = Date.now();
+    try {
+      const resultado = fn();
+      return { ms: Date.now() - t0, resultado };
+    } catch (erro) {
+      return { ms: Date.now() - t0, erro };
+    }
+  }
+
+  function svgComStyle(css: string): string {
+    return `<svg ${XMLNS}><style>${css}</style><rect width="1" height="1"/></svg>`;
+  }
+
+  it('aninhamento profundo (<g> repetido) — preflight rejeita em O(n), não processa a árvore', () => {
+    const n = 50_000; // a mesma escala que levava ~35s antes da correção.
+    const payload = `<svg ${XMLNS}>${'<g>'.repeat(n)}${'</g>'.repeat(n)}</svg>`;
+
+    const { ms, erro } = medir(() => sanitizeSvg(payload));
+
+    expect(erro).toBeInstanceOf(InvalidSvgError);
+    expect((erro as InvalidSvgError).code).toBe('INVALID_SVG');
+    expect(ms, `levou ${ms}ms (teto ${TETO_MS}ms)`).toBeLessThan(TETO_MS);
+  });
+
+  it('@import sem ";" repetido (ReDoS) — tempo não cresce quadraticamente com o tamanho', () => {
+    const alvo = 256 * 1024; // escala do pior caso medido (256KB = 13,6s antes).
+    const css = `${'@import '.repeat(Math.ceil(alvo / 8))}{`;
+    const { ms } = medir(() => sanitizeSvg(svgComStyle(css)));
+    expect(ms, `levou ${ms}ms (teto ${TETO_MS}ms)`).toBeLessThan(TETO_MS);
+  });
+
+  it('url( sem fechar, repetido — tempo não cresce quadraticamente com o tamanho', () => {
+    // "url(" tem só 4 bytes por ocorrência (contra 8 do "@import "), então o mesmo
+    // orçamento de bytes gera o dobro de ocorrências adversariais; 128KB aqui já mantém
+    // o número de ocorrências (e o custo total) na mesma ordem dos outros casos.
+    const alvo = 128 * 1024;
+    const css = 'url('.repeat(Math.ceil(alvo / 4));
+    const { ms } = medir(() => sanitizeSvg(svgComStyle(css)));
+    expect(ms, `levou ${ms}ms (teto ${TETO_MS}ms)`).toBeLessThan(TETO_MS);
+  });
+
+  it('url(" sem fechar, repetido — tempo não cresce quadraticamente com o tamanho', () => {
+    const alvo = 128 * 1024;
+    const css = 'url("'.repeat(Math.ceil(alvo / 5));
+    const { ms } = medir(() => sanitizeSvg(svgComStyle(css)));
+    expect(ms, `levou ${ms}ms (teto ${TETO_MS}ms)`).toBeLessThan(TETO_MS);
+  });
+
+  it('image-set( sem fechar, repetido — tempo não cresce quadraticamente com o tamanho', () => {
+    const alvo = 256 * 1024;
+    const css = 'image-set('.repeat(Math.ceil(alvo / 10));
+    const { ms } = medir(() => sanitizeSvg(svgComStyle(css)));
+    expect(ms, `levou ${ms}ms (teto ${TETO_MS}ms)`).toBeLessThan(TETO_MS);
+  });
+
+  it('MAX_SVG_DEPTH e MAX_SVG_BYTES são exportados para calibrar estes testes', () => {
+    expect(MAX_SVG_DEPTH).toBeGreaterThan(0);
+    expect(MAX_SVG_BYTES).toBeGreaterThan(0);
   });
 });
 
