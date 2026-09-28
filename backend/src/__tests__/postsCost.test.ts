@@ -71,7 +71,8 @@ describe('GET /api/posts/:id/cost', () => {
     generationRun.findMany.mockResolvedValue([
       run(
         [{ kind: 'MODEL', role: 'artist', model: 'gemini-3.1-pro-preview', inputTokens: 0, outputTokens: 1000, error: null, metadata: { thinkingTokens: 4000 } }],
-        { status: 'RUNNING', finishedAt: null },
+        // 'pipeline' e recente: é o caso que de fato conta como "em andamento".
+        { status: 'RUNNING', finishedAt: null, feature: 'pipeline', startedAt: new Date(Date.now() - 5 * 60 * 1000) },
       ),
     ]);
 
@@ -82,6 +83,37 @@ describe('GET /api/posts/:id/cost', () => {
     expect(res.body.data.thinkingTokens).toBe(4000);
     expect(res.body.data.inProgress).toBe(true);
     expect(res.body.data.durationMs).toBeNull();
+  });
+
+  it('NÃO fica "em andamento" para sempre por causa de um run implícito antigo (edit-slide, RUNNING, de horas atrás) — regressão do blocker', async () => {
+    generationRun.findMany.mockResolvedValue([
+      // Run 'pipeline' já concluído normalmente...
+      run([{ kind: 'MODEL', role: 'artist', model: 'gemini-3.1-pro-preview', inputTokens: 100, outputTokens: 100, error: null, metadata: null }]),
+      // ...e um run IMPLÍCITO de uma edição por IA, aberto por ensureRun() e
+      // NUNCA fechado (só o runPipeline chama closeRun). Sem o filtro por feature
+      // e por recência, isto travava "em andamento" para sempre.
+      run(
+        [{ kind: 'MODEL', role: 'utility', model: 'gemini-2.5-flash', inputTokens: 50, outputTokens: 50, error: null, metadata: null }],
+        { status: 'RUNNING', finishedAt: null, feature: 'edit-slide', startedAt: new Date(Date.now() - 3 * 60 * 60 * 1000) },
+      ),
+    ]);
+
+    const res = await get(request(app).get('/api/posts/post-1/cost'));
+
+    expect(res.body.data.inProgress).toBe(false);
+  });
+
+  it('fica "em andamento" com um run pipeline RUNNING recente', async () => {
+    generationRun.findMany.mockResolvedValue([
+      run(
+        [{ kind: 'MODEL', role: 'artist', model: 'gemini-3.1-pro-preview', inputTokens: 100, outputTokens: 100, error: null, metadata: null }],
+        { status: 'RUNNING', finishedAt: null, feature: 'pipeline', startedAt: new Date(Date.now() - 2 * 60 * 1000) },
+      ),
+    ]);
+
+    const res = await get(request(app).get('/api/posts/post-1/cost'));
+
+    expect(res.body.data.inProgress).toBe(true);
   });
 
   it('modelo fora da tabela chega como parcial, com o nome do modelo', async () => {

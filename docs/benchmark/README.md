@@ -71,6 +71,15 @@ anterior nunca é sobrescrito por um vazio.
   partir do commit `feat(tracing): grava os tokens de raciocinio no step`. Gerações anteriores
   têm o custo do artista subestimado.
 - Com poucas gerações, o p90 é quase o máximo (usa posto mais próximo, sem interpolar).
+- **Um run `pipeline` vira `COMPLETED` mesmo em pausas** — amostra de estilo (`generateStyleProofOnly`),
+  revisão pendente (`pendingReview`) ou bundle de imagens ambíguas (`pendingImageCandidates`). O
+  pipeline fecha o run (`closeRun`) sempre que `runPipelineInner` retorna, inclusive nesses pontos de
+  pausa: não é uma falha, é o desenho atual de "gera → para → espera decisão no chat". Quando o
+  usuário retoma (aprova a amostra, decide o bundle), a retomada abre **outro** run `pipeline` para o
+  **mesmo post** — logo um post pode ter vários runs `COMPLETED` que são, na prática, pedaços de uma
+  única geração. Isto significa que mediana e p90 deste baseline podem misturar execuções parciais
+  (só a capa, por exemplo) com execuções completas, sem diferenciar as duas. Não corrigido aqui —
+  fica registrado como limitação conhecida para quem for interpretar os números.
 
 ### Depois de rodar
 

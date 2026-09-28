@@ -6,7 +6,7 @@ import prisma from '../lib/prisma.js';
 import { createError } from '../middleware/errorHandler.js';
 import { AuthRequest } from '../middleware/auth.js';
 import { brandMemberFilter, ANY_MEMBER, EDITORS, FORBIDDEN_MESSAGE } from '../middleware/brandAccess.js';
-import { estimatePostCost } from '../lib/generationCost.js';
+import { estimatePostCost, isPostInProgress } from '../lib/generationCost.js';
 import { renderHtmlToPng } from '../lib/htmlRaster.js';
 import { buildSlideDocument, editHtmlSlide, sanitizeSlideHtml, sanitizeSlideCss } from '../lib/htmlDesign.js';
 import { GoogleGenAI } from '@google/genai';
@@ -360,6 +360,7 @@ postsRouter.get('/:id/cost', async (req: AuthRequest, res: Response, next: NextF
       orderBy: { startedAt: 'asc' },
       select: {
         status: true,
+        feature: true,
         startedAt: true,
         finishedAt: true,
         steps: {
@@ -390,8 +391,11 @@ postsRouter.get('/:id/cost', async (req: AuthRequest, res: Response, next: NextF
       data: {
         available: true,
         runs: runs.length,
-        // Geração ainda em curso: o valor sobe até o run fechar.
-        inProgress: runs.some((r) => r.status === 'RUNNING'),
+        // Geração ainda em curso: o valor sobe até o run fechar. Só conta run
+        // 'pipeline' RUNNING e recente — ver isPostInProgress (generationCost.ts)
+        // para o motivo: run implícito de edit-slide/chat nunca fecha sozinho e
+        // não pode travar isto em "em andamento" para sempre.
+        inProgress: isPostInProgress(runs),
         ...estimate,
       },
     });

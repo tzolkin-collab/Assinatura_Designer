@@ -4,6 +4,8 @@ import {
   estimateRunCost,
   estimatePostCost,
   runDurationMs,
+  isPostInProgress,
+  IN_PROGRESS_WINDOW_MS,
   type CostStepInput,
 } from '../lib/generationCost.js';
 
@@ -298,5 +300,55 @@ describe('tabela de preço real (config.ts)', () => {
     ]);
 
     expect(est.totalUsd).toBeCloseTo(0.0672, 4);
+  });
+});
+
+describe('isPostInProgress — blocker: run implícito não fecha, e travava "em andamento" para sempre', () => {
+  const AGORA = new Date('2026-09-28T12:00:00.000Z').getTime();
+
+  it('run implícito antigo (feature edit-slide, RUNNING, de horas atrás) NÃO conta como em andamento', () => {
+    const inProgress = isPostInProgress(
+      [{ status: 'RUNNING', feature: 'edit-slide', startedAt: new Date(AGORA - 3 * 60 * 60 * 1000) }],
+      AGORA,
+    );
+
+    expect(inProgress).toBe(false);
+  });
+
+  it('run pipeline RUNNING recente conta como em andamento', () => {
+    const inProgress = isPostInProgress(
+      [{ status: 'RUNNING', feature: 'pipeline', startedAt: new Date(AGORA - 5 * 60 * 1000) }],
+      AGORA,
+    );
+
+    expect(inProgress).toBe(true);
+  });
+
+  it('run pipeline RUNNING mas fora da janela (processo caiu no meio) NÃO conta — o valor já parou de subir', () => {
+    const inProgress = isPostInProgress(
+      [{ status: 'RUNNING', feature: 'pipeline', startedAt: new Date(AGORA - IN_PROGRESS_WINDOW_MS - 1000) }],
+      AGORA,
+    );
+
+    expect(inProgress).toBe(false);
+  });
+
+  it('run pipeline COMPLETED não conta, mesmo recente', () => {
+    const inProgress = isPostInProgress(
+      [{ status: 'COMPLETED', feature: 'pipeline', startedAt: new Date(AGORA - 1000) }],
+      AGORA,
+    );
+
+    expect(inProgress).toBe(false);
+  });
+
+  it('sem runs, não está em andamento', () => {
+    expect(isPostInProgress([], AGORA)).toBe(false);
+  });
+
+  it('run sem startedAt não conta (não dá para saber a idade)', () => {
+    const inProgress = isPostInProgress([{ status: 'RUNNING', feature: 'pipeline', startedAt: null }], AGORA);
+
+    expect(inProgress).toBe(false);
   });
 });

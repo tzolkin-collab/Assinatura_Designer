@@ -132,11 +132,16 @@ export function costWarnings(cost: GenerationCostAvailable): string[] {
         : `${n} chamadas responderam sem informar tokens e ficaram fora da conta.`,
     );
   }
-  // Sem thinking gravado, o artista (que "pensa" bastante) fica subestimado. Só avisa
-  // quando o deck tem chamadas: num deck vazio não há o que subestimar.
+  // Sem thinking gravado, o artista (que "pensa" bastante) FICA subestimado — mas só
+  // quando o raciocínio de fato rodou. Um deck legítimo com o raciocínio desligado
+  // (GEMINI_THINKING_BUDGET=0) também bate thinkingTokens===0, e nesse caso o aviso
+  // seria falso alarme. Sem o backend dizer se o raciocínio estava ligado, o texto
+  // aqui é deliberadamente condicional ("se usou") em vez de afirmar que o deck
+  // está subestimado. Só avisa quando o deck tem chamadas: num deck vazio não há o
+  // que subestimar.
   if (cost.thinkingTokens === 0 && cost.calls > 0) {
     out.push(
-      'Este deck não tem tokens de raciocínio gravados (só as gerações recentes têm). O valor real tende a ser maior.',
+      'Este deck não tem tokens de raciocínio gravados — pode ser porque o raciocínio estava desligado nessa geração, ou porque é anterior ao rastreamento. Se usou raciocínio, o valor real tende a ser maior.',
     );
   }
   return out;

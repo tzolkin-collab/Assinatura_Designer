@@ -194,6 +194,47 @@ function estimate(
   };
 }
 
+/** Janela dentro da qual um run 'pipeline' RUNNING ainda conta como "em andamento" —
+ *  ver isPostInProgress logo abaixo. 30min é folgado o bastante pro maior deck real
+ *  (dezenas de slides, lotes em paralelo) e curto o bastante pra não travar pra
+ *  sempre um pipeline que morreu no meio (processo caiu, pod reiniciado) sem passar
+ *  pelo closeRun do runPipeline. */
+export const IN_PROGRESS_WINDOW_MS = 30 * 60 * 1000;
+
+/** O que precisamos de um GenerationRun pra decidir se o deck está "em andamento". */
+export interface InProgressRunInput {
+  status: string;
+  /** Só existe a partir desta versão do schema; runs antigos podem vir undefined/null. */
+  feature?: string | null;
+  startedAt?: Date | string | null;
+}
+
+/**
+ * Se o DECK tem alguma geração de verdade em andamento agora (pro popover "o valor
+ * ainda vai subir").
+ *
+ * Antes bastava UM run RUNNING, de QUALQUER feature, pra acender "em andamento". Só
+ * que quem fecha um run (closeRun) é só o runPipeline — toda chamada de IA FORA do
+ * pipeline (edit-slide, chat com postId, ai-patch) abre um run IMPLÍCITO via
+ * ensureRun()/openRun() que ninguém fecha. Resultado: qualquer deck que já recebeu
+ * UMA edição por IA mostrava "em andamento" para sempre, falsamente — mesmo meses
+ * depois, com o run implícito eternamente RUNNING.
+ *
+ * Dois filtros resolvem os dois lados do bug: (1) só `feature === 'pipeline'` — é o
+ * único fluxo que de fato fecha o run no final; (2) só se `startedAt` está dentro da
+ * janela — cobre o caso de um pipeline de verdade que morreu no meio sem chamar
+ * closeRun (aí o run também fica RUNNING para sempre, mas não é mais "em andamento":
+ * o valor já parou de subir).
+ */
+export function isPostInProgress(runs: InProgressRunInput[], now: number = Date.now()): boolean {
+  return runs.some((r) => {
+    if (r.status !== 'RUNNING' || r.feature !== 'pipeline') return false;
+    const startedMs = toMs(r.startedAt);
+    if (startedMs === null) return false;
+    return now - startedMs < IN_PROGRESS_WINDOW_MS;
+  });
+}
+
 /** Custo estimado de UM run. */
 export function estimateRunCost(
   run: CostRunInput,
