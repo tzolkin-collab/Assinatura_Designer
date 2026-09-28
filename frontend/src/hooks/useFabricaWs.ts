@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { API_BASE } from '@/lib/api';
 import type { FabricaQuestion, SessionPhase, WorkerStatus, ReviewMode } from '@/lib/fabricaSession';
+import { applyAdviceEvent, hydrateAdviceList, type AdviceItem, type AdviceEventType } from '@/lib/advice';
 
 // Envelope genérico do design corrente (hoje sempre um HtmlDesignPostContent
 // embrulhado num array de 1 elemento — ver lib/designContent.ts).
@@ -84,6 +85,28 @@ export function useFabricaWs(brandSlug: string, initialSessionId?: string | null
   const [isStreaming, setIsStreaming] = useState(false);
   const [postId, setPostId] = useState<string | undefined>();
   const [connected, setConnected] = useState(false);
+  // Orientações em tempo real (substituem o /btw) e "Pausar e enviar".
+  const [advice, setAdvice] = useState<AdviceItem[]>([]);
+  // Fila de orientações que EXPIRARAM sem serem consumidas E foram enviadas por
+  // ESTA aba (origin === clientId): o texto volta pro campo de digitação (ver
+  // fabrica/page.tsx) — "nada se perde", mesmo quando a geração termina no meio.
+  const [returnedAdvice, setReturnedAdvice] = useState<AdviceItem[]>([]);
+  // true entre o clique em "Pausar e enviar" e o primeiro sinal de que o próximo
+  // turno começou — só para não deixar o usuário clicar duas vezes durante a
+  // espera (o backend pode levar até a duração de um lote inteiro para parar).
+  const [interrupting, setInterrupting] = useState(false);
+  // Id estável desta aba: é o `origin` que o servidor devolve nas orientações, e é
+  // como esta aba sabe se um advice.expired é seu (para devolver o texto) ou de
+  // outra aba na mesma sessão (aí só sai da lista).
+  const [clientId] = useState<string>(() => {
+    try {
+      return typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `c-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    } catch {
+      return `c-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    }
+  });
 
   // Se o initialSessionId mudar (ex: navegação via link de reabrir conversa na galeria),
   // atualizamos o estado interno e limpamos mensagens/design anteriores para não exibir dados antigos (stale).
@@ -98,6 +121,9 @@ export function useFabricaWs(brandSlug: string, initialSessionId?: string | null
       setProgressLabel('');
       setActiveQuestion(null);
       setPostId(undefined);
+      setAdvice([]);
+      setReturnedAdvice([]);
+      setInterrupting(false);
     }
   }, [initialSessionId]);
 
@@ -123,6 +149,10 @@ export function useFabricaWs(brandSlug: string, initialSessionId?: string | null
     setPhase,
     setReviewModeState,
     setActiveQuestion,
+    setAdvice,
+    setReturnedAdvice,
+    setInterrupting,
+    clientId,
     streamingMsgIdRef,
   });
 
@@ -141,6 +171,10 @@ export function useFabricaWs(brandSlug: string, initialSessionId?: string | null
       setPhase: setPh,
       setReviewModeState: setRm,
       setActiveQuestion: setQuestion,
+      setAdvice: setAdv,
+      setReturnedAdvice: setReturned,
+      setInterrupting: setInterr,
+      clientId: myClientId,
     } = actionsRef.current;
 
     switch (type) {
@@ -153,6 +187,8 @@ export function useFabricaWs(brandSlug: string, initialSessionId?: string | null
       case 'agent:token': {
         const text = (data.token ?? '') as string;
         setStreaming(true);
+        // Chegou token: o turno seguinte ao "Pausar e enviar" começou de verdade.
+        setInterr(false);
         setMsgs(prev => {
           const last = prev[prev.length - 1];
           const sid = actionsRef.current.streamingMsgIdRef.current;
@@ -390,6 +426,11 @@ export function useFabricaWs(brandSlug: string, initialSessionId?: string | null
         }
         if (rm) setRm(rm);
         setQuestion(question);
+        // O campo `advice` só vem no session:state de RECONEXÃO (ver
+        // agents/brain/index.ts `adviceForReconnect`) — nos demais broadcasts ele
+        // some do payload de propósito, e aqui a ausência preserva a lista local
+        // (que já está sendo mantida evento a evento) em vez de apagá-la.
+        if (Array.isArray(data.advice)) setAdv(hydrateAdviceList(data.advice));
         // IDs determinísticos por posição: o rehydrate reusa os mesmos IDs a cada
         // session:state, então o React reconcilia (sem remontar/piscar/perder scroll).
         const doServidor = msgs
@@ -418,7 +459,51 @@ export function useFabricaWs(brandSlug: string, initialSessionId?: string | null
         const msg = normalizeUiMessage((data.message ?? 'Erro desconhecido') as string);
         setMsgs(prev => appendSystemMessage(prev, msg));
         setStreaming(false);
+        setInterr(false);
         actionsRef.current.streamingMsgIdRef.current = null;
+        break;
+      }
+
+      // Orientações em tempo real (ver backend/src/lib/advice.ts). O reducer é puro
+      // (lib/advice.ts) — aqui só extraímos o payload e despachamos.
+      case 'advice.queued':
+      case 'advice.applied':
+      case 'advice.updated':
+      case 'advice.removed': {
+        const item = (data.item ?? null) as AdviceItem | null;
+        const id = (data.id as string | undefined) ?? item?.id;
+        setAdv(prev => applyAdviceEvent(prev, type as AdviceEventType, { item, id }));
+        break;
+      }
+
+      case 'advice.expired': {
+        const item = (data.item ?? null) as AdviceItem | null;
+        setAdv(prev => applyAdviceEvent(prev, 'advice.expired', { item }));
+        // Só esta aba recupera o texto — outra aba na mesma sessão só vê o item
+        // sumir da lista (ela não deve herdar um rascunho que não digitou).
+        if (item && item.origin && item.origin === myClientId) {
+          setReturned(prev => [...prev, item]);
+        }
+        break;
+      }
+
+      // O pipeline parou por "Pausar e enviar" mantendo os slides já gerados. Não é
+      // job:done (não terminou) nem job:error (não falhou) — o cliente volta ao
+      // estado ocioso e mostra ONDE parou. O abort do cérebro (sem pipeline) não
+      // passa por aqui: ele só acrescenta o marcador "[resposta interrompida]" ao
+      // fluxo normal de agent:token/agent:end.
+      case 'generation.interrupted': {
+        const info = data as { stage?: string; slidesKept?: number; total?: number; postId?: string };
+        setWStatus('idle');
+        setP(0);
+        setLabel('');
+        setStreaming(false);
+        setInterr(false);
+        actionsRef.current.streamingMsgIdRef.current = null;
+        if (info.postId) setPid(info.postId);
+        const stage = info.stage ?? 'a pedido';
+        const progresso = (info.total ?? 0) > 0 ? ` — ${info.slidesKept ?? 0} de ${info.total} slides mantidos` : '';
+        setMsgs(prev => appendSystemMessage(prev, `Geração pausada (${stage})${progresso}.`));
         break;
       }
     }
@@ -540,6 +625,54 @@ export function useFabricaWs(brandSlug: string, initialSessionId?: string | null
     send('message', { content, attachments });
   }, [send]);
 
+  // ── Orientações em tempo real ("aconselhar" a IA enquanto ela trabalha) ────────
+  //
+  // Otimista: a lista muda na hora (sem esperar o round-trip), e o servidor confirma
+  // (advice.queued) ou corrige (advice.expired, se a IA já não estava ocupada quando
+  // a gravação chegou — corrida rara, coberta no backend por `submitAdvice`).
+  const sendAdvice = useCallback((text: string) => {
+    const clean = text.trim();
+    if (!clean) return;
+    const id = crypto.randomUUID();
+    setAdvice(prev => [...prev, { id, text: clean, createdAt: Date.now(), status: 'pending', origin: clientId }]);
+    send('advice:send', { id, text: clean, clientId });
+  }, [send, clientId]);
+
+  // Só tem efeito enquanto o item está `pending` — o servidor recusa (e devolve a
+  // verdade dele via advice.updated) uma edição que perdeu a corrida para a drenagem.
+  const updateAdvice = useCallback((id: string, text: string) => {
+    const clean = text.trim();
+    if (!clean) return;
+    setAdvice(prev => prev.map(i => (i.id === id && i.status === 'pending' ? { ...i, text: clean, updatedAt: Date.now() } : i)));
+    send('advice:update', { id, text: clean });
+  }, [send]);
+
+  const removeAdvice = useCallback((id: string) => {
+    setAdvice(prev => prev.filter(i => i.id !== id));
+    send('advice:remove', { id });
+  }, [send]);
+
+  // O front consumiu o texto devolvido (juntou de volta ao campo) — limpa a fila
+  // para não reaplicá-lo a cada render.
+  const clearReturnedAdvice = useCallback(() => setReturnedAdvice([]), []);
+
+  // "Pausar e enviar": interrompe o que a IA estiver fazendo (stream do cérebro
+  // aborta mantendo o parcial; pipeline para no próximo limite de lote preservando
+  // os slides prontos) e abre a mensagem como um turno normal, com o contexto do
+  // que foi interrompido e onde — tudo isso decidido no backend
+  // (agents/brain/adviceHandlers.ts `handleInterruptMessage`), que pode levar
+  // alguns segundos (até a duração de um lote) para responder.
+  const interruptAndSend = useCallback((content: string, attachments?: FabricaAttachment[]) => {
+    const text = content.trim();
+    if (!text) return;
+    const id = crypto.randomUUID();
+    setMessages(prev => [...prev, { id, role: 'user', content: text, timestamp: Date.now(), attachments }]);
+    setActiveQuestion(null);
+    setIsStreaming(true);
+    setInterrupting(true);
+    send('message:interrupt', { content: text, attachments });
+  }, [send]);
+
   const answerQuestion = useCallback((payload: {
     optionLabel?: string;
     freeform?: string;
@@ -585,6 +718,9 @@ export function useFabricaWs(brandSlug: string, initialSessionId?: string | null
     setNotification(null);
     setIsStreaming(false);
     setPostId(undefined);
+    setAdvice([]);
+    setReturnedAdvice([]);
+    setInterrupting(false);
 
     fetch(`${API_BASE}/fabrica/sessions`, {
       method: 'POST',
@@ -652,5 +788,14 @@ export function useFabricaWs(brandSlug: string, initialSessionId?: string | null
     resetSession,
     cancelGeneration,
     clearNotification: () => setNotification(null),
+    // Orientações em tempo real + "Pausar e enviar".
+    advice,
+    returnedAdvice,
+    clearReturnedAdvice,
+    sendAdvice,
+    updateAdvice,
+    removeAdvice,
+    interruptAndSend,
+    interrupting,
   };
 }

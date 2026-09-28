@@ -2,7 +2,9 @@
 
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
-import { ArrowUp, Paperclip, Sparkles, Wifi, WifiOff, X, MessageSquarePlus, Check, Loader2 } from 'lucide-react';
+import { ArrowUp, Paperclip, Sparkles, Wifi, WifiOff, X, MessageSquarePlus, Check, Loader2, StopCircle } from 'lucide-react';
+import { AdviceList } from '@/components/Fabrica/AdviceList';
+import { decideEnterAction, isSessionBusy } from '@/lib/advice';
 import dynamic from 'next/dynamic';
 const HtmlSlideRenderer = dynamic(() => import('@/components/DesignDocument/HtmlSlideRenderer'), { ssr: false });
 import { type HtmlDesignPostContent } from '@/lib/designContent';
@@ -45,7 +47,6 @@ function attachmentPreviewLabel(attachment: Attachment): string {
 const BrandbookUploaderModal = dynamic(() => import('@/components/Brandbook/BrandbookUploaderModal'), { ssr: false });
 
 const SLASH_COMMANDS = [
-  { id: 'btw',   label: '/btw',   desc: 'Contexto extra sem interromper' },
   { id: 'brandbook', label: '/brandbook', desc: 'Importar/atualizar Brandbook completo' },
   { id: 'asana', label: '/asana', desc: 'Abrir painel do Asana' },
   { id: 'canva', label: '/canva', desc: 'Abrir painel do Canva' },
@@ -105,7 +106,19 @@ export default function FabricaPage() {
     cancelGeneration,
     clearNotification,
     applySlideLocal,
+    advice,
+    returnedAdvice,
+    clearReturnedAdvice,
+    sendAdvice,
+    updateAdvice,
+    removeAdvice,
+    interruptAndSend,
+    interrupting,
   } = useFabricaWs(marca, initialSessionId);
+
+  // "Ocupado" = cérebro fazendo stream OU pipeline rodando. É o portão único que
+  // decide o que Enter faz, se o "Pausar e enviar" aparece e o texto do input.
+  const busy = isSessionBusy(isStreaming, workerStatus);
 
   // Persiste a sessão atual no sessionStorage para não perder ao trocar de aba
   useEffect(() => {
@@ -138,7 +151,11 @@ export default function FabricaPage() {
     setAttachments(lista);
   }, []);
   const [questionFreeform, setQuestionFreeform] = useState('');
-  const [btwContext, setBtwContext] = useState<string[]>([]);
+  // Contexto externo anexado à PRÓXIMA mensagem (Asana/Canva/Drive e o aviso de
+  // brandbook atualizado). Diferente das orientações em tempo real (advice.ts):
+  // isto nunca chega à IA enquanto ela trabalha, só quando o usuário manda a
+  // mensagem seguinte — por isso não serve para "aconselhar durante a geração"
+  // (era esse o defeito do extinto /btw).
   const [asanaContext, setAsanaContext] = useState<string[]>([]);
   const [asanaAttachments, setAsanaAttachments] = useState<Attachment[]>([]);
 
@@ -184,6 +201,16 @@ export default function FabricaPage() {
     const scrollHeight = el.scrollHeight;
     el.style.height = `${Math.min(scrollHeight, 160)}px`;
   }, [input]);
+
+  // Orientação que ninguém consumiu (geração terminou/expirou no meio) volta para o
+  // campo em vez de sumir — "nada se perde" é literal aqui, o texto reaparece pronto
+  // para ser reenviado como mensagem normal.
+  useEffect(() => {
+    if (returnedAdvice.length === 0) return;
+    const bloco = returnedAdvice.map(a => a.text).join('\n');
+    setInput(prev => (prev.trim() ? `${prev}\n${bloco}` : bloco));
+    clearReturnedAdvice();
+  }, [returnedAdvice, clearReturnedAdvice]);
 
   // ── Slash menu ──────────────────────────────────────────────────────────────
 
@@ -234,9 +261,6 @@ export default function FabricaPage() {
       setInput(v => v.replace(/(\/[a-zA-Z0-9-]*)$/, ''));
       return;
     }
-    if (id === 'btw') {
-      setInput(v => v.replace(/(\/[a-zA-Z0-9-]*)$/, '/btw '));
-    }
     setShowSlash(false);
     setSlashSearch('');
     setTimeout(() => inputRef.current?.focus(), 0);
@@ -260,8 +284,8 @@ export default function FabricaPage() {
   // ── Send ────────────────────────────────────────────────────────────────────
 
   const handleSend = useCallback(() => {
-    let text = input.trim();
-    if (!text) return;
+    const text = input.trim();
+    if (!text || busy) return; // ocupado não envia mensagem normal — vira orientação (handleSendAdvice)
 
     if (text === '/editor') {
       if (postId) {
@@ -271,29 +295,11 @@ export default function FabricaPage() {
       return;
     }
 
-    // Se estiver streamando e o usuário enviar algo, automaticamente trata como /btw
-    if (isStreaming && !text.startsWith('/btw')) {
-      text = '/btw ' + text;
-    }
-
-    if (text.startsWith('/btw ')) {
-      const ctx = text.slice(5).trim();
-      if (!ctx) return;
-      setBtwContext(prev => [...prev, ctx]);
-      setInput('');
-      return;
-    }
-
-    if (isStreaming) return; // Se ainda for streaming mas for apenas "/btw" vazio, ou algo estranho
-
     let fullMessage = text;
-    if (btwContext.length > 0) {
-      fullMessage += `\n\n[Contexto adicional]\n${btwContext.map(c => `• ${c}`).join('\n')}`;
-    }
     if (asanaContext.length > 0) {
       fullMessage += `\n\n[Contexto Externo]\n${asanaContext.join('\n\n')}`;
     }
-    
+
     const outboundAttachments: Attachment[] = [];
     if (attachments.length > 0) outboundAttachments.push(...attachments);
     if (asanaAttachments.length > 0) outboundAttachments.push(...asanaAttachments);
@@ -303,18 +309,57 @@ export default function FabricaPage() {
     aplicarAnexos([]);
     setAttachErro(null);
     setAsanaAttachments([]);
-    setBtwContext([]);
     setAsanaContext([]);
-  }, [input, isStreaming, btwContext, asanaContext, asanaAttachments, attachments, aplicarAnexos, sendMessage, postId, router, marca]);
+  }, [input, busy, asanaContext, asanaAttachments, attachments, aplicarAnexos, sendMessage, postId, router, marca]);
+
+  // Ocupado + Enter: vira uma orientação (lista "Orientações" acima do campo), não
+  // uma mensagem — é o gesto "Aconselhar" da especificação.
+  const handleSendAdvice = useCallback(() => {
+    const text = input.trim();
+    if (!text) return;
+    sendAdvice(text);
+    setInput('');
+  }, [input, sendAdvice]);
+
+  // "Pausar e enviar": interrompe agora (stream do cérebro ou lote do pipeline) e
+  // manda a mensagem como um turno normal, com o contexto de onde parou.
+  const handleInterrupt = useCallback(() => {
+    const text = input.trim();
+    if (!text || interrupting) return;
+    const outboundAttachments: Attachment[] = [];
+    if (attachments.length > 0) outboundAttachments.push(...attachments);
+    if (asanaAttachments.length > 0) outboundAttachments.push(...asanaAttachments);
+    interruptAndSend(text, outboundAttachments.length > 0 ? outboundAttachments : undefined);
+    setInput('');
+    aplicarAnexos([]);
+    setAttachErro(null);
+    setAsanaAttachments([]);
+    setAsanaContext([]);
+  }, [input, interrupting, attachments, asanaAttachments, interruptAndSend, aplicarAnexos]);
 
   const handleKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (showSlash && filteredSlash.length > 0) {
       if (e.key === 'ArrowDown') { e.preventDefault(); setSlashIdx(i => (i + 1) % filteredSlash.length); return; }
       if (e.key === 'ArrowUp')   { e.preventDefault(); setSlashIdx(i => (i - 1 + filteredSlash.length) % filteredSlash.length); return; }
-      if (e.key === 'Enter')     { e.preventDefault(); applySlash(filteredSlash[slashIdx].id); return; }
       if (e.key === 'Escape')    { e.preventDefault(); setShowSlash(false); return; }
     }
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
+    if (e.key !== 'Enter') return;
+
+    const action = decideEnterAction({
+      shiftKey: e.shiftKey,
+      ctrlKey: e.ctrlKey || e.metaKey,
+      slashOpen: showSlash && filteredSlash.length > 0,
+      busy,
+      hasText: input.trim().length > 0,
+    });
+
+    switch (action) {
+      case 'slash': e.preventDefault(); applySlash(filteredSlash[slashIdx].id); break;
+      case 'advice': e.preventDefault(); handleSendAdvice(); break;
+      case 'interrupt': e.preventDefault(); handleInterrupt(); break;
+      case 'message': e.preventDefault(); handleSend(); break;
+      case 'newline': case 'noop': default: break; // deixa o navegador cuidar (nova linha) ou não faz nada
+    }
   };
 
   // Bytes reais do arquivo a partir do base64 (infla 4/3, menos o padding).
@@ -369,7 +414,7 @@ export default function FabricaPage() {
   };
 
   const handleNewConversation = useCallback(() => {
-    if ((isStreaming || workerStatus === 'running')
+    if (busy
       && !window.confirm('Começar uma nova conversa? A geração atual continua no servidor, mas some daqui.')) {
       return;
     }
@@ -378,11 +423,10 @@ export default function FabricaPage() {
     setInput('');
     aplicarAnexos([]);
     setAttachErro(null);
-    setBtwContext([]);
     setAsanaContext([]);
     setPreviewSlide(0);
     setShowAsana(false);
-  }, [isStreaming, workerStatus, resetSession, aplicarAnexos, router, marca]);
+  }, [busy, resetSession, aplicarAnexos, router, marca]);
 
   const { can, hint: permHint } = useBrandPermissions();
   // Gerar design consome cota do Gemini e cria post: exige papel de edição. Sem isto,
@@ -674,20 +718,13 @@ export default function FabricaPage() {
         {/* Input area */}
         <div className={s.inputArea}>
 
-          {/* /btw context pills */}
-          {(btwContext.length > 0 || asanaContext.length > 0) && (
-            <div className={s.btwStrip}>
-              {btwContext.map((c, i) => (
-                <span key={`btw-${i}`} className={s.btwPill}>
-                  <span className={s.btwTag}>/btw</span>
-                  <span className={s.btwPillText}>{c}</span>
-                  <button
-                    type="button"
-                    className={s.pillRemove}
-                    onClick={() => setBtwContext(prev => prev.filter((_, j) => j !== i))}
-                  ><X size={9} /></button>
-                </span>
-              ))}
+          {/* Orientações em tempo real — substituem o /btw. Só existe algo aqui
+              enquanto há pelo menos uma pendente ou aplicada nesta sessão. */}
+          <AdviceList items={advice} onEdit={updateAdvice} onRemove={removeAdvice} />
+
+          {/* Contexto externo (Asana/Canva/Drive/brandbook) para a PRÓXIMA mensagem */}
+          {asanaContext.length > 0 && (
+            <div className={s.contextStrip}>
               {asanaContext.map((c, i) => {
                 const firstLine = c.split('\n').find(l => l.startsWith('•'))?.slice(2) ?? `${i + 1} tarefa${i > 0 ? 's' : ''}`;
                 return (
@@ -766,7 +803,7 @@ export default function FabricaPage() {
 
             {/* Destino do deck, escolhido ANTES de gerar — sem isto ele nascia solto
                 na raiz e só era achado caçando na galeria. */}
-            <FolderPicker marca={marca} sessionId={sessionId} disabled={isStreaming || !canGenerate} />
+            <FolderPicker marca={marca} sessionId={sessionId} disabled={busy || !canGenerate} />
 
             <div className={`${s.inputBar} ${!canGenerate ? s.inputBarDisabled : ''}`}>
               <button
@@ -792,13 +829,13 @@ export default function FabricaPage() {
                 value={input}
                 onChange={handleInputChange}
                 onKeyDown={handleKey}
-                aria-label="Mensagem para a fábrica"
+                aria-label={busy ? 'Orientação para a fábrica enquanto ela trabalha' : 'Mensagem para a fábrica'}
                 aria-describedby="fabricaInputHint"
                 placeholder={
                   !canGenerate
                     ? 'Você não tem permissão para interagir com a fábrica nesta marca.'
-                    : isStreaming
-                    ? 'Gerando... digite algo para adicionar contexto em tempo real'
+                    : busy
+                    ? 'Gerando... Enter envia uma orientação · Ctrl+Enter pausa e envia agora'
                     : messages.length === 0
                     ? 'Descreva o que você quer criar...'
                     : 'Refine ou peça ajustes... use / para comandos'
@@ -806,22 +843,37 @@ export default function FabricaPage() {
                 rows={1}
                 disabled={!canGenerate}
               />
+              {busy && (
+                <button
+                  type="button"
+                  className={s.pauseSendBtn}
+                  onClick={handleInterrupt}
+                  disabled={input.trim().length === 0 || interrupting}
+                  title="Interromper agora e enviar esta mensagem (Ctrl+Enter)"
+                  aria-label="Pausar geração e enviar mensagem agora"
+                >
+                  {interrupting ? <Loader2 size={13} className={s.spin} /> : <StopCircle size={13} />}
+                  <span className={s.pauseSendLabel}>Pausar e enviar</span>
+                </button>
+              )}
               <button
-                className={`${s.sendBtn} ${canSend ? s.sendActive : ''}`}
-                onClick={handleSend}
-                disabled={!canSend}
-                title={canGenerate ? undefined : permHint}
-                aria-label="Enviar mensagem"
+                className={`${s.sendBtn} ${(busy ? input.trim().length > 0 : canSend) ? s.sendActive : ''}`}
+                onClick={busy ? handleSendAdvice : handleSend}
+                disabled={busy ? input.trim().length === 0 : !canSend}
+                title={busy ? 'Enviar como orientação (Enter)' : (canGenerate ? undefined : permHint)}
+                aria-label={busy ? 'Enviar orientação' : 'Enviar mensagem'}
               >
-                <ArrowUp size={15} />
+                {busy ? <Sparkles size={14} /> : <ArrowUp size={15} />}
               </button>
             </div>
           </div>
 
           <p className={s.inputHint} id="fabricaInputHint">
-            {canGenerate
-              ? 'Enter envia · Shift+Enter nova linha · / para comandos'
-              : permHint}
+            {!canGenerate
+              ? permHint
+              : busy
+              ? 'Enter envia uma orientação · Ctrl+Enter pausa e envia agora · Shift+Enter nova linha'
+              : 'Enter envia · Shift+Enter nova linha · / para comandos'}
           </p>
         </div>
       </aside>
@@ -996,7 +1048,7 @@ export default function FabricaPage() {
         isOpen={showBrandbook}
         onClose={() => setShowBrandbook(false)}
         onSuccess={(data) => {
-          setBtwContext((prev) => [
+          setAsanaContext((prev) => [
             ...prev,
             `Brandbook atualizado via upload (${data.svgsIndexed.total} SVGs indexados, cores: ${data.colors.join(', ')})`,
           ]);
