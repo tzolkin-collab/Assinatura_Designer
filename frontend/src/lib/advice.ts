@@ -116,6 +116,25 @@ export function decideEnterAction(opts: {
   return 'message';
 }
 
+/**
+ * Um texto que bate, letra por letra (case-insensitive, ignorando espaços nas
+ * pontas), com o rótulo de um slash command conhecido (ex.: "/editor"). Usado
+ * para não deixar um comando digitado escapar para o texto "de verdade"
+ * (orientação ou mensagem) quando o dropdown de autocomplete já fechou — ex.:
+ * usuário digita "/editor", aperta Escape (fecha o menu mas o texto continua
+ * no campo) e então Enter, ou ocupado clica direto no botão de enviar. Sem
+ * isso, o texto do comando ia parar como orientação real na fila e contaminava
+ * o prompt da IA (ver decideEnterAction: ocupado + sem menu aberto = 'advice').
+ */
+export function matchSlashCommand<T extends { label: string }>(
+  text: string,
+  commands: readonly T[],
+): T | undefined {
+  const trimmed = text.trim().toLowerCase();
+  if (!trimmed) return undefined;
+  return commands.find((c) => c.label.toLowerCase() === trimmed);
+}
+
 /** Rótulo pt-BR do status, para o badge da lista "Orientações". */
 export function adviceStatusLabel(item: AdviceItem): string {
   if (item.status === 'pending') return 'pendente';

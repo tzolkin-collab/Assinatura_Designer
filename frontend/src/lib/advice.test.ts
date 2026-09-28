@@ -4,6 +4,7 @@ import {
   hydrateAdviceList,
   isSessionBusy,
   decideEnterAction,
+  matchSlashCommand,
   adviceStatusLabel,
   type AdviceItem,
 } from './advice';
@@ -137,6 +138,35 @@ describe('decideEnterAction (o que Enter faz, dado o estado)', () => {
 
   it('ocupado + Ctrl+Enter interrompe e envia agora', () => {
     expect(decideEnterAction({ ...base, busy: true, ctrlKey: true })).toBe('interrupt');
+  });
+});
+
+describe('matchSlashCommand (comando digitado literal não vira orientação/mensagem)', () => {
+  const commands = [
+    { id: 'editor', label: '/editor' },
+    { id: 'brandbook', label: '/brandbook' },
+  ] as const;
+
+  it('bate com o rótulo exato', () => {
+    expect(matchSlashCommand('/editor', commands)).toEqual({ id: 'editor', label: '/editor' });
+  });
+
+  it('ignora espaços nas pontas e caixa (o usuário pode digitar "/Editor ")', () => {
+    expect(matchSlashCommand('  /Editor ', commands)).toEqual({ id: 'editor', label: '/editor' });
+  });
+
+  it('não bate com prefixo — só o comando sozinho no campo conta', () => {
+    expect(matchSlashCommand('/editor por favor', commands)).toBeUndefined();
+    expect(matchSlashCommand('/edito', commands)).toBeUndefined();
+  });
+
+  it('texto comum (uma orientação de verdade) não bate com nada', () => {
+    expect(matchSlashCommand('use fundo escuro', commands)).toBeUndefined();
+  });
+
+  it('texto vazio não bate (evita achar o "primeiro" comando por engano)', () => {
+    expect(matchSlashCommand('', commands)).toBeUndefined();
+    expect(matchSlashCommand('   ', commands)).toBeUndefined();
   });
 });
 

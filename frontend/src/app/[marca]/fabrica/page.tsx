@@ -4,7 +4,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { ArrowUp, Paperclip, Sparkles, Wifi, WifiOff, X, MessageSquarePlus, Check, Loader2, StopCircle } from 'lucide-react';
 import { AdviceList } from '@/components/Fabrica/AdviceList';
-import { decideEnterAction, isSessionBusy } from '@/lib/advice';
+import { decideEnterAction, isSessionBusy, matchSlashCommand } from '@/lib/advice';
 import dynamic from 'next/dynamic';
 const HtmlSlideRenderer = dynamic(() => import('@/components/DesignDocument/HtmlSlideRenderer'), { ssr: false });
 import { type HtmlDesignPostContent } from '@/lib/designContent';
@@ -317,9 +317,20 @@ export default function FabricaPage() {
   const handleSendAdvice = useCallback(() => {
     const text = input.trim();
     if (!text) return;
+    // Um comando exato (ex.: usuário digitou "/editor", apertou Escape — o
+    // dropdown fecha mas o texto fica — e então Enter, ou clicou direto no
+    // botão de enviar ocupado) não deve virar orientação: isso navegaria com
+    // sucesso antes desta feature, e virar "advice" faria o texto "/editor"
+    // ser injetado como se fosse uma instrução de design real no próximo lote
+    // (ver pipelineAdviceBlock/brainAdviceBlock no backend).
+    const command = matchSlashCommand(text, SLASH_COMMANDS);
+    if (command) {
+      applySlash(command.id);
+      return;
+    }
     sendAdvice(text);
     setInput('');
-  }, [input, sendAdvice]);
+  }, [input, sendAdvice, applySlash]);
 
   // "Pausar e enviar": interrompe agora (stream do cérebro ou lote do pipeline) e
   // manda a mensagem como um turno normal, com o contexto de onde parou.
