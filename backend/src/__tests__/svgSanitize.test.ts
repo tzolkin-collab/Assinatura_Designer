@@ -9,6 +9,8 @@ import {
   InvalidSvgError,
   MAX_SVG_DEPTH,
   MAX_SVG_BYTES,
+  MAX_SVG_ELEMENTS,
+  MAX_CSS_BYTES,
 } from '../lib/svgSanitize';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -391,6 +393,125 @@ describe('sanitizeSvg — regressão de desempenho (DoS síncrono)', () => {
   it('MAX_SVG_DEPTH e MAX_SVG_BYTES são exportados para calibrar estes testes', () => {
     expect(MAX_SVG_DEPTH).toBeGreaterThan(0);
     expect(MAX_SVG_BYTES).toBeGreaterThan(0);
+  });
+});
+
+// ── Regressão: bypasses do preflight fechados nesta rodada (revisão adversarial) ──
+// Uma revisão independente achou 4 furos concretos no preflightCheck da rodada
+// anterior: (1) qualquer "/>" era tratado como self-closing, mesmo fora de foreign
+// content, onde o parser HTML5 de verdade IGNORA a barra num elemento comum; (2) o
+// contador de profundidade decrementava em QUALQUER tag de fechamento, sem checar se o
+// nome batia com algo aberto; (3) o teto de CSS agregado não existia, então um <style>
+// perto do teto de bytes do arquivo (2MB) ainda custava dezenas de segundos síncronos
+// mesmo com o lookahead limitado do stripCss; (4) só profundidade era limitada, não a
+// quantidade total de elementos (um SVG raso com dezenas de milhares de irmãos passava
+// batido). Os 4 têm PoC reproduzido contra o código anterior a esta rodada.
+describe('sanitizeSvg — bypasses do preflight fechados nesta rodada (revisão adversarial)', () => {
+  const XMLNS_LOCAL = 'xmlns="http://www.w3.org/2000/svg"';
+
+  it('(1) <div/> fora do svg não se autofecha de verdade — profundidade real é detectada mesmo antes da raiz <svg>', () => {
+    // Fora de foreign content, "/>" num elemento HTML comum é ruído pro parser real:
+    // a tag abre e tudo que vem depois fica aninhado nela, como <div> sem a barra.
+    const n = MAX_SVG_DEPTH + 50;
+    const payload = '<div/>'.repeat(n) + `<svg ${XMLNS_LOCAL}><rect width="1" height="1"/></svg>`;
+    let erro: unknown;
+    try {
+      sanitizeSvg(payload);
+    } catch (e) {
+      erro = e;
+    }
+    expect(erro).toBeInstanceOf(InvalidSvgError);
+    expect((erro as InvalidSvgError).message).toContain('profundidade');
+  });
+
+  it('(1-controle) void element HTML (<br/>) e self-closing DENTRO do <svg> continuam sem contar como aninhamento', () => {
+    // <br> nunca tem filho de verdade, com ou sem barra — não pode virar falso positivo.
+    const n = MAX_SVG_DEPTH + 50;
+    const soBr = '<br/>'.repeat(n) + `<svg ${XMLNS_LOCAL}><rect width="1" height="1"/></svg>`;
+    expect(() => sanitizeSvg(soBr)).not.toThrow();
+
+    // <rect/> dentro da raiz <svg> é self-closing de verdade (foreign content real).
+    const irmaosNoSvg = `<svg ${XMLNS_LOCAL}>${'<rect width="1" height="1"/>'.repeat(100)}</svg>`;
+    expect(() => sanitizeSvg(irmaosNoSvg)).not.toThrow();
+  });
+
+  it('(2) fechamento cujo nome não corresponde a nada aberto (</b> sem <b>) não desempilha o <g> real', () => {
+    // Cada par <g></b> subia e descia um contador cego sem nunca estourar o teto,
+    // enquanto os <g> ficavam genuinamente empilhados na árvore que o jsdom monta —
+    // </b> nunca fecha <g>, só um <b> que nunca foi aberto.
+    const n = MAX_SVG_DEPTH + 50;
+    const payload = `<svg ${XMLNS_LOCAL}>${'<g></b>'.repeat(n)}</svg>`;
+    let erro: unknown;
+    try {
+      sanitizeSvg(payload);
+    } catch (e) {
+      erro = e;
+    }
+    expect(erro).toBeInstanceOf(InvalidSvgError);
+    expect((erro as InvalidSvgError).message).toContain('profundidade');
+  });
+
+  it('(2) reproduz a escala do PoC relatado (50.000 pares <g></b>) e rejeita rápido, não em dezenas de segundos', () => {
+    const n = 50_000;
+    const payload = `<svg ${XMLNS_LOCAL}>${'<g></b>'.repeat(n)}</svg>`;
+    const t0 = Date.now();
+    expect(() => sanitizeSvg(payload)).toThrow(InvalidSvgError);
+    expect(Date.now() - t0).toBeLessThan(1000);
+  });
+
+  it('(2-controle) fechamento com nome correto (<g></g> bem casado) continua desempilhando normalmente', () => {
+    const n = 100;
+    const payload = `<svg ${XMLNS_LOCAL}>${'<g>'.repeat(n)}${'</g>'.repeat(n)}</svg>`;
+    expect(() => sanitizeSvg(payload)).not.toThrow();
+  });
+
+  it('(3) CSS agregado (<style> + style="") acima do teto é rejeitado em O(n), antes do regex caro do stripCss rodar', () => {
+    const css = 'url('.repeat(Math.ceil((MAX_CSS_BYTES + 4096) / 4));
+    const payload = `<svg ${XMLNS_LOCAL}><style>${css}</style><rect width="1" height="1"/></svg>`;
+    const t0 = Date.now();
+    expect(() => sanitizeSvg(payload)).toThrow(InvalidSvgError);
+    expect(Date.now() - t0, 'preflight deve rejeitar em milissegundos, não segundos').toBeLessThan(300);
+  });
+
+  it('(3) reproduz a escala do PoC relatado: CSS quase do tamanho do teto de bytes do arquivo (2MB) não trava mais o event loop por 10s+', () => {
+    const alvo = MAX_SVG_BYTES - 2000; // ainda dentro do limite de bytes do arquivo inteiro
+    const css = 'url('.repeat(Math.ceil(alvo / 4));
+    const payload = `<svg ${XMLNS_LOCAL}><style>${css}</style><rect width="1" height="1"/></svg>`;
+    const t0 = Date.now();
+    expect(() => sanitizeSvg(payload)).toThrow(InvalidSvgError);
+    expect(Date.now() - t0, 'antes desta correção isto levava mais de 10s síncronos').toBeLessThan(1000);
+  });
+
+  it('(3-controle) CSS bem abaixo do teto continua sendo limpo normalmente', () => {
+    const { svg } = sanitizeSvg(`<svg ${XMLNS_LOCAL}><style>.a{fill:red}</style><rect class="a" width="1" height="1"/></svg>`);
+    expect(svg).toContain('.a{fill:red}');
+  });
+
+  it('(4) SVG raso com elementos-irmãos acima do teto total é rejeitado em O(n), mesmo com profundidade 1', () => {
+    const n = MAX_SVG_ELEMENTS + 1000;
+    const payload = `<svg ${XMLNS_LOCAL}>${'<rect width="1" height="1"/>'.repeat(n)}</svg>`;
+    const t0 = Date.now();
+    expect(() => sanitizeSvg(payload)).toThrow(InvalidSvgError);
+    expect(Date.now() - t0).toBeLessThan(500);
+  });
+
+  it('(4-controle) quantidade de elementos dentro do teto continua passando', () => {
+    const n = 200;
+    const payload = `<svg ${XMLNS_LOCAL}>${'<rect width="1" height="1"/>'.repeat(n)}</svg>`;
+    expect(() => sanitizeSvg(payload)).not.toThrow();
+  });
+
+  it('muitas tags <style> pequenas no mesmo documento não degradam quadraticamente (busca do fim de cada uma não copia o restante do texto)', () => {
+    // Uma implementação ingênua de "onde <style> termina" via `text.slice(j+1)` +
+    // `toLowerCase()` copia o RESTANTE do documento inteiro a cada <style> encontrado —
+    // com várias tags <style>, isso vira O(n²). Fica abaixo do teto de elementos
+    // (MAX_SVG_ELEMENTS) mas ainda deve ser rápido.
+    const n = 1000;
+    const umStyle = '<style>.a{fill:red}</style>';
+    const payload = `<svg ${XMLNS_LOCAL}>${umStyle.repeat(n)}<rect width="1" height="1"/></svg>`;
+    const t0 = Date.now();
+    expect(() => sanitizeSvg(payload)).not.toThrow();
+    expect(Date.now() - t0).toBeLessThan(1000);
   });
 });
 

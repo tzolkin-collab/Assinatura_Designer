@@ -33,6 +33,25 @@ export const MAX_SVG_BYTES = 2 * 1024 * 1024;
 // antes de montar qualquer árvore.
 export const MAX_SVG_DEPTH = 256;
 
+// Teto de elementos TOTAIS no documento — profundidade sozinha não basta. Medido contra
+// o código sem este teto: 20.000 elementos-irmãos rasos (`<rect/>` repetido, ~560KB) =
+// 1,8s; 30.000 (~840KB) = 2,0s; 40.000 (~1,12MB) = 3,1s; 62.914 (~1,68MB, ainda abaixo
+// do teto de bytes) = ~4,9s — tudo com profundidade 1, então MAX_SVG_DEPTH não pega.
+// 5000 é generoso pra um ícone/logo real (dezenas a poucas centenas de elementos) e
+// mantém o pior caso do preflight bem abaixo de 1s.
+export const MAX_SVG_ELEMENTS = 5000;
+
+// Teto para o total de bytes de CSS agregado (soma de todo conteúdo de <style> + todo
+// valor de style="") ANTES de rodar qualquer regex de limpeza sobre eles. O lookahead
+// limitado do stripCss (abaixo) já elimina o crescimento QUADRÁTICO do bug antigo, mas
+// o fator constante do pior caso ("url(" repetido sem fechar) ainda é caro: medido já
+// com o lookahead limitado, 256KB desse CSS = ~1,7s e 512KB = ~3,3s (cresce linear,
+// ~6,6ms/KB) — um <style> ocupando quase o teto inteiro de 2MB (MAX_SVG_BYTES) travaria
+// o event loop por mais de 10s SÍNCRONO, a mesma ordem de grandeza do bug que esta
+// rodada deveria ter eliminado. CSS de brandbook real (cores, fontes, classes) fica na
+// casa de poucos KB; 64KB é folgado e limita o pior caso a ~400ms.
+export const MAX_CSS_BYTES = 64 * 1024;
+
 /**
  * O conteúdo não é um SVG utilizável (sem raiz <svg>, binário, grande demais ou
  * irrecuperável). O chamador decide a resposta HTTP — o errorHandler global mapeia
@@ -316,6 +335,21 @@ function enforce(root: Element, removed: SvgRemoval[]): void {
 
 // ── Preflight (O(n), antes de qualquer árvore) ──────────────────────────────────
 
+// Os únicos 14 void elements do HTML Living Standard: nunca têm filhos de verdade, o
+// parser HTML5 os trata como "auto-fechados" apareça ou não a barra "/>", e um
+// `</br>` solto nunca reabre nada. Fora deste conjunto (e fora de foreign content —
+// ver FOREIGN_ROOTS), a barra final num elemento comum é só ruído: a tag ABRE
+// normalmente e tudo que vier depois fica aninhado dentro dela.
+const VOID_ELEMENTS = new Set([
+  'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
+  'link', 'meta', 'param', 'source', 'track', 'wbr',
+]);
+
+// Raízes que entram em "foreign content" (SVG/MathML). Só dentro delas — ou nelas
+// mesmas — o parser HTML5 realmente honra "/>" para fechar qualquer elemento comum
+// (<rect/>, <g/>...). Fora disso, mesmo com a barra, o elemento abre e aninha.
+const FOREIGN_ROOTS = new Set(['svg', 'math']);
+
 const LIMITE_MB = Math.round(MAX_SVG_BYTES / (1024 * 1024));
 
 function toText(input: string | Buffer): string {
@@ -332,22 +366,62 @@ function toText(input: string | Buffer): string {
 
 /**
  * Verificação O(n) num único passe pelo texto, ANTES de montar qualquer árvore no
- * jsdom — sem regex sobre o documento inteiro, só um contador de profundidade que soma
- * em tag de abertura e subtrai em tag de fechamento/self-closing. Existe porque a poda
- * de nó do DOMPurify/jsdom é O(profundidade) por nó tocado: uma revisão adversarial
- * mediu 1000 níveis de `<g>` (3KB) em 307ms, 10000 (30KB) em 13s e 50000 (150KB) em
- * 35s — SÍNCRONO, no event loop inteiro, em toda rota que grava SVG (upload, /assets,
- * brandbook, anexo de chat). Rejeitar aqui custa microssegundos.
+ * jsdom — sem regex custoso sobre o documento inteiro, só um scanner de tags que:
+ *  1. empilha o NOME de cada tag realmente aberta (para profundidade e para validar
+ *     tag de fechamento por nome — ver abaixo);
+ *  2. só considera "/>" self-closing quando a tag é um void element HTML conhecido OU
+ *     já estamos dentro de uma raiz <svg>/<math> (foreign content) — replicando a regra
+ *     real do parser HTML5 que o jsdom usa. Fora disso, mesmo com a barra, a tag ABRE e
+ *     tudo que vier depois fica aninhado nela — era exatamente esse o furo: `<div/>`
+ *     repetido antes da raiz <svg> parecia raso pro contador antigo e continuava
+ *     genuinamente profundo na árvore real;
+ *  3. só desempilha numa tag de fechamento se o NOME bater com algo já aberto (busca a
+ *     pilha de cima para baixo, como o algoritmo HTML5 "any other end tag") — sem isso,
+ *     `<g></b>` repetido (fechamento que nunca corresponde a nada) decrementava um
+ *     contador ingênuo a cada par e nunca estourava o teto, enquanto os `<g>` ficavam
+ *     genuinamente empilhados na árvore que o jsdom monta;
+ *  4. conta o total de tags de abertura vistas (nunca decrementa) — cobre LARGURA, não
+ *     só profundidade: um documento raso com dezenas de milhares de elementos-irmãos
+ *     passa batido pelo teto de profundidade mas ainda é caro pra jsdom+DOMPurify+
+ *     enforce (que roda duas vezes);
+ *  5. soma o total de bytes de CSS (conteúdo de <style> + valor de style="") visto até
+ *     agora — o lookahead limitado do stripCss elimina o crescimento quadrático, mas o
+ *     fator constante ainda é caro o bastante pra travar o event loop por segundos bem
+ *     dentro do teto de 2MB do arquivo inteiro.
  *
- * Não é um parser XML de verdade — não precisa ser: o pior caso de errar por falta de
- * rigor num markup exótico é subcontar profundidade, e isso ainda cai no teto de
- * tamanho (MAX_SVG_BYTES) e no try/catch de `sanitizeSvg`. Não há caminho em que um
- * erro de contagem aqui vire uma sanitização insegura, só uma rejeição tardia.
+ * Existe porque a poda de nó do DOMPurify/jsdom é O(profundidade) por nó tocado (1000
+ * níveis de `<g>` = 307ms; 50000 = 35s SÍNCRONO) em toda rota que grava SVG (upload,
+ * /assets, brandbook, anexo de chat). Rejeitar aqui custa microssegundos a milissegundos.
+ *
+ * Não é um parser HTML5 completo (não modela elementos "especiais" que abortam a busca
+ * de fechamento mais cedo, nem integration points) — não precisa ser: o pior caso de
+ * errar por falta de rigor num markup exótico é subcontar profundidade/largura/CSS, e
+ * isso ainda cai no teto de tamanho (MAX_SVG_BYTES) e no try/catch de `sanitizeSvg`. A
+ * combinação nome-na-pilha + contador monotônico de largura fecha os bypasses
+ * concretos relatados sem precisar reimplementar o algoritmo de árvore de elementos
+ * "especiais" do parser inteiro.
  */
 function preflightCheck(text: string): void {
   const len = text.length;
-  let depth = 0;
   let i = 0;
+
+  // Nomes das tags REALMENTE abertas (não self-closing, não void) — ver ponto 1 acima.
+  const pilha: string[] = [];
+  // Quantas raízes <svg>/<math> abertas de verdade estão na pilha agora.
+  let foreignDepth = 0;
+  // Contagem TOTAL de tags de abertura vistas — nunca decrementa (ponto 4 acima).
+  let totalAberturas = 0;
+  // Soma de bytes de CSS vistos até agora (ponto 5 acima).
+  let cssTotal = 0;
+  // Regex local (não module-level) pra não compartilhar `lastIndex` entre chamadas —
+  // reaproveitada dentro desta única passada via `lastIndex` (ver uso abaixo).
+  const FECHO_STYLE_RE = /<\/style/gi;
+
+  const estourouCss = () => {
+    if (cssTotal > MAX_CSS_BYTES) {
+      throw new InvalidSvgError(`SVG excede o teto de CSS agregado (${Math.round(MAX_CSS_BYTES / 1024)}KB).`);
+    }
+  };
 
   while (i < len) {
     const lt = text.indexOf('<', i);
@@ -355,10 +429,18 @@ function preflightCheck(text: string): void {
     const next = text.charCodeAt(lt + 1);
 
     if (next === 0x2f /* / */) {
-      // tag de fechamento: </tag>
+      // Tag de fechamento: só desempilha se o NOME bater com algo já aberto (ponto 3).
       const gt = text.indexOf('>', lt + 2);
       if (gt === -1) break;
-      if (depth > 0) depth--;
+      const nomeFechamentoMatch = /^[^\s/>]*/.exec(text.slice(lt + 2, gt));
+      const nomeFechamento = (nomeFechamentoMatch ? nomeFechamentoMatch[0] : '').toLowerCase();
+      for (let k = pilha.length - 1; k >= 0; k--) {
+        if (pilha[k] === nomeFechamento) {
+          const fechados = pilha.splice(k);
+          for (const nome of fechados) if (FOREIGN_ROOTS.has(nome)) foreignDepth--;
+          break;
+        }
+      }
       i = gt + 1;
       continue;
     }
@@ -402,10 +484,56 @@ function preflightCheck(text: string): void {
     }
     if (j >= len) break; // tag nunca fecha: deixa o jsdom decidir (ou rejeitar) o resto.
 
-    const autoFechada = text.charCodeAt(j - 1) === 0x2f /* '/' logo antes do '>' */;
+    const tagTexto = text.slice(lt + 1, j);
+    const nomeMatch = /^[^\s/>]*/.exec(tagTexto);
+    const nome = (nomeMatch ? nomeMatch[0] : '').toLowerCase();
+    const hasSlash = text.charCodeAt(j - 1) === 0x2f /* '/' logo antes do '>' */;
+
+    totalAberturas++;
+    if (totalAberturas > MAX_SVG_ELEMENTS) {
+      throw new InvalidSvgError(`SVG excede o número máximo de elementos (${MAX_SVG_ELEMENTS}).`);
+    }
+
+    // style="..." custa o mesmo regex caro do stripCss quando `enforce()` rodar; conta
+    // pro teto agregado mesmo fora de um <style> (ponto 5). Regex com classe negada
+    // ([^"]*), sem grupo aninhado repetido — não tem o backtracking catastrófico que
+    // motivou o lookahead limitado do stripCss.
+    const estiloAttrMatch = /\bstyle\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(tagTexto);
+    if (estiloAttrMatch) {
+      cssTotal += (estiloAttrMatch[1] ?? estiloAttrMatch[2] ?? '').length;
+      estourouCss();
+    }
+
+    const ehVoid = VOID_ELEMENTS.has(nome);
+    const emForeignContent = foreignDepth > 0 || FOREIGN_ROOTS.has(nome);
+    const autoFechada = hasSlash && (ehVoid || emForeignContent);
+
+    // <style> é "raw text" em HTML5: o conteúdo NUNCA é tag-parseado, só procurado
+    // literalmente até o primeiro "</style" (nem aspas nem CDATA mudam isso — é
+    // exatamente essa "burrice" que faz o mXSS clássico funcionar, coberto no teste
+    // "mXSS clássico com style e id"). Só entra aqui se não veio self-closed (`<style/>`
+    // de verdade é raro e não tem conteúdo pra pular).
+    if (nome === 'style' && !hasSlash) {
+      // Busca com regex+lastIndex no texto ORIGINAL (não `text.slice(j+1)`): um
+      // documento pode ter até MAX_SVG_ELEMENTS tags <style>, e fatiar+`toLowerCase()`
+      // do restante inteiro a cada uma seria O(tamanho restante) por tag — O(n²) no
+      // total com muitos <style>, o mesmo tipo de custo quadrático que este arquivo
+      // inteiro existe pra eliminar. `exec` com `lastIndex` não copia string nenhuma.
+      FECHO_STYLE_RE.lastIndex = j + 1;
+      const fechoMatch = FECHO_STYLE_RE.exec(text);
+      const fim = fechoMatch ? fechoMatch.index : len;
+      cssTotal += fim - (j + 1);
+      estourouCss();
+      if (fim >= len) { i = len; continue; }
+      const gtFechamento = text.indexOf('>', fim);
+      i = gtFechamento === -1 ? len : gtFechamento + 1;
+      continue;
+    }
+
     if (!autoFechada) {
-      depth++;
-      if (depth > MAX_SVG_DEPTH) {
+      pilha.push(nome);
+      if (FOREIGN_ROOTS.has(nome)) foreignDepth++;
+      if (pilha.length > MAX_SVG_DEPTH) {
         throw new InvalidSvgError(`SVG excede a profundidade máxima de aninhamento (${MAX_SVG_DEPTH}).`);
       }
     }
