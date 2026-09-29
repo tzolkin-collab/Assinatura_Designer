@@ -180,7 +180,7 @@ export async function processBrandbookIngest({
       // "Raw" não quer dizer "sem higiene": o arquivo bruto vai para um bucket público.
       // SVG sai limpo como image/svg+xml e HTML vira download — antes o mimetype do
       // cliente ia direto, então um .html ou .svg do brandbook era XSS armazenado.
-      const rawPrepared = prepareStorableFile({
+      const rawPrepared = await prepareStorableFile({
         buffer: file.buffer,
         fileName: file.originalname,
         mimeType: file.mimetype || 'application/octet-stream',
@@ -289,7 +289,7 @@ export async function processBrandbookIngest({
       // InvalidSvgError e cai no catch abaixo: este item é pulado, os outros seguem.
       const content = item.buffer.toString('utf-8');
       const classification = classifySVG(item.filename, content);
-      const limpo = sanitizeSvg(item.buffer);
+      const limpo = await sanitizeSvg(item.buffer);
 
       const r2Url = await uploadFileToR2(limpo.buffer, item.filename, 'image/svg+xml', `brands/${brand.id}/brandbook`);
 
@@ -395,7 +395,7 @@ Formato do JSON de resposta:
 
               // SVG "reconstruído por IA" é texto de modelo (e o modelo leu o brandbook
               // do usuário): não é mais confiável que upload. Mesma higienização.
-              const svgBuffer = sanitizeSvg(cleanSvg).buffer;
+              const svgBuffer = (await sanitizeSvg(cleanSvg)).buffer;
               const filename = item.name || `vetor-ia-${Date.now()}.svg`;
               const classification: SVGClassification =
                 item.classification === 'LOGOTYPE' || item.classification === 'ILLUSTRATION' || item.classification === 'GRAPHIC_ELEMENT'

@@ -16,6 +16,7 @@
 
 import createDOMPurify, { type WindowLike } from 'dompurify';
 import { JSDOM } from 'jsdom';
+import { Worker, isMainThread, parentPort } from 'node:worker_threads';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
@@ -541,32 +542,180 @@ function preflightCheck(text: string): void {
   }
 }
 
+// ── Worker: teto de TEMPO estrutural para a sanitização inteira ────────────────
+//
+// Por que existe: duas rodadas de revisão adversarial corrigiram 8 formas diferentes
+// de fazer o preflightCheck (scanner de tags escrito à mão) subestimar profundidade,
+// largura ou custo de CSS — e a cada rodada de patch pontual apareceu UM OU MAIS
+// bypasses NOVOS (o mais recente até num trecho que a rodada anterior tinha acabado de
+// escrever pra fechar o bypass de antes). Em nenhum caso a sanitização ficou insegura
+// (o resultado final sempre foi InvalidSvgError ou conteúdo limpo) — o problema é
+// sempre de TEMPO: com dezenas de KB, bem abaixo do teto de MAX_SVG_BYTES, o
+// preflightCheck ou o jsdom/DOMPurify podem travar o event loop por 2 a 18 segundos
+// SÍNCRONOS. Reimplementar à mão a tokenização adversarial de HTML5/XML tende a nunca
+// convergir por patch pontual — é o problema que navegadores levaram anos e specs
+// enormes para fechar.
+//
+// Em vez de perseguir bypass por bypass, a função inteira (preflightCheck + jsdom +
+// DOMPurify + enforce) roda dentro de um `worker_threads` Worker com um teto de
+// parede: se estourar, `worker.terminate()` interrompe a V8 NO MEIO de um laço
+// síncrono — é a ÚNICA forma de preemptar JS single-thread, já que nem Promise nem
+// timer conseguem interromper um `while` rodando de verdade — e o chamador recebe o
+// mesmo InvalidSvgError de sempre. Não importa qual dos 5 bypasses catalogados (ou um
+// futuro ainda não descoberto) o payload explora: o pior caso deixa de ser "trava a
+// API por segundos" e vira "rejeita rápido com erro".
+//
+// Por que 3000ms: brandbook real (mesmo com árvore/CSS grandes) sanitiza na casa de
+// baixos milissegundos — 3s é generoso o bastante para não ser "flaky" sob CPU
+// concorrente — e ainda assim fica bem abaixo dos 2-18s medidos pelos bypasses.
+export const SANITIZE_WORKER_TIMEOUT_MS = 3000;
+
+interface WorkerRequest {
+  id: number;
+  text: string;
+}
+
+type WorkerResponse =
+  | { id: number; ok: true; svg: string; removed: SvgRemoval[] }
+  | { id: number; ok: false; message: string };
+
+interface PendingJob {
+  resolve: (result: { svg: string; removed: SvgRemoval[] }) => void;
+  reject: (err: unknown) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
+const pendingJobs = new Map<number, PendingJob>();
+let nextJobId = 1;
+// Worker ÚNICO e reaproveitado entre chamadas (não um por chamada): jsdom é pesado de
+// carregar (é por isso que `getEnv()` acima já é preguiçoso) e subir uma thread nova a
+// cada SVG pagaria esse custo toda vez. Como a sanitização em si já é síncrona dentro
+// da thread (não há paralelismo real a ganhar processando duas ao mesmo tempo), um
+// worker persistente processando mensagens em fila é o "pool simples" pedido, sem
+// dependência nova. Se ele morrer (erro, exit ou terminate() por timeout), a próxima
+// chamada sobe um novo — ver `getWorker`.
+let worker: Worker | null = null;
+
+/**
+ * Sob `tsx watch` (dev) e `vitest` (teste) este arquivo roda como `.ts` — o
+ * worker_threads nativo do Node não entende TypeScript sozinho. `tsx/cjs` é o hook de
+ * registro do tsx (já é devDependency) para CommonJS; passamos explicitamente em vez
+ * de confiar que o processo pai já foi iniciado com ele (nem sempre é o caso — depender
+ * disso quebraria em silêncio se o comando de dev/teste mudasse). Em produção
+ * (`dist/lib/svgSanitize.js`, compilado por `tsc`) `__filename` termina em `.js`: o
+ * Node carrega nativamente, sem tocar em `tsx` (que nem é dependency de produção).
+ */
+function buildWorkerExecArgv(): string[] | undefined {
+  if (!__filename.endsWith('.ts')) return undefined;
+  return [...process.execArgv, '--require', 'tsx/cjs'];
+}
+
+function failAllPending(reason: unknown): void {
+  for (const [id, job] of pendingJobs) {
+    clearTimeout(job.timer);
+    job.reject(reason);
+    pendingJobs.delete(id);
+  }
+}
+
+function spawnWorker(): Worker {
+  const w = new Worker(__filename, { execArgv: buildWorkerExecArgv() });
+
+  w.on('message', (msg: WorkerResponse) => {
+    const job = pendingJobs.get(msg.id);
+    if (!job) return; // já resolvido por timeout — a resposta chegou tarde demais.
+    pendingJobs.delete(msg.id);
+    clearTimeout(job.timer);
+    if (msg.ok) job.resolve({ svg: msg.svg, removed: msg.removed });
+    else job.reject(new InvalidSvgError(msg.message));
+  });
+
+  // Thread morreu (erro não tratado dentro dela, ou encerrou sozinha) fora do fluxo de
+  // timeout normal: falha fechado tudo que estava pendente NESTE worker e força a
+  // próxima chamada a subir um novo (nunca fica "preso" reusando uma thread morta).
+  const onDeath = (detail: string) => {
+    if (worker === w) worker = null;
+    failAllPending(new InvalidSvgError(`Sanitização de SVG interrompida: ${detail}`));
+  };
+  w.on('error', (err) => onDeath(err.message));
+  w.on('exit', (code) => {
+    if (code !== 0) onDeath(`worker de sanitização encerrou com código ${code}`);
+  });
+
+  return w;
+}
+
+function getWorker(): Worker {
+  if (!worker) worker = spawnWorker();
+  return worker;
+}
+
+/**
+ * Roda preflightCheck + jsdom + DOMPurify + enforce dentro do worker persistente, com
+ * o teto de parede `SANITIZE_WORKER_TIMEOUT_MS`. Ao estourar, mata a thread INTEIRA
+ * (não só esta mensagem — não há como interromper só uma mensagem no meio de um laço
+ * síncrono) e rejeita com InvalidSvgError; qualquer outra chamada que já estivesse
+ * enfileirada NESTE worker morre junto (fail-closed) e vê o mesmo erro — a próxima
+ * chamada sobe um worker novo via `getWorker()`.
+ */
+function sanitizeViaWorker(text: string): Promise<{ svg: string; removed: SvgRemoval[] }> {
+  return new Promise((resolve, reject) => {
+    const id = nextJobId++;
+    const w = getWorker();
+
+    const timer = setTimeout(() => {
+      pendingJobs.delete(id);
+      w.terminate().catch(() => {
+        // best-effort: já estamos rejeitando por timeout de qualquer forma.
+      });
+      reject(new InvalidSvgError(`Sanitização de SVG excedeu o tempo máximo (${SANITIZE_WORKER_TIMEOUT_MS}ms) — recusado por segurança.`));
+    }, SANITIZE_WORKER_TIMEOUT_MS);
+    // Não deixa o timer sozinho manter o processo Node vivo (irrelevante em produção,
+    // mas evita travar `vitest`/scripts que aguardam o event loop esvaziar).
+    timer.unref?.();
+
+    pendingJobs.set(id, { resolve, reject, timer });
+    w.postMessage({ id, text } satisfies WorkerRequest);
+  });
+}
+
 // ── API ─────────────────────────────────────────────────────────────────────────
 
 /**
  * Devolve o SVG limpo e a lista do que foi removido. Lança InvalidSvgError se, depois
- * da limpeza, não sobrar uma raiz <svg> bem-formada — ou se qualquer etapa (inclusive
- * um erro inesperado do jsdom/DOMPurify) não puder garantir que o resultado é seguro.
+ * da limpeza, não sobrar uma raiz <svg> bem-formada — se qualquer etapa (inclusive um
+ * erro inesperado do jsdom/DOMPurify) não puder garantir que o resultado é seguro — ou
+ * se a sanitização (que roda numa thread separada, ver acima) excede o teto de tempo.
+ *
+ * Assíncrona: o trabalho pesado (preflightCheck + jsdom + DOMPurify + enforce) roda
+ * dentro de um `worker_threads` Worker, não neste thread — é o que permite matar a
+ * thread (`terminate()`) sem derrubar o processo da API se um payload adversarial
+ * travar o parser por tempo demais.
  */
-export function sanitizeSvg(input: string | Buffer): SanitizeSvgResult {
+export async function sanitizeSvg(input: string | Buffer): Promise<SanitizeSvgResult> {
   const text = toText(input);
   if (!/<svg[\s/>]/i.test(text)) throw new InvalidSvgError('Conteúdo não é um SVG (raiz <svg> não encontrada).');
-  preflightCheck(text);
 
-  try {
-    return sanitizeSvgSemProtecao(text);
-  } catch (err) {
-    if (err instanceof InvalidSvgError) throw err;
-    // Nada do que o jsdom/DOMPurify podem lançar numa árvore patológica (TypeError de
-    // remoção, erro de parse interno etc.) pode escapar como 500: vira o mesmo "não
-    // consigo garantir que isto é seguro" dos outros throws. Com o preflight acima,
-    // árvores fundas demais nem chegam aqui — isto cobre qualquer outra entrada que
-    // passe pelo preflight sem disparar o teto e ainda assim confunda o parser.
-    throw new InvalidSvgError(`Falha inesperada ao higienizar SVG: ${err instanceof Error ? err.message : String(err)}`);
-  }
+  const { svg, removed } = await sanitizeViaWorker(text);
+  // O buffer final é criado AQUI (thread principal), não dentro do worker: é ele que
+  // entra no WeakSet `jaHigienizados` logo abaixo, e a identidade do objeto Buffer só
+  // importa pra quem chama depois (`prepareStorableFile`) NESTE thread. Um Buffer
+  // criado dentro do worker e devolvido por postMessage seria uma cópia por
+  // structured clone — outra identidade — e o dedup abaixo nunca bateria.
+  const buffer = Buffer.from(svg, 'utf-8');
+  jaHigienizados.add(buffer);
+  return { svg, buffer, removed };
 }
 
-function sanitizeSvgSemProtecao(text: string): SanitizeSvgResult {
+/**
+ * O trabalho pesado de verdade (preflightCheck já rodou antes de chamar isto — ver o
+ * handler de worker no fim do arquivo). SEM proteção de tempo própria: quem chama
+ * (o handler de worker) é que está dentro da thread que pode ser `terminate()`ada de
+ * fora. Devolve só `{ svg, removed }` — não `buffer` — porque o Buffer "de verdade"
+ * (o que entra no WeakSet `jaHigienizados`) é construído na thread principal, depois
+ * do postMessage; ver o comentário em `sanitizeSvg`.
+ */
+function sanitizeSvgSemProtecao(text: string): { svg: string; removed: SvgRemoval[] } {
   const { window, purify } = getEnv();
   const removed: SvgRemoval[] = [];
 
@@ -621,9 +770,7 @@ function sanitizeSvgSemProtecao(text: string): SanitizeSvgResult {
   enforce(parsedRoot, sobras);
   if (sobras.length > 0) throw new InvalidSvgError('O SVG não pôde ser higienizado com segurança.');
 
-  const buffer = Buffer.from(svg, 'utf-8');
-  jaHigienizados.add(buffer);
-  return { svg, buffer, removed };
+  return { svg, removed };
 }
 
 // ── Decisão "isto é SVG?" e política de gravação ────────────────────────────────
@@ -660,8 +807,11 @@ export interface StorableFile {
  * cliente. SVG (por tipo, extensão OU conteúdo) é higienizado e sai como exatamente
  * `image/svg+xml`; documento ativo (html/xml) vira download; o resto passa como veio.
  * Lança InvalidSvgError se algo que se apresenta como SVG não for um.
+ *
+ * Assíncrona porque `sanitizeSvg` agora roda num worker (ver acima) — todos os
+ * chamadores precisam de `await`.
  */
-export function prepareStorableFile(input: { buffer: Buffer; fileName: string; mimeType: string }): StorableFile {
+export async function prepareStorableFile(input: { buffer: Buffer; fileName: string; mimeType: string }): Promise<StorableFile> {
   const mime = (input.mimeType || '').split(';')[0]!.trim().toLowerCase();
   const isSvg =
     mime === 'image/svg+xml' ||
@@ -672,7 +822,7 @@ export function prepareStorableFile(input: { buffer: Buffer; fileName: string; m
     if (jaHigienizados.has(input.buffer)) {
       return { buffer: input.buffer, mimeType: 'image/svg+xml', contentDisposition: 'attachment', removed: [] };
     }
-    const { buffer, removed } = sanitizeSvg(input.buffer);
+    const { buffer, removed } = await sanitizeSvg(input.buffer);
     // `attachment`: <img>/CSS continuam carregando normalmente, mas abrir a URL direto
     // no browser baixa o arquivo em vez de executá-lo — uma segunda barreira caso um
     // dia a higienização falhe.
@@ -684,4 +834,40 @@ export function prepareStorableFile(input: { buffer: Buffer; fileName: string; m
   }
 
   return { buffer: input.buffer, mimeType: input.mimeType || 'application/octet-stream', removed: [] };
+}
+
+// ── Modo worker: este mesmo arquivo é o script que roda dentro do Worker ───────
+//
+// Padrão comum em Node pra não precisar de um segundo arquivo compilado à parte (que
+// teria que existir tanto em `dist/` quanto sob o transform do vitest, com os dois
+// caminhos de resolução sincronizados manualmente): o módulo checa `isMainThread` e,
+// se for a thread filha, vira um processador de mensagens em vez de só exportar a API
+// pública. `new Worker(__filename)` (acima, em `spawnWorker`) reexecuta este arquivo
+// do zero NESTA thread — `isMainThread` é `false` aqui dentro — então tudo acima
+// (`export function`, `export class` etc.) roda de novo, só que ninguém do lado de
+// fora importa esta cópia: só o bloco abaixo importa, o resto é reaproveitado por
+// `preflightCheck`/`sanitizeSvgSemProtecao`/`InvalidSvgError` já estarem no escopo do
+// módulo.
+if (!isMainThread && parentPort) {
+  const port = parentPort;
+  port.on('message', (job: WorkerRequest) => {
+    try {
+      // A MESMA função que corria direto na API antes desta rodada — preflightCheck
+      // primeiro (O(n), rejeita o óbvio rápido), depois jsdom/DOMPurify/enforce. A
+      // diferença é só ONDE ela roda agora: aqui dentro, onde um `terminate()` de fora
+      // consegue interromper no meio, não mais no thread que serve requisições HTTP.
+      preflightCheck(job.text);
+      const { svg, removed } = sanitizeSvgSemProtecao(job.text);
+      port.postMessage({ id: job.id, ok: true, svg, removed } satisfies WorkerResponse);
+    } catch (err) {
+      // Mesma regra de antes: InvalidSvgError passa a mensagem adiante; qualquer outra
+      // coisa (TypeError de remoção, erro interno do jsdom numa árvore patológica que
+      // driblou o preflight etc.) vira o mesmo "não consigo garantir que isto é
+      // seguro" em vez de derrubar a thread sem responder.
+      const message = err instanceof InvalidSvgError
+        ? err.message
+        : `Falha inesperada ao higienizar SVG: ${err instanceof Error ? err.message : String(err)}`;
+      port.postMessage({ id: job.id, ok: false, message } satisfies WorkerResponse);
+    }
+  });
 }

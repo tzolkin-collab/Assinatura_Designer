@@ -55,7 +55,7 @@ assetsRouter.post('/', requireBrandRole(EDITORS), upload.single('file'), async (
     // O Content-Type que o cliente declara não manda: SVG é higienizado e sai como
     // image/svg+xml mesmo se veio como text/html; HTML de verdade vira download.
     // SVG inválido lança InvalidSvgError → 400 pelo errorHandler.
-    const prepared = prepareStorableFile({ buffer: file.buffer, fileName: file.originalname, mimeType: file.mimetype });
+    const prepared = await prepareStorableFile({ buffer: file.buffer, fileName: file.originalname, mimeType: file.mimetype });
 
     // Dimensões: sem elas o editor não sabe a proporção e insere a imagem esticada
     // num quadrado. Falha de leitura não impede o upload (pode ser SVG/fonte).
@@ -119,9 +119,9 @@ assetsRouter.post('/import-base64', requireBrandRole(EDITORS), async (req: Brand
 
       // Mesma regra do upload direto. Aqui um SVG inválido só tira ESTE item do lote
       // (como base64 inválido), em vez de derrubar os outros.
-      let prepared: ReturnType<typeof prepareStorableFile>;
+      let prepared: Awaited<ReturnType<typeof prepareStorableFile>>;
       try {
-        prepared = prepareStorableFile({ buffer, fileName: att.name, mimeType: att.mimeType });
+        prepared = await prepareStorableFile({ buffer, fileName: att.name, mimeType: att.mimeType });
       } catch (err) {
         if (err instanceof InvalidSvgError) {
           console.warn(`[Assets] import-base64: "${att.name}" ignorado — ${err.message}`);

@@ -46,7 +46,7 @@ export async function uploadFileToR2(
 ): Promise<string> {
   assertR2Configured();
 
-  const prepared = prepareStorableFile({ buffer, fileName, mimeType });
+  const prepared = await prepareStorableFile({ buffer, fileName, mimeType });
 
   // Garante um nome de arquivo único para não sobrescrever
   const uniqueId = crypto.randomUUID();

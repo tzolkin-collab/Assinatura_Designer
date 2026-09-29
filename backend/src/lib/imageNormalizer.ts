@@ -93,7 +93,7 @@ export async function normalizeImage(
   let processBuffer = buffer;
   // O sharp decide o formato pelos BYTES, não pelo mime declarado: um SVG mandado como
   // image/png escaparia da regra `sanitize` e seria rasterizado sem limpeza.
-  if (rule.sanitize || looksLikeSvg(buffer)) processBuffer = sanitizeSvg(buffer).buffer;
+  if (rule.sanitize || looksLikeSvg(buffer)) processBuffer = (await sanitizeSvg(buffer)).buffer;
 
   const maxDim = options.maxDimension ?? MAX_DIMENSION;
 

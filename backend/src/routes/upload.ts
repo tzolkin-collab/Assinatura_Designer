@@ -69,7 +69,7 @@ uploadRouter.post('/', requireAuth, upload.single('file'), async (req: AuthReque
 
     // Rota genérica = mais fácil de abusar: o cliente escolhe nome e Content-Type.
     // SVG sai higienizado como image/svg+xml; HTML vira download (ver svgSanitize.ts).
-    const prepared = prepareStorableFile({ buffer: file.buffer, fileName: file.originalname, mimeType: file.mimetype });
+    const prepared = await prepareStorableFile({ buffer: file.buffer, fileName: file.originalname, mimeType: file.mimetype });
 
     const url = await uploadFileToR2(
       prepared.buffer,

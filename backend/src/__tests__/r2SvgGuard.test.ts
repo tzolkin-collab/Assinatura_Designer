@@ -62,7 +62,7 @@ describe('uploadFileToR2 — guarda de SVG/HTML', () => {
   });
 
   it('SVG já higienizado pela rota não é reprocessado (mesmo buffer segue ao S3)', async () => {
-    const limpo = sanitizeSvg(SVG_SUJO).buffer;
+    const limpo = (await sanitizeSvg(SVG_SUJO)).buffer;
     await uploadFileToR2(limpo, 'a.svg', 'image/svg+xml');
     expect(ultimoPut().Body).toBe(limpo);
   });

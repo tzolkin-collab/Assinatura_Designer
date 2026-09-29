@@ -11,6 +11,7 @@ import {
   MAX_SVG_BYTES,
   MAX_SVG_ELEMENTS,
   MAX_CSS_BYTES,
+  SANITIZE_WORKER_TIMEOUT_MS,
 } from '../lib/svgSanitize';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -108,24 +109,24 @@ describe('sanitizeSvg — payloads de XSS neutralizados', () => {
   ];
 
   for (const [nome, payload] of [...ANOTACAO_0208, ...OUTROS]) {
-    it(`neutraliza: ${nome}`, () => {
-      const r = sanitizeSvg(payload);
+    it(`neutraliza: ${nome}`, async () => {
+      const r = await sanitizeSvg(payload);
       assertNeutro(r.svg);
       // O buffer devolvido é exatamente o texto (é ele que vai ao R2).
       expect(r.buffer.toString('utf-8')).toBe(r.svg);
     });
   }
 
-  it('os três bypasses da anotação de 02/08 saem sem script nem onload no texto final', () => {
+  it('os três bypasses da anotação de 02/08 saem sem script nem onload no texto final', async () => {
     for (const [, payload] of ANOTACAO_0208) {
-      const { svg } = sanitizeSvg(payload);
+      const { svg } = await sanitizeSvg(payload);
       expect(svg).not.toMatch(/<script/i);
       expect(svg).not.toMatch(/onload/i);
     }
   });
 
-  it('relata o que removeu', () => {
-    const { removed } = sanitizeSvg(`<svg ${XMLNS} onload=alert(1)><script>alert(1)</script><a href="javascript:alert(1)"><text>x</text></a></svg>`);
+  it('relata o que removeu', async () => {
+    const { removed } = await sanitizeSvg(`<svg ${XMLNS} onload=alert(1)><script>alert(1)</script><a href="javascript:alert(1)"><text>x</text></a></svg>`);
     const nomes = removed.map((r) => r.name.toLowerCase()).join(' | ');
     expect(nomes).toContain('script');
     expect(nomes).toContain('onload');
@@ -133,14 +134,14 @@ describe('sanitizeSvg — payloads de XSS neutralizados', () => {
     expect(removed.length).toBeGreaterThanOrEqual(3);
   });
 
-  it('@import removido mas o resto do CSS do <style> continua', () => {
-    const { svg } = sanitizeSvg(`<svg ${XMLNS}><style>@import url("https://evil.example/x.css"); .a{fill:red}</style><rect class="a" width="10" height="10"/></svg>`);
+  it('@import removido mas o resto do CSS do <style> continua', async () => {
+    const { svg } = await sanitizeSvg(`<svg ${XMLNS}><style>@import url("https://evil.example/x.css"); .a{fill:red}</style><rect class="a" width="10" height="10"/></svg>`);
     const doc = assertNeutro(svg);
     expect(doc.getElementsByTagName('style')[0]!.textContent).toContain('.a{fill:red}');
   });
 
-  it('use interno (#id) é mantido; use externo perde só o href', () => {
-    const { svg } = sanitizeSvg(`<svg ${XMLNS} ${XLINK}><defs><g id="m"><rect width="5" height="5"/></g></defs><use href="#m"/><use xlink:href="#m"/><use href="https://evil.example/x.svg#m"/></svg>`);
+  it('use interno (#id) é mantido; use externo perde só o href', async () => {
+    const { svg } = await sanitizeSvg(`<svg ${XMLNS} ${XLINK}><defs><g id="m"><rect width="5" height="5"/></g></defs><use href="#m"/><use xlink:href="#m"/><use href="https://evil.example/x.svg#m"/></svg>`);
     const doc = parseXml(svg);
     const uses = Array.from(doc.getElementsByTagName('use'));
     expect(uses).toHaveLength(3);
@@ -151,7 +152,7 @@ describe('sanitizeSvg — payloads de XSS neutralizados', () => {
 });
 
 describe('sanitizeSvg — entradas que não são SVG', () => {
-  it('lança InvalidSvgError (tipado) quando não sobra raiz <svg>', () => {
+  it('lança InvalidSvgError (tipado) quando não sobra raiz <svg>', async () => {
     for (const lixo of [
       '<html><body><script>alert(1)</script></body></html>',
       '<script><svg></script>',
@@ -159,13 +160,13 @@ describe('sanitizeSvg — entradas que não são SVG', () => {
       '',
       '<foreignObject><svg/></foreignObject>',
     ]) {
-      expect(() => sanitizeSvg(lixo), lixo).toThrow(InvalidSvgError);
+      await expect(sanitizeSvg(lixo), lixo).rejects.toThrow(InvalidSvgError);
     }
   });
 
-  it('o erro carrega code INVALID_SVG para o errorHandler decidir o HTTP', () => {
+  it('o erro carrega code INVALID_SVG para o errorHandler decidir o HTTP', async () => {
     try {
-      sanitizeSvg('nada');
+      await sanitizeSvg('nada');
       expect.unreachable();
     } catch (e) {
       expect(e).toBeInstanceOf(InvalidSvgError);
@@ -173,14 +174,15 @@ describe('sanitizeSvg — entradas que não são SVG', () => {
     }
   });
 
-  it('recusa binário/UTF-16 (NUL no conteúdo) em vez de decodificar como lixo', () => {
+  it('recusa binário/UTF-16 (NUL no conteúdo) em vez de decodificar como lixo', async () => {
     const utf16 = Buffer.from(`<svg ${XMLNS} onload="alert(1)"></svg>`, 'utf16le');
-    expect(() => sanitizeSvg(utf16)).toThrow(InvalidSvgError);
+    await expect(sanitizeSvg(utf16)).rejects.toThrow(InvalidSvgError);
   });
 
-  it('aceita Buffer com BOM UTF-8', () => {
+  it('aceita Buffer com BOM UTF-8', async () => {
     const buf = Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(`<svg ${XMLNS} viewBox="0 0 1 1"><rect width="1" height="1"/></svg>`)]);
-    expect(parseXml(sanitizeSvg(buf).svg).documentElement.getAttribute('viewBox')).toBe('0 0 1 1');
+    const { svg } = await sanitizeSvg(buf);
+    expect(parseXml(svg).documentElement.getAttribute('viewBox')).toBe('0 0 1 1');
   });
 });
 
@@ -237,19 +239,21 @@ function descrever(node: Element, prof = 0): string[] {
 }
 
 describe('sanitizeSvg — conteúdo legítimo de brandbook sai semanticamente intacto', () => {
-  const entrada = parseXml(LOGO_BRANDBOOK);
-  const { svg, removed } = sanitizeSvg(LOGO_BRANDBOOK);
-  const saida = parseXml(svg);
-
-  it('mesma árvore de elementos, atributos e textos (compara estrutura, não a string)', () => {
+  it('mesma árvore de elementos, atributos e textos (compara estrutura, não a string)', async () => {
+    const entrada = parseXml(LOGO_BRANDBOOK);
+    const { svg } = await sanitizeSvg(LOGO_BRANDBOOK);
+    const saida = parseXml(svg);
     expect(descrever(saida.documentElement)).toEqual(descrever(entrada.documentElement));
   });
 
-  it('não relata nada como removido', () => {
+  it('não relata nada como removido', async () => {
+    const { removed } = await sanitizeSvg(LOGO_BRANDBOOK);
     expect(removed).toEqual([]);
   });
 
-  it('mantém viewBox, preserveAspectRatio, namespaces e ids', () => {
+  it('mantém viewBox, preserveAspectRatio, namespaces e ids', async () => {
+    const { svg } = await sanitizeSvg(LOGO_BRANDBOOK);
+    const saida = parseXml(svg);
     const root = saida.documentElement;
     expect(root.getAttribute('viewBox')).toBe('0 0 240 80');
     expect(root.getAttribute('preserveAspectRatio')).toBe('xMidYMid meet');
@@ -260,7 +264,9 @@ describe('sanitizeSvg — conteúdo legítimo de brandbook sai semanticamente in
     }
   });
 
-  it('preserva o CSS interno e o raster embutido em base64', () => {
+  it('preserva o CSS interno e o raster embutido em base64', async () => {
+    const { svg } = await sanitizeSvg(LOGO_BRANDBOOK);
+    const saida = parseXml(svg);
     const css = saida.getElementsByTagName('style')[0]!.textContent ?? '';
     expect(css).toContain('.st0{fill:url(#grad1);}');
     expect(css).toContain("'Monument Extended'");
@@ -269,24 +275,29 @@ describe('sanitizeSvg — conteúdo legítimo de brandbook sai semanticamente in
     expect(img.getAttributeNS('http://www.w3.org/1999/xlink', 'href')).toBe(`data:image/png;base64,${PNG_1x1}`);
   });
 
-  it('o espaço não separável não vira &nbsp; (entidade inexistente em XML)', () => {
+  it('o espaço não separável não vira &nbsp; (entidade inexistente em XML)', async () => {
+    const { svg } = await sanitizeSvg(LOGO_BRANDBOOK);
+    const saida = parseXml(svg);
     expect(svg).not.toContain('&nbsp;');
     expect(saida.getElementsByTagName('text')[0]!.textContent).toContain(String.fromCharCode(0xa0) + 'NATURA');
   });
 
   it('continua rasterizável pelo sharp (é o que o pipeline faz depois)', async () => {
+    const { svg } = await sanitizeSvg(LOGO_BRANDBOOK);
     const png = await sharp(Buffer.from(svg), { failOnError: false }).png().toBuffer();
     const meta = await sharp(png).metadata();
     expect(meta.format).toBe('png');
     expect(meta.width).toBeGreaterThan(0);
   });
 
-  it('é idempotente: sanitizar o resultado devolve o mesmo SVG', () => {
-    expect(sanitizeSvg(svg).svg).toBe(svg);
+  it('é idempotente: sanitizar o resultado devolve o mesmo SVG', async () => {
+    const { svg } = await sanitizeSvg(LOGO_BRANDBOOK);
+    const outra = await sanitizeSvg(svg);
+    expect(outra.svg).toBe(svg);
   });
 
-  it('SVG mínimo sem xmlns declarado sai com o namespace correto (senão o browser não renderiza)', () => {
-    const r = sanitizeSvg('<svg viewBox="0 0 10 10"><circle cx="5" cy="5" r="4"/></svg>');
+  it('SVG mínimo sem xmlns declarado sai com o namespace correto (senão o browser não renderiza)', async () => {
+    const r = await sanitizeSvg('<svg viewBox="0 0 10 10"><circle cx="5" cy="5" r="4"/></svg>');
     expect(r.svg).toContain('xmlns="http://www.w3.org/2000/svg"');
   });
 });
@@ -318,26 +329,35 @@ describe('sanitizeCss', () => {
 });
 
 // ── Regressão de desempenho: DoS síncrono no event loop ─────────────────────────
-// Uma revisão adversarial (lente "robustez") mediu, contra o código ANTES desta
-// correção: aninhamento profundo de <g> — 1000 níveis (3KB)=307ms, 10000 (30KB)=13s,
-// 50000 (150KB)=35s; e ReDoS nos regex de CSS — @import repetido sem ";" antes de "{":
-// 16KB=150ms, 32KB=228ms, 64KB=911ms, 256KB=13,6s (dobrar o tamanho QUADRUPLICAVA o
-// tempo); o mesmo padrão em url( sem fechar, url(" sem fechar e image-set( sem fechar.
-// O teto abaixo (TETO_MS) é generoso o bastante para não ser "flaky" em CI sob CPU
-// concorrente, mas teria pegado qualquer um destes casos ANTES da correção (13 a 35s).
-describe('sanitizeSvg — regressão de desempenho (DoS síncrono)', () => {
-  // 3000ms é generoso o bastante para não "piscar" sob CPU concorrente (a suíte inteira
-  // roda dezenas de arquivos de teste em paralelo) e continua de 4x a 10x abaixo dos
-  // 13-35s medidos ANTES da correção — a diferença que importa é ordem de grandeza, não
-  // o segundo exato.
-  const TETO_MS = 3000;
+// Duas rodadas de revisão adversarial mediram, contra o código ANTES desta correção:
+// aninhamento profundo de <g> — 1000 níveis (3KB)=307ms, 10000 (30KB)=13s, 50000
+// (150KB)=35s; ReDoS nos regex de CSS — @import repetido sem ";" antes de "{":
+// 16KB=150ms, 32KB=228ms, 64KB=911ms, 256KB=13,6s; e, numa SEGUNDA rodada, mais 4
+// bypasses do preflightCheck (ver describe abaixo) que também levavam de 2 a 18s.
+//
+// A partir desta rodada, sanitizeSvg roda a sanitização inteira (preflightCheck +
+// jsdom + DOMPurify + enforce) dentro de um worker_threads com um teto de parede
+// (SANITIZE_WORKER_TIMEOUT_MS) — ver o comentário em svgSanitize.ts. Isto significa
+// que NENHUM destes testes de tempo pode mais assumir execução síncrona no mesmo
+// thread: o teto que importa agora é "a chamada termina bem antes dos 2-18s que
+// travavam antes", não mais "em X milissegundos exatos" — por isso os antigos tetos
+// (300/500/1000ms, calibrados pra execução síncrona em processo) foram trocados por um
+// teto generoso (poucos segundos, cobrindo o overhead real de spawn/mensagem do
+// worker) que ainda assim continua de 1 a 2 ordens de grandeza abaixo dos 2-18s
+// medidos.
+describe('sanitizeSvg — regressão de desempenho (DoS síncrono, agora limitado pelo worker)', () => {
+  // Generoso o bastante pra não ser "flaky" em CI sob CPU concorrente (a suíte roda
+  // dezenas de arquivos de teste em paralelo) e ainda cobre o overhead real de subir/
+  // reaproveitar o worker — mas continua bem abaixo dos 13-35s medidos ANTES da
+  // correção original e é o mesmo tipo de teto que o timeout do worker impõe agora.
+  const TETO_MS = 5000;
   const XMLNS = 'xmlns="http://www.w3.org/2000/svg"';
 
   /** Tempo real com Date.now() antes/depois — sem fake timers, é o event loop de verdade. */
-  function medir<T>(fn: () => T): { ms: number; resultado?: T; erro?: unknown } {
+  async function medir<T>(fn: () => Promise<T>): Promise<{ ms: number; resultado?: T; erro?: unknown }> {
     const t0 = Date.now();
     try {
-      const resultado = fn();
+      const resultado = await fn();
       return { ms: Date.now() - t0, resultado };
     } catch (erro) {
       return { ms: Date.now() - t0, erro };
@@ -348,47 +368,47 @@ describe('sanitizeSvg — regressão de desempenho (DoS síncrono)', () => {
     return `<svg ${XMLNS}><style>${css}</style><rect width="1" height="1"/></svg>`;
   }
 
-  it('aninhamento profundo (<g> repetido) — preflight rejeita em O(n), não processa a árvore', () => {
-    const n = 50_000; // a mesma escala que levava ~35s antes da correção.
+  it('aninhamento profundo (<g> repetido) — preflight (dentro do worker) rejeita rápido, não processa a árvore', async () => {
+    const n = 50_000; // a mesma escala que levava ~35s antes da correção original.
     const payload = `<svg ${XMLNS}>${'<g>'.repeat(n)}${'</g>'.repeat(n)}</svg>`;
 
-    const { ms, erro } = medir(() => sanitizeSvg(payload));
+    const { ms, erro } = await medir(() => sanitizeSvg(payload));
 
     expect(erro).toBeInstanceOf(InvalidSvgError);
     expect((erro as InvalidSvgError).code).toBe('INVALID_SVG');
     expect(ms, `levou ${ms}ms (teto ${TETO_MS}ms)`).toBeLessThan(TETO_MS);
-  });
+  }, 10_000);
 
-  it('@import sem ";" repetido (ReDoS) — tempo não cresce quadraticamente com o tamanho', () => {
+  it('@import sem ";" repetido (ReDoS) — tempo não cresce quadraticamente com o tamanho', async () => {
     const alvo = 256 * 1024; // escala do pior caso medido (256KB = 13,6s antes).
     const css = `${'@import '.repeat(Math.ceil(alvo / 8))}{`;
-    const { ms } = medir(() => sanitizeSvg(svgComStyle(css)));
+    const { ms } = await medir(() => sanitizeSvg(svgComStyle(css)));
     expect(ms, `levou ${ms}ms (teto ${TETO_MS}ms)`).toBeLessThan(TETO_MS);
-  });
+  }, 10_000);
 
-  it('url( sem fechar, repetido — tempo não cresce quadraticamente com o tamanho', () => {
+  it('url( sem fechar, repetido — tempo não cresce quadraticamente com o tamanho', async () => {
     // "url(" tem só 4 bytes por ocorrência (contra 8 do "@import "), então o mesmo
     // orçamento de bytes gera o dobro de ocorrências adversariais; 128KB aqui já mantém
     // o número de ocorrências (e o custo total) na mesma ordem dos outros casos.
     const alvo = 128 * 1024;
     const css = 'url('.repeat(Math.ceil(alvo / 4));
-    const { ms } = medir(() => sanitizeSvg(svgComStyle(css)));
+    const { ms } = await medir(() => sanitizeSvg(svgComStyle(css)));
     expect(ms, `levou ${ms}ms (teto ${TETO_MS}ms)`).toBeLessThan(TETO_MS);
-  });
+  }, 10_000);
 
-  it('url(" sem fechar, repetido — tempo não cresce quadraticamente com o tamanho', () => {
+  it('url(" sem fechar, repetido — tempo não cresce quadraticamente com o tamanho', async () => {
     const alvo = 128 * 1024;
     const css = 'url("'.repeat(Math.ceil(alvo / 5));
-    const { ms } = medir(() => sanitizeSvg(svgComStyle(css)));
+    const { ms } = await medir(() => sanitizeSvg(svgComStyle(css)));
     expect(ms, `levou ${ms}ms (teto ${TETO_MS}ms)`).toBeLessThan(TETO_MS);
-  });
+  }, 10_000);
 
-  it('image-set( sem fechar, repetido — tempo não cresce quadraticamente com o tamanho', () => {
+  it('image-set( sem fechar, repetido — tempo não cresce quadraticamente com o tamanho', async () => {
     const alvo = 256 * 1024;
     const css = 'image-set('.repeat(Math.ceil(alvo / 10));
-    const { ms } = medir(() => sanitizeSvg(svgComStyle(css)));
+    const { ms } = await medir(() => sanitizeSvg(svgComStyle(css)));
     expect(ms, `levou ${ms}ms (teto ${TETO_MS}ms)`).toBeLessThan(TETO_MS);
-  });
+  }, 10_000);
 
   it('MAX_SVG_DEPTH e MAX_SVG_BYTES são exportados para calibrar estes testes', () => {
     expect(MAX_SVG_DEPTH).toBeGreaterThan(0);
@@ -396,7 +416,7 @@ describe('sanitizeSvg — regressão de desempenho (DoS síncrono)', () => {
   });
 });
 
-// ── Regressão: bypasses do preflight fechados nesta rodada (revisão adversarial) ──
+// ── Regressão: bypasses do preflight (2ª rodada de revisão adversarial) ─────────
 // Uma revisão independente achou 4 furos concretos no preflightCheck da rodada
 // anterior: (1) qualquer "/>" era tratado como self-closing, mesmo fora de foreign
 // content, onde o parser HTML5 de verdade IGNORA a barra num elemento comum; (2) o
@@ -405,18 +425,20 @@ describe('sanitizeSvg — regressão de desempenho (DoS síncrono)', () => {
 // perto do teto de bytes do arquivo (2MB) ainda custava dezenas de segundos síncronos
 // mesmo com o lookahead limitado do stripCss; (4) só profundidade era limitada, não a
 // quantidade total de elementos (um SVG raso com dezenas de milhares de irmãos passava
-// batido). Os 4 têm PoC reproduzido contra o código anterior a esta rodada.
-describe('sanitizeSvg — bypasses do preflight fechados nesta rodada (revisão adversarial)', () => {
+// batido). Os 4 têm PoC reproduzido contra o código anterior a esta rodada, e (1)-(4)
+// seguem cobertos abaixo com sanitizeSvg async (preflightCheck agora roda dentro do
+// worker, mas a lógica dos testes não muda).
+describe('sanitizeSvg — bypasses do preflight fechados na 2ª rodada (revisão adversarial)', () => {
   const XMLNS_LOCAL = 'xmlns="http://www.w3.org/2000/svg"';
 
-  it('(1) <div/> fora do svg não se autofecha de verdade — profundidade real é detectada mesmo antes da raiz <svg>', () => {
+  it('(1) <div/> fora do svg não se autofecha de verdade — profundidade real é detectada mesmo antes da raiz <svg>', async () => {
     // Fora de foreign content, "/>" num elemento HTML comum é ruído pro parser real:
     // a tag abre e tudo que vem depois fica aninhado nela, como <div> sem a barra.
     const n = MAX_SVG_DEPTH + 50;
     const payload = '<div/>'.repeat(n) + `<svg ${XMLNS_LOCAL}><rect width="1" height="1"/></svg>`;
     let erro: unknown;
     try {
-      sanitizeSvg(payload);
+      await sanitizeSvg(payload);
     } catch (e) {
       erro = e;
     }
@@ -424,18 +446,18 @@ describe('sanitizeSvg — bypasses do preflight fechados nesta rodada (revisão 
     expect((erro as InvalidSvgError).message).toContain('profundidade');
   });
 
-  it('(1-controle) void element HTML (<br/>) e self-closing DENTRO do <svg> continuam sem contar como aninhamento', () => {
+  it('(1-controle) void element HTML (<br/>) e self-closing DENTRO do <svg> continuam sem contar como aninhamento', async () => {
     // <br> nunca tem filho de verdade, com ou sem barra — não pode virar falso positivo.
     const n = MAX_SVG_DEPTH + 50;
     const soBr = '<br/>'.repeat(n) + `<svg ${XMLNS_LOCAL}><rect width="1" height="1"/></svg>`;
-    expect(() => sanitizeSvg(soBr)).not.toThrow();
+    await expect(sanitizeSvg(soBr)).resolves.toBeDefined();
 
     // <rect/> dentro da raiz <svg> é self-closing de verdade (foreign content real).
     const irmaosNoSvg = `<svg ${XMLNS_LOCAL}>${'<rect width="1" height="1"/>'.repeat(100)}</svg>`;
-    expect(() => sanitizeSvg(irmaosNoSvg)).not.toThrow();
+    await expect(sanitizeSvg(irmaosNoSvg)).resolves.toBeDefined();
   });
 
-  it('(2) fechamento cujo nome não corresponde a nada aberto (</b> sem <b>) não desempilha o <g> real', () => {
+  it('(2) fechamento cujo nome não corresponde a nada aberto (</b> sem <b>) não desempilha o <g> real', async () => {
     // Cada par <g></b> subia e descia um contador cego sem nunca estourar o teto,
     // enquanto os <g> ficavam genuinamente empilhados na árvore que o jsdom monta —
     // </b> nunca fecha <g>, só um <b> que nunca foi aberto.
@@ -443,7 +465,7 @@ describe('sanitizeSvg — bypasses do preflight fechados nesta rodada (revisão 
     const payload = `<svg ${XMLNS_LOCAL}>${'<g></b>'.repeat(n)}</svg>`;
     let erro: unknown;
     try {
-      sanitizeSvg(payload);
+      await sanitizeSvg(payload);
     } catch (e) {
       erro = e;
     }
@@ -451,57 +473,57 @@ describe('sanitizeSvg — bypasses do preflight fechados nesta rodada (revisão 
     expect((erro as InvalidSvgError).message).toContain('profundidade');
   });
 
-  it('(2) reproduz a escala do PoC relatado (50.000 pares <g></b>) e rejeita rápido, não em dezenas de segundos', () => {
+  it('(2) reproduz a escala do PoC relatado (50.000 pares <g></b>) e rejeita rápido, não em dezenas de segundos', async () => {
     const n = 50_000;
     const payload = `<svg ${XMLNS_LOCAL}>${'<g></b>'.repeat(n)}</svg>`;
     const t0 = Date.now();
-    expect(() => sanitizeSvg(payload)).toThrow(InvalidSvgError);
-    expect(Date.now() - t0).toBeLessThan(1000);
-  });
+    await expect(sanitizeSvg(payload)).rejects.toThrow(InvalidSvgError);
+    expect(Date.now() - t0).toBeLessThan(4000);
+  }, 10_000);
 
-  it('(2-controle) fechamento com nome correto (<g></g> bem casado) continua desempilhando normalmente', () => {
+  it('(2-controle) fechamento com nome correto (<g></g> bem casado) continua desempilhando normalmente', async () => {
     const n = 100;
     const payload = `<svg ${XMLNS_LOCAL}>${'<g>'.repeat(n)}${'</g>'.repeat(n)}</svg>`;
-    expect(() => sanitizeSvg(payload)).not.toThrow();
+    await expect(sanitizeSvg(payload)).resolves.toBeDefined();
   });
 
-  it('(3) CSS agregado (<style> + style="") acima do teto é rejeitado em O(n), antes do regex caro do stripCss rodar', () => {
+  it('(3) CSS agregado (<style> + style="") acima do teto é rejeitado, antes do regex caro do stripCss rodar', async () => {
     const css = 'url('.repeat(Math.ceil((MAX_CSS_BYTES + 4096) / 4));
     const payload = `<svg ${XMLNS_LOCAL}><style>${css}</style><rect width="1" height="1"/></svg>`;
     const t0 = Date.now();
-    expect(() => sanitizeSvg(payload)).toThrow(InvalidSvgError);
-    expect(Date.now() - t0, 'preflight deve rejeitar em milissegundos, não segundos').toBeLessThan(300);
-  });
+    await expect(sanitizeSvg(payload)).rejects.toThrow(InvalidSvgError);
+    expect(Date.now() - t0, 'deve rejeitar rápido, não em segundos').toBeLessThan(2000);
+  }, 10_000);
 
-  it('(3) reproduz a escala do PoC relatado: CSS quase do tamanho do teto de bytes do arquivo (2MB) não trava mais o event loop por 10s+', () => {
+  it('(3) reproduz a escala do PoC relatado: CSS quase do tamanho do teto de bytes do arquivo (2MB) não trava mais o event loop por 10s+', async () => {
     const alvo = MAX_SVG_BYTES - 2000; // ainda dentro do limite de bytes do arquivo inteiro
     const css = 'url('.repeat(Math.ceil(alvo / 4));
     const payload = `<svg ${XMLNS_LOCAL}><style>${css}</style><rect width="1" height="1"/></svg>`;
     const t0 = Date.now();
-    expect(() => sanitizeSvg(payload)).toThrow(InvalidSvgError);
-    expect(Date.now() - t0, 'antes desta correção isto levava mais de 10s síncronos').toBeLessThan(1000);
-  });
+    await expect(sanitizeSvg(payload)).rejects.toThrow(InvalidSvgError);
+    expect(Date.now() - t0, 'antes desta correção isto levava mais de 10s síncronos').toBeLessThan(4000);
+  }, 10_000);
 
-  it('(3-controle) CSS bem abaixo do teto continua sendo limpo normalmente', () => {
-    const { svg } = sanitizeSvg(`<svg ${XMLNS_LOCAL}><style>.a{fill:red}</style><rect class="a" width="1" height="1"/></svg>`);
+  it('(3-controle) CSS bem abaixo do teto continua sendo limpo normalmente', async () => {
+    const { svg } = await sanitizeSvg(`<svg ${XMLNS_LOCAL}><style>.a{fill:red}</style><rect class="a" width="1" height="1"/></svg>`);
     expect(svg).toContain('.a{fill:red}');
   });
 
-  it('(4) SVG raso com elementos-irmãos acima do teto total é rejeitado em O(n), mesmo com profundidade 1', () => {
+  it('(4) SVG raso com elementos-irmãos acima do teto total é rejeitado, mesmo com profundidade 1', async () => {
     const n = MAX_SVG_ELEMENTS + 1000;
     const payload = `<svg ${XMLNS_LOCAL}>${'<rect width="1" height="1"/>'.repeat(n)}</svg>`;
     const t0 = Date.now();
-    expect(() => sanitizeSvg(payload)).toThrow(InvalidSvgError);
-    expect(Date.now() - t0).toBeLessThan(500);
-  });
+    await expect(sanitizeSvg(payload)).rejects.toThrow(InvalidSvgError);
+    expect(Date.now() - t0).toBeLessThan(2000);
+  }, 10_000);
 
-  it('(4-controle) quantidade de elementos dentro do teto continua passando', () => {
+  it('(4-controle) quantidade de elementos dentro do teto continua passando', async () => {
     const n = 200;
     const payload = `<svg ${XMLNS_LOCAL}>${'<rect width="1" height="1"/>'.repeat(n)}</svg>`;
-    expect(() => sanitizeSvg(payload)).not.toThrow();
+    await expect(sanitizeSvg(payload)).resolves.toBeDefined();
   });
 
-  it('muitas tags <style> pequenas no mesmo documento não degradam quadraticamente (busca do fim de cada uma não copia o restante do texto)', () => {
+  it('muitas tags <style> pequenas no mesmo documento não degradam quadraticamente (busca do fim de cada uma não copia o restante do texto)', async () => {
     // Uma implementação ingênua de "onde <style> termina" via `text.slice(j+1)` +
     // `toLowerCase()` copia o RESTANTE do documento inteiro a cada <style> encontrado —
     // com várias tags <style>, isso vira O(n²). Fica abaixo do teto de elementos
@@ -510,8 +532,92 @@ describe('sanitizeSvg — bypasses do preflight fechados nesta rodada (revisão 
     const umStyle = '<style>.a{fill:red}</style>';
     const payload = `<svg ${XMLNS_LOCAL}>${umStyle.repeat(n)}<rect width="1" height="1"/></svg>`;
     const t0 = Date.now();
-    expect(() => sanitizeSvg(payload)).not.toThrow();
-    expect(Date.now() - t0).toBeLessThan(1000);
+    await expect(sanitizeSvg(payload)).resolves.toBeDefined();
+    expect(Date.now() - t0).toBeLessThan(2000);
+  }, 10_000);
+});
+
+// ── Regressão: worker + timeout torna irrelevante bypass de tokenizer NÃO corrigido
+// (3ª rodada de revisão adversarial) ────────────────────────────────────────────
+// Uma 3ª revisão achou mais 5 bypasses concretos e ainda NÃO corrigidos um a um no
+// preflightCheck — ao contrário das rodadas anteriores, esta rodada NÃO persegue cada
+// um: em vez disso, a função inteira roda num worker com teto de tempo
+// (SANITIZE_WORKER_TIMEOUT_MS), então qualquer um destes bypasses (ou um futuro ainda
+// não descoberto) passa a ser irrelevante do ponto de vista de segurança — o pior caso
+// deixa de ser "trava a API por segundos" e vira "rejeita rápido". Os dois testes
+// abaixo reproduzem dois dos 5 bypasses catalogados (que, sem o worker, levavam
+// segundos síncronos) e medem tempo de parede real (sem fake timers) para provar que o
+// teto de tempo os corta bem antes.
+describe('sanitizeSvg — worker + timeout cobre bypasses de preflight ainda não corrigidos (3ª rodada)', () => {
+  const XMLNS_LOCAL = 'xmlns="http://www.w3.org/2000/svg"';
+  // Generoso o bastante para não ser "flaky" em CI, mas MUITO menor que os 2-18s
+  // medidos pela revisão contra o preflightCheck rodando sem worker/teto.
+  const TETO_COM_OVERHEAD_MS = 4000;
+
+  it('(bypass #2) CDATA tratado como opaco mesmo FORA de uma raiz svg/math: preflight subestima a árvore real, mas o worker corta o tempo', async () => {
+    // O preflight pula de "<![CDATA[" direto até o próximo "]]>" em QUALQUER contexto,
+    // tratando tudo no meio como opaco (nenhuma tag ali conta pra profundidade/
+    // elementos) — mas o parser HTML5 real só reconhece CDATA de verdade DENTRO de
+    // svg/math; fora disso "<![CDATA[" vira um "bogus comment" que termina no primeiro
+    // ">" literal. Como este payload não tem NENHUM svg/math antes, o parser real
+    // fecha o "comentário" já no primeiro "<div>" e processa os milhares de <div>
+    // seguintes como uma árvore genuinamente profunda (nunca fechados) — o mesmo custo
+    // quadrático de poda que o teto de profundidade existe para evitar, só que aqui o
+    // preflight nunca viu nada disso (achou que era tudo opaco).
+    const n = 50_000; // mesma ordem de grandeza dos outros PoCs de profundidade deste arquivo.
+    const payload = `<![CDATA[${'<div>'.repeat(n)}]]><svg ${XMLNS_LOCAL}><rect width="1" height="1"/></svg>`;
+
+    const t0 = Date.now();
+    let concluiu = false;
+    try {
+      await sanitizeSvg(payload);
+      concluiu = true;
+    } catch {
+      concluiu = true; // InvalidSvgError (preflight, teto do worker ou parser) — tanto faz qual: só importa que TERMINOU.
+    }
+    const ms = Date.now() - t0;
+
+    expect(concluiu).toBe(true);
+    expect(ms, `levou ${ms}ms (teto ${TETO_COM_OVERHEAD_MS}ms) — sem o worker, a revisão mediu 2-18s síncronos para este padrão`).toBeLessThan(TETO_COM_OVERHEAD_MS);
+  }, 8_000);
+
+  it('(bypass #4) atributo GENÉRICO (não style=/<style>) com "url(" escapa do teto agregado de CSS e ainda paga o stripCss caro — o worker corta o tempo', async () => {
+    // O teto agregado (MAX_CSS_BYTES) só soma o conteúdo de <style> e o valor de
+    // style="" (`estiloAttrMatch` no preflightCheck procura literalmente pelo nome de
+    // atributo "style"). Um atributo qualquer OUTRO — aqui `data-x` — com "url(" dentro
+    // nunca entra nessa soma, então o preflight nunca dispara `estourouCss()` pra ele.
+    // Mas o `enforce()` (2ª passada) testa "url(" em QUALQUER atributo e, se achar,
+    // roda `stripCss` nele — sem teto agregado, só o lookahead fixo por ocorrência. Com
+    // um único atributo desse tamanho perto do teto de arquivo (2MB), essa passada
+    // sozinha já é cara: a revisão mediu até ~12s perto do teto de arquivo para este
+    // padrão especificamente.
+    const alvo = MAX_SVG_BYTES - 4000; // perto do teto de arquivo, como no PoC relatado.
+    const css = 'url('.repeat(Math.ceil(alvo / 4));
+    const payload = `<svg ${XMLNS_LOCAL}><rect data-x="${css}" width="1" height="1"/></svg>`;
+    expect(Buffer.byteLength(payload, 'utf-8')).toBeLessThan(MAX_SVG_BYTES);
+
+    const t0 = Date.now();
+    let concluiu = false;
+    try {
+      await sanitizeSvg(payload);
+      concluiu = true;
+    } catch {
+      concluiu = true; // InvalidSvgError (preflight, teto do worker ou parser) — só importa que TERMINOU.
+    }
+    const ms = Date.now() - t0;
+
+    expect(concluiu).toBe(true);
+    expect(ms, `levou ${ms}ms (teto ${TETO_COM_OVERHEAD_MS}ms) — sem o worker, a revisão mediu até ~12s síncronos para este padrão`).toBeLessThan(TETO_COM_OVERHEAD_MS);
+  }, 8_000);
+
+  it('SANITIZE_WORKER_TIMEOUT_MS é exportado e positivo, para calibrar estes testes', () => {
+    expect(SANITIZE_WORKER_TIMEOUT_MS).toBeGreaterThan(0);
+  });
+
+  it('(controle) SVG legítimo de brandbook continua passando pelo worker normalmente, dentro do teto, com o mesmo resultado de antes', async () => {
+    const direto = await sanitizeSvg(LOGO_BRANDBOOK);
+    expect(direto.removed).toEqual([]);
+    expect(parseXml(direto.svg).documentElement.getAttribute('viewBox')).toBe('0 0 240 80');
   });
 });
 
@@ -520,50 +626,51 @@ describe('sanitizeSvg — bypasses do preflight fechados nesta rodada (revisão 
 describe('prepareStorableFile', () => {
   const svgSujo = Buffer.from(`<svg ${XMLNS} onload="alert(1)"><script>alert(1)</script><rect width="1" height="1"/></svg>`);
 
-  it('SVG declarado como text/html é tratado como SVG: higienizado e servido como image/svg+xml', () => {
-    const r = prepareStorableFile({ buffer: svgSujo, fileName: 'logo.svg', mimeType: 'text/html' });
+  it('SVG declarado como text/html é tratado como SVG: higienizado e servido como image/svg+xml', async () => {
+    const r = await prepareStorableFile({ buffer: svgSujo, fileName: 'logo.svg', mimeType: 'text/html' });
     expect(r.mimeType).toBe('image/svg+xml');
     assertNeutro(r.buffer.toString('utf-8'));
     expect(r.contentDisposition).toBe('attachment');
   });
 
-  it('SVG disfarçado de octet-stream/sem extensão é descoberto pelo conteúdo', () => {
-    const r = prepareStorableFile({ buffer: svgSujo, fileName: 'arquivo', mimeType: 'application/octet-stream' });
+  it('SVG disfarçado de octet-stream/sem extensão é descoberto pelo conteúdo', async () => {
+    const r = await prepareStorableFile({ buffer: svgSujo, fileName: 'arquivo', mimeType: 'application/octet-stream' });
     expect(r.mimeType).toBe('image/svg+xml');
     assertNeutro(r.buffer.toString('utf-8'));
   });
 
-  it('HTML de verdade nunca sai como text/html: vira download', () => {
+  it('HTML de verdade nunca sai como text/html: vira download', async () => {
     const html = Buffer.from('<html><script>alert(1)</script></html>');
-    const r = prepareStorableFile({ buffer: html, fileName: 'pagina.html', mimeType: 'text/html; charset=utf-8' });
+    const r = await prepareStorableFile({ buffer: html, fileName: 'pagina.html', mimeType: 'text/html; charset=utf-8' });
     expect(r.mimeType).toBe('application/octet-stream');
     expect(r.contentDisposition).toBe('attachment');
     expect(r.buffer).toBe(html);
   });
 
-  it('xml/xhtml também viram download', () => {
+  it('xml/xhtml também viram download', async () => {
     for (const mimeType of ['application/xhtml+xml', 'text/xml', 'application/xml']) {
-      expect(prepareStorableFile({ buffer: Buffer.from('<a/>'), fileName: 'x.xml', mimeType }).mimeType).toBe('application/octet-stream');
+      const r = await prepareStorableFile({ buffer: Buffer.from('<a/>'), fileName: 'x.xml', mimeType });
+      expect(r.mimeType).toBe('application/octet-stream');
     }
   });
 
-  it('raster e outros tipos passam intactos (sem sniff, sem copiar)', () => {
+  it('raster e outros tipos passam intactos (sem sniff, sem copiar)', async () => {
     const png = Buffer.from(PNG_1x1, 'base64');
-    const r = prepareStorableFile({ buffer: png, fileName: 'a.png', mimeType: 'image/png' });
+    const r = await prepareStorableFile({ buffer: png, fileName: 'a.png', mimeType: 'image/png' });
     expect(r.buffer).toBe(png);
     expect(r.mimeType).toBe('image/png');
     expect(r.contentDisposition).toBeUndefined();
-    const pptx = prepareStorableFile({ buffer: Buffer.from('x'), fileName: 'a.pptx', mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' });
+    const pptx = await prepareStorableFile({ buffer: Buffer.from('x'), fileName: 'a.pptx', mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' });
     expect(pptx.mimeType).toContain('presentationml');
   });
 
-  it('arquivo .svg que não é SVG lança InvalidSvgError', () => {
-    expect(() => prepareStorableFile({ buffer: Buffer.from('<html><script>alert(1)</script></html>'), fileName: 'x.svg', mimeType: 'image/svg+xml' })).toThrow(InvalidSvgError);
+  it('arquivo .svg que não é SVG lança InvalidSvgError', async () => {
+    await expect(prepareStorableFile({ buffer: Buffer.from('<html><script>alert(1)</script></html>'), fileName: 'x.svg', mimeType: 'image/svg+xml' })).rejects.toThrow(InvalidSvgError);
   });
 
-  it('buffer já higienizado por sanitizeSvg não é reprocessado', () => {
-    const limpo = sanitizeSvg(svgSujo).buffer;
-    const r = prepareStorableFile({ buffer: limpo, fileName: 'a.svg', mimeType: 'image/svg+xml' });
+  it('buffer já higienizado por sanitizeSvg não é reprocessado', async () => {
+    const limpo = (await sanitizeSvg(svgSujo)).buffer;
+    const r = await prepareStorableFile({ buffer: limpo, fileName: 'a.svg', mimeType: 'image/svg+xml' });
     expect(r.buffer).toBe(limpo);
   });
 

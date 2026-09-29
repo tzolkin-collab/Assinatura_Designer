@@ -17,7 +17,7 @@ export async function uploadChatAttachments(attachments: ChatAttachment[], brand
   await Promise.all(attachments.map(async (a) => {
     try {
       const buffer = Buffer.from(a.dataBase64, 'base64');
-      const prepared = prepareStorableFile({ buffer, fileName: a.name, mimeType: a.mimeType });
+      const prepared = await prepareStorableFile({ buffer, fileName: a.name, mimeType: a.mimeType });
       a.url = await uploadFileToR2(prepared.buffer, a.name, prepared.mimeType, `brands/${brandSlug}/chat-attachments`);
     } catch (err) {
       logger.warn('Falha ao subir anexo do chat pro R2 — segue só com o base64 (sem URL pra geração)', { error: (err as Error).message });

@@ -32,7 +32,7 @@ export async function uploadBase64ToR2(base64Data: string, mimeType: string): Pr
   // image/svg+xml). Este caminho grava direto no S3, então higieniza aqui: SVG limpo e
   // Content-Type fixado, senão seria XSS armazenado no bucket público.
   const inputBuffer = Buffer.from(base64Data, 'base64');
-  const prepared = prepareStorableFile({ buffer: inputBuffer, fileName: 'referencia', mimeType });
+  const prepared = await prepareStorableFile({ buffer: inputBuffer, fileName: 'referencia', mimeType });
   const subtype = prepared.mimeType === 'image/svg+xml' ? 'svg' : (prepared.mimeType.split('/')[1] || 'jpg').replace(/[^a-zA-Z0-9]/g, '');
   const key = `references/${crypto.randomUUID()}.${subtype || 'jpg'}`;
 
