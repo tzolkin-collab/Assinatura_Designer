@@ -6,6 +6,7 @@ import { initWebSocket } from './lib/websocket.js';
 import { startPipelineWorker, startCanvaExportWorker, startDeckExportWorker, startAssetCaptureWorker, closeQueue } from './lib/queue.js';
 import { closeEventBus } from './lib/eventBus.js';
 import { ensureInternalTeamMemberships } from './lib/internalTeam.js';
+import { closeSvgSanitizePool } from './lib/svgSanitize.js';
 
 
 const start = async () => {
@@ -62,6 +63,7 @@ const start = async () => {
     server.close();
     try { await closeQueue(); } catch (err) { console.error('[Server] closeQueue:', err); }
     try { await closeEventBus(); } catch { /* já desconectado */ }
+    try { await closeSvgSanitizePool(); } catch (err) { console.error('[Server] closeSvgSanitizePool:', err); }
     try { await redis.quit(); } catch { /* já desconectado */ }
     process.exit(0);
   };

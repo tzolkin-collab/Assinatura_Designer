@@ -16,42 +16,24 @@
 
 import createDOMPurify, { type WindowLike } from 'dompurify';
 import { JSDOM } from 'jsdom';
-import { Worker, isMainThread, parentPort } from 'node:worker_threads';
+import Piscina, { isWorkerThread } from 'piscina';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
-// Teto BEM abaixo do multer (10MB): uma revisão adversarial (lente "robustez") mediu
-// que árvore funda + CSS adversarial dentro deste teto antigo já travava o event loop
-// por até 35s SÍNCRONO — e todo POST de upload/asset/brandbook/chat passa por aqui. Um
-// brandbook real (mesmo com raster embutido em base64) fica bem abaixo de 2MB; o multer
-// segue aceitando até 10MB no corpo da requisição, mas o que chega aqui é recusado cedo.
+// Teto BEM abaixo do multer (10MB): árvore funda + CSS adversarial dentro deste teto já
+// mediu até 35s de custo (jsdom/DOMPurify) num payload só — e todo POST de upload/asset/
+// brandbook/chat passa por aqui. Um brandbook real (mesmo com raster embutido em
+// base64) fica bem abaixo de 2MB; o multer segue aceitando até 10MB no corpo da
+// requisição, mas o que chega aqui é recusado cedo, sem tokenizar nada.
+//
+// Isto NÃO é a fronteira de segurança contra DoS — é só um atalho de custo (barato,
+// não precisa entender markup) para recusar o óbvio antes de pagar até a serialização
+// pro worker. A fronteira de verdade é o teto de TEMPO do pool piscina, mais abaixo:
+// qualquer payload que passe deste teto de bytes ainda está limitado pelo timeout por
+// tarefa, então nenhuma precisão de tokenização é necessária aqui.
 export const MAX_SVG_BYTES = 2 * 1024 * 1024;
 
-// Profundidade máxima de aninhamento de tags (<svg><g><g>...). Medido: 1000 níveis
-// (3KB) = 307ms; 10000 (30KB) = 13s; 50000 (150KB) = 35s — quadrático, porque a poda de
-// nó do DOMPurify/jsdom caminha a árvore. 256 é generoso para brandbook/ícone real (que
-// raramente passa de 10-15 níveis) e recusa em microssegundos via `preflightCheck`,
-// antes de montar qualquer árvore.
-export const MAX_SVG_DEPTH = 256;
-
-// Teto de elementos TOTAIS no documento — profundidade sozinha não basta. Medido contra
-// o código sem este teto: 20.000 elementos-irmãos rasos (`<rect/>` repetido, ~560KB) =
-// 1,8s; 30.000 (~840KB) = 2,0s; 40.000 (~1,12MB) = 3,1s; 62.914 (~1,68MB, ainda abaixo
-// do teto de bytes) = ~4,9s — tudo com profundidade 1, então MAX_SVG_DEPTH não pega.
-// 5000 é generoso pra um ícone/logo real (dezenas a poucas centenas de elementos) e
-// mantém o pior caso do preflight bem abaixo de 1s.
-export const MAX_SVG_ELEMENTS = 5000;
-
-// Teto para o total de bytes de CSS agregado (soma de todo conteúdo de <style> + todo
-// valor de style="") ANTES de rodar qualquer regex de limpeza sobre eles. O lookahead
-// limitado do stripCss (abaixo) já elimina o crescimento QUADRÁTICO do bug antigo, mas
-// o fator constante do pior caso ("url(" repetido sem fechar) ainda é caro: medido já
-// com o lookahead limitado, 256KB desse CSS = ~1,7s e 512KB = ~3,3s (cresce linear,
-// ~6,6ms/KB) — um <style> ocupando quase o teto inteiro de 2MB (MAX_SVG_BYTES) travaria
-// o event loop por mais de 10s SÍNCRONO, a mesma ordem de grandeza do bug que esta
-// rodada deveria ter eliminado. CSS de brandbook real (cores, fontes, classes) fica na
-// casa de poucos KB; 64KB é folgado e limita o pior caso a ~400ms.
-export const MAX_CSS_BYTES = 64 * 1024;
+const LIMITE_MB = Math.round(MAX_SVG_BYTES / (1024 * 1024));
 
 /**
  * O conteúdo não é um SVG utilizável (sem raiz <svg>, binário, grande demais ou
@@ -334,25 +316,6 @@ function enforce(root: Element, removed: SvgRemoval[]): void {
   }
 }
 
-// ── Preflight (O(n), antes de qualquer árvore) ──────────────────────────────────
-
-// Os únicos 14 void elements do HTML Living Standard: nunca têm filhos de verdade, o
-// parser HTML5 os trata como "auto-fechados" apareça ou não a barra "/>", e um
-// `</br>` solto nunca reabre nada. Fora deste conjunto (e fora de foreign content —
-// ver FOREIGN_ROOTS), a barra final num elemento comum é só ruído: a tag ABRE
-// normalmente e tudo que vier depois fica aninhado dentro dela.
-const VOID_ELEMENTS = new Set([
-  'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
-  'link', 'meta', 'param', 'source', 'track', 'wbr',
-]);
-
-// Raízes que entram em "foreign content" (SVG/MathML). Só dentro delas — ou nelas
-// mesmas — o parser HTML5 realmente honra "/>" para fechar qualquer elemento comum
-// (<rect/>, <g/>...). Fora disso, mesmo com a barra, o elemento abre e aninha.
-const FOREIGN_ROOTS = new Set(['svg', 'math']);
-
-const LIMITE_MB = Math.round(MAX_SVG_BYTES / (1024 * 1024));
-
 function toText(input: string | Buffer): string {
   if (typeof input !== 'string') {
     if (input.length > MAX_SVG_BYTES) throw new InvalidSvgError(`SVG muito grande (limite de ${LIMITE_MB}MB).`);
@@ -365,236 +328,59 @@ function toText(input: string | Buffer): string {
   return semBom(input);
 }
 
-/**
- * Verificação O(n) num único passe pelo texto, ANTES de montar qualquer árvore no
- * jsdom — sem regex custoso sobre o documento inteiro, só um scanner de tags que:
- *  1. empilha o NOME de cada tag realmente aberta (para profundidade e para validar
- *     tag de fechamento por nome — ver abaixo);
- *  2. só considera "/>" self-closing quando a tag é um void element HTML conhecido OU
- *     já estamos dentro de uma raiz <svg>/<math> (foreign content) — replicando a regra
- *     real do parser HTML5 que o jsdom usa. Fora disso, mesmo com a barra, a tag ABRE e
- *     tudo que vier depois fica aninhado nela — era exatamente esse o furo: `<div/>`
- *     repetido antes da raiz <svg> parecia raso pro contador antigo e continuava
- *     genuinamente profundo na árvore real;
- *  3. só desempilha numa tag de fechamento se o NOME bater com algo já aberto (busca a
- *     pilha de cima para baixo, como o algoritmo HTML5 "any other end tag") — sem isso,
- *     `<g></b>` repetido (fechamento que nunca corresponde a nada) decrementava um
- *     contador ingênuo a cada par e nunca estourava o teto, enquanto os `<g>` ficavam
- *     genuinamente empilhados na árvore que o jsdom monta;
- *  4. conta o total de tags de abertura vistas (nunca decrementa) — cobre LARGURA, não
- *     só profundidade: um documento raso com dezenas de milhares de elementos-irmãos
- *     passa batido pelo teto de profundidade mas ainda é caro pra jsdom+DOMPurify+
- *     enforce (que roda duas vezes);
- *  5. soma o total de bytes de CSS (conteúdo de <style> + valor de style="") visto até
- *     agora — o lookahead limitado do stripCss elimina o crescimento quadrático, mas o
- *     fator constante ainda é caro o bastante pra travar o event loop por segundos bem
- *     dentro do teto de 2MB do arquivo inteiro.
- *
- * Existe porque a poda de nó do DOMPurify/jsdom é O(profundidade) por nó tocado (1000
- * níveis de `<g>` = 307ms; 50000 = 35s SÍNCRONO) em toda rota que grava SVG (upload,
- * /assets, brandbook, anexo de chat). Rejeitar aqui custa microssegundos a milissegundos.
- *
- * Não é um parser HTML5 completo (não modela elementos "especiais" que abortam a busca
- * de fechamento mais cedo, nem integration points) — não precisa ser: o pior caso de
- * errar por falta de rigor num markup exótico é subcontar profundidade/largura/CSS, e
- * isso ainda cai no teto de tamanho (MAX_SVG_BYTES) e no try/catch de `sanitizeSvg`. A
- * combinação nome-na-pilha + contador monotônico de largura fecha os bypasses
- * concretos relatados sem precisar reimplementar o algoritmo de árvore de elementos
- * "especiais" do parser inteiro.
- */
-function preflightCheck(text: string): void {
-  const len = text.length;
-  let i = 0;
-
-  // Nomes das tags REALMENTE abertas (não self-closing, não void) — ver ponto 1 acima.
-  const pilha: string[] = [];
-  // Quantas raízes <svg>/<math> abertas de verdade estão na pilha agora.
-  let foreignDepth = 0;
-  // Contagem TOTAL de tags de abertura vistas — nunca decrementa (ponto 4 acima).
-  let totalAberturas = 0;
-  // Soma de bytes de CSS vistos até agora (ponto 5 acima).
-  let cssTotal = 0;
-  // Regex local (não module-level) pra não compartilhar `lastIndex` entre chamadas —
-  // reaproveitada dentro desta única passada via `lastIndex` (ver uso abaixo).
-  const FECHO_STYLE_RE = /<\/style/gi;
-
-  const estourouCss = () => {
-    if (cssTotal > MAX_CSS_BYTES) {
-      throw new InvalidSvgError(`SVG excede o teto de CSS agregado (${Math.round(MAX_CSS_BYTES / 1024)}KB).`);
-    }
-  };
-
-  while (i < len) {
-    const lt = text.indexOf('<', i);
-    if (lt === -1) break;
-    const next = text.charCodeAt(lt + 1);
-
-    if (next === 0x2f /* / */) {
-      // Tag de fechamento: só desempilha se o NOME bater com algo já aberto (ponto 3).
-      const gt = text.indexOf('>', lt + 2);
-      if (gt === -1) break;
-      const nomeFechamentoMatch = /^[^\s/>]*/.exec(text.slice(lt + 2, gt));
-      const nomeFechamento = (nomeFechamentoMatch ? nomeFechamentoMatch[0] : '').toLowerCase();
-      for (let k = pilha.length - 1; k >= 0; k--) {
-        if (pilha[k] === nomeFechamento) {
-          const fechados = pilha.splice(k);
-          for (const nome of fechados) if (FOREIGN_ROOTS.has(nome)) foreignDepth--;
-          break;
-        }
-      }
-      i = gt + 1;
-      continue;
-    }
-
-    if (next === 0x21 /* ! */) {
-      // comentário, CDATA ou DOCTYPE — não é elemento, não conta para profundidade.
-      if (text.startsWith('<!--', lt)) {
-        const end = text.indexOf('-->', lt + 4);
-        i = end === -1 ? len : end + 3;
-      } else if (text.startsWith('<![CDATA[', lt)) {
-        const end = text.indexOf(']]>', lt + 9);
-        i = end === -1 ? len : end + 3;
-      } else {
-        const gt = text.indexOf('>', lt + 2);
-        i = gt === -1 ? len : gt + 1;
-      }
-      continue;
-    }
-
-    if (next === 0x3f /* ? */) {
-      // <?xml version="1.0"?>
-      const end = text.indexOf('?>', lt + 2);
-      i = end === -1 ? len : end + 2;
-      continue;
-    }
-
-    // Tag de abertura ou self-closing: acha o '>' não citado (ignora '>' dentro de um
-    // valor de atributo entre aspas, ex.: title="a > b").
-    let j = lt + 1;
-    let aspas = 0; // 0 = fora de aspas; senão, o código do caractere de aspa aberta.
-    while (j < len) {
-      const c = text.charCodeAt(j);
-      if (aspas) {
-        if (c === aspas) aspas = 0;
-      } else if (c === 0x22 || c === 0x27 /* " ou ' */) {
-        aspas = c;
-      } else if (c === 0x3e /* > */) {
-        break;
-      }
-      j++;
-    }
-    if (j >= len) break; // tag nunca fecha: deixa o jsdom decidir (ou rejeitar) o resto.
-
-    const tagTexto = text.slice(lt + 1, j);
-    const nomeMatch = /^[^\s/>]*/.exec(tagTexto);
-    const nome = (nomeMatch ? nomeMatch[0] : '').toLowerCase();
-    const hasSlash = text.charCodeAt(j - 1) === 0x2f /* '/' logo antes do '>' */;
-
-    totalAberturas++;
-    if (totalAberturas > MAX_SVG_ELEMENTS) {
-      throw new InvalidSvgError(`SVG excede o número máximo de elementos (${MAX_SVG_ELEMENTS}).`);
-    }
-
-    // style="..." custa o mesmo regex caro do stripCss quando `enforce()` rodar; conta
-    // pro teto agregado mesmo fora de um <style> (ponto 5). Regex com classe negada
-    // ([^"]*), sem grupo aninhado repetido — não tem o backtracking catastrófico que
-    // motivou o lookahead limitado do stripCss.
-    const estiloAttrMatch = /\bstyle\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(tagTexto);
-    if (estiloAttrMatch) {
-      cssTotal += (estiloAttrMatch[1] ?? estiloAttrMatch[2] ?? '').length;
-      estourouCss();
-    }
-
-    const ehVoid = VOID_ELEMENTS.has(nome);
-    const emForeignContent = foreignDepth > 0 || FOREIGN_ROOTS.has(nome);
-    const autoFechada = hasSlash && (ehVoid || emForeignContent);
-
-    // <style> é "raw text" em HTML5: o conteúdo NUNCA é tag-parseado, só procurado
-    // literalmente até o primeiro "</style" (nem aspas nem CDATA mudam isso — é
-    // exatamente essa "burrice" que faz o mXSS clássico funcionar, coberto no teste
-    // "mXSS clássico com style e id"). Só entra aqui se não veio self-closed (`<style/>`
-    // de verdade é raro e não tem conteúdo pra pular).
-    if (nome === 'style' && !hasSlash) {
-      // Busca com regex+lastIndex no texto ORIGINAL (não `text.slice(j+1)`): um
-      // documento pode ter até MAX_SVG_ELEMENTS tags <style>, e fatiar+`toLowerCase()`
-      // do restante inteiro a cada uma seria O(tamanho restante) por tag — O(n²) no
-      // total com muitos <style>, o mesmo tipo de custo quadrático que este arquivo
-      // inteiro existe pra eliminar. `exec` com `lastIndex` não copia string nenhuma.
-      FECHO_STYLE_RE.lastIndex = j + 1;
-      const fechoMatch = FECHO_STYLE_RE.exec(text);
-      const fim = fechoMatch ? fechoMatch.index : len;
-      cssTotal += fim - (j + 1);
-      estourouCss();
-      if (fim >= len) { i = len; continue; }
-      const gtFechamento = text.indexOf('>', fim);
-      i = gtFechamento === -1 ? len : gtFechamento + 1;
-      continue;
-    }
-
-    if (!autoFechada) {
-      pilha.push(nome);
-      if (FOREIGN_ROOTS.has(nome)) foreignDepth++;
-      if (pilha.length > MAX_SVG_DEPTH) {
-        throw new InvalidSvgError(`SVG excede a profundidade máxima de aninhamento (${MAX_SVG_DEPTH}).`);
-      }
-    }
-    i = j + 1;
-  }
-}
-
-// ── Worker: teto de TEMPO estrutural para a sanitização inteira ────────────────
+// ── Pool piscina: teto de TEMPO estrutural para a sanitização inteira ──────────
 //
-// Por que existe: duas rodadas de revisão adversarial corrigiram 8 formas diferentes
-// de fazer o preflightCheck (scanner de tags escrito à mão) subestimar profundidade,
-// largura ou custo de CSS — e a cada rodada de patch pontual apareceu UM OU MAIS
-// bypasses NOVOS (o mais recente até num trecho que a rodada anterior tinha acabado de
-// escrever pra fechar o bypass de antes). Em nenhum caso a sanitização ficou insegura
-// (o resultado final sempre foi InvalidSvgError ou conteúdo limpo) — o problema é
-// sempre de TEMPO: com dezenas de KB, bem abaixo do teto de MAX_SVG_BYTES, o
-// preflightCheck ou o jsdom/DOMPurify podem travar o event loop por 2 a 18 segundos
-// SÍNCRONOS. Reimplementar à mão a tokenização adversarial de HTML5/XML tende a nunca
-// convergir por patch pontual — é o problema que navegadores levaram anos e specs
-// enormes para fechar.
+// Por que existe: três rodadas de revisão adversarial corrigiram bypasses cada vez
+// mais sutis num `preflightCheck` que reimplementava à mão a tokenização HTML5 (pilha
+// de nomes, foreign content, CDATA opaco, contagem agregada de CSS) só para rejeitar
+// ANTES de montar a árvore no jsdom. Cada rodada fechou um furo e abriu outro — sinal
+// de que o problema real (parsear HTML5/XML de forma adversarialmente correta) é dos
+// browsers, não de um scanner de uma passada. O preflight morreu (ver mais abaixo,
+// "MAX_SVG_BYTES"): a garantia de segurança agora é estrutural, não por precisão de
+// parsing.
 //
-// Em vez de perseguir bypass por bypass, a função inteira (preflightCheck + jsdom +
-// DOMPurify + enforce) roda dentro de um `worker_threads` Worker com um teto de
-// parede: se estourar, `worker.terminate()` interrompe a V8 NO MEIO de um laço
-// síncrono — é a ÚNICA forma de preemptar JS single-thread, já que nem Promise nem
-// timer conseguem interromper um `while` rodando de verdade — e o chamador recebe o
-// mesmo InvalidSvgError de sempre. Não importa qual dos 5 bypasses catalogados (ou um
-// futuro ainda não descoberto) o payload explora: o pior caso deixa de ser "trava a
-// API por segundos" e vira "rejeita rápido com erro".
+// A função que faz o trabalho pesado de verdade (jsdom + DOMPurify + `enforce()`) roda
+// dentro de um pool `piscina` de worker_threads, com um teto de tempo por tarefa via
+// `AbortSignal`. Ao estourar, piscina mata a thread que está rodando a tarefa
+// (`worker.terminate()` por baixo) — é a ÚNICA forma de preemptar um laço síncrono
+// travado, já que nem Promise nem timer interrompem um `while` rodando de verdade — e o
+// chamador recebe o mesmo InvalidSvgError de sempre. Não importa qual payload
+// adversarial (catalogado ou futuro) explora o parser: o pior caso deixa de ser "trava
+// a API por segundos" e vira "rejeita rápido com erro".
 //
-// Por que 3000ms: brandbook real (mesmo com árvore/CSS grandes) sanitiza na casa de
-// baixos milissegundos — 3s é generoso o bastante para não ser "flaky" sob CPU
-// concorrente — e ainda assim fica bem abaixo dos 2-18s medidos pelos bypasses.
-export const SANITIZE_WORKER_TIMEOUT_MS = 3000;
+// Por que um POOL (>=2 threads) e não um worker único: a rodada anterior usava UM
+// worker persistente com fila manual, e o timer de cada chamada começava no
+// ENFILEIRAMENTO, não no início real do processamento — duas chamadas concorrentes (dois
+// uploads de usuários diferentes) competiam pela mesma fila, e um SVG legítimo e
+// trivial enfileirado atrás de um payload lento era rejeitado por timeout mesmo sem ter
+// custado nada de verdade (bug B1, reproduzido de forma determinística e coberto pelo
+// teste de concorrência abaixo). Com >=2 threads, piscina despacha cada chamada
+// concorrente para uma thread OCIOSA (e cresce o pool sob demanda até `maxThreads`
+// antes de enfileirar) — os dois SVGs rodam em paralelo de verdade, não competem pelo
+// mesmo timer.
+//
+// Por que 5000ms: brandbook real (mesmo com árvore/CSS grandes) sanitiza na casa de
+// baixos milissegundos — 5s é generoso o bastante para não ser "flaky" mesmo sob CPU
+// MUITO concorrente (medido: rodando a suíte inteira em paralelo — dezenas de arquivos
+// de teste, cada um podendo subir suas próprias threads jsdom/piscina — uma tarefa
+// trivial ocasionalmente levou pouco mais de 3s só de espera de escalonamento, sem
+// nenhum trabalho de verdade; 5s absorve essa margem) — e ainda assim fica uma ordem de
+// grandeza abaixo dos 13-35s medidos pelos payloads adversariais catalogados nas
+// rodadas anteriores.
+export const SANITIZE_WORKER_TIMEOUT_MS = 5000;
 
-interface WorkerRequest {
-  id: number;
-  text: string;
-}
-
-type WorkerResponse =
-  | { id: number; ok: true; svg: string; removed: SvgRemoval[] }
-  | { id: number; ok: false; message: string };
-
-interface PendingJob {
-  resolve: (result: { svg: string; removed: SvgRemoval[] }) => void;
-  reject: (err: unknown) => void;
-  timer: ReturnType<typeof setTimeout>;
-}
-
-const pendingJobs = new Map<number, PendingJob>();
-let nextJobId = 1;
-// Worker ÚNICO e reaproveitado entre chamadas (não um por chamada): jsdom é pesado de
-// carregar (é por isso que `getEnv()` acima já é preguiçoso) e subir uma thread nova a
-// cada SVG pagaria esse custo toda vez. Como a sanitização em si já é síncrona dentro
-// da thread (não há paralelismo real a ganhar processando duas ao mesmo tempo), um
-// worker persistente processando mensagens em fila é o "pool simples" pedido, sem
-// dependência nova. Se ele morrer (erro, exit ou terminate() por timeout), a próxima
-// chamada sobe um novo — ver `getWorker`.
-let worker: Worker | null = null;
+// Tamanho do pool: jsdom é pesado de memória (cada thread mantém sua própria janela —
+// ver `getEnv()`), então o pool fica PEQUENO de propósito — não baseado em
+// `os.availableParallelism()` (o padrão do piscina), que em produção poderia subir
+// dezenas de threads jsdom simultâneas. minThreads=2 mantém DUAS threads sempre
+// quentes: é o mínimo pra que duas chamadas concorrentes (o cenário do bug B1) nunca
+// precisem esperar o pool crescer sob demanda — se fosse 1, a segunda chamada
+// concorrente pagaria o custo de subir uma thread nova (spawn + jsdom) na hora exata da
+// corrida. maxThreads=4 é o suficiente pra absorver uma rajada maior de uploads
+// concorrentes sem enfileirar atrás de um payload lento — e ainda deixa memória de
+// sobra para o resto do processo da API.
+const SANITIZE_POOL_MIN_THREADS = 2;
+const SANITIZE_POOL_MAX_THREADS = 4;
 
 /**
  * Sob `tsx watch` (dev) e `vitest` (teste) este arquivo roda como `.ts` — o
@@ -604,79 +390,89 @@ let worker: Worker | null = null;
  * disso quebraria em silêncio se o comando de dev/teste mudasse). Em produção
  * (`dist/lib/svgSanitize.js`, compilado por `tsc`) `__filename` termina em `.js`: o
  * Node carrega nativamente, sem tocar em `tsx` (que nem é dependency de produção).
+ * piscina aceita `execArgv` na configuração do pool e repassa pra cada Worker que cria.
  */
 function buildWorkerExecArgv(): string[] | undefined {
   if (!__filename.endsWith('.ts')) return undefined;
   return [...process.execArgv, '--require', 'tsx/cjs'];
 }
 
-function failAllPending(reason: unknown): void {
-  for (const [id, job] of pendingJobs) {
-    clearTimeout(job.timer);
-    job.reject(reason);
-    pendingJobs.delete(id);
+// Resultado que a tarefa do worker devolve pro pool. Por que NÃO lançar InvalidSvgError
+// direto de dentro da tarefa: `postMessage` entre threads faz structured clone do valor,
+// e um Error (mesmo subclasse) chega do outro lado como um `Error` genérico — perde
+// `instanceof InvalidSvgError`, `.code` e até `.name` (verificado: `structuredClone` de
+// uma subclasse de Error com propriedade própria zera nome e propriedade extra). Por
+// isso a tarefa sempre RESOLVE com este objeto discriminado, e é a thread principal
+// (`sanitizeViaWorker`) que reconstrói o InvalidSvgError de verdade a partir de
+// `message` — exatamente como a rodada anterior já fazia com o Worker manual.
+type WorkerResult =
+  | { ok: true; svg: string; removed: SvgRemoval[] }
+  | { ok: false; message: string };
+
+let pool: Piscina<string, WorkerResult> | null = null;
+
+/**
+ * Cria o pool só na thread principal. `isWorkerThread` é o equivalente do piscina
+ * para o `isMainThread` do `node:worker_threads` que a rodada anterior usava — fica
+ * `true` só dentro das threads do próprio pool, que reexecutam este arquivo do zero
+ * (ver o export default no fim). Sem esta guarda, uma chamada indevida de dentro do
+ * worker criaria um pool NOVO dentro do próprio worker — pool dentro de pool.
+ */
+function getPool(): Piscina<string, WorkerResult> {
+  if (isWorkerThread) {
+    // Defesa em profundidade: nada dentro do worker deveria chamar isto (a tarefa do
+    // worker usa `sanitizeSvgSemProtecao` direto — ver o export default abaixo), mas se
+    // algum código futuro chamar `sanitizeSvg` de dentro de um worker por engano, falha
+    // alto e cedo em vez de criar um pool dentro de outro pool recursivamente.
+    throw new Error('getPool() não deve ser chamado de dentro de um worker thread do próprio pool.');
   }
-}
-
-function spawnWorker(): Worker {
-  const w = new Worker(__filename, { execArgv: buildWorkerExecArgv() });
-
-  w.on('message', (msg: WorkerResponse) => {
-    const job = pendingJobs.get(msg.id);
-    if (!job) return; // já resolvido por timeout — a resposta chegou tarde demais.
-    pendingJobs.delete(msg.id);
-    clearTimeout(job.timer);
-    if (msg.ok) job.resolve({ svg: msg.svg, removed: msg.removed });
-    else job.reject(new InvalidSvgError(msg.message));
-  });
-
-  // Thread morreu (erro não tratado dentro dela, ou encerrou sozinha) fora do fluxo de
-  // timeout normal: falha fechado tudo que estava pendente NESTE worker e força a
-  // próxima chamada a subir um novo (nunca fica "preso" reusando uma thread morta).
-  const onDeath = (detail: string) => {
-    if (worker === w) worker = null;
-    failAllPending(new InvalidSvgError(`Sanitização de SVG interrompida: ${detail}`));
-  };
-  w.on('error', (err) => onDeath(err.message));
-  w.on('exit', (code) => {
-    if (code !== 0) onDeath(`worker de sanitização encerrou com código ${code}`);
-  });
-
-  return w;
-}
-
-function getWorker(): Worker {
-  if (!worker) worker = spawnWorker();
-  return worker;
+  if (!pool) {
+    pool = new Piscina<string, WorkerResult>({
+      filename: __filename,
+      minThreads: SANITIZE_POOL_MIN_THREADS,
+      maxThreads: SANITIZE_POOL_MAX_THREADS,
+      execArgv: buildWorkerExecArgv(),
+    });
+  }
+  return pool;
 }
 
 /**
- * Roda preflightCheck + jsdom + DOMPurify + enforce dentro do worker persistente, com
- * o teto de parede `SANITIZE_WORKER_TIMEOUT_MS`. Ao estourar, mata a thread INTEIRA
- * (não só esta mensagem — não há como interromper só uma mensagem no meio de um laço
- * síncrono) e rejeita com InvalidSvgError; qualquer outra chamada que já estivesse
- * enfileirada NESTE worker morre junto (fail-closed) e vê o mesmo erro — a próxima
- * chamada sobe um worker novo via `getWorker()`.
+ * Encerra o pool de sanitização de SVG. Chamado no shutdown do servidor (ver
+ * server.ts), no mesmo espírito de `closeQueue`/`closeEventBus`: espera as tarefas em
+ * andamento terminarem antes de derrubar as threads. Não faz nada se o pool nunca foi
+ * criado (processo que nunca sanitizou um SVG, ou já encerrado).
  */
-function sanitizeViaWorker(text: string): Promise<{ svg: string; removed: SvgRemoval[] }> {
-  return new Promise((resolve, reject) => {
-    const id = nextJobId++;
-    const w = getWorker();
+export async function closeSvgSanitizePool(): Promise<void> {
+  if (!pool) return;
+  const p = pool;
+  pool = null;
+  await p.close();
+}
 
-    const timer = setTimeout(() => {
-      pendingJobs.delete(id);
-      w.terminate().catch(() => {
-        // best-effort: já estamos rejeitando por timeout de qualquer forma.
-      });
-      reject(new InvalidSvgError(`Sanitização de SVG excedeu o tempo máximo (${SANITIZE_WORKER_TIMEOUT_MS}ms) — recusado por segurança.`));
-    }, SANITIZE_WORKER_TIMEOUT_MS);
-    // Não deixa o timer sozinho manter o processo Node vivo (irrelevante em produção,
-    // mas evita travar `vitest`/scripts que aguardam o event loop esvaziar).
-    timer.unref?.();
-
-    pendingJobs.set(id, { resolve, reject, timer });
-    w.postMessage({ id, text } satisfies WorkerRequest);
-  });
+/**
+ * Roda jsdom + DOMPurify + `enforce()` (a função exportada como default no fim deste
+ * arquivo, que é o que o pool piscina de fato executa em cada worker thread) com o teto
+ * de parede `SANITIZE_WORKER_TIMEOUT_MS`, via `AbortSignal.timeout` — o padrão do
+ * próprio piscina para tarefas canceláveis (ver README: "Cancelable Tasks"). Se a
+ * tarefa já estiver RODANDO quando o sinal dispara, piscina mata a thread inteira (não
+ * há como interromper só uma mensagem no meio de um laço síncrono); se ainda estiver
+ * na fila, só é removida sem gastar uma thread.
+ */
+async function sanitizeViaWorker(text: string): Promise<{ svg: string; removed: SvgRemoval[] }> {
+  let result: WorkerResult;
+  try {
+    result = await getPool().run(text, { signal: AbortSignal.timeout(SANITIZE_WORKER_TIMEOUT_MS) });
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      throw new InvalidSvgError(`Sanitização de SVG excedeu o tempo máximo (${SANITIZE_WORKER_TIMEOUT_MS}ms) — recusado por segurança.`);
+    }
+    // Thread morreu por outro motivo (erro não tratado, exit inesperado etc.): mesma
+    // regra de antes — fail-closed com InvalidSvgError, nunca deixa o erro cru escapar.
+    throw new InvalidSvgError(`Sanitização de SVG interrompida: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  if (!result.ok) throw new InvalidSvgError(result.message);
+  return { svg: result.svg, removed: result.removed };
 }
 
 // ── API ─────────────────────────────────────────────────────────────────────────
@@ -685,12 +481,13 @@ function sanitizeViaWorker(text: string): Promise<{ svg: string; removed: SvgRem
  * Devolve o SVG limpo e a lista do que foi removido. Lança InvalidSvgError se, depois
  * da limpeza, não sobrar uma raiz <svg> bem-formada — se qualquer etapa (inclusive um
  * erro inesperado do jsdom/DOMPurify) não puder garantir que o resultado é seguro — ou
- * se a sanitização (que roda numa thread separada, ver acima) excede o teto de tempo.
+ * se a sanitização (que roda num pool de threads separado, ver acima) excede o teto de
+ * tempo.
  *
- * Assíncrona: o trabalho pesado (preflightCheck + jsdom + DOMPurify + enforce) roda
- * dentro de um `worker_threads` Worker, não neste thread — é o que permite matar a
- * thread (`terminate()`) sem derrubar o processo da API se um payload adversarial
- * travar o parser por tempo demais.
+ * Assíncrona: o trabalho pesado (jsdom + DOMPurify + enforce) roda dentro de um pool
+ * `piscina` de `worker_threads`, não neste thread — é o que permite matar a thread da
+ * tarefa (via `AbortSignal`, sem derrubar as outras tarefas do pool) se um payload
+ * adversarial travar o parser por tempo demais.
  */
 export async function sanitizeSvg(input: string | Buffer): Promise<SanitizeSvgResult> {
   const text = toText(input);
@@ -708,12 +505,12 @@ export async function sanitizeSvg(input: string | Buffer): Promise<SanitizeSvgRe
 }
 
 /**
- * O trabalho pesado de verdade (preflightCheck já rodou antes de chamar isto — ver o
- * handler de worker no fim do arquivo). SEM proteção de tempo própria: quem chama
- * (o handler de worker) é que está dentro da thread que pode ser `terminate()`ada de
- * fora. Devolve só `{ svg, removed }` — não `buffer` — porque o Buffer "de verdade"
- * (o que entra no WeakSet `jaHigienizados`) é construído na thread principal, depois
- * do postMessage; ver o comentário em `sanitizeSvg`.
+ * O trabalho pesado de verdade: jsdom + DOMPurify + `enforce()`. SEM proteção de tempo
+ * própria — quem chama isto (o export default no fim do arquivo, dentro da thread do
+ * pool) é que pode ser `terminate()`ado de fora pelo `AbortSignal` do piscina. Devolve
+ * só `{ svg, removed }` — não `buffer` — porque o Buffer "de verdade" (o que entra no
+ * WeakSet `jaHigienizados`) é construído na thread principal, depois da mensagem
+ * voltar do worker; ver o comentário em `sanitizeSvg`.
  */
 function sanitizeSvgSemProtecao(text: string): { svg: string; removed: SvgRemoval[] } {
   const { window, purify } = getEnv();
@@ -836,38 +633,31 @@ export async function prepareStorableFile(input: { buffer: Buffer; fileName: str
   return { buffer: input.buffer, mimeType: input.mimeType || 'application/octet-stream', removed: [] };
 }
 
-// ── Modo worker: este mesmo arquivo é o script que roda dentro do Worker ───────
+// ── Modo worker: este mesmo arquivo é o script que o pool piscina executa ──────
 //
 // Padrão comum em Node pra não precisar de um segundo arquivo compilado à parte (que
 // teria que existir tanto em `dist/` quanto sob o transform do vitest, com os dois
-// caminhos de resolução sincronizados manualmente): o módulo checa `isMainThread` e,
-// se for a thread filha, vira um processador de mensagens em vez de só exportar a API
-// pública. `new Worker(__filename)` (acima, em `spawnWorker`) reexecuta este arquivo
-// do zero NESTA thread — `isMainThread` é `false` aqui dentro — então tudo acima
-// (`export function`, `export class` etc.) roda de novo, só que ninguém do lado de
-// fora importa esta cópia: só o bloco abaixo importa, o resto é reaproveitado por
-// `preflightCheck`/`sanitizeSvgSemProtecao`/`InvalidSvgError` já estarem no escopo do
-// módulo.
-if (!isMainThread && parentPort) {
-  const port = parentPort;
-  port.on('message', (job: WorkerRequest) => {
-    try {
-      // A MESMA função que corria direto na API antes desta rodada — preflightCheck
-      // primeiro (O(n), rejeita o óbvio rápido), depois jsdom/DOMPurify/enforce. A
-      // diferença é só ONDE ela roda agora: aqui dentro, onde um `terminate()` de fora
-      // consegue interromper no meio, não mais no thread que serve requisições HTTP.
-      preflightCheck(job.text);
-      const { svg, removed } = sanitizeSvgSemProtecao(job.text);
-      port.postMessage({ id: job.id, ok: true, svg, removed } satisfies WorkerResponse);
-    } catch (err) {
-      // Mesma regra de antes: InvalidSvgError passa a mensagem adiante; qualquer outra
-      // coisa (TypeError de remoção, erro interno do jsdom numa árvore patológica que
-      // driblou o preflight etc.) vira o mesmo "não consigo garantir que isto é
-      // seguro" em vez de derrubar a thread sem responder.
-      const message = err instanceof InvalidSvgError
-        ? err.message
-        : `Falha inesperada ao higienizar SVG: ${err instanceof Error ? err.message : String(err)}`;
-      port.postMessage({ id: job.id, ok: false, message } satisfies WorkerResponse);
-    }
-  });
+// caminhos de resolução sincronizados manualmente): `filename: __filename` (em
+// `getPool`, acima) faz o piscina reexecutar este mesmo arquivo do zero DENTRO de cada
+// worker thread e procurar o export default para usar como tarefa. `isWorkerThread` é
+// `true` só aí dentro — é por isso que `getPool` só cria o pool quando ela é `false`
+// (thread principal): sem essa guarda, cada worker tentaria criar seu PRÓPRIO pool
+// recursivamente. Tudo acima (`export function`, `export class` etc.) roda de novo
+// nesta cópia, mas ninguém de fora importa ela — só esta função default é chamada,
+// pelo próprio piscina.
+export default async function sanitizeSvgWorkerTask(text: string): Promise<WorkerResult> {
+  try {
+    const { svg, removed } = sanitizeSvgSemProtecao(text);
+    return { ok: true, svg, removed };
+  } catch (err) {
+    // Mesma regra de antes: InvalidSvgError passa a mensagem adiante; qualquer outra
+    // coisa (TypeError de remoção, erro interno do jsdom numa árvore patológica etc.)
+    // vira o mesmo "não consigo garantir que isto é seguro" em vez de propagar um erro
+    // cru (que o structured clone entre threads desfiguraria de qualquer forma — ver o
+    // comentário em `WorkerResult`).
+    const message = err instanceof InvalidSvgError
+      ? err.message
+      : `Falha inesperada ao higienizar SVG: ${err instanceof Error ? err.message : String(err)}`;
+    return { ok: false, message };
+  }
 }

@@ -7,10 +7,7 @@ import {
   prepareStorableFile,
   looksLikeSvg,
   InvalidSvgError,
-  MAX_SVG_DEPTH,
   MAX_SVG_BYTES,
-  MAX_SVG_ELEMENTS,
-  MAX_CSS_BYTES,
   SANITIZE_WORKER_TIMEOUT_MS,
 } from '../lib/svgSanitize';
 
@@ -328,297 +325,138 @@ describe('sanitizeCss', () => {
   });
 });
 
-// ── Regressão de desempenho: DoS síncrono no event loop ─────────────────────────
-// Duas rodadas de revisão adversarial mediram, contra o código ANTES desta correção:
-// aninhamento profundo de <g> — 1000 níveis (3KB)=307ms, 10000 (30KB)=13s, 50000
-// (150KB)=35s; ReDoS nos regex de CSS — @import repetido sem ";" antes de "{":
-// 16KB=150ms, 32KB=228ms, 64KB=911ms, 256KB=13,6s; e, numa SEGUNDA rodada, mais 4
-// bypasses do preflightCheck (ver describe abaixo) que também levavam de 2 a 18s.
+// ── Pool piscina + timeout: a fronteira de segurança contra DoS ─────────────────
+// (o preflight de tokenização foi REMOVIDO — ver svgSanitize.ts) ────────────────
 //
-// A partir desta rodada, sanitizeSvg roda a sanitização inteira (preflightCheck +
-// jsdom + DOMPurify + enforce) dentro de um worker_threads com um teto de parede
-// (SANITIZE_WORKER_TIMEOUT_MS) — ver o comentário em svgSanitize.ts. Isto significa
-// que NENHUM destes testes de tempo pode mais assumir execução síncrona no mesmo
-// thread: o teto que importa agora é "a chamada termina bem antes dos 2-18s que
-// travavam antes", não mais "em X milissegundos exatos" — por isso os antigos tetos
-// (300/500/1000ms, calibrados pra execução síncrona em processo) foram trocados por um
-// teto generoso (poucos segundos, cobrindo o overhead real de spawn/mensagem do
-// worker) que ainda assim continua de 1 a 2 ordens de grandeza abaixo dos 2-18s
-// medidos.
-describe('sanitizeSvg — regressão de desempenho (DoS síncrono, agora limitado pelo worker)', () => {
-  // Generoso o bastante pra não ser "flaky" em CI sob CPU concorrente (a suíte roda
-  // dezenas de arquivos de teste em paralelo) e ainda cobre o overhead real de subir/
-  // reaproveitar o worker — mas continua bem abaixo dos 13-35s medidos ANTES da
-  // correção original e é o mesmo tipo de teto que o timeout do worker impõe agora.
-  const TETO_MS = 5000;
-  const XMLNS = 'xmlns="http://www.w3.org/2000/svg"';
+// Três rodadas de revisão adversarial foram gastas corrigindo bypass atrás de bypass
+// num `preflightCheck` escrito à mão que tentava replicar regras de tokenização do
+// HTML5 (self-closing, foreign content, CDATA opaco, pilha de fechamento, agregação de
+// CSS) só para rejeitar ANTES de montar a árvore no jsdom. Cada correção pontual abria
+// um bypass novo — sinal de que reimplementar um parser adversarialmente correto por
+// patch pontual não converge. O preflight foi removido (não substituído por uma
+// versão mais esperta): a garantia contra payload lento agora é estrutural — o teto de
+// tempo POR TAREFA do pool piscina (`SANITIZE_WORKER_TIMEOUT_MS`), que mata a thread
+// inteira se estourar, não importa qual caminho do parser o payload explora.
+//
+// Os dois testes abaixo reproduzem os dois tipos de custo já medidos nas rodadas
+// anteriores (aninhamento profundo — custo do jsdom/DOMPurify percorrendo a árvore — e
+// CSS quase do tamanho do teto de arquivo — custo do stripCss mesmo com o lookahead já
+// limitado) e provam que, SEM preflight nenhum, o pool ainda corta o tempo bem antes do
+// que o payload levaria se rodasse até o fim (13-35s medidos nas rodadas anteriores).
+describe('sanitizeSvg — pool com timeout é a fronteira de segurança (sem preflight de tokenização)', () => {
+  // Generoso o bastante pra não ser "flaky" em CI sob CPU MUITO concorrente (rodando a
+  // suíte inteira em paralelo — dezenas de arquivos de teste, vários subindo suas
+  // próprias threads jsdom/piscina — e sem preflight o payload roda até o teto de
+  // verdade, não é cortado no primeiro microssegundo) — mas continua bem abaixo dos
+  // 13-35s que estes payloads levavam pra completar antes desta rodada.
+  const TETO_MS = SANITIZE_WORKER_TIMEOUT_MS + 3000;
+  const XMLNS_LOCAL = 'xmlns="http://www.w3.org/2000/svg"';
 
   /** Tempo real com Date.now() antes/depois — sem fake timers, é o event loop de verdade. */
-  async function medir<T>(fn: () => Promise<T>): Promise<{ ms: number; resultado?: T; erro?: unknown }> {
+  async function medir<T>(fn: () => Promise<T>): Promise<{ ms: number; erro?: unknown }> {
     const t0 = Date.now();
     try {
-      const resultado = await fn();
-      return { ms: Date.now() - t0, resultado };
+      await fn();
+      return { ms: Date.now() - t0 };
     } catch (erro) {
       return { ms: Date.now() - t0, erro };
     }
   }
 
-  function svgComStyle(css: string): string {
-    return `<svg ${XMLNS}><style>${css}</style><rect width="1" height="1"/></svg>`;
-  }
-
-  it('aninhamento profundo (<g> repetido) — preflight (dentro do worker) rejeita rápido, não processa a árvore', async () => {
-    const n = 50_000; // a mesma escala que levava ~35s antes da correção original.
-    const payload = `<svg ${XMLNS}>${'<g>'.repeat(n)}${'</g>'.repeat(n)}</svg>`;
+  it('aninhamento profundo (<g> repetido, 50.000 níveis) é cortado pelo teto do pool, não processado até o fim', async () => {
+    const n = 50_000; // a mesma escala que levava ~35s antes desta rodada (sem preflight).
+    const payload = `<svg ${XMLNS_LOCAL}>${'<g>'.repeat(n)}${'</g>'.repeat(n)}</svg>`;
 
     const { ms, erro } = await medir(() => sanitizeSvg(payload));
 
     expect(erro).toBeInstanceOf(InvalidSvgError);
     expect((erro as InvalidSvgError).code).toBe('INVALID_SVG');
     expect(ms, `levou ${ms}ms (teto ${TETO_MS}ms)`).toBeLessThan(TETO_MS);
-  }, 10_000);
+  }, 15_000);
 
-  it('@import sem ";" repetido (ReDoS) — tempo não cresce quadraticamente com o tamanho', async () => {
-    const alvo = 256 * 1024; // escala do pior caso medido (256KB = 13,6s antes).
-    const css = `${'@import '.repeat(Math.ceil(alvo / 8))}{`;
-    const { ms } = await medir(() => sanitizeSvg(svgComStyle(css)));
-    expect(ms, `levou ${ms}ms (teto ${TETO_MS}ms)`).toBeLessThan(TETO_MS);
-  }, 10_000);
-
-  it('url( sem fechar, repetido — tempo não cresce quadraticamente com o tamanho', async () => {
-    // "url(" tem só 4 bytes por ocorrência (contra 8 do "@import "), então o mesmo
-    // orçamento de bytes gera o dobro de ocorrências adversariais; 128KB aqui já mantém
-    // o número de ocorrências (e o custo total) na mesma ordem dos outros casos.
-    const alvo = 128 * 1024;
+  it('CSS quase do tamanho do teto de arquivo (2MB, "url(" sem fechar repetido) é cortado pelo teto do pool', async () => {
+    const alvo = MAX_SVG_BYTES - 2000; // perto do teto de bytes do arquivo inteiro.
     const css = 'url('.repeat(Math.ceil(alvo / 4));
-    const { ms } = await medir(() => sanitizeSvg(svgComStyle(css)));
-    expect(ms, `levou ${ms}ms (teto ${TETO_MS}ms)`).toBeLessThan(TETO_MS);
+    const payload = `<svg ${XMLNS_LOCAL}><style>${css}</style><rect width="1" height="1"/></svg>`;
+
+    const { ms, erro } = await medir(() => sanitizeSvg(payload));
+
+    expect(erro).toBeInstanceOf(InvalidSvgError);
+    expect(ms, `levou ${ms}ms (teto ${TETO_MS}ms) — sem preflight, isto levava mais de 10s síncronos antes desta rodada`).toBeLessThan(TETO_MS);
+  }, 15_000);
+
+  it('(controle) SVG legítimo de brandbook continua sanitizado corretamente e rápido, sem preflight nenhum', async () => {
+    const t0 = Date.now();
+    const { removed, svg } = await sanitizeSvg(LOGO_BRANDBOOK);
+    const ms = Date.now() - t0;
+    expect(removed).toEqual([]);
+    expect(parseXml(svg).documentElement.getAttribute('viewBox')).toBe('0 0 240 80');
+    // Bem abaixo do teto (não é "quase timeout") mesmo sob CPU concorrente — a
+    // sanitização em si custa poucos ms; a folga é pra escalonamento sob contenção.
+    expect(ms, `levou ${ms}ms (bem abaixo do teto de ${SANITIZE_WORKER_TIMEOUT_MS}ms)`).toBeLessThan(SANITIZE_WORKER_TIMEOUT_MS - 1000);
   }, 10_000);
 
-  it('url(" sem fechar, repetido — tempo não cresce quadraticamente com o tamanho', async () => {
-    const alvo = 128 * 1024;
-    const css = 'url("'.repeat(Math.ceil(alvo / 5));
-    const { ms } = await medir(() => sanitizeSvg(svgComStyle(css)));
-    expect(ms, `levou ${ms}ms (teto ${TETO_MS}ms)`).toBeLessThan(TETO_MS);
-  }, 10_000);
-
-  it('image-set( sem fechar, repetido — tempo não cresce quadraticamente com o tamanho', async () => {
-    const alvo = 256 * 1024;
-    const css = 'image-set('.repeat(Math.ceil(alvo / 10));
-    const { ms } = await medir(() => sanitizeSvg(svgComStyle(css)));
-    expect(ms, `levou ${ms}ms (teto ${TETO_MS}ms)`).toBeLessThan(TETO_MS);
-  }, 10_000);
-
-  it('MAX_SVG_DEPTH e MAX_SVG_BYTES são exportados para calibrar estes testes', () => {
-    expect(MAX_SVG_DEPTH).toBeGreaterThan(0);
+  it('SANITIZE_WORKER_TIMEOUT_MS e MAX_SVG_BYTES são exportados para calibrar estes testes', () => {
+    expect(SANITIZE_WORKER_TIMEOUT_MS).toBeGreaterThan(0);
     expect(MAX_SVG_BYTES).toBeGreaterThan(0);
   });
 });
 
-// ── Regressão: bypasses do preflight (2ª rodada de revisão adversarial) ─────────
-// Uma revisão independente achou 4 furos concretos no preflightCheck da rodada
-// anterior: (1) qualquer "/>" era tratado como self-closing, mesmo fora de foreign
-// content, onde o parser HTML5 de verdade IGNORA a barra num elemento comum; (2) o
-// contador de profundidade decrementava em QUALQUER tag de fechamento, sem checar se o
-// nome batia com algo aberto; (3) o teto de CSS agregado não existia, então um <style>
-// perto do teto de bytes do arquivo (2MB) ainda custava dezenas de segundos síncronos
-// mesmo com o lookahead limitado do stripCss; (4) só profundidade era limitada, não a
-// quantidade total de elementos (um SVG raso com dezenas de milhares de irmãos passava
-// batido). Os 4 têm PoC reproduzido contra o código anterior a esta rodada, e (1)-(4)
-// seguem cobertos abaixo com sanitizeSvg async (preflightCheck agora roda dentro do
-// worker, mas a lógica dos testes não muda).
-describe('sanitizeSvg — bypasses do preflight fechados na 2ª rodada (revisão adversarial)', () => {
+// ── Regressão B1: SVG legítimo concorrente não é penalizado por payload lento ───
+// (achado de uma revisão adversarial independente sobre o commit anterior, que usava
+// UM worker persistente com fila escrita à mão) ─────────────────────────────────
+//
+// Bug relatado e reproduzido de forma determinística contra o código anterior: com um
+// worker ÚNICO e uma fila manual, o timer de CADA chamada começava no ENFILEIRAMENTO
+// (quando a mensagem era enviada), não quando o worker de fato começava a processá-la.
+// Duas chamadas concorrentes (upload de dois usuários diferentes, por rotas
+// diferentes) competiam pela MESMA fila — um SVG legítimo e trivial enfileirado atrás
+// de um payload lento era rejeitado por timeout JUNTO com o payload lento, mesmo sem
+// ter custado nada de verdade.
+//
+// piscina, configurado para crescer sob demanda até `maxThreads` (>=2 — ver
+// `getPool()`), despacha duas chamadas concorrentes para DUAS threads ociosas, não
+// para a mesma fila: o SVG legítimo roda em paralelo de verdade com o payload lento,
+// não atrás dele. Este teste dispara os dois AO MESMO TEMPO e mede o tempo de parede
+// real do legítimo (Date.now(), sem fake timers) — ele precisa terminar rápido e com
+// sucesso, independentemente do que acontece com o payload lento.
+describe('sanitizeSvg — concorrência: SVG legítimo não é penalizado por payload lento concorrente (B1)', () => {
   const XMLNS_LOCAL = 'xmlns="http://www.w3.org/2000/svg"';
 
-  it('(1) <div/> fora do svg não se autofecha de verdade — profundidade real é detectada mesmo antes da raiz <svg>', async () => {
-    // Fora de foreign content, "/>" num elemento HTML comum é ruído pro parser real:
-    // a tag abre e tudo que vem depois fica aninhado nela, como <div> sem a barra.
-    const n = MAX_SVG_DEPTH + 50;
-    const payload = '<div/>'.repeat(n) + `<svg ${XMLNS_LOCAL}><rect width="1" height="1"/></svg>`;
-    let erro: unknown;
-    try {
-      await sanitizeSvg(payload);
-    } catch (e) {
-      erro = e;
+  it('SVG legítimo disparado ao mesmo tempo que um payload lento termina rápido e com sucesso', async () => {
+    const n = 50_000; // mesmo payload lento do describe acima — leva até SANITIZE_WORKER_TIMEOUT_MS até o pool matar a thread.
+    const payloadLento = `<svg ${XMLNS_LOCAL}>${'<g>'.repeat(n)}${'</g>'.repeat(n)}</svg>`;
+    const svgLegitimo = `<svg ${XMLNS_LOCAL} viewBox="0 0 10 10"><rect width="10" height="10" fill="#c2103f"/></svg>`;
+
+    const [lento, legitimo] = await Promise.allSettled([
+      sanitizeSvg(payloadLento),
+      (async () => {
+        const t0 = Date.now();
+        const resultado = await sanitizeSvg(svgLegitimo);
+        return { resultado, ms: Date.now() - t0 };
+      })(),
+    ]);
+
+    // A garantia central deste teste: o legítimo teve SUCESSO e foi RÁPIDO. Se ele
+    // tivesse competido pela mesma fila/timer do payload lento (o bug B1), teria sido
+    // rejeitado por timeout ou levado quase o mesmo tempo do payload lento (perto de
+    // SANITIZE_WORKER_TIMEOUT_MS) — em vez de rodar em paralelo, numa thread própria.
+    expect(legitimo.status, 'o SVG legítimo não pode falhar por causa do payload lento concorrente').toBe('fulfilled');
+    if (legitimo.status === 'fulfilled') {
+      // Bem abaixo do teto — a folga extra (contra o teste isolado acima) é porque
+      // aqui há DUAS tarefas competindo por CPU de verdade (uma delas pesada).
+      expect(legitimo.value.ms, `o legítimo levou ${legitimo.value.ms}ms rodando ao lado do payload lento`).toBeLessThan(SANITIZE_WORKER_TIMEOUT_MS - 1500);
+      expect(legitimo.value.resultado.removed).toEqual([]);
+      expect(parseXml(legitimo.value.resultado.svg).documentElement.getAttribute('viewBox')).toBe('0 0 10 10');
     }
-    expect(erro).toBeInstanceOf(InvalidSvgError);
-    expect((erro as InvalidSvgError).message).toContain('profundidade');
-  });
 
-  it('(1-controle) void element HTML (<br/>) e self-closing DENTRO do <svg> continuam sem contar como aninhamento', async () => {
-    // <br> nunca tem filho de verdade, com ou sem barra — não pode virar falso positivo.
-    const n = MAX_SVG_DEPTH + 50;
-    const soBr = '<br/>'.repeat(n) + `<svg ${XMLNS_LOCAL}><rect width="1" height="1"/></svg>`;
-    await expect(sanitizeSvg(soBr)).resolves.toBeDefined();
-
-    // <rect/> dentro da raiz <svg> é self-closing de verdade (foreign content real).
-    const irmaosNoSvg = `<svg ${XMLNS_LOCAL}>${'<rect width="1" height="1"/>'.repeat(100)}</svg>`;
-    await expect(sanitizeSvg(irmaosNoSvg)).resolves.toBeDefined();
-  });
-
-  it('(2) fechamento cujo nome não corresponde a nada aberto (</b> sem <b>) não desempilha o <g> real', async () => {
-    // Cada par <g></b> subia e descia um contador cego sem nunca estourar o teto,
-    // enquanto os <g> ficavam genuinamente empilhados na árvore que o jsdom monta —
-    // </b> nunca fecha <g>, só um <b> que nunca foi aberto.
-    const n = MAX_SVG_DEPTH + 50;
-    const payload = `<svg ${XMLNS_LOCAL}>${'<g></b>'.repeat(n)}</svg>`;
-    let erro: unknown;
-    try {
-      await sanitizeSvg(payload);
-    } catch (e) {
-      erro = e;
+    // O payload lento (numa thread separada, em paralelo) ainda é cortado pelo teto do
+    // pool — não "escapa" do timeout só porque outra tarefa concorrente é rápida.
+    expect(lento.status).toBe('rejected');
+    if (lento.status === 'rejected') {
+      expect(lento.reason).toBeInstanceOf(InvalidSvgError);
     }
-    expect(erro).toBeInstanceOf(InvalidSvgError);
-    expect((erro as InvalidSvgError).message).toContain('profundidade');
-  });
-
-  it('(2) reproduz a escala do PoC relatado (50.000 pares <g></b>) e rejeita rápido, não em dezenas de segundos', async () => {
-    const n = 50_000;
-    const payload = `<svg ${XMLNS_LOCAL}>${'<g></b>'.repeat(n)}</svg>`;
-    const t0 = Date.now();
-    await expect(sanitizeSvg(payload)).rejects.toThrow(InvalidSvgError);
-    expect(Date.now() - t0).toBeLessThan(4000);
-  }, 10_000);
-
-  it('(2-controle) fechamento com nome correto (<g></g> bem casado) continua desempilhando normalmente', async () => {
-    const n = 100;
-    const payload = `<svg ${XMLNS_LOCAL}>${'<g>'.repeat(n)}${'</g>'.repeat(n)}</svg>`;
-    await expect(sanitizeSvg(payload)).resolves.toBeDefined();
-  });
-
-  it('(3) CSS agregado (<style> + style="") acima do teto é rejeitado, antes do regex caro do stripCss rodar', async () => {
-    const css = 'url('.repeat(Math.ceil((MAX_CSS_BYTES + 4096) / 4));
-    const payload = `<svg ${XMLNS_LOCAL}><style>${css}</style><rect width="1" height="1"/></svg>`;
-    const t0 = Date.now();
-    await expect(sanitizeSvg(payload)).rejects.toThrow(InvalidSvgError);
-    expect(Date.now() - t0, 'deve rejeitar rápido, não em segundos').toBeLessThan(2000);
-  }, 10_000);
-
-  it('(3) reproduz a escala do PoC relatado: CSS quase do tamanho do teto de bytes do arquivo (2MB) não trava mais o event loop por 10s+', async () => {
-    const alvo = MAX_SVG_BYTES - 2000; // ainda dentro do limite de bytes do arquivo inteiro
-    const css = 'url('.repeat(Math.ceil(alvo / 4));
-    const payload = `<svg ${XMLNS_LOCAL}><style>${css}</style><rect width="1" height="1"/></svg>`;
-    const t0 = Date.now();
-    await expect(sanitizeSvg(payload)).rejects.toThrow(InvalidSvgError);
-    expect(Date.now() - t0, 'antes desta correção isto levava mais de 10s síncronos').toBeLessThan(4000);
-  }, 10_000);
-
-  it('(3-controle) CSS bem abaixo do teto continua sendo limpo normalmente', async () => {
-    const { svg } = await sanitizeSvg(`<svg ${XMLNS_LOCAL}><style>.a{fill:red}</style><rect class="a" width="1" height="1"/></svg>`);
-    expect(svg).toContain('.a{fill:red}');
-  });
-
-  it('(4) SVG raso com elementos-irmãos acima do teto total é rejeitado, mesmo com profundidade 1', async () => {
-    const n = MAX_SVG_ELEMENTS + 1000;
-    const payload = `<svg ${XMLNS_LOCAL}>${'<rect width="1" height="1"/>'.repeat(n)}</svg>`;
-    const t0 = Date.now();
-    await expect(sanitizeSvg(payload)).rejects.toThrow(InvalidSvgError);
-    expect(Date.now() - t0).toBeLessThan(2000);
-  }, 10_000);
-
-  it('(4-controle) quantidade de elementos dentro do teto continua passando', async () => {
-    const n = 200;
-    const payload = `<svg ${XMLNS_LOCAL}>${'<rect width="1" height="1"/>'.repeat(n)}</svg>`;
-    await expect(sanitizeSvg(payload)).resolves.toBeDefined();
-  });
-
-  it('muitas tags <style> pequenas no mesmo documento não degradam quadraticamente (busca do fim de cada uma não copia o restante do texto)', async () => {
-    // Uma implementação ingênua de "onde <style> termina" via `text.slice(j+1)` +
-    // `toLowerCase()` copia o RESTANTE do documento inteiro a cada <style> encontrado —
-    // com várias tags <style>, isso vira O(n²). Fica abaixo do teto de elementos
-    // (MAX_SVG_ELEMENTS) mas ainda deve ser rápido.
-    const n = 1000;
-    const umStyle = '<style>.a{fill:red}</style>';
-    const payload = `<svg ${XMLNS_LOCAL}>${umStyle.repeat(n)}<rect width="1" height="1"/></svg>`;
-    const t0 = Date.now();
-    await expect(sanitizeSvg(payload)).resolves.toBeDefined();
-    expect(Date.now() - t0).toBeLessThan(2000);
-  }, 10_000);
-});
-
-// ── Regressão: worker + timeout torna irrelevante bypass de tokenizer NÃO corrigido
-// (3ª rodada de revisão adversarial) ────────────────────────────────────────────
-// Uma 3ª revisão achou mais 5 bypasses concretos e ainda NÃO corrigidos um a um no
-// preflightCheck — ao contrário das rodadas anteriores, esta rodada NÃO persegue cada
-// um: em vez disso, a função inteira roda num worker com teto de tempo
-// (SANITIZE_WORKER_TIMEOUT_MS), então qualquer um destes bypasses (ou um futuro ainda
-// não descoberto) passa a ser irrelevante do ponto de vista de segurança — o pior caso
-// deixa de ser "trava a API por segundos" e vira "rejeita rápido". Os dois testes
-// abaixo reproduzem dois dos 5 bypasses catalogados (que, sem o worker, levavam
-// segundos síncronos) e medem tempo de parede real (sem fake timers) para provar que o
-// teto de tempo os corta bem antes.
-describe('sanitizeSvg — worker + timeout cobre bypasses de preflight ainda não corrigidos (3ª rodada)', () => {
-  const XMLNS_LOCAL = 'xmlns="http://www.w3.org/2000/svg"';
-  // Generoso o bastante para não ser "flaky" em CI, mas MUITO menor que os 2-18s
-  // medidos pela revisão contra o preflightCheck rodando sem worker/teto.
-  const TETO_COM_OVERHEAD_MS = 4000;
-
-  it('(bypass #2) CDATA tratado como opaco mesmo FORA de uma raiz svg/math: preflight subestima a árvore real, mas o worker corta o tempo', async () => {
-    // O preflight pula de "<![CDATA[" direto até o próximo "]]>" em QUALQUER contexto,
-    // tratando tudo no meio como opaco (nenhuma tag ali conta pra profundidade/
-    // elementos) — mas o parser HTML5 real só reconhece CDATA de verdade DENTRO de
-    // svg/math; fora disso "<![CDATA[" vira um "bogus comment" que termina no primeiro
-    // ">" literal. Como este payload não tem NENHUM svg/math antes, o parser real
-    // fecha o "comentário" já no primeiro "<div>" e processa os milhares de <div>
-    // seguintes como uma árvore genuinamente profunda (nunca fechados) — o mesmo custo
-    // quadrático de poda que o teto de profundidade existe para evitar, só que aqui o
-    // preflight nunca viu nada disso (achou que era tudo opaco).
-    const n = 50_000; // mesma ordem de grandeza dos outros PoCs de profundidade deste arquivo.
-    const payload = `<![CDATA[${'<div>'.repeat(n)}]]><svg ${XMLNS_LOCAL}><rect width="1" height="1"/></svg>`;
-
-    const t0 = Date.now();
-    let concluiu = false;
-    try {
-      await sanitizeSvg(payload);
-      concluiu = true;
-    } catch {
-      concluiu = true; // InvalidSvgError (preflight, teto do worker ou parser) — tanto faz qual: só importa que TERMINOU.
-    }
-    const ms = Date.now() - t0;
-
-    expect(concluiu).toBe(true);
-    expect(ms, `levou ${ms}ms (teto ${TETO_COM_OVERHEAD_MS}ms) — sem o worker, a revisão mediu 2-18s síncronos para este padrão`).toBeLessThan(TETO_COM_OVERHEAD_MS);
-  }, 8_000);
-
-  it('(bypass #4) atributo GENÉRICO (não style=/<style>) com "url(" escapa do teto agregado de CSS e ainda paga o stripCss caro — o worker corta o tempo', async () => {
-    // O teto agregado (MAX_CSS_BYTES) só soma o conteúdo de <style> e o valor de
-    // style="" (`estiloAttrMatch` no preflightCheck procura literalmente pelo nome de
-    // atributo "style"). Um atributo qualquer OUTRO — aqui `data-x` — com "url(" dentro
-    // nunca entra nessa soma, então o preflight nunca dispara `estourouCss()` pra ele.
-    // Mas o `enforce()` (2ª passada) testa "url(" em QUALQUER atributo e, se achar,
-    // roda `stripCss` nele — sem teto agregado, só o lookahead fixo por ocorrência. Com
-    // um único atributo desse tamanho perto do teto de arquivo (2MB), essa passada
-    // sozinha já é cara: a revisão mediu até ~12s perto do teto de arquivo para este
-    // padrão especificamente.
-    const alvo = MAX_SVG_BYTES - 4000; // perto do teto de arquivo, como no PoC relatado.
-    const css = 'url('.repeat(Math.ceil(alvo / 4));
-    const payload = `<svg ${XMLNS_LOCAL}><rect data-x="${css}" width="1" height="1"/></svg>`;
-    expect(Buffer.byteLength(payload, 'utf-8')).toBeLessThan(MAX_SVG_BYTES);
-
-    const t0 = Date.now();
-    let concluiu = false;
-    try {
-      await sanitizeSvg(payload);
-      concluiu = true;
-    } catch {
-      concluiu = true; // InvalidSvgError (preflight, teto do worker ou parser) — só importa que TERMINOU.
-    }
-    const ms = Date.now() - t0;
-
-    expect(concluiu).toBe(true);
-    expect(ms, `levou ${ms}ms (teto ${TETO_COM_OVERHEAD_MS}ms) — sem o worker, a revisão mediu até ~12s síncronos para este padrão`).toBeLessThan(TETO_COM_OVERHEAD_MS);
-  }, 8_000);
-
-  it('SANITIZE_WORKER_TIMEOUT_MS é exportado e positivo, para calibrar estes testes', () => {
-    expect(SANITIZE_WORKER_TIMEOUT_MS).toBeGreaterThan(0);
-  });
-
-  it('(controle) SVG legítimo de brandbook continua passando pelo worker normalmente, dentro do teto, com o mesmo resultado de antes', async () => {
-    const direto = await sanitizeSvg(LOGO_BRANDBOOK);
-    expect(direto.removed).toEqual([]);
-    expect(parseXml(direto.svg).documentElement.getAttribute('viewBox')).toBe('0 0 240 80');
-  });
+  }, SANITIZE_WORKER_TIMEOUT_MS + 5_000);
 });
 
 // ── Política de gravação (tipo declarado pelo cliente não manda) ────────────────

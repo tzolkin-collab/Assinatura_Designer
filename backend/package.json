@@ -41,6 +41,7 @@
     "multer": "^2.2.0",
     "pdf-lib": "^1.17.1",
     "pg": "^8.20.0",
+    "piscina": "^5.3.2",
     "playwright": "^1.61.0",
     "pptxgenjs": "^4.0.1",
     "puppeteer": "^25.3.0",
