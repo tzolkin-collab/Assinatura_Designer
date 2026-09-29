@@ -402,62 +402,20 @@ describe('sanitizeSvg — pool com timeout é a fronteira de segurança (sem pre
   });
 });
 
-// ── Regressão B1: SVG legítimo concorrente não é penalizado por payload lento ───
-// (achado de uma revisão adversarial independente sobre o commit anterior, que usava
-// UM worker persistente com fila escrita à mão) ─────────────────────────────────
+// ── Regressão B1 (concorrência) — MOVIDA para __tests__/svgSanitizeConcorrencia.test.ts
 //
-// Bug relatado e reproduzido de forma determinística contra o código anterior: com um
-// worker ÚNICO e uma fila manual, o timer de CADA chamada começava no ENFILEIRAMENTO
-// (quando a mensagem era enviada), não quando o worker de fato começava a processá-la.
-// Duas chamadas concorrentes (upload de dois usuários diferentes, por rotas
-// diferentes) competiam pela MESMA fila — um SVG legítimo e trivial enfileirado atrás
-// de um payload lento era rejeitado por timeout JUNTO com o payload lento, mesmo sem
-// ter custado nada de verdade.
-//
-// piscina, configurado para crescer sob demanda até `maxThreads` (>=2 — ver
-// `getPool()`), despacha duas chamadas concorrentes para DUAS threads ociosas, não
-// para a mesma fila: o SVG legítimo roda em paralelo de verdade com o payload lento,
-// não atrás dele. Este teste dispara os dois AO MESMO TEMPO e mede o tempo de parede
-// real do legítimo (Date.now(), sem fake timers) — ele precisa terminar rápido e com
-// sucesso, independentemente do que acontece com o payload lento.
-describe('sanitizeSvg — concorrência: SVG legítimo não é penalizado por payload lento concorrente (B1)', () => {
-  const XMLNS_LOCAL = 'xmlns="http://www.w3.org/2000/svg"';
-
-  it('SVG legítimo disparado ao mesmo tempo que um payload lento termina rápido e com sucesso', async () => {
-    const n = 50_000; // mesmo payload lento do describe acima — leva até SANITIZE_WORKER_TIMEOUT_MS até o pool matar a thread.
-    const payloadLento = `<svg ${XMLNS_LOCAL}>${'<g>'.repeat(n)}${'</g>'.repeat(n)}</svg>`;
-    const svgLegitimo = `<svg ${XMLNS_LOCAL} viewBox="0 0 10 10"><rect width="10" height="10" fill="#c2103f"/></svg>`;
-
-    const [lento, legitimo] = await Promise.allSettled([
-      sanitizeSvg(payloadLento),
-      (async () => {
-        const t0 = Date.now();
-        const resultado = await sanitizeSvg(svgLegitimo);
-        return { resultado, ms: Date.now() - t0 };
-      })(),
-    ]);
-
-    // A garantia central deste teste: o legítimo teve SUCESSO e foi RÁPIDO. Se ele
-    // tivesse competido pela mesma fila/timer do payload lento (o bug B1), teria sido
-    // rejeitado por timeout ou levado quase o mesmo tempo do payload lento (perto de
-    // SANITIZE_WORKER_TIMEOUT_MS) — em vez de rodar em paralelo, numa thread própria.
-    expect(legitimo.status, 'o SVG legítimo não pode falhar por causa do payload lento concorrente').toBe('fulfilled');
-    if (legitimo.status === 'fulfilled') {
-      // Bem abaixo do teto — a folga extra (contra o teste isolado acima) é porque
-      // aqui há DUAS tarefas competindo por CPU de verdade (uma delas pesada).
-      expect(legitimo.value.ms, `o legítimo levou ${legitimo.value.ms}ms rodando ao lado do payload lento`).toBeLessThan(SANITIZE_WORKER_TIMEOUT_MS - 1500);
-      expect(legitimo.value.resultado.removed).toEqual([]);
-      expect(parseXml(legitimo.value.resultado.svg).documentElement.getAttribute('viewBox')).toBe('0 0 10 10');
-    }
-
-    // O payload lento (numa thread separada, em paralelo) ainda é cortado pelo teto do
-    // pool — não "escapa" do timeout só porque outra tarefa concorrente é rápida.
-    expect(lento.status).toBe('rejected');
-    if (lento.status === 'rejected') {
-      expect(lento.reason).toBeInstanceOf(InvalidSvgError);
-    }
-  }, SANITIZE_WORKER_TIMEOUT_MS + 5_000);
-});
+// Motivo (blocker A, achado de revisão adversarial independente sobre este commit):
+// rodando SÓ este arquivo, o teste de concorrência B1 passava 3/3; rodando a suíte
+// INTEIRA (57 arquivos, vitest paralelizando arquivos em processos/threads separados),
+// falhava 3/3 — vários arquivos de teste chamam sanitizeSvg de verdade (svgSanitize.test
+// .ts, svgWritePoints.test.ts, r2SvgGuard.test.ts) e cada um sobe seu PRÓPRIO pool
+// piscina (module-level, uma cópia por processo/worker do vitest); com vários pools de
+// até 4 threads competindo pela CPU da máquina ao mesmo tempo, a folga de tempo que o
+// teste de concorrência mede fica curta demais e ele passa a rejeitar o SVG legítimo
+// (ou passar bem perto do teto) — não é flakiness do sanitizeSvg em si, é disputa de
+// recursos ENTRE processos de teste. A correção — isolar este teste específico em
+// arquivo próprio e trocar a asserção de tempo apertada por uma estrutural — está
+// documentada no topo do arquivo novo.
 
 // ── Política de gravação (tipo declarado pelo cliente não manda) ────────────────
 

@@ -98,11 +98,20 @@ function assertLimpo(text: string) {
   expect(text).toMatch(SVG_LIMPO_ESPERADO);
 }
 
+let contadorUsuarioDeTeste = 0;
+
 beforeEach(() => {
   vi.clearAllMocks();
   hoisted.s3Sent.length = 0;
   hoisted.geminiSvg.value = `<svg viewBox="0 0 40 40"><a href="javascript:alert(1)"><path d="M0 0h10v10z" fill="#c2103f"/></a><script>alert(1)</script><rect width="10" height="10" onclick="alert(1)"/></svg>`;
-  mockedVerify.mockReturnValue({ userId: 'u1' });
+  // Cada teste usa uma conta PRÓPRIA (não mais fixo em 'u1'): este arquivo bate várias
+  // vezes nas MESMAS rotas que agora têm rate limit por conta (svgSanitizeRateLimit.ts,
+  // max=4 por janela) — com 'u1' fixo, os testes deste arquivo dividiam o mesmo balde e,
+  // a partir do 5º POST, o rate limiter (corretamente) começava a devolver 429 em vez do
+  // 200/201/400 que cada teste espera. Isto não é sobre o rate limit em si (testado à
+  // parte em svgSanitizeRateLimit.test.ts) — é sobre isolar a conta simulada entre casos
+  // de teste, o que já era desejável independente do rate limit.
+  mockedVerify.mockReturnValue({ userId: `usuario-de-teste-${++contadorUsuarioDeTeste}` });
   mockedUpload.mockImplementation(async (_b: Buffer, name: string) => `https://cdn.exemplo.com/brands/brand-1/${name}`);
   prismaMock.brand.findUnique.mockResolvedValue({ id: 'brand-1', slug: 'marca', name: 'Marca', config: null });
   prismaMock.brandMember.findUnique.mockResolvedValue({ role: 'EDITOR' });

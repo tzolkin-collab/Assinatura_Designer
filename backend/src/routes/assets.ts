@@ -9,6 +9,8 @@ import { requireBrandRole, ANY_MEMBER, EDITORS, type BrandRequest } from '../mid
 import { parseBody } from '../lib/validate.js';
 import { exportDesign, waitForExport } from '../lib/canvaClient.js';
 import { prepareStorableFile, InvalidSvgError } from '../lib/svgSanitize.js';
+import { rateLimit } from '../middleware/rateLimit.js';
+import { SVG_SANITIZE_RATE_LIMIT } from '../lib/svgSanitizeRateLimit.js';
 
 export const assetsRouter = Router({ mergeParams: true });
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -43,7 +45,9 @@ assetsRouter.get('/', requireBrandRole(ANY_MEMBER), async (req: BrandRequest, re
 });
 
 // POST /api/brands/:slug/assets
-assetsRouter.post('/', requireBrandRole(EDITORS), upload.single('file'), async (req: BrandRequest, res: Response, next: NextFunction) => {
+// Rate limit compartilhado com as outras rotas que chamam sanitizeSvg — ver
+// lib/svgSanitizeRateLimit.ts (blocker B: pool piscina saturado por uma única conta).
+assetsRouter.post('/', rateLimit(SVG_SANITIZE_RATE_LIMIT), requireBrandRole(EDITORS), upload.single('file'), async (req: BrandRequest, res: Response, next: NextFunction) => {
   try {
     const { userId } = req.user!;
     const file = req.file;
@@ -101,7 +105,7 @@ assetsRouter.post('/', requireBrandRole(EDITORS), upload.single('file'), async (
 // base64 (Drive/Asana) pro pool de assets da marca. O frontend reaproveita os
 // mesmos popups da Fábrica (DrivePopup/AsanaPopup), que já resolvem OAuth e
 // devolvem `attachments` nesse formato — aqui só falta persistir no R2 + Asset.
-assetsRouter.post('/import-base64', requireBrandRole(EDITORS), async (req: BrandRequest, res: Response, next: NextFunction) => {
+assetsRouter.post('/import-base64', rateLimit(SVG_SANITIZE_RATE_LIMIT), requireBrandRole(EDITORS), async (req: BrandRequest, res: Response, next: NextFunction) => {
   try {
     const { userId } = req.user!;
     const brand = req.brand!;

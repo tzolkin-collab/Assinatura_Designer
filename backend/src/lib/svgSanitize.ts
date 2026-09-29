@@ -48,6 +48,25 @@ export class InvalidSvgError extends Error {
   }
 }
 
+/**
+ * O pool de sanitização está momentaneamente sobrecarregado (fila além do teto — ver
+ * `SANITIZE_POOL_MAX_QUEUE`) — DIFERENTE de InvalidSvgError: aqui o arquivo do usuário
+ * pode ser perfeitamente válido, o problema é o SISTEMA não ter capacidade agora. O
+ * chamador deve mapear para 429/503 ("tente de novo"), nunca para o mesmo 400 de "seu
+ * arquivo é inválido" — são mensagens e ações completamente diferentes para quem sobe o
+ * arquivo. `statusCode` já vai setado (em vez de depender do `code` no errorHandler,
+ * como InvalidSvgError faz): assim qualquer chamador que apenas repasse o erro adiante
+ * (`next(error)`) já responde com o código certo sem precisar conhecer este módulo.
+ */
+export class SvgSanitizePoolOverloadedError extends Error {
+  readonly code = 'SANITIZE_POOL_OVERLOADED';
+  readonly statusCode = 503;
+  constructor(message: string) {
+    super(message);
+    this.name = 'SvgSanitizePoolOverloadedError';
+  }
+}
+
 export interface SvgRemoval {
   kind: 'element' | 'attribute' | 'style';
   /** Nome do elemento/atributo (ou o construto de CSS) que saiu. */
@@ -382,6 +401,23 @@ export const SANITIZE_WORKER_TIMEOUT_MS = 5000;
 const SANITIZE_POOL_MIN_THREADS = 2;
 const SANITIZE_POOL_MAX_THREADS = 4;
 
+// Teto de FILA (tarefas aceitas mas ainda sem thread livre) — segunda camada de defesa,
+// além do rate limit por conta (ver routes/brands.ts, assets.ts, upload.ts, e
+// lib/svgSanitizeRateLimit.ts): o rate limit contém uma única conta, mas não impede que
+// VÁRIAS contas diferentes, cada uma dentro do seu próprio limite, ainda somem
+// concorrência suficiente pra saturar este pool COMPARTILHADO (ele é module-level, por
+// PROCESSO — não por conta nem por marca). 2x maxThreads (=8, então capacidade total 4
+// rodando + 8 na fila = 12 aceitas de uma vez): folga o bastante para absorver uma
+// rajada de várias contas legítimas coincidindo (cada uma já limitada a poucas
+// requisições pelo rate limit) sem começar a rejeitar gente à toa, mas baixo o bastante
+// para que, quando ultrapassado, o sistema já esteja claramente além do que os
+// `maxThreads` threads conseguem processar em tempo hábil. Acima disto,
+// `sanitizeViaWorker` (abaixo) rejeita a tarefa IMEDIATAMENTE — antes mesmo de chamar
+// `.run()` — em vez de deixá-la esperar e estourar o timeout de
+// `SANITIZE_WORKER_TIMEOUT_MS` junto com quem já estava na fila. Exportado só para
+// calibrar o teste de saturação (ver __tests__/svgSanitizeConcorrencia.test.ts).
+export const SANITIZE_POOL_MAX_QUEUE = SANITIZE_POOL_MAX_THREADS * 2;
+
 /**
  * Sob `tsx watch` (dev) e `vitest` (teste) este arquivo roda como `.ts` — o
  * worker_threads nativo do Node não entende TypeScript sozinho. `tsx/cjs` é o hook de
@@ -432,9 +468,31 @@ function getPool(): Piscina<string, WorkerResult> {
       minThreads: SANITIZE_POOL_MIN_THREADS,
       maxThreads: SANITIZE_POOL_MAX_THREADS,
       execArgv: buildWorkerExecArgv(),
+      // NÃO usamos a opção nativa `maxQueue` do piscina aqui — medido na prática (ver
+      // __tests__/svgSanitizeConcorrencia.test.ts) que ela não vale para o NOSSO caso:
+      // toda tarefa que passamos carrega um `signal` (o AbortSignal do teto de tempo,
+      // abaixo), e o próprio piscina (`_returnUndistributedTask`, node_modules/piscina/
+      // src/index.ts) desvia toda tarefa COM signal que não encontra thread livre na
+      // hora para o `skipQueue`, não para o `taskQueue` — e a checagem de admissão do
+      // `maxQueue` (dentro de `run()`) só olha `taskQueue.size`. Resultado: com um burst
+      // síncrono de chamadas (o cenário real de um ataque), `maxQueue` nunca rejeita
+      // nada, porque a fila que ele fiscaliza fica vazia enquanto o excedente todo vai
+      // para o `skipQueue`. A guarda de verdade é a checagem manual em
+      // `sanitizeViaWorker`, que usa `queueSize` (soma as duas filas — ver
+      // `getSvgSanitizeQueueSize`) e roda ANTES de chamar `.run()`.
     });
   }
   return pool;
+}
+
+/**
+ * Quantas tarefas estão na fila (aceitas, aguardando uma thread livre) agora — não
+ * inclui as que já estão rodando. Exposto só para o teste de saturação inspecionar o
+ * estado real do pool em vez de inferir por tempo decorrido.
+ */
+export function getSvgSanitizeQueueSize(): number {
+  if (isWorkerThread || !pool) return 0;
+  return pool.queueSize;
 }
 
 /**
@@ -460,9 +518,25 @@ export async function closeSvgSanitizePool(): Promise<void> {
  * na fila, só é removida sem gastar uma thread.
  */
 async function sanitizeViaWorker(text: string): Promise<{ svg: string; removed: SvgRemoval[] }> {
+  const p = getPool();
+
+  // Guarda de profundidade de fila: checada de forma síncrona, ANTES de chamar
+  // `.run()` — nem entra na fila, nem gasta uma thread, nem espera o timeout. Isto é
+  // O QUE de fato protege contra sobrecarga (a opção nativa `maxQueue` do piscina foi
+  // tentada primeiro e descartada — ver o comentário em `getPool()` — porque não cobre
+  // o nosso padrão de uso). `queueSize` soma taskQueue+skipQueue, então enxerga
+  // corretamente as tarefas nossas (todas com `signal`) que ficam esperando thread
+  // livre. Sem `await` entre esta leitura e o `.run()` logo abaixo: nenhuma outra
+  // chamada síncrona consegue "furar" entre a checagem e o enfileiramento.
+  if (p.queueSize >= SANITIZE_POOL_MAX_QUEUE) {
+    throw new SvgSanitizePoolOverloadedError(
+      `Sistema de sanitização de SVG está sobrecarregado agora (fila com ${p.queueSize} tarefas). Tente novamente em instantes.`,
+    );
+  }
+
   let result: WorkerResult;
   try {
-    result = await getPool().run(text, { signal: AbortSignal.timeout(SANITIZE_WORKER_TIMEOUT_MS) });
+    result = await p.run(text, { signal: AbortSignal.timeout(SANITIZE_WORKER_TIMEOUT_MS) });
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') {
       throw new InvalidSvgError(`Sanitização de SVG excedeu o tempo máximo (${SANITIZE_WORKER_TIMEOUT_MS}ms) — recusado por segurança.`);
