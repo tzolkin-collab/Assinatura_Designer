@@ -99,7 +99,7 @@
 .listTitle {
   font-family: var(--font-serif);
   font-size: var(--text-base);
-  font-weight: 500;
+  font-weight: var(--weight-title);
   color: var(--color-text);
 }
 
@@ -689,7 +689,7 @@
 .modalTitle {
   font-family: var(--font-serif);
   font-size: var(--text-2xl);
-  font-weight: 500;
+  font-weight: var(--weight-title);
   color: var(--color-text);
   margin: 0;
 }
@@ -872,7 +872,7 @@
 .postId {
   font-family: var(--font-serif);
   font-size: var(--text-base);
-  font-weight: 500;
+  font-weight: var(--weight-title);
   color: var(--color-text);
 }
 
@@ -965,7 +965,7 @@
 .aiReportTitle {
   font-family: var(--font-serif);
   font-size: var(--text-2xl);
-  font-weight: 500;
+  font-weight: var(--weight-title);
   color: var(--color-text);
   margin: 0;
   display: flex;
@@ -1349,6 +1349,7 @@
   white-space: nowrap;
   font-size: 12px;
   font-family: var(--font-mono);
+  font-size-adjust: none;
   color: var(--color-text-secondary);
 }
 

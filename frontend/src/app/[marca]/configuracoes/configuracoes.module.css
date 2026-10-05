@@ -45,6 +45,7 @@
 
 code.infoValue {
   font-family: var(--font-mono);
+  font-size-adjust: none;
   font-size: var(--text-sm);
   padding: var(--space-1) var(--space-2);
   background-color: var(--color-surface);
@@ -205,7 +206,7 @@ code.infoValue {
 .modalTitle {
   font-family: var(--font-serif);
   font-size: var(--text-2xl);
-  font-weight: 500;
+  font-weight: var(--weight-title);
   color: var(--color-text);
   margin: 0;
 }

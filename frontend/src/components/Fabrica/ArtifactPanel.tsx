@@ -586,7 +586,7 @@ export function ArtifactPanel({
               style={{
                 flex: 1, margin: 0, padding: '0 12px 12px',
                 overflow: 'auto', fontSize: 11.5, lineHeight: 1.5,
-                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                fontSizeAdjust: 'none', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
                 color: 'var(--color-text, #111827)',
               }}
             >

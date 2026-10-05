@@ -28,7 +28,7 @@ interface SlideCodeEditorProps {
 
 const areaStyle: React.CSSProperties = {
   width: '100%',
-  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+  fontSizeAdjust: 'none', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
   fontSize: 12,
   lineHeight: 1.5,
   padding: 10,

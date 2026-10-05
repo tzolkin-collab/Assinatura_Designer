@@ -72,7 +72,7 @@ export default function GlobalAgentSettingsPage() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '16px' }}>
             <div style={{ padding: '16px', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', backgroundColor: '#fafaf9' }}>
               <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)', fontWeight: 500 }}>Modelo Principal (Main)</span>
-              <p style={{ margin: '4px 0 0 0', fontFamily: 'monospace', fontSize: '14px', fontWeight: 700, color: 'var(--color-text)' }}>
+              <p style={{ margin: '4px 0 0 0', fontFamily: 'monospace', fontSizeAdjust: 'none', fontSize: '14px', fontWeight: 700, color: 'var(--color-text)' }}>
                 {config?.models.main || 'Carregando...'}
               </p>
               <span style={{ fontSize: '11px', color: 'var(--color-text-tertiary)', marginTop: '4px', display: 'block' }}>
@@ -82,7 +82,7 @@ export default function GlobalAgentSettingsPage() {
 
             <div style={{ padding: '16px', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', backgroundColor: '#fafaf9' }}>
               <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)', fontWeight: 500 }}>Modelo Auxiliar (Utility)</span>
-              <p style={{ margin: '4px 0 0 0', fontFamily: 'monospace', fontSize: '14px', fontWeight: 700, color: 'var(--color-text)' }}>
+              <p style={{ margin: '4px 0 0 0', fontFamily: 'monospace', fontSizeAdjust: 'none', fontSize: '14px', fontWeight: 700, color: 'var(--color-text)' }}>
                 {config?.models.utility || 'Carregando...'}
               </p>
               <span style={{ fontSize: '11px', color: 'var(--color-text-tertiary)', marginTop: '4px', display: 'block' }}>

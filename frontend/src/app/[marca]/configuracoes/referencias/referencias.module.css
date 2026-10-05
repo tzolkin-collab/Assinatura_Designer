@@ -228,7 +228,7 @@
 .modalTitle {
   font-family: var(--font-serif);
   font-size: var(--text-2xl);
-  font-weight: 500;
+  font-weight: var(--weight-title);
   color: var(--color-text);
   margin: 0;
 }
@@ -393,6 +393,7 @@ input:checked + .slider:before {
 
 .refSlugBadge {
   font-family: var(--font-mono);
+  font-size-adjust: none;
   font-size: var(--text-xs);
   background-color: var(--color-bg-secondary);
   color: var(--color-brand);
@@ -404,7 +405,7 @@ input:checked + .slider:before {
 .sectionTitle {
   font-family: var(--font-serif);
   font-size: var(--text-lg);
-  font-weight: 500;
+  font-weight: var(--weight-title);
   color: var(--color-text);
   margin: 0 0 var(--space-4) 0;
 }
@@ -485,6 +486,7 @@ input:checked + .slider:before {
 .placeholderText {
   color: var(--color-text-tertiary);
   font-family: var(--font-mono);
+  font-size-adjust: none;
   font-size: var(--text-sm);
   opacity: 0.5;
 }

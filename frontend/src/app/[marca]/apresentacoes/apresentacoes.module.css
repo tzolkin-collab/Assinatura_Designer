@@ -106,6 +106,7 @@
 .linkText {
   font-size: var(--text-xs);
   font-family: var(--font-mono);
+  font-size-adjust: none;
   color: var(--color-text-secondary);
   white-space: nowrap;
   overflow: hidden;
