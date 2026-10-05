@@ -45,8 +45,11 @@ vi.mock('@aws-sdk/client-s3', () => ({
   },
 }));
 
-// A ingestão de brandbook pede SVGs "reconstruídos" ao Gemini. Aqui o modelo devolve um
-// SVG malicioso — é exatamente o risco: o modelo leu o brandbook do usuário.
+// A ingestão de brandbook pede SVGs "reconstruídos" ao Gemini (via a função pura
+// brandbookExtraction.extractBrandInsights). Aqui o modelo devolve um SVG malicioso —
+// é exatamente o risco: o modelo leu o brandbook do usuário. `files` também precisa
+// existir na classe: extractBrandInsights usa `client.files.upload/delete` para PDFs
+// grandes (não é o caso deste teste, mas o objeto precisa ter a forma esperada).
 vi.mock('@google/genai', () => ({
   GoogleGenAI: class {
     models = {
@@ -55,11 +58,15 @@ vi.mock('@google/genai', () => ({
           guidelines: 'Tom direto',
           colors: ['#112233'],
           primaryFonts: ['Inter'],
-          reconstructedSvgs: [
+          svgs: [
             { name: 'sparkle-ia.svg', classification: 'GRAPHIC_ELEMENT', svgCode: hoisted.geminiSvg.value },
           ],
         }),
       })),
+    };
+    files = {
+      upload: vi.fn(),
+      delete: vi.fn(),
     };
   },
   Type: { OBJECT: 'OBJECT', STRING: 'STRING', ARRAY: 'ARRAY', NUMBER: 'NUMBER' },

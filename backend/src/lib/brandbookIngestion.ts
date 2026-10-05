@@ -4,11 +4,20 @@ import { uploadFileToR2 } from './r2.js';
 import { createError } from '../middleware/errorHandler.js';
 import { GoogleGenAI } from '@google/genai';
 import { config } from '../config.js';
+import { logger } from './logger.js';
 import { normalizarLogoParaFundoEscuro } from './logoTransparency.js';
-import { mesclarGuidelines } from './brandGuidelines.js';
+import { mesclarGuidelines, normalizarParaFormulario } from './brandGuidelines.js';
 import { sanitizeSvg, prepareStorableFile } from './svgSanitize.js';
+import {
+  extractBrandInsights,
+  mergeHexColorLists,
+  MAX_BRAND_COLORS,
+  type BrandbookExtractionInputPart,
+  type BrandbookExtractionStatus,
+  type SVGClassification,
+} from './brandbookExtraction.js';
 
-export type SVGClassification = 'LOGOTYPE' | 'GRAPHIC_ELEMENT' | 'ILLUSTRATION';
+export type { SVGClassification };
 
 export interface IngestedSVG {
   id: string;
@@ -31,6 +40,17 @@ export interface BrandbookIngestResult {
   logoNeedsConfirmation: boolean;
   detectedLogoUrl?: string | null;
   currentLogoUrl?: string | null;
+  /**
+   * Estado HONESTO da extração por IA. Antes, qualquer falha (JSON truncado, PDF
+   * grande demais, conta sem crédito…) caía num catch com `console.warn` e a rota
+   * devolvia sucesso com tudo zerado — a UI mostrava "Indexado com sucesso!" sem
+   * nada dentro. Agora o status vai explícito para quem chamou.
+   */
+  extraction: {
+    status: BrandbookExtractionStatus;
+    warnings: string[];
+    reason?: string;
+  };
 }
 
 function extractColorsFromText(text: string): string[] {
@@ -43,62 +63,6 @@ function extractColorsFromText(text: string): string[] {
     return c.toUpperCase();
   });
   return Array.from(new Set(normalized));
-}
-
-function parseIngestionJSON(rawText: string): any {
-  let cleanText = rawText.trim();
-  cleanText = cleanText.replace(/^```(json|xml)?/i, '').replace(/```$/i, '').trim();
-
-  let parsed: any = {};
-  try {
-    parsed = JSON.parse(cleanText);
-  } catch (err) {
-    console.warn('JSON.parse falhou, tentando resgate de emergência...', err);
-    try {
-      parsed = JSON.parse(cleanText + ']}');
-    } catch {
-      parsed = {};
-    }
-  }
-
-  // Se guidelines veio como objeto ou stringified JSON, converte para Markdown limpo
-  if (parsed.guidelines) {
-    if (typeof parsed.guidelines === 'object' && parsed.guidelines !== null) {
-      const g = parsed.guidelines;
-      parsed.guidelines = [g.history, g.guidelines, g.voice, g.rules, g.summary].filter(Boolean).join('\n\n');
-    } else if (typeof parsed.guidelines === 'string' && parsed.guidelines.trim().startsWith('{')) {
-      try {
-        const inner = JSON.parse(parsed.guidelines);
-        if (typeof inner === 'object' && inner !== null) {
-          parsed.guidelines = [inner.history, inner.guidelines, inner.voice, inner.rules, inner.summary].filter(Boolean).join('\n\n');
-        }
-      } catch {
-        // Mantém como está se não for JSON válido
-      }
-    }
-  }
-
-  // Se reconstructedSvgs não veio no JSON parsed, resgata objetos SVG com Regex
-  if (!Array.isArray(parsed.reconstructedSvgs) || parsed.reconstructedSvgs.length === 0) {
-    const svgRegex = /\{\s*"name"\s*:\s*"([^"]+)"\s*,\s*"classification"\s*:\s*"([^"]+)"\s*,\s*"svgCode"\s*:\s*"([\s\S]*?)"\s*\}/gi;
-    const extracted: Array<{ name: string; classification: string; svgCode: string }> = [];
-    let match;
-    while ((match = svgRegex.exec(cleanText)) !== null) {
-      const svgCode = match[3].replace(/\\"/g, '"').replace(/\\n/g, '\n');
-      if (svgCode.includes('<svg')) {
-        extracted.push({
-          name: match[1],
-          classification: match[2],
-          svgCode,
-        });
-      }
-    }
-    if (extracted.length > 0) {
-      parsed.reconstructedSvgs = extracted;
-    }
-  }
-
-  return parsed;
 }
 
 function classifySVG(filename: string, content: string): SVGClassification {
@@ -159,7 +123,9 @@ export async function processBrandbookIngest({
   if (!brand) throw createError(404, 'Marca não encontrada');
 
   const textSnippets: string[] = [];
-  const imagePartsForGemini: Array<{ inlineData: { mimeType: string; data: string } }> = [];
+  // Partes que vão para a extração via IA (map-reduce: uma chamada por PDF, uma
+  // chamada para o grupo de imagens). SEM o teto global de 6 que existia antes.
+  const extractionParts: BrandbookExtractionInputPart[] = [];
   const rawSvgsToProcess: Array<{ filename: string; buffer: Buffer }> = [];
 
   // Encontra ou cria a pasta "Brandbooks" (MEDIA)
@@ -205,7 +171,7 @@ export async function processBrandbookIngest({
         },
       });
     } catch (rawSaveErr) {
-      console.warn(`Falha ao salvar arquivo RAW ${file.originalname}:`, rawSaveErr);
+      logger.warn('Falha ao salvar arquivo RAW do brandbook', { fileName: file.originalname, error: rawSaveErr instanceof Error ? rawSaveErr.message : String(rawSaveErr) });
     }
 
     let isZipHandled = false;
@@ -228,14 +194,12 @@ export async function processBrandbookIngest({
               const txt = buffer.toString('utf-8');
               textSnippets.push(txt);
             } else if (entryName.endsWith('.png') || entryName.endsWith('.jpg') || entryName.endsWith('.jpeg') || entryName.endsWith('.webp')) {
-              if (imagePartsForGemini.length < 6) {
-                imagePartsForGemini.push({
-                  inlineData: {
-                    mimeType: entryName.endsWith('.png') ? 'image/png' : 'image/jpeg',
-                    data: buffer.toString('base64'),
-                  },
-                });
-              }
+              extractionParts.push({
+                kind: 'image',
+                mimeType: entryName.endsWith('.png') ? 'image/png' : 'image/jpeg',
+                data: buffer.toString('base64'),
+                fileName: entry.name || entry.entryName,
+              });
             }
           }
         }
@@ -262,15 +226,12 @@ export async function processBrandbookIngest({
             buffer: Buffer.from(match[0], 'utf-8'),
           });
         }
-      } else if (file.mimetype.startsWith('image/') || file.mimetype === 'application/pdf') {
-        if (imagePartsForGemini.length < 6) {
-          imagePartsForGemini.push({
-            inlineData: {
-              mimeType: file.mimetype === 'application/pdf' ? 'application/pdf' : file.mimetype,
-              data: file.buffer.toString('base64'),
-            },
-          });
-        }
+      } else if (file.mimetype === 'application/pdf') {
+        // Cada PDF é UMA parte própria — a extração faz uma chamada por PDF
+        // (map-reduce) e decide sozinha se manda inline ou via Files API.
+        extractionParts.push({ kind: 'pdf', buffer: file.buffer, fileName: file.originalname });
+      } else if (file.mimetype.startsWith('image/')) {
+        extractionParts.push({ kind: 'image', mimeType: file.mimetype, data: file.buffer.toString('base64'), fileName: file.originalname });
       }
     }
   }
@@ -323,142 +284,127 @@ export async function processBrandbookIngest({
         illustrationsCount++;
       }
     } catch (err) {
-      console.warn(`Falha ao salvar SVG ${item.filename}:`, err);
+      logger.warn('Falha ao salvar SVG do brandbook', { fileName: item.filename, error: err instanceof Error ? err.message : String(err) });
     }
   }
 
-  // ── Extração de inteligência via Gemini AI ─────────────────────────────────
+  // ── Extração de inteligência via Gemini AI (função pura, sem efeito colateral) ────
   const combinedTextContent = textSnippets.join('\n\n').slice(0, 15000);
   const regexColors = extractColorsFromText(combinedTextContent);
 
-  let aiGuidelines = '';
-  let aiColors: string[] = [];
-  let aiFonts: string[] = [];
+  const currentColors = brand.config?.colors ?? [];
+  const currentFonts = brand.config?.primaryFonts ?? [];
+  const currentGuidelines = brand.config?.guidelines ?? '';
+  const currentGuidelinesText = normalizarParaFormulario(currentGuidelines, brand.name).history;
 
-  const promptText = `
-Você é um especialista em direção de arte, vetorização de marcas e engenharia de SVGs.
-Examine atentamente cada slide e imagem da apresentação/brandbook da marca "${brand.name}".
+  const ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
+  const extraction = await extractBrandInsights({
+    client: ai,
+    brandName: brand.name,
+    parts: extractionParts,
+    sharedText: combinedTextContent,
+    existingContext: {
+      guidelines: currentGuidelinesText,
+      colors: currentColors,
+      primaryFonts: currentFonts,
+    },
+  });
 
-Sua missão é extrair e vetorizar rigorosamente as seguintes informações em JSON:
-1. "guidelines": Resumo do tom de voz, regras de marca, promessa e personalidade (markdown, 2-4 parágrafos).
-2. "colors": Lista de todos os códigos hexadecimais da paleta de cores visíveis (ex: cores de fundo, botões, ícones, textos, ex: ["#3D101C", "#F8ECE5", "#892A45", "#3F51B5"]).
-3. "primaryFonts": Lista de nomes das famílias tipográficas utilizadas nos títulos e textos (ex: ["Inter", "Montserrat", "Playfair"]).
-4. "reconstructedSvgs": VETORIZE e remonte o código SVG limpo para CADA um dos seguintes elementos encontrados nas imagens (gere até 15 objetos vetoriais com viewBox, paths, stroke, fill e dimensões precisas):
-   - A LOGO OFICIAL da marca visível no canto superior esquerdo ou nos cabeçalhos (ex: o monograma "A✦ ASSINATURA" ou "A✦ ASSINATURA MARCA PRÓPRIA" com a estrela de 4 pontas). Classificação: "LOGOTYPE".
-   - O ÍCONE DA ESTRELA DE 4 PONTAS (Sparkle ✦) que é o grafismo assinatura da marca. Classificação: "GRAPHIC_ELEMENT".
-   - O CONJUNTO DE ÍCONES DE LINHA/CARD visíveis nos slides (ex: Ícone de caixa/estoque, sacola de compras, cadeado, gráfico de barras com seta, alvo/bullseye, coração, relógio/cronômetro, presente/bônus, bisnaga de creme, pessoas/aquisição, checkmark). Classificação: "ILLUSTRATION".
-   - GRAFISMOS DE MOLDURA E ESTRUTURA (ex: engrenagem/quebra-cabeça de 4 peças, arcos/linhas de fundo, barra chevron de etapas). Classificação: "GRAPHIC_ELEMENT".
+  const warnings = [...extraction.warnings];
 
-Formato do JSON de resposta:
-{
-  "guidelines": "...",
-  "colors": ["#HEX1", "#HEX2", "#HEX3"],
-  "primaryFonts": ["Fonte1"],
-  "reconstructedSvgs": [
-    { "name": "logo-assinatura-vector.svg", "classification": "LOGOTYPE", "svgCode": "<svg viewBox=\\"0 0 200 60\\">...</svg>" },
-    { "name": "sparkle-estrela-4-pontas.svg", "classification": "GRAPHIC_ELEMENT", "svgCode": "<svg viewBox=\\"0 0 40 40\\">...</svg>" },
-    { "name": "icone-caixa-estoque.svg", "classification": "ILLUSTRATION", "svgCode": "<svg viewBox=\\"0 0 32 32\\">...</svg>" }
-  ]
-}
-`;
-
-  try {
-    const ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
-    const aiResponse = await ai.models.generateContent({
-      model: config.models.fast,
-      contents: [
-        ...imagePartsForGemini,
-        { text: `${promptText}\n\nConteúdo textual extraído:\n${combinedTextContent}` },
-      ],
-      config: {
-        responseMimeType: 'application/json',
-        maxOutputTokens: 8192,
-      },
-    });
-
-    if (aiResponse.text) {
-      const parsed = parseIngestionJSON(aiResponse.text);
-      if (parsed.guidelines) aiGuidelines = parsed.guidelines;
-      if (Array.isArray(parsed.colors)) aiColors = parsed.colors.filter((c: unknown) => typeof c === 'string' && c.startsWith('#'));
-      if (Array.isArray(parsed.primaryFonts)) aiFonts = parsed.primaryFonts.filter((f: unknown) => typeof f === 'string');
-
-      // Processa SVGs pescados e remontados pela IA
-      if (Array.isArray(parsed.reconstructedSvgs)) {
-        for (const item of parsed.reconstructedSvgs) {
-          if (item?.svgCode && typeof item.svgCode === 'string' && item.svgCode.includes('<svg')) {
-            try {
-              let cleanSvg = item.svgCode.trim();
-              cleanSvg = cleanSvg.replace(/^```(xml|svg|json)?/i, '').replace(/```$/i, '').trim();
-              if (!cleanSvg.includes('xmlns=')) {
-                cleanSvg = cleanSvg.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
-              }
-
-              // SVG "reconstruído por IA" é texto de modelo (e o modelo leu o brandbook
-              // do usuário): não é mais confiável que upload. Mesma higienização.
-              const svgBuffer = (await sanitizeSvg(cleanSvg)).buffer;
-              const filename = item.name || `vetor-ia-${Date.now()}.svg`;
-              const classification: SVGClassification =
-                item.classification === 'LOGOTYPE' || item.classification === 'ILLUSTRATION' || item.classification === 'GRAPHIC_ELEMENT'
-                  ? item.classification
-                  : 'GRAPHIC_ELEMENT';
-
-              const r2Url = await uploadFileToR2(svgBuffer, filename, 'image/svg+xml', `brands/${brand.id}/brandbook`);
-
-              const asset = await prisma.asset.create({
-                data: {
-                  name: filename,
-                  url: r2Url,
-                  fileType: 'image/svg+xml',
-                  sizeBytes: svgBuffer.length,
-                  source: 'brandbook',
-                  tags: ['brandbook', 'ai-reconstructed', classification],
-                  brandId: brand.id,
-                  uploadedBy: uploadedByUserId ?? null,
-                  folderId: brandbooksFolder.id,
-                },
-              });
-
-              processedSvgs.push({
-                id: asset.id,
-                name: asset.name,
-                url: asset.url,
-                classification,
-              });
-
-              if (classification === 'LOGOTYPE') {
-                logotypesCount++;
-                if (!detectedLogoUrl) detectedLogoUrl = r2Url;
-              } else if (classification === 'GRAPHIC_ELEMENT') {
-                graphicElementsCount++;
-              } else {
-                illustrationsCount++;
-              }
-            } catch (err) {
-              console.warn('Falha ao salvar SVG pescado pela IA:', err);
-            }
-          }
-        }
+  // Processa SVGs pescados e remontados pela IA — só existem quando a extração teve
+  // sucesso (em 'failed' a lista vem sempre vazia). Mesma higienização do upload real:
+  // é texto de modelo que leu o material do usuário, não é mais confiável que upload.
+  for (const item of extraction.svgs) {
+    try {
+      let cleanSvg = item.svgCode.trim();
+      cleanSvg = cleanSvg.replace(/^```(xml|svg|json)?/i, '').replace(/```$/i, '').trim();
+      if (!cleanSvg.includes('xmlns=')) {
+        cleanSvg = cleanSvg.replace('<svg', '<svg xmlns="http://www.w3.org/2000/svg"');
       }
+
+      const svgBuffer = (await sanitizeSvg(cleanSvg)).buffer;
+      const filename = item.name || `vetor-ia-${Date.now()}.svg`;
+
+      const r2Url = await uploadFileToR2(svgBuffer, filename, 'image/svg+xml', `brands/${brand.id}/brandbook`);
+
+      const asset = await prisma.asset.create({
+        data: {
+          name: filename,
+          url: r2Url,
+          fileType: 'image/svg+xml',
+          sizeBytes: svgBuffer.length,
+          source: 'brandbook',
+          tags: ['brandbook', 'ai-reconstructed', item.classification],
+          brandId: brand.id,
+          uploadedBy: uploadedByUserId ?? null,
+          folderId: brandbooksFolder.id,
+        },
+      });
+
+      processedSvgs.push({
+        id: asset.id,
+        name: asset.name,
+        url: asset.url,
+        classification: item.classification,
+      });
+
+      if (item.classification === 'LOGOTYPE') {
+        logotypesCount++;
+        if (!detectedLogoUrl) detectedLogoUrl = r2Url;
+      } else if (item.classification === 'GRAPHIC_ELEMENT') {
+        graphicElementsCount++;
+      } else {
+        illustrationsCount++;
+      }
+    } catch (err) {
+      logger.warn('Falha ao salvar SVG reconstruído pela IA', { fileName: item.name, error: err instanceof Error ? err.message : String(err) });
     }
-  } catch (err) {
-    console.warn('IA Ingestion fallback (leitura local usada):', err);
   }
 
   // ── Consolidação final de cores, fontes e diretrizes ─────────────────────
-  const currentColors = brand.config?.colors ?? [];
-  const mergedColors = Array.from(new Set([...currentColors, ...aiColors, ...regexColors])).slice(0, 12);
+  // Falha total da IA: NÃO sobrescreve a marca com nada (nem cores, nem fontes, nem
+  // guidelines) — o catch silencioso de antes deixava a rota devolver "sucesso" com
+  // tudo zerado; agora a marca simplesmente fica como estava.
+  if (extraction.status === 'failed') {
+    return {
+      guidelines: currentGuidelines,
+      colors: currentColors,
+      primaryFonts: currentFonts,
+      svgsIndexed: {
+        logotypes: logotypesCount,
+        graphicElements: graphicElementsCount,
+        illustrations: illustrationsCount,
+        total: processedSvgs.length,
+      },
+      svgs: processedSvgs,
+      logoNeedsConfirmation: false,
+      detectedLogoUrl: null,
+      currentLogoUrl: brand.config?.logoUrl ?? null,
+      extraction: { status: extraction.status, warnings, reason: extraction.reason },
+    };
+  }
 
-  const currentFonts = brand.config?.primaryFonts ?? [];
-  const mergedFonts = Array.from(new Set([...currentFonts, ...aiFonts])).filter(Boolean);
+  const aiColorHexes = extraction.colors.map((c) => c.hex);
+  // Prioridade: cores já cadastradas > cores da IA > cores de regex (só complemento).
+  // Deduplicação por DISTÂNCIA de cor (não só string exata) — pega quase-duplicatas
+  // como "#3e101f" e "#3c111c" vistas de verdade em produção. Teto subiu de 12 para
+  // 24; o que passar do teto é descartado com aviso, não em silêncio.
+  const { colors: mergedColors, droppedForCap } = mergeHexColorLists([currentColors, aiColorHexes, regexColors]);
+  if (droppedForCap.length > 0) {
+    warnings.push(`${droppedForCap.length} cor(es) além do teto de ${MAX_BRAND_COLORS} foram descartadas: ${droppedForCap.join(', ')}`);
+  }
+
+  const aiFontNames = extraction.primaryFonts.map((f) => f.family);
+  const mergedFonts = Array.from(new Set([...currentFonts, ...aiFontNames])).filter(Boolean);
 
   // Concatenar texto aqui quebrava o formato: a página de Branding grava
   // `guidelines` como JSON, e "JSON + texto colado" deixa de ser JSON. A página
   // então caía no catch, enterrava tudo dentro de `history` e resetava o nome
   // para o placeholder. mesclarGuidelines entende os dois formatos e sempre
   // devolve JSON que a página reabre sem perder campo.
-  const currentGuidelines = brand.config?.guidelines ?? '';
-  const newGuidelines = aiGuidelines
-    ? mesclarGuidelines(currentGuidelines, aiGuidelines)
+  const newGuidelines = extraction.guidelines
+    ? mesclarGuidelines(currentGuidelines, extraction.guidelines)
     : currentGuidelines;
 
   const currentLogoUrl = brand.config?.logoUrl ?? null;
@@ -518,5 +464,6 @@ Formato do JSON de resposta:
     logoNeedsConfirmation,
     detectedLogoUrl,
     currentLogoUrl,
+    extraction: { status: extraction.status, warnings, reason: extraction.reason },
   };
 }
