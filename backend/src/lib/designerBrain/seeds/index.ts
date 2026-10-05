@@ -8,3 +8,12 @@ import { AMANDA_COELHO_MEMORY } from './amandaCoelho.js';
 export const PROJECT_MEMORY_SEEDS: Record<string, string> = {
   'amanda-coelho': AMANDA_COELHO_MEMORY,
 };
+
+/**
+ * Fontes oficiais de cada projeto (a mesma tipografia que a memória descreve em texto).
+ * Em estrutura porque o sistema precisa comparar com o que realmente consegue carregar;
+ * ler isso do texto da memória seria adivinhar.
+ */
+export const PROJECT_OFFICIAL_FONTS: Record<string, string[]> = {
+  'amanda-coelho': ['Queens', 'Aeonik'],
+};
