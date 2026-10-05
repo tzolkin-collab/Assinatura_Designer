@@ -331,7 +331,7 @@ export function ArtifactPanel({
           // do preview, que vem depois no documento. z-30 põe a barra inteira
           // (menu incluído) acima do preview.
           position: 'relative',
-          zIndex: 30,
+          zIndex: 'var(--z-sticky)',
         }}
       >
         {botaoAba('preview', 'Preview', Eye)}
@@ -371,7 +371,7 @@ export function ArtifactPanel({
           {menuAberto && (
             <div
               style={{
-                position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 20,
+                position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 'var(--z-dropdown)',
                 width: 'min(260px, calc(100vw - 24px))', padding: '4px 0',
                 background: 'var(--color-surface, #fff)',
                 border: '1px solid var(--color-border, rgba(0,0,0,0.12))',
@@ -599,7 +599,7 @@ export function ArtifactPanel({
       {hostModalOpen && (
         <div
           style={{
-            position: 'fixed', inset: 0, zIndex: 1000,
+            position: 'fixed', inset: 0, zIndex: 'var(--z-modal)',
             background: 'rgba(0,0,0,0.4)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             padding: 16,

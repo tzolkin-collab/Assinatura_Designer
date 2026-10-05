@@ -5,19 +5,43 @@
   --color-bg: #f3f2ef;
   --color-bg-secondary: #eae8e3;
   --color-surface: #ffffff;
-  --color-border: rgba(0, 0, 0, 0.04);
-  --color-border-hover: rgba(0, 0, 0, 0.08);
+  --color-border: rgba(0, 0, 0, 0.09);
+  --color-border-hover: rgba(0, 0, 0, 0.16);
   --color-text: #1d1c1a;
   --color-text-secondary: #63615c;
-  --color-text-tertiary: #96948f;
+  --color-text-tertiary: #706e69; /* era #96948f (2,7:1); agora 4,5:1 sobre o fundo */
   --color-accent: #23221f;
   --color-accent-hover: #3a3834;
-  --color-brand: #d97757;
+  --color-brand: #b04e2c; /* era #d97757 (2,8 a 3,1:1 como texto e como fundo de botão branco); agora 4,7:1 */
   --color-brand-light: #fdf2ef;
   --color-error: #e00;
   --color-error-light: #fff0f0;
-  --color-success: #10f300;
-  --color-success-light: #f0f7ff;
+
+  /* Tokens que várias telas já usavam SEM definição (cada tela caía no seu próprio cinza, e o
+     fundo do painel de notificações ficava transparente). Aliases dos tokens acima. */
+  --color-text-primary: var(--color-text);
+  --color-text-muted: var(--color-text-secondary);
+  --color-text-dim: var(--color-text-tertiary);
+  --color-danger: var(--color-error);
+  --color-primary: var(--color-accent);
+  --color-surface-hover: #f7f6f3;
+  --color-bg-tertiary: #e4e2dc;
+  --color-bg-elevated: #ffffff;
+  --color-border-subtle: rgba(0, 0, 0, 0.06);
+
+  /* Escala ÚNICA de camadas, do fundo para o topo. Nunca use número solto em z-index:
+     o menu lateral (100) e o botão de menu (200) já empataram com menus e modais. */
+  --z-raised: 10;
+  --z-sticky: 20;
+  --z-dropdown: 50;          /* menus, popovers e dicas ancorados a um controle */
+  --z-sidebar-overlay: 90;
+  --z-sidebar: 100;
+  --z-menu-button: 110;      /* acima do menu lateral, para poder fechá-lo */
+  --z-modal: 1000;
+  --z-modal-nested: 1100;    /* modal aberto sobre outro modal */
+  --z-toast: 2000;           /* aviso nunca pode ficar escondido atrás de um modal */
+  --color-success: #15803d; /* era #10f300 (1,5:1 sobre branco) */
+  --color-success-light: #f0fdf4; /* era azulado */
 
   /* ── Typography ── */
   --font-sans: var(--font-inter), -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;

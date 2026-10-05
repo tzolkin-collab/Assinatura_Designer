@@ -280,7 +280,7 @@ export default function EditorPage() {
       <header style={{
         display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', flexWrap: 'wrap',
         borderBottom: '1px solid var(--color-border, rgba(0,0,0,0.08))', background: 'var(--color-surface, #fff)',
-        position: 'relative', zIndex: 30,
+        position: 'relative', zIndex: 'var(--z-sticky)',
       }}>
         <button
           type="button"
@@ -315,7 +315,7 @@ export default function EditorPage() {
           </button>
           {menuBaixar && (
             <div style={{
-              position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 40,
+              position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 'var(--z-dropdown)',
               width: 'min(250px, calc(100vw - 24px))', padding: '4px 0', background: 'var(--color-surface, #fff)',
               border: '1px solid var(--color-border, rgba(0,0,0,0.12))', borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
             }}>
