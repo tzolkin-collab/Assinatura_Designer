@@ -13,6 +13,7 @@ import { SVG_SANITIZE_RATE_LIMIT } from '../lib/svgSanitizeRateLimit.js';
 
 import multer from 'multer';
 import { processBrandbookIngest } from '../lib/brandbookIngestion.js';
+import { coverFromHtmlRender } from '../lib/publishedCover.js';
 import { getValidAccessToken, exportDesign, waitForExport } from '../lib/canvaClient.js';
 
 export const brandsRouter = Router();
@@ -309,9 +310,18 @@ brandsRouter.get('/:slug/posts', async (req: Request, res: Response, next: NextF
         select: {
           id: true, name: true, type: true, previewUrl: true,
           publicSlug: true, publishedAt: true, hostingConfig: true, updatedAt: true,
+          // Só o PRIMEIRO slide (a capa) e a contagem: nunca o conteúdo inteiro do post.
+          slides: { orderBy: { position: 'asc' }, take: 1, select: { htmlRender: true } },
+          _count: { select: { slides: true } },
         },
       });
-      res.json({ data: posts });
+      res.json({
+        data: posts.map(({ slides, _count, ...post }) => ({
+          ...post,
+          slideCount: _count.slides,
+          cover: coverFromHtmlRender(slides[0]?.htmlRender),
+        })),
+      });
       return;
     }
 
