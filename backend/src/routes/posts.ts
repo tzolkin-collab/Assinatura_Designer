@@ -17,6 +17,7 @@ import { resolveBrandContext } from '../lib/brandContext.js';
 import { uploadPngToR2 } from '../lib/r2.js';
 import { mergeSlidesIntoPost, syncPostSlides } from '../lib/postHelper.js';
 import { snapshotPost, restorePostVersion } from '../lib/postVersions.js';
+import { listPhotoSlots, setPhotoInSlot, PhotoSlotNotFoundError } from '../lib/photoSlot.js';
 import { enrichAiContext } from '../lib/aiContext.js';
 import { enqueueCanvaExport, canvaExportQueue, enqueueDeckExport, deckExportQueue } from '../lib/queue.js';
 import { publishPost, unpublishPost, type HostingConfig } from '../lib/presentationHosting.js';
@@ -263,6 +264,130 @@ postsRouter.put('/:id/slides/:index/code', async (req: AuthRequest, res: Respons
     await prisma.post.update({ where: { id: post.id }, data: { updatedAt: new Date() } });
 
     res.json({ data: { slideIndex: idx, slide: clean } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ── Espaço de foto ─────────────────────────────────────────────────────────────
+// O artista reserva a área da foto como <div data-photo-slot="N"> (ver lib/photoSlot.ts).
+// Estas duas rotas são o que deixa a pessoa colocar, trocar e enquadrar a foto depois,
+// sem refazer a arte e sem a IA no meio: nenhuma chamada de modelo, nenhuma geração.
+
+const photoSlotSchema = z.object({
+  slot: z.string().min(1).max(40),
+  // string = coloca/troca; null = esvazia o espaço; ausente = só muda o enquadramento da foto atual.
+  assetUrl: z.string().url().max(2048).nullable().optional(),
+  position: z.object({ x: z.number().finite(), y: z.number().finite() }).optional(),
+  fit: z.enum(['cover', 'contain']).optional(),
+});
+
+type HtmlSlideContent = {
+  kind?: string;
+  width?: number;
+  height?: number;
+  fonts?: string[];
+  slides?: Array<{ html: string; css?: string }>;
+};
+
+postsRouter.get('/:id/slides/:index/photo-slots', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const id = req.params.id as string;
+    const idx = Math.max(0, parseInt(req.params.index as string, 10) || 0);
+    const post = await prisma.post.findFirst({
+      where: { id, brand: brandMemberFilter(req.user?.userId, ANY_MEMBER) },
+      include: { slides: { orderBy: { position: 'asc' } } },
+    });
+    if (!post) throw createError(404, 'Post não encontrado');
+
+    const content = mergeSlidesIntoPost(post).content as unknown as HtmlSlideContent;
+    const slide = content?.kind === 'html-design' ? content.slides?.[idx] : undefined;
+    if (!slide) throw createError(404, 'Slide não encontrado');
+
+    res.json({ data: { slideIndex: idx, slots: listPhotoSlots(slide.html) } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+postsRouter.put('/:id/slides/:index/photo', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const id = req.params.id as string;
+    const idx = Math.max(0, parseInt(req.params.index as string, 10) || 0);
+    const body = parseBody(photoSlotSchema, req.body ?? {});
+
+    const post = await prisma.post.findFirst({
+      where: { id, brand: brandMemberFilter(req.user?.userId, EDITORS) },
+      include: { slides: { orderBy: { position: 'asc' } } },
+    });
+    if (!post) throw createError(404, 'Post não encontrado');
+
+    const content = mergeSlidesIntoPost(post).content as unknown as HtmlSlideContent;
+    if (content?.kind !== 'html-design' || !Array.isArray(content.slides)) {
+      throw createError(400, 'Troca de foto disponível apenas para designs html-design');
+    }
+    const current = content.slides[idx];
+    if (!current) throw createError(400, 'slide fora do limite');
+
+    const atual = listPhotoSlots(current.html).find((s) => s.slot === body.slot);
+
+    let placement: Parameters<typeof setPhotoInSlot>[2];
+    if (body.assetUrl === null) {
+      placement = null;
+    } else if (typeof body.assetUrl === 'string') {
+      // Só foto da biblioteca DESTA marca. Sem isto, o cliente poderia mandar qualquer URL
+      // e o chromium do raster iria buscá-la (SSRF), além de poder expor foto de outra marca.
+      const asset = await prisma.asset.findFirst({
+        where: { brandId: post.brandId, url: body.assetUrl, fileType: { startsWith: 'image/' } },
+        select: { name: true },
+      });
+      if (!asset) throw createError(400, 'Essa foto não está na biblioteca da marca');
+      // Foto nova começa centralizada; a mesma foto reenviada mantém o enquadramento que já tinha.
+      const mesmaFoto = atual?.src === body.assetUrl;
+      placement = {
+        url: body.assetUrl,
+        position: body.position ?? (mesmaFoto ? atual!.position : { x: 50, y: 50 }),
+        fit: body.fit ?? atual?.fit,
+        alt: asset.name,
+      };
+    } else {
+      // Só enquadramento: mantém a foto e o ajuste que já estão no espaço.
+      if (!atual?.src) throw createError(400, 'Não há foto neste espaço para reenquadrar');
+      placement = { url: atual.src, position: body.position ?? atual.position, fit: body.fit ?? atual.fit };
+    }
+
+    let novoHtml: string;
+    try {
+      novoHtml = setPhotoInSlot(current.html, body.slot, placement);
+    } catch (e) {
+      if (e instanceof PhotoSlotNotFoundError) throw createError(404, e.message);
+      throw e;
+    }
+
+    // Mesma porta de escrita da edição de código: sanitiza no servidor e snapshota antes.
+    const clean = { html: sanitizeSlideHtml(novoHtml), css: current.css ? sanitizeSlideCss(current.css) : undefined };
+    if (!clean.html.trim()) throw createError(400, 'html ficou vazio após a sanitização');
+
+    const row = post.slides.find((s) => s.position === idx);
+    if (!row) throw createError(404, 'Slide não encontrado na tabela relacional');
+
+    await snapshotPost(post.id, {
+      source: 'EDITOR',
+      label: body.assetUrl === null
+        ? `Antes de remover a foto do slide ${idx + 1}`
+        : `Antes de trocar a foto do slide ${idx + 1}`,
+      userId: req.user?.userId,
+    });
+    await prisma.slide.update({
+      where: { id: row.id },
+      data: {
+        contentJson: clean as unknown as Prisma.InputJsonValue,
+        htmlRender: buildSlideDocument(clean, content.fonts ?? ['Inter'], content.width ?? 1080, content.height ?? 1080),
+      },
+    });
+    await prisma.post.update({ where: { id: post.id }, data: { updatedAt: new Date() } });
+
+    res.json({ data: { slideIndex: idx, slide: clean, slots: listPhotoSlots(clean.html) } });
   } catch (error) {
     next(error);
   }

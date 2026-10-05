@@ -297,6 +297,17 @@ function renderStyleBible(bible: StyleBible): string {
   ].filter(Boolean).join('\n');
 }
 
+/**
+ * Contrato do espaço de foto (ver lib/photoSlot.ts): é o que deixa a pessoa colocar, trocar e
+ * enquadrar a foto no editor depois, sem refazer a arte. Só vai ao artista nas marcas com o
+ * cérebro ligado; as demais continuam como antes.
+ */
+const PHOTO_SLOT_RULE = `ESPAÇO DE FOTO (para a foto poder entrar ou ser trocada depois, sem refazer a arte):
+- Toda área destinada a uma fotografia é um elemento <div data-photo-slot="N"> (N = 1, 2, 3... único dentro do slide), com posição, largura e altura definidas no CSS e overflow:hidden.
+- Foto real fornecida para o slide: coloque a <img src="URL EXATA"> DENTRO desse <div>, com width:100%;height:100%;object-fit:cover. Não ponha a <img> solta, fora do espaço.
+- Nenhuma foto fornecida para o slide: deixe o <div data-photo-slot="N"> VAZIO. Dê a ele um fundo e uma borda sutis, tirados da paleta, que fiquem bonitos mesmo sem foto. NUNCA escreva "inserir foto", ícone, legenda nem texto dentro dele.
+- Pense na proporção e na posição da área como a de uma fotografia de verdade (retrato, paisagem), e não ponha texto essencial sobre ela.`;
+
 function buildBatchSystemInstruction(input: GenerateHtmlDesignInput, startIndex: number, total: number, bible: StyleBible, batchSize: number): string {
   const endIndex = Math.min(startIndex + batchSize, total);
 
@@ -312,7 +323,7 @@ function buildBatchSystemInstruction(input: GenerateHtmlDesignInput, startIndex:
   // sobre fidelidade, foto real e identidade do projeto. O restante deste prompt é mecânica
   // de formato (JSON, classes, tamanho) e não o contradiz.
   const brainBlock = input.brand.designerBrain
-    ? `${input.brand.designerBrain}\n\n=== MECÂNICA DE SAÍDA (formato do JSON e do HTML; não altera as regras acima) ===\n\n`
+    ? `${input.brand.designerBrain}\n\n=== MECÂNICA DE SAÍDA (formato do JSON e do HTML; não altera as regras acima) ===\n\n${PHOTO_SLOT_RULE}\n\n`
     : '';
 
   return `${brainBlock}Você é um diretor de arte premiado especializado em social media premium. Você desenha em HTML e CSS, como um designer que codifica.
