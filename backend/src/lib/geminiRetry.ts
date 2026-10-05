@@ -339,6 +339,8 @@ type GenerateContentParams = Parameters<InstanceType<typeof GoogleGenAI>['models
 export interface GeminiRetryHooks {
   onRetry?: (info: { model: string; attempt: number; delayMs: number; reason: string }) => void;
   onFallback?: (info: { fromModel: string; toModel: string; reason: string }) => void;
+  /** Só no stream: cancelamento pedido pelo usuário (ver GenerationAbortedError). */
+  abortSignal?: AbortSignal;
 }
 
 function getErrorReason(error: unknown): string {
@@ -533,15 +535,31 @@ function buildModelList(preferredModel?: string): string[] {
  * chamador já tenha passado é respeitado (ganha de nós); nesse caso não impomos o
  * nosso, para não cancelar por baixo de quem sabe o que está fazendo.
  */
-function withTimeout(params: GenerateContentParams, model: string): GenerateContentParams {
+function withTimeout(params: GenerateContentParams, model: string, userSignal?: AbortSignal): GenerateContentParams {
   const config = params.config ?? {};
   if (config.abortSignal) return { ...params, model };
 
+  // Sinal do USUÁRIO ("Pausar e enviar"): soma-se ao de tempo, em vez de substituí-lo —
+  // parar por vontade da pessoa não pode custar a proteção contra modelo travado.
+  const timeout = AbortSignal.timeout(timeoutForModel(model));
   return {
     ...params,
     model,
-    config: { ...config, abortSignal: AbortSignal.timeout(timeoutForModel(model)) },
+    config: { ...config, abortSignal: userSignal ? AbortSignal.any([userSignal, timeout]) : timeout },
   };
+}
+
+/**
+ * A pessoa mandou parar. Erro PRÓPRIO, e não o AbortError do fetch, porque o
+ * AbortError é classificado como timeout — retentável: o laço de retry esperaria,
+ * avisaria "tentando novamente" e cairia para o modelo irmão para refazer algo que
+ * ninguém quer mais. Este erro não casa com nenhum critério de retentativa.
+ */
+export class GenerationAbortedError extends Error {
+  constructor() {
+    super('Interrompido a pedido do usuário.');
+    this.name = 'GenerationAbortedError';
+  }
 }
 
 /**
@@ -714,7 +732,16 @@ export async function generateStreamWithRetry(
   // Mesma regra do generateWithRetry: params.model vale como preferência.
   return runWithFallback(buildModelList(preferido), customHooks, async (model) => {
     if (!attemptedModels.includes(model)) attemptedModels.push(model);
-    const result = await ai.models.generateContentStream(withTimeout(params, model));
-    return meterStream(result, model, params, attemptedModels, startTime, preferido);
+    // Já abortado antes de tentar (ex.: estava esperando vaga na janela do modelo).
+    if (hooks?.abortSignal?.aborted) throw new GenerationAbortedError();
+    try {
+      const result = await ai.models.generateContentStream(withTimeout(params, model, hooks?.abortSignal));
+      return meterStream(result, model, params, attemptedModels, startTime, preferido);
+    } catch (err) {
+      // O usuário abortou durante a conexão: o fetch lança AbortError, que o laço de
+      // retry leria como timeout. Troca por um erro que ele não retenta.
+      if (hooks?.abortSignal?.aborted) throw new GenerationAbortedError();
+      throw err;
+    }
   });
 }

@@ -21,6 +21,15 @@ import { generateWithRetry } from '../lib/geminiRetry.js';
 import { runWithAiContext, enrichAiContext, getAiContext } from '../lib/aiContext.js';
 import { openRun, closeRun } from '../lib/generationTracing.js';
 import { logger } from '../lib/logger.js';
+import {
+  consumePendingAdvice,
+  listAdvice,
+  pruneAdvice,
+  settleAdviceWhenIdle,
+  ADVICE_SCOPE_CHAT,
+  adviceLines,
+} from '../lib/advice.js';
+import { isInterruptRequested, markInterruptStopped } from '../lib/interrupt.js';
 
 const ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
 // Extrai uma contagem de slides pedida no brief ("de 200 slides", "50 lâminas",
@@ -89,6 +98,36 @@ export interface PipelineParams {
   };
 }
 
+/** Onde uma geração parou a pedido do usuário ("Pausar e enviar"). */
+export interface PipelineInterruption {
+  /** Legível, no formato "antes do lote 4 de 10" / "antes do revisor". */
+  stage: string;
+  /** Slides que já estavam prontos e foram MANTIDOS no deck. */
+  slidesKept: number;
+  /** Total planejado (0 quando parou antes de haver plano). */
+  total: number;
+}
+
+export interface PipelineOutcome {
+  interrupted?: PipelineInterruption;
+}
+
+/**
+ * Como o run interrompido é fechado. O schema não tem CANCELLED em GenerationStatus
+ * e não pode ser alterado aqui, então o run fecha COMPLETED com `error` preenchido:
+ *  - FAILED estaria errado: nada falhou, o usuário pediu para parar, e o que já
+ *    foi gerado está salvo e íntegro. Marcar FAILED sujaria qualquer métrica de
+ *    falha e o "custo por deck" trataria um run bom como perdido;
+ *  - COMPLETED puro esconderia que foi interrompido. O prefixo fixo abaixo
+ *    permite achar esses runs com um filtro em `error` (começa com o prefixo), sem migration.
+ */
+export const INTERRUPTED_RUN_PREFIX = 'interrompida_pelo_usuario';
+
+export function describeInterruptedRun(i: PipelineInterruption): string {
+  const progresso = i.total > 0 ? `; ${i.slidesKept} de ${i.total} slides mantidos` : '';
+  return `${INTERRUPTED_RUN_PREFIX}: ${i.stage}${progresso}`;
+}
+
 export async function runPipeline(params: PipelineParams): Promise<void> {
   const { sessionId } = params;
 
@@ -107,12 +146,24 @@ export async function runPipeline(params: PipelineParams): Promise<void> {
       // disso a FK `GenerationRun.postId` não fecha. Aqui só o fechamento: o id
       // volta pelo AiContext, que é o mesmo objeto dentro deste escopo.
       try {
-        await runPipelineInner(params, session);
+        const outcome = await runPipelineInner(params, session);
         // COMPLETED aqui significa "o pipeline retornou sem lançar". Falha que o
         // runPipelineInner trata por dentro (ws.error e retorno normal) não vira
         // FAILED — quem quiser esse detalhe olha o `error` dos steps.
+        // Interrompido a pedido do usuário também retorna sem lançar; o motivo vai
+        // no `error` (ver describeInterruptedRun para o porquê de não ser FAILED).
         const runId = getAiContext().runId;
-        if (runId) await closeRun(runId, { status: 'COMPLETED' });
+        if (runId) {
+          await closeRun(runId, outcome?.interrupted
+            ? { status: 'COMPLETED', error: describeInterruptedRun(outcome.interrupted) }
+            : { status: 'COMPLETED' });
+        }
+        // O trabalho acabou (o estado da sessão já reflete isso): o que ficou
+        // pendente não tem mais quem consuma e volta ao autor. Na interrupção NÃO
+        // varre: quem pediu a parada leva as pendentes junto com a mensagem
+        // (agents/brain/adviceHandlers.ts) — expirá-las aqui as devolveria ao campo
+        // de texto de quem acabou de mandar uma mensagem por cima.
+        if (!outcome?.interrupted) await settleAdviceWhenIdle(sessionId, 'ended');
       } catch (error) {
         const runId = getAiContext().runId;
         if (runId) {
@@ -120,6 +171,12 @@ export async function runPipeline(params: PipelineParams): Promise<void> {
             status: 'FAILED',
             error: error instanceof Error ? error.message : String(error),
           });
+        }
+        // Parada dura (botão "Parar geração"): o workerStatus já foi zerado por quem
+        // pediu, então é seguro devolver as pendentes. Outras falhas podem ser
+        // retentadas pelo BullMQ; quem varre nesse caso é o worker, só na tentativa final.
+        if (error instanceof Error && error.message === 'Generation cancelled by user') {
+          await settleAdviceWhenIdle(sessionId, 'ended');
         }
         throw error;
       }
@@ -130,7 +187,7 @@ export async function runPipeline(params: PipelineParams): Promise<void> {
 async function runPipelineInner(
   params: PipelineParams,
   session: NonNullable<Awaited<ReturnType<typeof getSession>>>,
-): Promise<void> {
+): Promise<PipelineOutcome | void> {
   const { sessionId, brief, format } = params;
 
   // ── Carregar contexto canônico da marca ─────────────────────────────────────
@@ -180,10 +237,70 @@ async function runPipelineInner(
 
   const postId = params.postId ?? randomUUID();
 
+  // ── Interrupção cooperativa ("Pausar e enviar") ─────────────────────────────
+  // Objeto, e não `let`: o TS estreita uma variável atribuída só dentro de closure
+  // para `null` e trataria toda checagem abaixo como código morto.
+  const stop: { interruption: PipelineInterruption | null; postCreated: boolean } = {
+    interruption: null,
+    postCreated: false,
+  };
+
+  /** Há pedido de parada? Registra ONDE o pipeline viu (o primeiro ponto vence). */
+  const stopRequested = async (stage: string): Promise<boolean> => {
+    if (stop.interruption) return true;
+    if (!(await isInterruptRequested(sessionId))) return false;
+    stop.interruption = { stage, slidesKept: 0, total: 0 };
+    return true;
+  };
+
+  /**
+   * Fecha a geração parada ANTES de haver slides para salvar (planejamento, imagens):
+   * o post já criado, sem nenhum slide, fica FAILED como na parada dura, e a sessão
+   * volta a ouvir. Sem `session:state`: ele traz a lista de mensagens do servidor e
+   * apagaria da tela a mensagem do usuário que motivou a parada, ainda não persistida.
+   */
+  const finishInterruptedEarly = async (): Promise<PipelineOutcome> => {
+    const info = stop.interruption!;
+    if (stop.postCreated) {
+      // Retomada após a Amostra de Estilo: o slide 0 já existe e foi aprovado, o deck
+      // continua utilizável (READY). Em qualquer outro caso ainda não há nenhum slide
+      // — FAILED, igual à parada dura.
+      await prisma.post.update({
+        where: { id: postId },
+        data: { status: params.resumeFromStyleProof ? 'READY' : 'FAILED' },
+      }).catch(() => {});
+    }
+    await announceInterruption(info);
+    return { interrupted: info };
+  };
+
+  const announceInterruption = async (info: PipelineInterruption): Promise<void> => {
+    await updateSession(sessionId, { phase: 'listening', workerStatus: 'idle', activeQuestion: null });
+    ws.interrupted(sessionId, { ...info, postId: stop.postCreated ? postId : undefined });
+    // Só DEPOIS de o estado da sessão estar ocioso: quem espera (o handler da
+    // mensagem) lê isto para abrir o turno seguinte já com a sessão consistente.
+    await markInterruptStopped(sessionId, info);
+  };
+
+  // ── Orientações em tempo real ───────────────────────────────────────────────
+  // Novo deck: some da lista o que era de decks anteriores; o deste (retry do job,
+  // retomada após Amostra de Estilo) e as dadas no chat que originou a geração ficam.
+  await pruneAdvice(sessionId, { keepScopes: [postId, ADVICE_SCOPE_CHAT] });
+  // O que já valia para ESTE deck antes desta execução (retry, retomada): entra no
+  // primeiro lote como se tivesse sido dito agora, senão uma retomada esqueceria
+  // orientações já aplicadas.
+  const carriedAdvice = (await listAdvice(sessionId))
+    .filter((a) => a.status === 'applied' && a.scope === postId)
+    .map((a) => a.text);
+  // Tudo que está em vigor neste deck (carregado + aplicado agora): alimenta o revisor.
+  const adviceInEffect: string[] = [...carriedAdvice];
+  let carriedDelivered = false;
+
   // Geração de passo único: gera → revisa → para. NÃO regeramos automaticamente
   // a apresentação inteira. A análise do revisor é mostrada ao usuário, que
   // decide se aceita o design ou pede ajustes/refação no chat.
   await checkCancelled();
+  if (await stopRequested('antes do planejamento')) return finishInterruptedEarly();
     // ── 1. Planner ────────────────────────────────────────────────────────────
     ws.progress(sessionId, 10, 'Planejando estrutura (Manager)...');
 
@@ -207,6 +324,7 @@ async function runPipelineInner(
     const requestedCount = parseRequestedSlideCount(planBrief);
 
     await checkCancelled();
+    if (await stopRequested('antes do planejamento')) return finishInterruptedEarly();
     ws.progress(sessionId, 20, 'Planejando estrutura lógica...');
     // Roteiro pré-aprovado (fluxo copy-first): o usuário JÁ viu e confirmou esta
     // estrutura no chat — replanejar aqui jogaria fora a aprovação.
@@ -233,6 +351,10 @@ async function runPipelineInner(
     const { width, height } = resolveCanvasSize(format, params.aspectRatio);
 
     await checkCancelled();
+    if (await stopRequested('antes de criar o deck')) {
+      stop.interruption!.total = slideCount;
+      return finishInterruptedEarly();
+    }
     ws.progress(sessionId, 25, 'Inicializando design no banco de dados...');
     try {
       await prisma.post.create({
@@ -265,6 +387,7 @@ async function runPipelineInner(
           },
         },
       });
+      stop.postCreated = true;
     } catch (dbErr) {
       // Retry do job: o post da tentativa anterior já existe — seguimos NELE
       // (os writes incrementais são por postId+position e o update final idem).
@@ -273,6 +396,7 @@ async function runPipelineInner(
         data: { status: 'GENERATING' },
       }).catch(() => null);
       if (updated) {
+        stop.postCreated = true;
         logger.warn('Post já existia (retry do job) — continuando no mesmo post', { postId });
       } else {
         logger.error('Falha ao pré-criar Post/Slides no banco', { error: (dbErr as Error).message });
@@ -302,6 +426,10 @@ async function runPipelineInner(
 
     // ── 1.5. Imagens dos slides que pedem (reaproveita da biblioteca ou gera) ──
     await checkCancelled();
+    if (await stopRequested('antes de gerar as imagens')) {
+      stop.interruption!.total = slideCount;
+      return finishInterruptedEarly();
+    }
     let resolvedImages: Map<number, ResolvedSlideImage>;
 
     if (params.resumeFromImageApproval && params.imageCandidateDecision) {
@@ -389,6 +517,10 @@ async function runPipelineInner(
 
     // ── 2. Geração HTML/CSS (modo nativo do modelo) ───────────────────────────
     await checkCancelled();
+    if (await stopRequested('antes de gerar os slides')) {
+      stop.interruption!.total = slideCount;
+      return finishInterruptedEarly();
+    }
     ws.progress(sessionId, 30, 'Gerando design...');
 
     try {
@@ -526,7 +658,29 @@ async function runPipelineInner(
             `Gerando slide ${completed} de ${totalSlides}...`,
           );
         },
-        { concurrency: config.generationConcurrency },
+        {
+          concurrency: config.generationConcurrency,
+          // Ponto seguro de CONSUMO de orientações: o início de cada lote. Drena as
+          // pendentes (atômico: já as marca aplicadas, com o lote onde entraram) e as
+          // devolve ao gerador, que as injeta neste lote e nos seguintes.
+          getPendingAdvice: async ({ batch, totalBatches }) => {
+            const fresh = await consumePendingAdvice(sessionId, {
+              stage: `lote ${batch} de ${totalBatches}`,
+              scope: postId,
+            });
+            const texts = fresh.map((a) => a.text);
+            adviceInEffect.push(...texts);
+            // As já valendo antes desta execução (retry/retomada) entram uma vez só.
+            if (!carriedDelivered) {
+              carriedDelivered = true;
+              return [...carriedAdvice, ...texts];
+            }
+            return texts;
+          },
+          // Ponto seguro de PARADA: o limite entre lotes.
+          shouldStop: async ({ batch, totalBatches }) =>
+            stopRequested(`antes do lote ${batch} de ${totalBatches}`),
+        },
       );
 
       // Envelope de conteúdo (preview no front + persistência). kind html-design.
@@ -545,50 +699,68 @@ async function runPipelineInner(
 
       // Persiste no Redis + broadcast WS (design:update). O frontend renderiza o
       // envelope html-design via HtmlSlideRenderer (preview da Fábrica).
-      currentPages = await executeTool('set_design', { pages: [content] }, sessionId, currentPages);
+      if (design.slides.length > 0) {
+        currentPages = await executeTool('set_design', { pages: [content] }, sessionId, currentPages);
+      }
 
       // ── 3. Reviewer (visão sobre render fiel em chromium) ─────────────────────
       await checkCancelled();
-      ws.progress(sessionId, 85, 'Revisando resultado...');
+      // Parada pedida durante o último lote (ou já vista por um lote): o deck com o
+      // que existe segue para o salvamento; o revisor não roda.
+      if (!stop.interruption) await stopRequested('antes do revisor');
+      if (stop.interruption) {
+        stop.interruption.slidesKept = design.slides.length;
+        stop.interruption.total = slideCount;
+      } else {
+        ws.progress(sessionId, 85, 'Revisando resultado...');
 
-      await updateSession(sessionId, { phase: 'reviewing', workerStatus: 'running' });
-      const reviewingSession = await getSession(sessionId);
-      if (reviewingSession) {
-        ws.sessionState(sessionId, {
-          phase: reviewingSession.phase,
-          messages: reviewingSession.messages,
-          currentDesign: reviewingSession.currentDesign,
-          workerStatus: reviewingSession.workerStatus,
-          reviewMode: reviewingSession.reviewMode,
+        await updateSession(sessionId, { phase: 'reviewing', workerStatus: 'running' });
+        const reviewingSession = await getSession(sessionId);
+        if (reviewingSession) {
+          ws.sessionState(sessionId, {
+            phase: reviewingSession.phase,
+            messages: reviewingSession.messages,
+            currentDesign: reviewingSession.currentDesign,
+            workerStatus: reviewingSession.workerStatus,
+            reviewMode: reviewingSession.reviewMode,
+          });
+        }
+
+        // Ponto seguro de consumo, o segundo: antes do revisor. A orientação que
+        // chegou durante o último lote entra aqui — o revisor julga o deck contra
+        // o que o usuário pediu DEPOIS do briefing, não só contra o briefing.
+        const reviewerAdvice = await consumePendingAdvice(sessionId, { stage: 'revisor', scope: postId });
+        adviceInEffect.push(...reviewerAdvice.map((a) => a.text));
+        const reviewerBrief = adviceInEffect.length > 0
+          ? `${brief}\n\nOrientações do usuário dadas durante a geração (o deck deve refleti-las):\n${adviceLines(adviceInEffect).join('\n')}`
+          : brief;
+
+        // Reviewer do HTML: crítica sobre o render fiel (rasteriza em chromium e o
+        // modelo multimodal vê a arte). Fail-safe: se o reviewer estourar, aprova
+        // para não travar a entrega.
+        try {
+          reviewResult = await runHtmlReviewer(design, brandContext, reviewerBrief);
+        } catch (reviewErr) {
+          logger.error('Reviewer HTML falhou; aprovando por segurança (fail-safe)', { error: (reviewErr as Error).message });
+          reviewResult = { approved: true, score: 75, deviations: [], feedback: 'Revisão automática indisponível', correctionInstructions: undefined };
+        }
+
+        // Guarda o review na sessão MESMO quando aprovado: se o usuário recusar
+        // (review:decline), o brain usa estas deviations para montar um [EDIT]
+        // cirúrgico — sem isto a recusa só tinha o texto solto do chat e a única
+        // saída era regenerar o deck inteiro. O brain limpa no approve/decline.
+        await updateSession(sessionId, {
+          pendingReview: {
+            score: reviewResult.score,
+            feedback: reviewResult.feedback,
+            deviations: reviewResult.deviations ?? [],
+          },
         });
       }
 
-      // Reviewer do HTML: crítica sobre o render fiel (rasteriza em chromium e o
-      // modelo multimodal vê a arte). Fail-safe: se o reviewer estourar, aprova
-      // para não travar a entrega.
-      try {
-        reviewResult = await runHtmlReviewer(design, brandContext, brief);
-      } catch (reviewErr) {
-        logger.error('Reviewer HTML falhou; aprovando por segurança (fail-safe)', { error: (reviewErr as Error).message });
-        reviewResult = { approved: true, score: 75, deviations: [], feedback: 'Revisão automática indisponível', correctionInstructions: undefined };
-      }
-
-
-      // Guarda o review na sessão MESMO quando aprovado: se o usuário recusar
-      // (review:decline), o brain usa estas deviations para montar um [EDIT]
-      // cirúrgico — sem isto a recusa só tinha o texto solto do chat e a única
-      // saída era regenerar o deck inteiro. O brain limpa no approve/decline.
-      await updateSession(sessionId, {
-        pendingReview: {
-          score: reviewResult.score,
-          feedback: reviewResult.feedback,
-          deviations: reviewResult.deviations ?? [],
-        },
-      });
-
       // Sem auto-regeneração: se o revisor não aprovou, mantemos ESTE design e
       // mostramos a análise para o usuário decidir o próximo passo no chat.
-      if (!reviewResult.approved) {
+      if (reviewResult && !reviewResult.approved) {
         const deviationsText = (reviewResult.deviations ?? [])
           .map((d) => `- [${d.severity}] Slide ${d.slideIndex + 1}: ${d.description}${d.fix ? ` → ${d.fix}` : ''}`)
           .join('\n');
@@ -626,8 +798,16 @@ async function runPipelineInner(
       throw err;
     }
 
+  // Parou no primeiro limite de lote, antes de sair um slide sequer: não há o que
+  // salvar. Mesmo desfecho da parada antes da geração.
+  if (stop.interruption && stop.interruption.slidesKept === 0) {
+    return finishInterruptedEarly();
+  }
 
   // ── Salvar post no banco ────────────────────────────────────────────────────
+  // Também é o caminho da interrupção COM slides: o que já foi gerado é persistido
+  // como um deck de verdade. O syncPostSlides apaga as linhas-placeholder dos
+  // slides que não chegaram a ser gerados, então o deck fica com N reais, sem buracos.
   try {
     // currentPages[0] é o envelope html-design; persistimos ele + histórico de chat.
     const envelope = (currentPages[0] ?? {}) as unknown as Record<string, unknown>;
@@ -702,6 +882,15 @@ async function runPipelineInner(
   }
 
   // ── Finalizar ──────────────────────────────────────────────────────────────
+  // Interrompido com slides salvos: NÃO é `done` (sem "o que achou do resultado?",
+  // sem notificação de conclusão, sem revisão) nem Amostra de Estilo. A sessão volta a
+  // ouvir e o cliente é avisado de onde parou; a mensagem do usuário, que motivou a
+  // parada, é o próximo turno.
+  if (stop.interruption) {
+    await announceInterruption(stop.interruption);
+    return { interrupted: stop.interruption };
+  }
+
   if (params.generateStyleProofOnly) {
     await updateSession(sessionId, { 
       phase: 'listening', // Volta para listening para aprovar a amostra

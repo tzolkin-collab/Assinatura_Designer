@@ -20,6 +20,8 @@ import { runDeckExport, type DeckExportParams } from './deckExport.js';
 import { runAssetCapture, type AssetCaptureParams } from './assetCapture.js';
 import { analyzeReferenceBackground } from './referenceSync.js';
 import { logger } from './logger.js';
+import { expirePendingAdvice } from './advice.js';
+import { clearInterrupt } from './interrupt.js';
 
 const QUEUE_NAME = 'pipeline';
 
@@ -56,6 +58,9 @@ export async function enqueuePipeline(params: PipelineParams): Promise<void> {
   // A identidade do Post nasce AQUI e viaja no job: um retry (crash/restart no
   // meio da geração) reusa o mesmo post em vez de duplicar e deixar zumbi.
   const withPostId: PipelineParams = { ...params, postId: params.postId ?? randomUUID() };
+  // Uma geração nova é uma intenção nova: um pedido de "Pausar e enviar" que sobrou
+  // da anterior (a flag vive 5 min) cancelaria este job no primeiro limite de lote.
+  await clearInterrupt(params.sessionId);
   await pipelineQueue.add('generate', withPostId, {
     // Rastreabilidade nos logs/inspeção; não usado para dedup (regenerações
     // legítimas na mesma sessão precisam poder re-enfileirar). NÃO usar ':' —
@@ -289,6 +294,10 @@ export function startPipelineWorker(): Worker<PipelineParams> {
     // Só avisa o usuário quando esgotaram as tentativas — evita ruído em retries.
     if (isFinal && job?.data.sessionId) {
       ws.error(job.data.sessionId, `Erro na geração: ${err.message}`);
+      // Sem retry pela frente: o que o usuário deixou pendente não terá quem consuma.
+      // Devolve ao campo de mensagem em vez de deixar a orientação parada. (O estado
+      // da sessão pode ainda constar como `running`; a varredura não depende disso.)
+      void expirePendingAdvice(job.data.sessionId, 'failed');
     }
   });
 
