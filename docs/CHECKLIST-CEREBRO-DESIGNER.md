@@ -6,7 +6,7 @@
 > **Levantado em:** 2026-10-05
 > **Estado (05/10):** cérebro ainda não implementado. As 4 branches pendentes do plano antigo já estão no `main`
 > (seção D). Este arquivo é o plano de trabalho a validar.
-> **Convenção:** ☐ pendente · ☑ feito · 🟡 HIPÓTESE (não verificado) · ❓ depende de decisão
+> **Convenção:** ☐ pendente · ◐ parcial (módulo pronto e testado, ainda não ligado à geração) · ☑ feito · 🟡 HIPÓTESE (não verificado) · ❓ depende de decisão
 
 ---
 
@@ -47,15 +47,15 @@ nos projetos, e a identidade de um projeto nunca contamina outro.
 
 | ☐ | Item | Objetivo | Pedido |
 |---|---|---|---|
-| ☐ | Prompt global persistente | Regras fixas que valem para todos os projetos, sem repetir em cada um | Guardar o §3.1 como instrução fixa, separada dos projetos |
+| ◐ | Prompt global persistente | Regras fixas que valem para todos os projetos, sem repetir em cada um | Guardar o §3.1 como instrução fixa, separada dos projetos. **Feito:** texto literal em `lib/designerBrain/prompts.ts`. **Falta:** ligar ao planner/artista/reviewer |
 | ☐ | Projeto-base | Cada marca ter sua memória isolada | Campos independentes: plataforma de marca, manual visual, logo, fonte, paleta, fotos, elementos |
 | ☐ | Collab / desdobramento | Herdar a base e guardar só o que muda | Tipo (interno/parceria), contexto, logo e manual do parceiro, % de protagonismo |
-| ☐ | Seleção de modo | Cada tipo de peça ter regras próprias | Escolher entre apresentação 16:9, imagem avulsa e e-book A4 |
+| ◐ | Seleção de modo | Cada tipo de peça ter regras próprias | Escolher entre apresentação 16:9, imagem avulsa e e-book A4. **Feito:** regras dos 3 modos no módulo. **Falta:** seletor na UI e tipo de post do e-book A4 |
 | ☐ | Galeria de fotos reais | A IA só usar foto fornecida | Biblioteca por projeto + anexos por demanda |
-| ☐ | Sem foto, sem pessoa gerada | Nunca fabricar rosto nem stock | Reservar área limpa na arte, sem texto técnico dentro dela |
-| ☐ | Status do texto | Texto visível ≠ fala, contexto ou interno | Campo por bloco: aprovado, em revisão, apoio, fala, contexto, interno, não exibir |
-| ☐ | Amanda como piloto | Validar o sistema com um projeto completo | Carregar a memória do §11 (essência, paleta, tipografia, proibições) |
-| ☐ | Montagem do prompt | Camadas na ordem certa | global → projeto → collab → modo → foto → ativos → briefing → checklist |
+| ◐ | Sem foto, sem pessoa gerada | Nunca fabricar rosto nem stock | Reservar área limpa na arte, sem texto técnico dentro dela. **Feito:** regra §5.1 anexada quando há foto ou área fotográfica. **Falta:** tirar `generate-photo`, Unsplash e Remix do `imageResolver` |
+| ◐ | Status do texto | Texto visível ≠ fala, contexto ou interno | Campo por bloco: aprovado, em revisão, apoio, fala, contexto, interno, não exibir. **Feito:** regra em código (`interno` e `não exibir` nunca chegam ao modelo). **Falta:** campo no briefing e na UI |
+| ◐ | Amanda como piloto | Validar o sistema com um projeto completo | Carregar a memória do §11. **Feito:** memória em `seeds/amandaCoelho.ts`. **Falta:** projeto-base no banco, ativos e fotos |
+| ◐ | Montagem do prompt | Camadas na ordem certa | global → projeto → collab → modo → foto → ativos → briefing → checklist. **Feito:** `assembleDesignerBrain` (função pura, 21 testes). **Falta:** chamar no pipeline |
 | ☐ | Revisão antes de "final" | Não entregar peça com erro ou invenção | Checar texto, quantidade, acentos, logo, cores, margens, fotos |
 | ☐ | Galeria de projetos | Trocar "galeria de marcas" por projetos | Nova home e página interna do projeto, conforme os mockups do documento |
 
