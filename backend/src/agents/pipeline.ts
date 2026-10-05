@@ -20,6 +20,7 @@ import { runHtmlReviewer } from './reviewer/index.js';
 import type { ReviewResult } from './reviewer/index.js';
 import { editHtmlSlide, generateHtmlDesignBatched, type HtmlDesignSlide } from '../lib/htmlDesign.js';
 import { deriveDeckName } from '../lib/deckName.js';
+import { normalizeEmptyPhotoSlots } from '../lib/photoSlot.js';
 import { syncPostSlides } from '../lib/postHelper.js';
 import { researchBrand, type VisualRef } from '../lib/fabricaLegacy.js';
 import { resolveSlideImages, resolveImageCandidateDecisions, type AmbiguousImageCandidate, type ResolvedSlideImage } from '../lib/imageResolver.js';
@@ -841,6 +842,11 @@ async function runPipelineInner(
           corrigidos: textSlidesFixed,
           restantes: textIssuesLeft.map((i) => i.slideIndex + 1),
         });
+      }
+
+      // Moldura padrão nos espaços de foto vazios: a mesma em todos os slides, desenhada pelo sistema.
+      if (designerBrainOn) {
+        design.slides = design.slides.map((slide) => ({ ...slide, html: normalizeEmptyPhotoSlots(slide.html) }));
       }
 
       // Envelope de conteúdo (preview no front + persistência). kind html-design.

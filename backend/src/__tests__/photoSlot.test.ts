@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { listPhotoSlots, setPhotoInSlot, PhotoSlotNotFoundError } from '../lib/photoSlot';
+import { listPhotoSlots, setPhotoInSlot, normalizeEmptyPhotoSlots, PhotoSlotNotFoundError } from '../lib/photoSlot';
 import { sanitizeSlideHtml } from '../lib/htmlDesign';
 
 const VAZIO = `<style>.s1-foto{position:absolute;left:60%;top:8%;width:36%;height:84%;background:#D8E9F3}</style>
@@ -93,5 +93,40 @@ describe('setPhotoInSlot', () => {
       src: 'https://cdn/a.jpg',
       position: { x: 25, y: 75 },
     });
+  });
+});
+
+describe('moldura padrão do espaço vazio', () => {
+  const vazio = '<div data-photo-slot="1" style="position:absolute;left:10px;top:20px;width:300px;height:400px;border-radius:12px;background:#f00"></div>';
+  const comFoto = '<div data-photo-slot="1" style="width:100px;height:100px"><img data-photo-img src="https://x/a.jpg" style="width:100%"></div>';
+
+  it('dá a mesma moldura a todo espaço vazio, sem texto, e mantém posição e tamanho', () => {
+    const out = normalizeEmptyPhotoSlots(vazio + vazio.replace('"1"', '"2"'));
+    expect(out.match(/data-photo-empty/g)).toHaveLength(2);
+    expect(out).toContain('border:1px solid rgba(128,128,128,.5)');
+    expect(out).toContain('width:300px');
+    expect(out).toContain('border-radius:12px');
+    expect(out).not.toMatch(/>[^<]+</);
+  });
+
+  it('não mexe no espaço que já tem foto nem no HTML sem espaço', () => {
+    expect(normalizeEmptyPhotoSlots(comFoto)).not.toContain('data-photo-empty');
+    expect(normalizeEmptyPhotoSlots('<p>oi</p>')).toBe('<p>oi</p>');
+  });
+
+  it('a moldura some quando a foto entra e volta quando o espaço é esvaziado', () => {
+    const molde = normalizeEmptyPhotoSlots(vazio);
+    const com = setPhotoInSlot(molde, '1', { url: 'https://x/a.jpg' });
+    expect(com).not.toContain('data-photo-empty');
+    expect(com).not.toContain('background-image');
+    expect(com).toContain('width:300px');
+    const volta = setPhotoInSlot(com, '1', null);
+    expect(volta).toContain('data-photo-empty');
+    expect(volta).not.toContain('<img');
+  });
+
+  it('rodar duas vezes dá o mesmo resultado', () => {
+    const uma = normalizeEmptyPhotoSlots(vazio);
+    expect(normalizeEmptyPhotoSlots(uma)).toBe(uma);
   });
 });

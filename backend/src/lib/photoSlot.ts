@@ -97,6 +97,52 @@ function readPosition(img: Element | null): PhotoPosition {
   return { x: clampPct(parseFloat(m[1]!), 50), y: clampPct(parseFloat(m[2]!), 50) };
 }
 
+// Moldura padrão do espaço vazio (achado V2): o artista desenhava, em cada slide, uma caixa de
+// um jeito, e fica difícil reconhecer que ali vai uma foto. A moldura agora é do SISTEMA: a
+// mesma em todos os slides — retângulo neutro com as duas diagonais, o sinal universal de
+// "imagem aqui" —, sem texto e sem ícone, e some quando a foto entra. O tamanho, a posição e
+// o arredondamento continuam sendo os que o artista desenhou.
+const DIAGONAL = 'rgba(128,128,128,.42)';
+const EMPTY_FRAME: Record<string, string> = {
+  'background-color': 'rgba(128,128,128,.14)',
+  'background-image': [
+    `linear-gradient(to top right,transparent calc(50% - .75px),${DIAGONAL} calc(50% - .75px),${DIAGONAL} calc(50% + .75px),transparent calc(50% + .75px))`,
+    `linear-gradient(to bottom right,transparent calc(50% - .75px),${DIAGONAL} calc(50% - .75px),${DIAGONAL} calc(50% + .75px),transparent calc(50% + .75px))`,
+  ].join(','),
+  border: '1px solid rgba(128,128,128,.5)',
+  'box-sizing': 'border-box',
+  overflow: 'hidden',
+};
+const EMPTY_ATTR = 'data-photo-empty';
+
+function applyEmptyFrame(slotEl: Element): void {
+  withStyle(slotEl, EMPTY_FRAME);
+  slotEl.setAttribute(EMPTY_ATTR, '');
+}
+
+function clearEmptyFrame(slotEl: Element): void {
+  if (!slotEl.hasAttribute(EMPTY_ATTR)) return;
+  const map = parseStyle(slotEl.getAttribute('style'));
+  for (const k of ['background-color', 'background-image', 'border']) map.delete(k);
+  slotEl.setAttribute('style', serializeStyle(map));
+  slotEl.removeAttribute(EMPTY_ATTR);
+}
+
+/**
+ * Padroniza a moldura de TODO espaço de foto vazio do slide. Quem já tem foto fica como está.
+ * Roda depois que o artista gera o slide; o texto e a posição do espaço não são tocados.
+ */
+export function normalizeEmptyPhotoSlots(html: string): string {
+  const { body } = parseBody(html);
+  const slots = Array.from(body.querySelectorAll('[data-photo-slot]'));
+  if (slots.length === 0) return html;
+  for (const el of slots) {
+    if (photoOf(el)) clearEmptyFrame(el);
+    else applyEmptyFrame(el);
+  }
+  return body.innerHTML;
+}
+
 /** Lista os espaços de foto do slide, na ordem em que aparecem. */
 export function listPhotoSlots(html: string): PhotoSlotInfo[] {
   const { body } = parseBody(html);
@@ -131,6 +177,7 @@ export function setPhotoInSlot(html: string, slot: string, placement: PhotoPlace
 
   if (placement === null) {
     for (const img of Array.from(slotEl.querySelectorAll('img'))) img.remove();
+    applyEmptyFrame(slotEl);
     return body.innerHTML;
   }
 
@@ -153,6 +200,7 @@ export function setPhotoInSlot(html: string, slot: string, placement: PhotoPlace
     'object-position': `${clampPct(pos.x, 50)}% ${clampPct(pos.y, 50)}%`,
   });
 
+  clearEmptyFrame(slotEl);
   // A foto não pode vazar do espaço: sem isto, uma foto maior que a moldura invade o layout.
   withStyle(slotEl, { overflow: 'hidden' });
   return body.innerHTML;
