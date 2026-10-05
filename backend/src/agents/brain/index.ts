@@ -20,6 +20,7 @@ import { editHtmlSlide, type HtmlDesignSlide } from '../../lib/htmlDesign.js';
 import { enqueuePipeline } from '../../lib/queue.js';
 import { uploadFileToR2 } from '../../lib/r2.js';
 import { buildMessageParts } from '../../lib/chatMessageParts.js';
+import { uploadChatAttachments } from '../../lib/chatAttachments.js';
 import { BRAIN_SYSTEM_PROMPT } from './prompts.js';
 import prisma from '../../lib/prisma.js';
 import { executeTool } from '../tools/index.js';
@@ -582,19 +583,10 @@ async function handleUserMessageInner(
   // não cairia no teto da marca.
   enrichAiContext({ brandSlug: session.brandSlug });
 
-  // Sobe cada foto anexada pro R2 assim que chega — antes ela só existia como
-  // base64 dentro da mensagem: o cérebro via só o NOME do arquivo em texto (nunca
-  // o pixel), e a geração nunca tinha como usá-la (nenhuma URL real pra embutir
-  // num <img>). Com a URL em mãos, os dois casos passam a funcionar de verdade.
+  // Sobe cada foto anexada pro R2 assim que chega (com SVG higienizado) — ver
+  // lib/chatAttachments.ts pelo porquê.
   if (attachments && attachments.length > 0) {
-    await Promise.all(attachments.map(async (a) => {
-      try {
-        const buffer = Buffer.from(a.dataBase64, 'base64');
-        a.url = await uploadFileToR2(buffer, a.name, a.mimeType, `brands/${session!.brandSlug}/chat-attachments`);
-      } catch (err) {
-        logger.warn('Falha ao subir anexo do chat pro R2 — segue só com o base64 (sem URL pra geração)', { error: (err as Error).message });
-      }
-    }));
+    await uploadChatAttachments(attachments, session.brandSlug);
   }
 
   // Persiste mensagem do usuário

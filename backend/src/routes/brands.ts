@@ -8,6 +8,8 @@ import { mergeSlidesIntoPost } from '../lib/postHelper.js';
 import { deleteFromR2 } from '../lib/r2.js';
 import { requireBrandRole, ANY_MEMBER, EDITORS, type BrandRequest } from '../middleware/brandAccess.js';
 import { getUsage, getBilling } from '../lib/aiBudget.js';
+import { rateLimit } from '../middleware/rateLimit.js';
+import { SVG_SANITIZE_RATE_LIMIT } from '../lib/svgSanitizeRateLimit.js';
 
 import multer from 'multer';
 import { processBrandbookIngest } from '../lib/brandbookIngestion.js';
@@ -18,7 +20,13 @@ const brandbookUpload = multer({ storage: multer.memoryStorage(), limits: { file
 
 // POST /api/brands/:slug/brandbook/ingest - Upload e processamento do Brandbook
 // Requer papel EDITOR+ para evitar que um usuário autenticado processe o brandbook de outra marca
-brandsRouter.post('/:slug/brandbook/ingest', requireBrandRole(EDITORS), brandbookUpload.array('files', 15), async (req: BrandRequest, res: Response, next: NextFunction) => {
+//
+// Rate limit ANTES do multer/requireBrandRole: um upload de brandbook aceita até 15
+// arquivos numa ÚNICA requisição (não são 15 chamadas HTTP — não gasta orçamento extra
+// do rate limit), mas a rota chama sanitizeSvg em cada um deles. Ver
+// lib/svgSanitizeRateLimit.ts para a justificativa dos números e por que o orçamento é
+// COMPARTILHADO com as outras rotas que também sanitizam SVG (assets.ts, upload.ts).
+brandsRouter.post('/:slug/brandbook/ingest', rateLimit(SVG_SANITIZE_RATE_LIMIT), requireBrandRole(EDITORS), brandbookUpload.array('files', 15), async (req: BrandRequest, res: Response, next: NextFunction) => {
   try {
     const { userId } = req.user!;
     const slug = req.brand!.slug;

@@ -56,20 +56,32 @@ function parseBase64Image(data: string) {
 
 import multer from 'multer';
 import { uploadFileToR2 } from '../lib/r2.js';
+import { prepareStorableFile } from '../lib/svgSanitize.js';
+import { rateLimit } from '../middleware/rateLimit.js';
+import { SVG_SANITIZE_RATE_LIMIT } from '../lib/svgSanitizeRateLimit.js';
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
+const svgSanitizeRateLimit = rateLimit(SVG_SANITIZE_RATE_LIMIT);
 
 // POST /api/upload - Rota genérica para uploads avulsos (ex: pelo Editor no Frontend)
-uploadRouter.post('/', requireAuth, upload.single('file'), async (req: AuthRequest, res: Response, next: NextFunction) => {
+// Rate limit compartilhado com as outras rotas que chamam sanitizeSvg — ver
+// lib/svgSanitizeRateLimit.ts (blocker B: pool piscina saturado por uma única conta).
+// "Rota genérica = mais fácil de abusar" já era o motivo do comentário original abaixo;
+// o rate limit fecha exatamente essa brecha.
+uploadRouter.post('/', requireAuth, svgSanitizeRateLimit, upload.single('file'), async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     assertR2Configured();
     const file = req.file;
     if (!file) throw createError(400, 'Nenhum arquivo enviado.');
 
+    // Rota genérica = mais fácil de abusar: o cliente escolhe nome e Content-Type.
+    // SVG sai higienizado como image/svg+xml; HTML vira download (ver svgSanitize.ts).
+    const prepared = await prepareStorableFile({ buffer: file.buffer, fileName: file.originalname, mimeType: file.mimetype });
+
     const url = await uploadFileToR2(
-      file.buffer,
+      prepared.buffer,
       file.originalname,
-      file.mimetype,
+      prepared.mimeType,
       `uploads/general` // Pasta genérica
     );
 
@@ -79,7 +91,12 @@ uploadRouter.post('/', requireAuth, upload.single('file'), async (req: AuthReque
   }
 });
 
-uploadRouter.post('/logo', async (req: AuthRequest, res: Response, next: NextFunction) => {
+// Rate limit compartilhado com as outras rotas que chamam sanitizeSvg — ver
+// lib/svgSanitizeRateLimit.ts. Esta rota não repete `requireAuth` explicitamente (só
+// existe uma vez, no app.use('/api/upload', requireAuth, uploadRouter) em app.ts), mas
+// já roda atrás dele mesmo assim — o rate limit por conta (keyBy: 'user') funciona
+// normalmente.
+uploadRouter.post('/logo', svgSanitizeRateLimit, async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     assertR2Configured();
 

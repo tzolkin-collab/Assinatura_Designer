@@ -8,6 +8,9 @@ import { createError } from '../middleware/errorHandler.js';
 import { requireBrandRole, ANY_MEMBER, EDITORS, type BrandRequest } from '../middleware/brandAccess.js';
 import { parseBody } from '../lib/validate.js';
 import { exportDesign, waitForExport } from '../lib/canvaClient.js';
+import { prepareStorableFile, InvalidSvgError } from '../lib/svgSanitize.js';
+import { rateLimit } from '../middleware/rateLimit.js';
+import { SVG_SANITIZE_RATE_LIMIT } from '../lib/svgSanitizeRateLimit.js';
 
 export const assetsRouter = Router({ mergeParams: true });
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
@@ -42,7 +45,9 @@ assetsRouter.get('/', requireBrandRole(ANY_MEMBER), async (req: BrandRequest, re
 });
 
 // POST /api/brands/:slug/assets
-assetsRouter.post('/', requireBrandRole(EDITORS), upload.single('file'), async (req: BrandRequest, res: Response, next: NextFunction) => {
+// Rate limit compartilhado com as outras rotas que chamam sanitizeSvg — ver
+// lib/svgSanitizeRateLimit.ts (blocker B: pool piscina saturado por uma única conta).
+assetsRouter.post('/', rateLimit(SVG_SANITIZE_RATE_LIMIT), requireBrandRole(EDITORS), upload.single('file'), async (req: BrandRequest, res: Response, next: NextFunction) => {
   try {
     const { userId } = req.user!;
     const file = req.file;
@@ -51,13 +56,18 @@ assetsRouter.post('/', requireBrandRole(EDITORS), upload.single('file'), async (
 
     const brand = req.brand!;
 
+    // O Content-Type que o cliente declara não manda: SVG é higienizado e sai como
+    // image/svg+xml mesmo se veio como text/html; HTML de verdade vira download.
+    // SVG inválido lança InvalidSvgError → 400 pelo errorHandler.
+    const prepared = await prepareStorableFile({ buffer: file.buffer, fileName: file.originalname, mimeType: file.mimetype });
+
     // Dimensões: sem elas o editor não sabe a proporção e insere a imagem esticada
     // num quadrado. Falha de leitura não impede o upload (pode ser SVG/fonte).
     let width: number | undefined;
     let height: number | undefined;
-    if (file.mimetype.startsWith('image/')) {
+    if (prepared.mimeType.startsWith('image/')) {
       try {
-        const meta = await sharp(file.buffer).metadata();
+        const meta = await sharp(prepared.buffer).metadata();
         width = meta.width;
         height = meta.height;
       } catch {
@@ -67,9 +77,9 @@ assetsRouter.post('/', requireBrandRole(EDITORS), upload.single('file'), async (
 
     // Upload to R2
     const url = await uploadFileToR2(
-      file.buffer,
+      prepared.buffer,
       file.originalname,
-      file.mimetype,
+      prepared.mimeType,
       `brands/${brand.id}`
     );
 
@@ -79,8 +89,8 @@ assetsRouter.post('/', requireBrandRole(EDITORS), upload.single('file'), async (
         uploadedBy: userId,
         name: file.originalname,
         url,
-        fileType: file.mimetype,
-        sizeBytes: file.size,
+        fileType: prepared.mimeType,
+        sizeBytes: prepared.buffer.length,
         width,
         height,
       }
@@ -95,7 +105,7 @@ assetsRouter.post('/', requireBrandRole(EDITORS), upload.single('file'), async (
 // base64 (Drive/Asana) pro pool de assets da marca. O frontend reaproveita os
 // mesmos popups da Fábrica (DrivePopup/AsanaPopup), que já resolvem OAuth e
 // devolvem `attachments` nesse formato — aqui só falta persistir no R2 + Asset.
-assetsRouter.post('/import-base64', requireBrandRole(EDITORS), async (req: BrandRequest, res: Response, next: NextFunction) => {
+assetsRouter.post('/import-base64', rateLimit(SVG_SANITIZE_RATE_LIMIT), requireBrandRole(EDITORS), async (req: BrandRequest, res: Response, next: NextFunction) => {
   try {
     const { userId } = req.user!;
     const brand = req.brand!;
@@ -111,11 +121,24 @@ assetsRouter.post('/import-base64', requireBrandRole(EDITORS), async (req: Brand
       }
       if (buffer.length === 0 || buffer.length > MAX_IMPORT_BYTES) continue;
 
+      // Mesma regra do upload direto. Aqui um SVG inválido só tira ESTE item do lote
+      // (como base64 inválido), em vez de derrubar os outros.
+      let prepared: Awaited<ReturnType<typeof prepareStorableFile>>;
+      try {
+        prepared = await prepareStorableFile({ buffer, fileName: att.name, mimeType: att.mimeType });
+      } catch (err) {
+        if (err instanceof InvalidSvgError) {
+          console.warn(`[Assets] import-base64: "${att.name}" ignorado — ${err.message}`);
+          continue;
+        }
+        throw err;
+      }
+
       let width: number | undefined;
       let height: number | undefined;
-      if (att.mimeType.startsWith('image/')) {
+      if (prepared.mimeType.startsWith('image/')) {
         try {
-          const meta = await sharp(buffer).metadata();
+          const meta = await sharp(prepared.buffer).metadata();
           width = meta.width;
           height = meta.height;
         } catch {
@@ -123,7 +146,7 @@ assetsRouter.post('/import-base64', requireBrandRole(EDITORS), async (req: Brand
         }
       }
 
-      const url = await uploadFileToR2(buffer, att.name, att.mimeType, `brands/${brand.id}`);
+      const url = await uploadFileToR2(prepared.buffer, att.name, prepared.mimeType, `brands/${brand.id}`);
 
       const asset = await prisma.asset.create({
         data: {
@@ -131,8 +154,8 @@ assetsRouter.post('/import-base64', requireBrandRole(EDITORS), async (req: Brand
           uploadedBy: userId,
           name: att.name,
           url,
-          fileType: att.mimeType,
-          sizeBytes: buffer.length,
+          fileType: prepared.mimeType,
+          sizeBytes: prepared.buffer.length,
           width,
           height,
           source,
