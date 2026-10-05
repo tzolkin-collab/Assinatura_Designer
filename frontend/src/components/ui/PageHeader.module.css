@@ -32,9 +32,8 @@
 
 .title {
   font-family: var(--font-serif);
-  font-size-adjust: none;
   font-size: var(--text-3xl);
-  font-weight: 500;
+  font-weight: var(--weight-title);
   color: var(--color-text);
   line-height: var(--leading-tight);
 }

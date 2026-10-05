@@ -45,7 +45,12 @@
 
   /* ── Typography ── */
   --font-sans: var(--font-source-sans), 'Source Sans 3', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  --font-serif: var(--font-newsreader), 'Georgia', serif;
+  /* Títulos usam a MESMA família da interface (Source Sans 3), em peso mais forte: em tamanho de
+     título o peso 500 fica leve demais nessa fonte. `--font-serif` ficou como apelido do token novo
+     para não quebrar quem ainda o usa; a fonte serifada (Newsreader) foi retirada. */
+  --font-display: var(--font-sans);
+  --font-serif: var(--font-display);
+  --weight-title: 600;
   --font-mono: 'SF Mono', 'Fira Code', 'Fira Mono', 'Roboto Mono', monospace;
 
   --text-xs: 0.75rem;

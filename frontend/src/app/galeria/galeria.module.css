@@ -186,9 +186,8 @@
 
 .modalTitle {
   font-family: var(--font-serif);
-  font-size-adjust: none;
   font-size: var(--text-2xl);
-  font-weight: 500;
+  font-weight: var(--weight-title);
   color: var(--color-text);
   margin: 0;
 }

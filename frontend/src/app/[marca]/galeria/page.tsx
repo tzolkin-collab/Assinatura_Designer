@@ -1350,7 +1350,7 @@ export default function BrandGaleriaPage() {
       <div className={styles.foldersContainer}>
         <div className={styles.foldersHeader}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)' }}>
-            <h3 className={styles.foldersTitle} style={{ fontFamily: 'var(--font-serif)', fontSizeAdjust: 'none', fontSize: '20px', textTransform: 'none', color: 'var(--color-text)', letterSpacing: 'normal' }}>Pastas do Projeto</h3>
+            <h3 className={styles.foldersTitle} style={{ fontFamily: 'var(--font-display)', fontSize: '20px', textTransform: 'none', color: 'var(--color-text)', letterSpacing: 'normal' }}>Pastas do Projeto</h3>
             <button 
               className={styles.aiReportBtn} 
               title="Gerar relatório de estilo desta pasta com Inteligência Artificial"
