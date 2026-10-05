@@ -57,7 +57,7 @@ nos projetos, e a identidade de um projeto nunca contamina outro.
 | ◐ | Status do texto | Texto visível ≠ fala, contexto ou interno | Campo por bloco: aprovado, em revisão, apoio, fala, contexto, interno, não exibir. **Feito:** regra em código (`interno` e `não exibir` nunca chegam ao modelo). **Falta:** campo no briefing e na UI |
 | ◐ | Amanda como piloto | Validar o sistema com um projeto completo | Carregar a memória do §11. **Feito:** memória em `seeds/amandaCoelho.ts`. **Falta:** projeto-base no banco, ativos e fotos |
 | ◐ | Montagem do prompt | Camadas na ordem certa | global → projeto → collab → modo → foto → ativos → briefing → checklist. **Feito:** `assembleDesignerBrain` (função pura, 21 testes) e chamado no pipeline para marcas com o flag. **Falta:** briefing e ativos entrarem pelo montador (hoje o pipeline os entrega por caminho próprio) |
-| ☐ | Revisão antes de "final" | Não entregar peça com erro ou invenção | Checar texto, quantidade, acentos, logo, cores, margens, fotos |
+| ◐ | Revisão antes de "final" | Não entregar peça com erro ou invenção | Checar texto, quantidade, acentos, logo, cores, margens, fotos. **Feito (com o cérebro ligado):** checagem em código do texto aprovado contra cada slide (palavras faltando ou a mais, com acento), que reprova o deck e alimenta o ajuste; e a geração **para** quando não há texto aprovado. **Falta:** quantidade fechada, logo, cores, margens e foto |
 | ☐ | Galeria de projetos | Trocar "galeria de marcas" por projetos | Nova home e página interna do projeto, conforme os mockups do documento |
 
 **Observação sobre os mockups:** os dados mostrados neles (92% configurado, 38 fotos, Belong, Governo de Minas)
