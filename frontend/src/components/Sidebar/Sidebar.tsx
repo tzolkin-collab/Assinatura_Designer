@@ -4,86 +4,89 @@ import Image from 'next/image';
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import {
-  LayoutGrid,
-  Factory,
-  FileText,
-  Settings,
-  Palette,
-  Eye,
-  Bot,
-  PenTool,
-  ChevronDown,
-  Menu,
-  X,
-  LogOut,
-  Users,
-  Globe,
-  BarChart3,
-  Image as ImageIcon,
-} from 'lucide-react';
+import { ChevronDown, Menu, X, LogOut, type LucideIcon } from 'lucide-react';
 import styles from './Sidebar.module.css';
 import NotificationBell from '../Notification/NotificationBell';
 import { useAuth } from '@/lib/hooks';
+import { api } from '@/lib/api';
+import {
+  BRAND_SETTINGS,
+  BRAND_SETTINGS_GROUP,
+  BRAND_SETTINGS_OVERVIEW,
+  EXTRAS_NAV,
+  GLOBAL_NAV,
+  brandNav,
+  isActivePath,
+} from '@/lib/navigation';
 
 interface NavItem {
   label: string;
   href: string;
-  icon: React.ReactNode;
+  icon: LucideIcon;
   children?: NavItem[];
 }
 
-const mainNav: NavItem[] = [
-  { label: 'Minhas Marcas', href: '/galeria', icon: <LayoutGrid size={18} /> },
-  { label: 'Projetos da Equipe', href: '/projetos', icon: <Globe size={18} /> },
-  { label: 'Configurações Gerais', href: '/configuracoes', icon: <Settings size={18} /> },
-];
+/** Configurações da marca: um grupo que abre, com a visão geral e cada seção. */
+function brandSettingsGroup(marca: string): NavItem {
+  const base = `/${marca}/configuracoes`;
+  return {
+    label: BRAND_SETTINGS_GROUP.label,
+    icon: BRAND_SETTINGS_GROUP.icon,
+    href: base,
+    children: [
+      { label: BRAND_SETTINGS_OVERVIEW.label, icon: BRAND_SETTINGS_OVERVIEW.icon, href: base },
+      ...BRAND_SETTINGS.map((section) => ({
+        label: section.label,
+        icon: section.icon,
+        href: `${base}/${section.key}`,
+      })),
+    ],
+  };
+}
 
-const extrasNav: NavItem[] = [
-  { label: 'Documentação', href: '/extras/docs', icon: <FileText size={18} /> },
-];
+// O título da seção da marca mostrava o slug ("assinatura"). O nome vem da própria marca;
+// guardado em memória para não buscar de novo a cada navegação.
+const brandNameCache = new Map<string, string>();
 
-function getBrandNav(marca: string): NavItem[] {
-  return [
-    { label: 'Galeria', href: `/${marca}/galeria`, icon: <Eye size={18} /> },
-    { label: 'Fábrica', href: `/${marca}/fabrica`, icon: <Factory size={18} /> },
-    { label: 'Editor', href: `/${marca}/editor`, icon: <PenTool size={18} /> },
-    { label: 'Apresentações Publicadas', href: `/${marca}/apresentacoes`, icon: <Globe size={18} /> },
-
-    {
-      label: 'Configurações',
-      href: `/${marca}/configuracoes`,
-      icon: <Settings size={18} />,
-      children: [
-        { label: 'Visão Geral', href: `/${marca}/configuracoes`, icon: <Settings size={16} /> },
-        { label: 'Agente IA', href: `/${marca}/configuracoes/agent`, icon: <Bot size={16} /> },
-        { label: 'Branding', href: `/${marca}/configuracoes/branding`, icon: <Palette size={16} /> },
-        { label: 'Referências', href: `/${marca}/configuracoes/referencias`, icon: <Eye size={16} /> },
-        { label: 'Equipe', href: `/${marca}/configuracoes/equipe`, icon: <Users size={16} /> },
-        { label: 'Mídia e Fontes', href: `/${marca}/configuracoes/midia`, icon: <ImageIcon size={16} /> },
-        { label: 'Gastos de IA', href: `/${marca}/configuracoes/billing`, icon: <BarChart3 size={16} /> },
-      ],
-    },
-  ];
+function useBrandName(slug: string | null): string | null {
+  const [buscados, setBuscados] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (!slug || brandNameCache.has(slug)) return;
+    let vivo = true;
+    api.get<{ name?: string }>(`/brands/${slug}`)
+      .then((b) => {
+        if (!b?.name) return;
+        brandNameCache.set(slug, b.name);
+        if (vivo) setBuscados((prev) => ({ ...prev, [slug]: b.name! }));
+      })
+      .catch(() => { /* sem nome, o título cai no slug como antes */ });
+    return () => { vivo = false; };
+  }, [slug]);
+  return slug ? (brandNameCache.get(slug) ?? buscados[slug] ?? null) : null;
 }
 
 function NavLink({ item, pathname }: { item: NavItem; pathname: string }) {
+  const hasChildren = !!item.children && item.children.length > 0;
+  // O grupo fica "ativo" quando a página aberta é uma das filhas, e não só aberto.
+  const childActive = hasChildren && item.children!.some((c) => isActivePath(pathname, c.href, c.href === item.href));
   const [open, setOpen] = useState(pathname.startsWith(item.href));
-  const isActive = pathname === item.href;
-  const hasChildren = item.children && item.children.length > 0;
+  const Icon = item.icon;
 
   if (hasChildren) {
     return (
       <div className={styles.navGroup}>
         <button
-          className={[styles.navLink, open ? styles.navLinkOpen : ''].join(' ')}
+          type="button"
+          className={[styles.navLink, open ? styles.navLinkOpen : '', childActive ? styles.navLinkActive : ''].join(' ')}
           onClick={() => setOpen(!open)}
+          aria-expanded={open}
         >
-          <span className={styles.navIcon}>{item.icon}</span>
+          <span className={styles.navIcon}><Icon size={18} /></span>
           <span className={styles.navLabel}>{item.label}</span>
           <ChevronDown
             size={14}
             className={[styles.chevron, open ? styles.chevronOpen : ''].join(' ')}
+            aria-hidden="true"
           />
         </button>
         {open && (
@@ -97,12 +100,15 @@ function NavLink({ item, pathname }: { item: NavItem; pathname: string }) {
     );
   }
 
+  // A "Visão geral" tem o mesmo endereço do grupo: só é ativa na igualdade exata.
+  const isActive = isActivePath(pathname, item.href, item.href.endsWith('/configuracoes'));
   return (
     <Link
       href={item.href}
       className={[styles.navLink, isActive ? styles.navLinkActive : ''].join(' ')}
+      aria-current={isActive ? 'page' : undefined}
     >
-      <span className={styles.navIcon}>{item.icon}</span>
+      <span className={styles.navIcon}><Icon size={item.href.split('/').length > 3 ? 16 : 18} /></span>
       <span className={styles.navLabel}>{item.label}</span>
     </Link>
   );
@@ -147,6 +153,7 @@ export default function Sidebar() {
   }, [urlMarca]);
 
   const marca = urlMarca ?? lastBrand;
+  const brandName = useBrandName(marca);
 
   return (
     <>
@@ -154,7 +161,8 @@ export default function Sidebar() {
       <button
         className={styles.mobileToggle}
         onClick={() => setMobileOpen(!mobileOpen)}
-        aria-label="Toggle menu"
+        aria-label={mobileOpen ? 'Fechar menu' : 'Abrir menu'}
+        aria-expanded={mobileOpen}
       >
         {mobileOpen ? <X size={20} /> : <Menu size={20} />}
       </button>
@@ -177,10 +185,10 @@ export default function Sidebar() {
         <div className={styles.divider} />
 
         {/* Main navigation */}
-        <nav className={styles.nav}>
+        <nav className={styles.nav} aria-label="Navegação principal">
           <div className={styles.navSection}>
-            <span className={styles.navSectionLabel}>Principal</span>
-            {mainNav.map((item) => (
+            <span className={styles.navSectionLabel}>Geral</span>
+            {GLOBAL_NAV.map((item) => (
               <NavLink key={item.href} item={item} pathname={pathname} />
             ))}
           </div>
@@ -188,8 +196,8 @@ export default function Sidebar() {
           {/* Brand context navigation */}
           {marca && (
             <div className={styles.navSection}>
-              <span className={styles.navSectionLabel}>{decodeURIComponent(marca)}</span>
-              {getBrandNav(marca).map((item) => (
+              <span className={styles.navSectionLabel}>{brandName ?? decodeURIComponent(marca)}</span>
+              {[...brandNav(marca), brandSettingsGroup(marca)].map((item) => (
                 <NavLink key={item.href} item={item} pathname={pathname} />
               ))}
             </div>
@@ -197,7 +205,7 @@ export default function Sidebar() {
 
           <div className={styles.navSection}>
             <span className={styles.navSectionLabel}>Extras</span>
-            {extrasNav.map((item) => (
+            {EXTRAS_NAV.map((item) => (
               <NavLink key={item.href} item={item} pathname={pathname} />
             ))}
           </div>
@@ -216,6 +224,7 @@ export default function Sidebar() {
             <button
               className={styles.logoutBtn}
               title="Sair"
+              aria-label="Sair da conta"
               onClick={() => {
                 localStorage.removeItem('auth_token');
                 document.cookie = 'auth_token=; path=/; max-age=0';

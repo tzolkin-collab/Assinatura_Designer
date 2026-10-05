@@ -494,7 +494,7 @@ export default function MidiaPage() {
             ref={fileInputRef}
             style={{ display: 'none' }}
             onChange={handleFileUpload}
-            accept="image/*,font/*,.svg"
+            accept="image/*,.svg"
           />
           <Button
             onClick={() => setIsBrandbookModalOpen(true)}
