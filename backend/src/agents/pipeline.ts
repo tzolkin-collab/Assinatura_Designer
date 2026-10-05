@@ -6,16 +6,17 @@ import { ws } from '../lib/websocket.js';
 import { buildBrandContextSummary, resolveBrandContext } from '../lib/brandContext.js';
 import {
   buildPipelineBrainContext,
-  checkApprovedText,
+  correctTextDivergences,
   hasApprovedText,
   isDesignerBrainEnabled,
   textIssuesToDeviations,
 } from '../lib/designerBrain/index.js';
+import type { TextIssue } from '../lib/designerBrain/index.js';
 import { executeTool } from './tools/index.js';
 import { runPlanner, MAX_SLIDES, type SlideSkeletonItem } from './planner/index.js';
 import { runHtmlReviewer } from './reviewer/index.js';
 import type { ReviewResult } from './reviewer/index.js';
-import { generateHtmlDesignBatched, type HtmlDesignSlide } from '../lib/htmlDesign.js';
+import { editHtmlSlide, generateHtmlDesignBatched, type HtmlDesignSlide } from '../lib/htmlDesign.js';
 import { syncPostSlides } from '../lib/postHelper.js';
 import { researchBrand, type VisualRef } from '../lib/fabricaLegacy.js';
 import { resolveSlideImages, resolveImageCandidateDecisions, type AmbiguousImageCandidate, type ResolvedSlideImage } from '../lib/imageResolver.js';
@@ -779,6 +780,65 @@ async function runPipelineInner(
         },
       );
 
+      // Texto aprovado × texto do slide, ANTES do envelope e do revisor: o slide que diverge volta
+      // ao artista (no máximo 2 rodadas) e o revisor e o usuário já veem o deck corrigido. É código,
+      // não prompt: o reviewer visual olha uma amostra e não confere palavras.
+      const geradosDaCopia = params.resumeFromStyleProof ? enrichedSkeleton.slice(1) : enrichedSkeleton;
+      const textoSemCopiaPorSlide = designerBrainOn && !geradosDaCopia.some((item) => item.copy?.trim());
+      let textIssuesLeft: TextIssue[] = [];
+      let textSlidesFixed = 0;
+      if (textoSemCopiaPorSlide) {
+        // Sem a copy distribuída por slide (o planner falhou e caiu no esqueleto genérico) não
+        // há como conferir slide a slide: pular com aviso é melhor que acusar o deck inteiro.
+        logger.warn('Cérebro ligado, mas o roteiro não distribuiu a copy por slide: checagem de texto pulada', { brandSlug: brand.slug });
+      } else if (designerBrainOn && !stop.interruption) {
+        ws.progress(sessionId, 83, 'Conferindo o texto com o aprovado...');
+        const corrigir = async (slide: { html: string; css?: string }, instruction: string): Promise<{ html: string; css?: string }> => {
+          await checkCancelled();
+          return editHtmlSlide(
+            async (systemInstruction, userPrompt) => {
+              const response = await generateWithRetry(ai, {
+                model: preferredModel,
+                contents: userPrompt,
+                config: { systemInstruction, responseMimeType: 'application/json', maxOutputTokens: 16384 },
+              }, preferredModel);
+              return response.text ?? '{}';
+            },
+            {
+              slide,
+              instruction,
+              brand: {
+                name: brand.name,
+                colors: brand.colors,
+                primaryFonts: brand.primaryFonts,
+                guidelines: brand.guidelines ?? undefined,
+                // Com o cérebro ligado as camadas já estão no contexto; ele é a memória do projeto.
+                agentPrompt: brandContext,
+              },
+              width: design.width,
+              height: design.height,
+              isolate: true,
+            },
+            extractJsonObject,
+          );
+        };
+        const resultado = await correctTextDivergences({
+          approved: geradosDaCopia.map((item) => item.copy),
+          slides: design.slides,
+          editSlide: corrigir,
+          indexOffset: params.resumeFromStyleProof ? 1 : 0,
+        });
+        design.slides = resultado.slides;
+        textIssuesLeft = resultado.remaining;
+        textSlidesFixed = resultado.corrected.length;
+        logger.info('Conferência do texto aprovado', {
+          brandSlug: brand.slug,
+          rodadas: resultado.attempts,
+          corrigidos: textSlidesFixed,
+          restantes: textIssuesLeft.map((i) => i.slideIndex + 1),
+        });
+      }
+
       // Envelope de conteúdo (preview no front + persistência). kind html-design.
       const content = {
         kind: 'html-design' as const,
@@ -841,34 +901,30 @@ async function runPipelineInner(
           reviewResult = { approved: true, score: 75, deviations: [], feedback: 'Revisão automática indisponível', correctionInstructions: undefined };
         }
 
-        // Texto aprovado × texto do slide. É código, não prompt: o reviewer visual olha uma
-        // amostra e não confere palavras. Os problemas viram desvios do mesmo formato, então
-        // aparecem na análise do chat, deixam o deck como "precisa de revisão" e alimentam o
-        // ajuste cirúrgico quando a pessoa recusa.
-        const geradosDaCopia = params.resumeFromStyleProof ? enrichedSkeleton.slice(1) : enrichedSkeleton;
-        // Sem a copy distribuída por slide (o planner falhou e caiu no esqueleto genérico) não
-        // há como conferir slide a slide: pular com aviso é melhor que acusar o deck inteiro.
-        if (designerBrainOn && !geradosDaCopia.some((item) => item.copy?.trim())) {
-          logger.warn('Cérebro ligado, mas o roteiro não distribuiu a copy por slide: checagem de texto pulada', { brandSlug: brand.slug });
-        } else if (designerBrainOn) {
-          const issues = checkApprovedText(
-            geradosDaCopia.map((item) => item.copy),
-            design.slides.map((s) => s.html),
-            params.resumeFromStyleProof ? 1 : 0,
-          );
-          if (issues.length > 0) {
-            logger.warn('Texto dos slides difere do texto aprovado', {
-              slides: issues.map((i) => i.slideIndex + 1),
-              brandSlug: brand.slug,
-            });
-            const feedback = `O texto de ${issues.length} slide(s) não confere com o texto aprovado.`;
-            reviewResult = {
-              ...reviewResult,
-              approved: false,
-              deviations: [...(reviewResult.deviations ?? []), ...textIssuesToDeviations(issues)],
-              feedback: reviewResult.feedback ? `${feedback} ${reviewResult.feedback}` : feedback,
-            };
-          }
+        // O que o laço de correção não conseguiu resolver vira desvio do mesmo formato do reviewer:
+        // aparece na análise do chat, deixa o deck como "precisa de revisão" e alimenta o ajuste
+        // cirúrgico quando a pessoa recusa. Um veredito só: se o texto reprova, o "peça aprovada"
+        // do revisor visual não vai junto (a mensagem se contradizia).
+        if (textIssuesLeft.length > 0) {
+          logger.warn('Texto dos slides difere do texto aprovado', {
+            slides: textIssuesLeft.map((i) => i.slideIndex + 1),
+            brandSlug: brand.slug,
+          });
+          const feedback = textSlidesFixed > 0
+            ? `Corrigi o texto de ${textSlidesFixed} slide(s) sozinho, mas o de ${textIssuesLeft.length} slide(s) ainda não confere com o texto aprovado.`
+            : `O texto de ${textIssuesLeft.length} slide(s) não confere com o texto aprovado.`;
+          reviewResult = {
+            ...reviewResult,
+            approved: false,
+            deviations: [...(reviewResult.deviations ?? []), ...textIssuesToDeviations(textIssuesLeft)],
+            // O texto manda no veredito: só mantém a crítica visual se ela já apontava problemas.
+            feedback: reviewResult.approved ? feedback : `${feedback} ${reviewResult.feedback ?? ''}`.trim(),
+          };
+        } else if (textSlidesFixed > 0) {
+          reviewResult = {
+            ...reviewResult,
+            feedback: `Corrigi o texto de ${textSlidesFixed} slide(s) para ficar igual ao aprovado. ${reviewResult.feedback ?? ''}`.trim(),
+          };
         }
 
         // Guarda o review na sessão MESMO quando aprovado: se o usuário recusar
