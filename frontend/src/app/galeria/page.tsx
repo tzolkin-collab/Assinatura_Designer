@@ -205,7 +205,7 @@ export default function GaleriaPage() {
             <span>Exibindo: {filterMode === 'my' ? 'Minhas Marcas' : 'Descobrir Novas Marcas'}</span>
           </Button>
           {showFilterDropdown && (
-            <div className={styles.dropdownList} style={{ position: 'absolute', right: 0, top: '42px', zIndex: 50, minWidth: '200px', boxShadow: 'var(--shadow-lg)' }} onMouseDown={(e) => e.preventDefault()}>
+            <div className={styles.dropdownList} style={{ position: 'absolute', right: 0, top: '42px', zIndex: 'var(--z-dropdown)', minWidth: '200px', boxShadow: 'var(--shadow-lg)' }} onMouseDown={(e) => e.preventDefault()}>
               <div 
                 className={styles.dropdownItem} 
                 onClick={() => { setFilterMode('my'); setShowFilterDropdown(false); }}
@@ -260,7 +260,7 @@ export default function GaleriaPage() {
                           <div className={styles.cardBody}>
                             <h3 className={styles.cardTitle}>{brand.name}</h3>
                             <div className={styles.cardMeta}>
-                              <span>{brand._count?.posts || 0} posts</span>
+                              <span>{brand._count?.posts || 0} {(brand._count?.posts || 0) === 1 ? 'post' : 'posts'}</span>
                               <span className={styles.dot}>·</span>
                               <span>{new Date(brand.updatedAt).toLocaleDateString('pt-BR')}</span>
                             </div>

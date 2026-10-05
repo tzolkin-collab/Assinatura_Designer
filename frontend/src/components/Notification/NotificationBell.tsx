@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Bell, Check } from 'lucide-react';
 import { api, ApiError } from '@/lib/api';
 import styles from './Notification.module.css';
@@ -16,6 +17,9 @@ interface Notification {
 export default function NotificationBell() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [open, setOpen] = useState(false);
+  // O painel é desenhado num portal (fora do menu lateral), então são DOIS elementos a vigiar
+  // no clique fora: o botão (container) e o painel.
+  const containerRef = useRef<HTMLDivElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
 
   const fetchNotifications = async () => {
@@ -41,9 +45,9 @@ export default function NotificationBell() {
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
-      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
+      const alvo = e.target as Node;
+      if (containerRef.current?.contains(alvo) || popoverRef.current?.contains(alvo)) return;
+      setOpen(false);
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
@@ -70,14 +74,17 @@ export default function NotificationBell() {
   };
 
   return (
-    <div className={styles.container} ref={popoverRef}>
+    <div className={styles.container} ref={containerRef}>
       <button className={styles.bellBtn} onClick={() => setOpen(!open)}>
         <Bell size={18} />
         {unreadCount > 0 && <span className={styles.badge}>{unreadCount}</span>}
       </button>
 
-      {open && (
-        <div className={styles.popover}>
+      {open && createPortal(
+        // No portal: dentro do menu lateral o painel era preso pelo `transform` dele (que vira o
+        // bloco de referência do `position: fixed`) e cortado pelo `overflow`, então abria em
+        // x=270 de um menu de 260px e ficava invisível, por baixo do fundo escurecido.
+        <div className={styles.popover} ref={popoverRef}>
           <div className={styles.header}>
             <h4>Notificações</h4>
             {unreadCount > 0 && (
@@ -106,7 +113,8 @@ export default function NotificationBell() {
               ))
             )}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

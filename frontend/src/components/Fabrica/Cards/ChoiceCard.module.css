@@ -137,7 +137,7 @@
   transform: translateY(-6px);
   pointer-events: none;
   transition: opacity var(--transition-fast), transform var(--transition-fast);
-  z-index: 100;
+  z-index: var(--z-dropdown);
 }
 
 .infoButton:hover .infoTooltip {

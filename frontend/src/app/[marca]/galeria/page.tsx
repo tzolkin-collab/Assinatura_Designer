@@ -76,6 +76,15 @@ export default function BrandGaleriaPage() {
   const params = useParams();
   const slug = params.marca as string;
   const marca = decodeURIComponent(slug);
+  // O título mostrava o slug em minúsculas ("assinatura"); o nome de verdade vem da marca.
+  const [brandName, setBrandName] = useState<string | null>(null);
+  useEffect(() => {
+    let vivo = true;
+    api.get<{ name?: string }>(`/brands/${slug}`)
+      .then((b) => { if (vivo && b?.name) setBrandName(b.name); })
+      .catch(() => { /* sem nome, o título cai no slug como antes */ });
+    return () => { vivo = false; };
+  }, [slug]);
   const { posts, loading, error, mutate } = useBrandPosts(slug);
   const { brand } = useBrand(slug);
   const [activePreviewPost, setActivePreviewPost] = useState<Post | null>(null);
@@ -1291,7 +1300,7 @@ export default function BrandGaleriaPage() {
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '16px', flexWrap: 'wrap' }}>
         <PageHeader
-          title={marca}
+          title={brandName ?? marca}
           description="Histórico de artes e criativos gerados para esta marca."
         />
 
