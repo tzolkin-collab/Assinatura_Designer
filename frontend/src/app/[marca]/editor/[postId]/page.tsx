@@ -21,6 +21,7 @@ import { api, getApiErrorMessage } from '@/lib/api';
 import Button from '@/components/ui/Button';
 import HtmlSlideRenderer from '@/components/DesignDocument/HtmlSlideRenderer';
 import SlideCodeEditor, { type SlideCode } from '@/components/DesignDocument/SlideCodeEditor';
+import GenerationCostChip from '@/components/GenerationCost/GenerationCostChip';
 import { baixarSlide, exportarDeck, type DeckFileFormat } from '@/lib/deckFile';
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
@@ -94,6 +95,8 @@ export default function EditorPage() {
   const [editando, setEditando] = useState(false);
   const [editLog, setEditLog] = useState<string[]>([]);
   const [erroEdicao, setErroEdicao] = useState<string | null>(null);
+  // Cada edição por IA gasta tokens: sobe este contador para o chip de custo reler o rastro.
+  const [custoKey, setCustoKey] = useState(0);
 
   // Seletor "inspecionar": clica no elemento do preview e a instrução de IA
   // passa a mirar EXATAMENTE nele (identifier + caminho + trecho de HTML).
@@ -193,6 +196,9 @@ export default function EditorPage() {
         },
       );
       aplicarSlide(resp.slideIndex, resp.slide);
+      // O step da edição é gravado em segundo plano (fail-open, sem await): reler na hora
+      // podia pegar o rastro sem ele. Um respiro curto resolve sem virar polling.
+      setTimeout(() => setCustoKey((k) => k + 1), 1200);
       setEditLog(prev => [...prev.slice(-5), alvo?.identifier ? `[${alvo.identifier}] ${texto}` : texto]);
       setInstrucao('');
       setAlvo(null); // alvo consumido — o elemento pode nem existir mais após a edição
@@ -290,7 +296,9 @@ export default function EditorPage() {
           {slideCount} slide{slideCount > 1 ? 's' : ''} · {canvasW}×{canvasH}
         </span>
 
-        <div style={{ marginLeft: 'auto', position: 'relative' }}>
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <GenerationCostChip postId={postId} refreshKey={custoKey} />
+        <div style={{ position: 'relative' }}>
           <button
             type="button"
             onClick={() => setMenuBaixar(v => !v)}
@@ -333,6 +341,7 @@ export default function EditorPage() {
               </button>
             </div>
           )}
+        </div>
         </div>
       </header>
 

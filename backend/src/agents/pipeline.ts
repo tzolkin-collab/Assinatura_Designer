@@ -59,6 +59,51 @@ export function resolveCanvasSize(format: 'presentation' | 'carousel', aspectRat
   return CAROUSEL_DIMENSIONS[aspectRatio ?? '1:1'] ?? CAROUSEL_DIMENSIONS['1:1']!;
 }
 
+/**
+ * Amarra o run do pipeline ao Post recém-criado — reaproveitando o run IMPLÍCITO
+ * que researchBrand/runPlanner já podem ter aberto, em vez de abrir um segundo.
+ *
+ * researchBrand e runPlanner rodam ANTES de o Post existir. Cada chamada deles
+ * passa por generateWithRetry → ensureRun(), que abre um GenerationRun com
+ * `postId` ainda undefined (ctx.postId só é setado aqui embaixo). Se, depois do
+ * Post nascer, a gente chamasse openRun() de novo, abriria um SEGUNDO run e
+ * sobrescreveria ctx.runId — o implícito ficava órfão, RUNNING para sempre, e
+ * os tokens do planner e da pesquisa (uns 2%-10% do custo de um deck típico)
+ * nunca entravam no "Custo estimado": estimatePostCost só soma runs COM postId
+ * (rota GET /api/posts/:id/cost filtra `where: { postId }`).
+ *
+ * Reaproveitar em vez de reabrir resolve os dois problemas de uma vez: o run
+ * ganha o postId (passa a aparecer na conta do deck) e continua sendo o MESMO
+ * id que o runPipeline fecha no final — sem run zumbi.
+ */
+export async function attachRunToPost(
+  implicitRunId: string | undefined,
+  data: { postId: string; brandSlug: string; sessionId: string; brief: string; format: string; aspectRatio?: string },
+): Promise<string | null> {
+  if (implicitRunId) {
+    await prisma.generationRun.update({
+      where: { id: implicitRunId },
+      data: { postId: data.postId, brief: data.brief, format: data.format, aspectRatio: data.aspectRatio },
+    }).catch((err) => {
+      logger.warn('Falha ao reaproveitar o run implícito do planner/pesquisa (fail-open)', {
+        runId: implicitRunId, postId: data.postId, error: (err as Error).message,
+      });
+    });
+    return implicitRunId;
+  }
+
+  return openRun({
+    brandSlug: data.brandSlug,
+    postId: data.postId,
+    sessionId: data.sessionId,
+    requestId: data.sessionId,
+    feature: 'pipeline',
+    brief: data.brief,
+    format: data.format,
+    aspectRatio: data.aspectRatio,
+  });
+}
+
 export interface PipelineParams {
   sessionId: string;
   brief: string;
@@ -403,21 +448,22 @@ async function runPipelineInner(
       }
     }
 
-    // ── Trace: o run nasce AQUI, e não no runPipeline ──────────────────────────
-    // Tentativa anterior abria o run no topo do runPipeline, antes desta criação.
-    // `GenerationRun.postId` é FK para Post, e o Post ainda não existia — toda
-    // abertura estourava com `GenerationRun_postId_fkey`, o fail-open engolia, e
-    // o `runId` nulo levava junto o closeRun (o run ficava RUNNING para sempre) e
-    // o brief/formato, que eram a razão de abrir aqui em vez de no geminiRetry.
+    // ── Trace: o run nasce AQUI (ou é reaproveitado), e não no runPipeline ─────
+    // Tentativa anterior sempre abria um run novo neste ponto, antes desta
+    // criação do Post. `GenerationRun.postId` é FK para Post, e o Post ainda não
+    // existia — toda abertura estourava com `GenerationRun_postId_fkey`, o
+    // fail-open engolia, e o `runId` nulo levava junto o closeRun (o run ficava
+    // RUNNING para sempre) e o brief/formato.
     //
-    // Depois do Post existir, a FK fecha. O id vai para o AiContext, e o
-    // runPipeline o lê de volta no fim para fechar o run.
-    const runId = await openRun({
-      brandSlug: session.brandSlug,
+    // Agora: se researchBrand/runPlanner (rodados ANTES do Post existir) já
+    // abriram um run implícito via ensureRun(), reaproveitamos ele em vez de
+    // abrir um segundo — ver attachRunToPost(). Depois do Post existir, a FK
+    // fecha. O id vai para o AiContext, e o runPipeline o lê de volta no fim
+    // para fechar o run.
+    const runId = await attachRunToPost(getAiContext().runId, {
       postId,
+      brandSlug: session.brandSlug,
       sessionId,
-      requestId: sessionId,
-      feature: 'pipeline',
       brief: params.brief,
       format: params.format,
       aspectRatio: params.aspectRatio,

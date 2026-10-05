@@ -8,6 +8,7 @@ import { api, getApiErrorMessage } from '@/lib/api';
 import { acompanharExport } from '@/lib/canvaExport';
 import { publishPost, unpublishPost, type HostingConfig } from '@/lib/presentationHosting';
 import SlideCodeEditor, { type SlideCode } from '@/components/DesignDocument/SlideCodeEditor';
+import GenerationCostChip from '@/components/GenerationCost/GenerationCostChip';
 
 interface ArtifactPanelProps {
   /** Envelope do design (ir-design/html-design). `undefined` = nada gerado ainda. */
@@ -341,6 +342,11 @@ export function ArtifactPanel({
             ? `${slideCount} slide${slideCount > 1 ? 's' : ''}${gerando ? ' · gerando…' : ''}`
             : gerando ? 'gerando…' : ''}
         </span>
+
+        {/* Custo estimado do deck. Refaz a leitura a cada slide que entra e quando a geração
+            termina (cada slide persistido já tem seus steps no rastro), então o valor acompanha
+            a geração sem polling. Ancorado à esquerda: aqui o chip está longe da borda direita. */}
+        <GenerationCostChip postId={postId} refreshKey={`${gerando ? 'g' : 'i'}:${slideCount}`} align="start" />
 
         <div ref={boxRef} style={{ position: 'relative', marginLeft: 'auto' }}>
           <button

@@ -5,7 +5,8 @@ import type { Prisma } from '@prisma/client';
 import prisma from '../lib/prisma.js';
 import { createError } from '../middleware/errorHandler.js';
 import { AuthRequest } from '../middleware/auth.js';
-import { brandMemberFilter, ANY_MEMBER, EDITORS } from '../middleware/brandAccess.js';
+import { brandMemberFilter, ANY_MEMBER, EDITORS, FORBIDDEN_MESSAGE } from '../middleware/brandAccess.js';
+import { estimatePostCost, isPostInProgress } from '../lib/generationCost.js';
 import { renderHtmlToPng } from '../lib/htmlRaster.js';
 import { buildSlideDocument, editHtmlSlide, sanitizeSlideHtml, sanitizeSlideCss } from '../lib/htmlDesign.js';
 import { GoogleGenAI } from '@google/genai';
@@ -328,6 +329,76 @@ postsRouter.get('/:id', async (req: AuthRequest, res: Response, next: NextFuncti
 
     if (!post) throw createError(404, 'Post not found');
     res.json({ data: mergeSlidesIntoPost(post) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/posts/:id/cost - custo ESTIMADO do deck, somando o rastro de todos os runs dele.
+//
+// Diferente das rotas vizinhas, quem não é membro da marca do post recebe 403 (e não 404):
+// a tela do editor precisa distinguir "sem permissão" de "deck inexistente". O id do post
+// é um UUID, então confirmar que ele existe não entrega nada de útil a quem não é da marca.
+postsRouter.get('/:id/cost', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const id = req.params.id as string;
+    const userId = req.user?.userId;
+    if (!userId) throw createError(401, 'Unauthorized');
+
+    const post = await prisma.post.findUnique({ where: { id }, select: { id: true, brandId: true } });
+    if (!post) throw createError(404, 'Post not found');
+
+    const membership = await prisma.brandMember.findUnique({
+      where: { userId_brandId: { userId, brandId: post.brandId } },
+      select: { role: true },
+    });
+    if (!membership || !ANY_MEMBER.includes(membership.role)) throw createError(403, FORBIDDEN_MESSAGE);
+
+    // Só o que a conta usa: o promptText/responseText dos steps são MBs e não custam nada aqui.
+    const runs = await prisma.generationRun.findMany({
+      where: { postId: id },
+      orderBy: { startedAt: 'asc' },
+      select: {
+        status: true,
+        feature: true,
+        startedAt: true,
+        finishedAt: true,
+        steps: {
+          orderBy: { seq: 'asc' },
+          select: { kind: true, role: true, model: true, inputTokens: true, outputTokens: true, error: true, metadata: true },
+        },
+      },
+    });
+
+    // Deck anterior ao rastreamento (ou cujo run nunca abriu): não é erro, é ausência de dado.
+    if (runs.length === 0) {
+      res.json({
+        data: {
+          available: false,
+          reason: 'Este deck foi gerado antes do rastreamento de custo, então não há chamadas registradas para estimar.',
+        },
+      });
+      return;
+    }
+
+    const estimate = estimatePostCost(runs.map((r) => ({ run: r, steps: r.steps })));
+    if (estimate.calls === 0 && estimate.unmeteredSteps === 0) {
+      res.json({ data: { available: false, reason: 'Ainda não há chamadas de IA registradas para este deck.' } });
+      return;
+    }
+
+    res.json({
+      data: {
+        available: true,
+        runs: runs.length,
+        // Geração ainda em curso: o valor sobe até o run fechar. Só conta run
+        // 'pipeline' RUNNING e recente — ver isPostInProgress (generationCost.ts)
+        // para o motivo: run implícito de edit-slide/chat nunca fecha sozinho e
+        // não pode travar isto em "em andamento" para sempre.
+        inProgress: isPostInProgress(runs),
+        ...estimate,
+      },
+    });
   } catch (error) {
     next(error);
   }
