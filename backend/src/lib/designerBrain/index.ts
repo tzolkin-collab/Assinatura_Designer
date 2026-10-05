@@ -10,4 +10,11 @@ export {
   REAL_PHOTO_RULE_PROMPT,
 } from './prompts.js';
 export { AMANDA_COELHO_MEMORY } from './seeds/amandaCoelho.js';
+export { PROJECT_MEMORY_SEEDS } from './seeds/index.js';
+export { designerBrainBrands, isDesignerBrainEnabled } from './enabled.js';
+export {
+  DesignerBrainSetupError,
+  buildPipelineBrainContext,
+  resolveProjectMemory,
+} from './pipelineContext.js';
 export type * from './types.js';

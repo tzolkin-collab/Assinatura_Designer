@@ -47,15 +47,15 @@ nos projetos, e a identidade de um projeto nunca contamina outro.
 
 | ☐ | Item | Objetivo | Pedido |
 |---|---|---|---|
-| ◐ | Prompt global persistente | Regras fixas que valem para todos os projetos, sem repetir em cada um | Guardar o §3.1 como instrução fixa, separada dos projetos. **Feito:** texto literal em `lib/designerBrain/prompts.ts`. **Falta:** ligar ao planner/artista/reviewer |
+| ◐ | Prompt global persistente | Regras fixas que valem para todos os projetos, sem repetir em cada um | Guardar o §3.1 como instrução fixa, separada dos projetos. **Feito:** texto literal em `lib/designerBrain/prompts.ts`, ligado ao planner, ao artista e ao reviewer **atrás do flag por marca** (ver "Como ligar"). **Falta:** edição de slide e ferramentas de edição do chat |
 | ☐ | Projeto-base | Cada marca ter sua memória isolada | Campos independentes: plataforma de marca, manual visual, logo, fonte, paleta, fotos, elementos |
 | ☐ | Collab / desdobramento | Herdar a base e guardar só o que muda | Tipo (interno/parceria), contexto, logo e manual do parceiro, % de protagonismo |
 | ◐ | Seleção de modo | Cada tipo de peça ter regras próprias | Escolher entre apresentação 16:9, imagem avulsa e e-book A4. **Feito:** regras dos 3 modos no módulo. **Falta:** seletor na UI e tipo de post do e-book A4 |
 | ☐ | Galeria de fotos reais | A IA só usar foto fornecida | Biblioteca por projeto + anexos por demanda |
-| ◐ | Sem foto, sem pessoa gerada | Nunca fabricar rosto nem stock | Reservar área limpa na arte, sem texto técnico dentro dela. **Feito:** regra §5.1 anexada quando há foto ou área fotográfica. **Falta:** tirar `generate-photo`, Unsplash e Remix do `imageResolver` |
+| ◐ | Sem foto, sem pessoa gerada | Nunca fabricar rosto nem stock | Reservar área limpa na arte, sem texto técnico dentro dela. **Feito:** regra §5.1 anexada quando há foto ou área fotográfica. **Feito (só com o flag ligado):** o resolver não gera foto nem busca Unsplash, "regenerar" não faz nada, e o chat deixa de oferecer IA/Remix/Unsplash. Marcas sem o flag seguem como antes |
 | ◐ | Status do texto | Texto visível ≠ fala, contexto ou interno | Campo por bloco: aprovado, em revisão, apoio, fala, contexto, interno, não exibir. **Feito:** regra em código (`interno` e `não exibir` nunca chegam ao modelo). **Falta:** campo no briefing e na UI |
 | ◐ | Amanda como piloto | Validar o sistema com um projeto completo | Carregar a memória do §11. **Feito:** memória em `seeds/amandaCoelho.ts`. **Falta:** projeto-base no banco, ativos e fotos |
-| ◐ | Montagem do prompt | Camadas na ordem certa | global → projeto → collab → modo → foto → ativos → briefing → checklist. **Feito:** `assembleDesignerBrain` (função pura, 21 testes). **Falta:** chamar no pipeline |
+| ◐ | Montagem do prompt | Camadas na ordem certa | global → projeto → collab → modo → foto → ativos → briefing → checklist. **Feito:** `assembleDesignerBrain` (função pura, 21 testes) e chamado no pipeline para marcas com o flag. **Falta:** briefing e ativos entrarem pelo montador (hoje o pipeline os entrega por caminho próprio) |
 | ☐ | Revisão antes de "final" | Não entregar peça com erro ou invenção | Checar texto, quantidade, acentos, logo, cores, margens, fotos |
 | ☐ | Galeria de projetos | Trocar "galeria de marcas" por projetos | Nova home e página interna do projeto, conforme os mockups do documento |
 
@@ -113,13 +113,33 @@ Origem: `docs/ACABAMENTOS-DESIGNER.md` (21/09) e `docs/PLANO-CONSOLIDACAO.md` (2
 
 | ☐ | Item | Objetivo | Pedido |
 |---|---|---|---|
-| ☐ | Remover geração de pessoa e stock | Alinhar à regra de foto real | `imageResolver` hoje gera foto de pessoa, usa Unsplash e "Remix IA". Depende da seção A |
+| ◐ | Remover geração de pessoa e stock | Alinhar à regra de foto real | Bloqueado nas marcas com o flag (seção D.1). Nas demais o `imageResolver` ainda gera foto, usa Unsplash e "Remix IA": só mudam se a regra passar a valer para todos |
 | ☐ | Planner pedindo imagem de pessoa | Não pedir o que não pode ser gerado | `imageHint` inclui "pessoa, equipe, depoimento" |
 | ☐ | Checklist pré-geração do chat | Não perguntar "IA / Remix / Unsplash" | Substituir pelos templates de briefing do §12 |
 | ☐ | Upload de fonte `.otf/.ttf` | Usar Queens e Aeonik de verdade | Hoje só entram Google Fonts. Já estava no plano de 21/09 |
 | ☐ | Gravação da memória pelo chat | Impedir que o bot altere o projeto sem pedir | `updateBrandMemory` grava "sem pedir permissão"; exigir aprovação |
 | ☐ | Slides de fallback silenciosos | Não entregar deck "pronto" com slide genérico | Avisar e sinalizar em vez de preencher o lote |
 | ☐ | Revisão ver todo o deck | Checar quantidade, texto e acentos, não só uma amostra | O reviewer visual amostra ~8 slides |
+
+---
+
+## D.1 Como ligar o cérebro para um caso específico
+
+O cérebro é opt-in por marca. **Padrão: desligado em todas**, e a geração segue exatamente como antes.
+
+1. Defina a variável de ambiente no backend (e no worker): `DESIGNER_BRAIN_BRANDS=amanda-coelho` (slugs separados por vírgula).
+2. A marca precisa existir com esse slug, com **cores e fontes** cadastradas (elas continuam vindo da configuração da marca, inclusive o carregamento de fonte).
+3. A memória do projeto vem de **"Instruções do agente"** da marca. Se estiver vazia, usa o seed do repositório (`seeds/index.ts`, hoje só `amanda-coelho`). Sem nenhuma das duas, a geração **falha com mensagem clara**, em vez de seguir com as regras erradas.
+4. Para desligar: tirar o slug da lista.
+
+**O que muda quando ligado:** o artista, o planner e o reviewer recebem global + memória + modo + regra de foto + revisão no lugar das diretrizes legadas; o resolver não gera foto nem usa Unsplash; o chat não oferece IA/Remix/Unsplash; o que o chat "aprendeu" não reescreve a memória.
+
+**Ainda NÃO coberto quando ligado:**
+- editar um slide depois de gerado (`editHtmlSlide` e a ferramenta de edição do chat) usa o contexto legado;
+- carrossel usa o modo "imagem avulsa" (o documento não define modo de carrossel);
+- e-book A4 não existe como tipo de peça;
+- status do texto por bloco ainda não tem campo no briefing (hoje o texto vem do briefing como antes);
+- nada disso foi exercitado com geração real, só com testes automatizados.
 
 ---
 

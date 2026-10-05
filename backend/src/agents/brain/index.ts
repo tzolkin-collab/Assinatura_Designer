@@ -24,7 +24,8 @@ import { enqueuePipeline } from '../../lib/queue.js';
 import { uploadFileToR2 } from '../../lib/r2.js';
 import { buildMessageParts } from '../../lib/chatMessageParts.js';
 import { uploadChatAttachments } from '../../lib/chatAttachments.js';
-import { BRAIN_SYSTEM_PROMPT } from './prompts.js';
+import { BRAIN_SYSTEM_PROMPT, DESIGNER_BRAIN_CHAT_NOTE } from './prompts.js';
+import { isDesignerBrainEnabled } from '../../lib/designerBrain/index.js';
 import prisma from '../../lib/prisma.js';
 import { executeTool } from '../tools/index.js';
 import { mergeSlidesIntoPost, persistPostContent } from '../../lib/postHelper.js';
@@ -824,6 +825,7 @@ async function handleUserMessageInner(
             systemInstruction: [
               BRAIN_SYSTEM_PROMPT,
               brandContextSummary ? `## Contexto atual da marca\n${brandContextSummary}` : '',
+              isDesignerBrainEnabled(latestSession.brandSlug) ? DESIGNER_BRAIN_CHAT_NOTE : '',
               brainAdviceBlock(adviceTexts),
             ].filter(Boolean).join('\n\n'),
             temperature: 0.7,
@@ -1059,7 +1061,8 @@ async function detectAndDispatch(
   const { format, isProof, aspectRatio, imagePreference } = dispatch;
 
   // Intercepta geração se o limite de IA estiver alto e o usuário ainda não decidiu.
-  if (!imagePreference) {
+  // Com o cérebro ligado a marca só usa foto real fornecida: não há "IA vs Unsplash" a perguntar.
+  if (!imagePreference && !isDesignerBrainEnabled(session.brandSlug)) {
     const { shouldPreferUnsplashForCost } = await import('../../lib/imageResolver.js');
     if (await shouldPreferUnsplashForCost(session.brandSlug)) {
       await updateSession(sessionId, {

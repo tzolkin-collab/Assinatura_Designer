@@ -627,12 +627,25 @@ export async function resolveSlideImages(params: ResolveSlideImagesParams): Prom
 export async function resolveImageCandidateDecisions(
   candidates: AmbiguousImageCandidate[],
   decision: 'accept' | 'regenerate',
-  params: Pick<ResolveSlideImagesParams, 'brandName' | 'width' | 'height' | 'brandId' | 'createdById' | 'postId' | 'imagePreference'>,
+  params: Pick<ResolveSlideImagesParams, 'brandName' | 'width' | 'height' | 'brandId' | 'createdById' | 'postId' | 'imagePreference'> & {
+    /** Cérebro do Designer ligado: só foto real fornecida. "Regenerar" não gera nada. */
+    realPhotosOnly?: boolean;
+  },
 ): Promise<Map<number, ResolvedSlideImage>> {
   const results = new Map<number, ResolvedSlideImage>();
 
   if (decision === 'accept') {
     for (const c of candidates) results.set(c.slideIndex, { imageUrl: c.assetUrl });
+    return results;
+  }
+
+  // Regra de foto real: nem IA nem Unsplash. O slide segue sem imagem e a área fica
+  // reservada para a foto real entrar depois. Não é falha: é o comportamento pedido.
+  if (params.realPhotosOnly) {
+    logger.warn('Regenerar imagem ignorado: esta marca usa só fotos reais fornecidas', {
+      brandId: params.brandId,
+      slides: candidates.map((c) => c.slideIndex),
+    });
     return results;
   }
 

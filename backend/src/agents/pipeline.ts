@@ -4,6 +4,7 @@ import prisma from '../lib/prisma.js';
 import { getSession, updateSession, updateBrandMemory, getBrandMemory } from '../lib/redis.js';
 import { ws } from '../lib/websocket.js';
 import { buildBrandContextSummary, resolveBrandContext } from '../lib/brandContext.js';
+import { buildPipelineBrainContext, isDesignerBrainEnabled } from '../lib/designerBrain/index.js';
 import { executeTool } from './tools/index.js';
 import { runPlanner, MAX_SLIDES, type SlideSkeletonItem } from './planner/index.js';
 import { runHtmlReviewer } from './reviewer/index.js';
@@ -254,7 +255,33 @@ async function runPipelineInner(
     ? `Regras aprendidas sobre esta marca em conversas anteriores (respeite):\n${Object.entries(learnedPreferences).map(([k, v]) => `- ${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`).join('\n')}`
     : '';
 
-  const brandContext = [buildBrandContextSummary(brand), learnedPreferencesText].filter(Boolean).join('\n\n');
+  // Cérebro do Designer em camadas: ligado só nas marcas listadas em DESIGNER_BRAIN_BRANDS.
+  // Ligado, o contexto legado (resumo + regras aprendidas no chat) dá lugar às camadas
+  // global → projeto → modo: a memória do projeto é a do cadastro, e o chat não a reescreve.
+  const designerBrainOn = isDesignerBrainEnabled(session.brandSlug);
+  let brandContext: string;
+  if (designerBrainOn) {
+    try {
+      const brain = buildPipelineBrainContext({
+        brand,
+        format,
+        aspectRatio: params.aspectRatio,
+        pageCount: parseRequestedSlideCount(brief),
+      });
+      brandContext = brain.brandContext;
+      if (brain.pending.length > 0) {
+        logger.info('Cérebro do Designer: informações ainda não definidas', { brandSlug: brand.slug, pending: brain.pending });
+      }
+    } catch (error) {
+      // Configuração incompleta tem de aparecer: cair no contexto legado em silêncio
+      // geraria a peça com as regras erradas sem ninguém saber.
+      ws.error(sessionId, error instanceof Error ? error.message : 'Cérebro do Designer mal configurado');
+      await updateSession(sessionId, { phase: 'error', workerStatus: 'error' });
+      return;
+    }
+  } else {
+    brandContext = [buildBrandContextSummary(brand), learnedPreferencesText].filter(Boolean).join('\n\n');
+  }
 
   await updateSession(sessionId, { phase: 'running', workerStatus: 'running' });
   const runningSession = await getSession(sessionId);
@@ -487,7 +514,7 @@ async function runPipelineInner(
       resolvedImages = await resolveImageCandidateDecisions(
         params.imageCandidateDecision.candidates,
         params.imageCandidateDecision.decision,
-        { brandName: brand.name, width, height, brandId: brand.id, postId, imagePreference: params.imagePreference },
+        { brandName: brand.name, width, height, brandId: brand.id, postId, imagePreference: params.imagePreference, realPhotosOnly: designerBrainOn },
       ).catch((err) => {
         logger.error('Falha ao aplicar decisão do bundle de imagens; seguindo sem essas imagens', { error: (err as Error).message });
         return new Map<number, ResolvedSlideImage>();
@@ -501,7 +528,9 @@ async function runPipelineInner(
         height,
         skeleton,
         postId,
-        allowGeneratedGraphics: brand.presentationConfig?.allowGeneratedGraphics,
+        // Foto real é regra absoluta no cérebro: nada de pessoa gerada nem Unsplash. Só
+        // reaproveita o que está na biblioteca ou deixa o slide sem imagem.
+        allowGeneratedGraphics: designerBrainOn ? false : brand.presentationConfig?.allowGeneratedGraphics,
         imagePreference: params.imagePreference,
       }).catch((err) => {
         logger.error('Resolução de imagens dos slides falhou; seguindo sem imagens geradas', { error: (err as Error).message });
@@ -622,13 +651,17 @@ async function runPipelineInner(
             primaryFonts: brand.primaryFonts,
             guidelines: brand.guidelines,
             agentPrompt: brand.agentPrompt,
+            // Cérebro ligado: as camadas substituem diretrizes e instruções legadas no artista.
+            designerBrain: designerBrainOn ? brandContext : undefined,
             logoUrl: brand.logoUrl,
             // Fotos anexadas pelo usuário no chat entram JUNTO com os assets da
             // marca — o artista as trata igual, prefere a inventar foto de banco.
             assetUrls: [...(params.attachmentImages ?? []), ...brand.assetUrls],
             presentationConfig: brand.presentationConfig ?? undefined,
             references: brand.references,
-            learnedPreferences,
+            // Com o cérebro ligado a memória do projeto é a do cadastro: o que o chat
+            // "aprendeu" não a reescreve (isolamento entre projetos).
+            learnedPreferences: designerBrainOn ? undefined : learnedPreferences,
           },
           skeleton: params.generateStyleProofOnly
             ? enrichedSkeleton.slice(0, 1)

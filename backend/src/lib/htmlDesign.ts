@@ -33,6 +33,12 @@ export interface GenerateHtmlDesignInput {
     primaryFonts: string[];
     guidelines?: string;
     agentPrompt?: string;
+    /**
+     * Cérebro do Designer já montado em camadas (global + memória do projeto + modo + regra
+     * de foto + revisão). Quando presente, vai na instrução de sistema e SUBSTITUI as
+     * diretrizes e as "instruções do agente" legadas: as duas versões juntas se contradiriam.
+     */
+    designerBrain?: string;
     logoUrl?: string | null;
     /** URLs reais do pool de assets da marca — o artista prefere estas a inventar fotos de banco. */
     assetUrls?: Array<{ url: string; name: string }>;
@@ -302,7 +308,14 @@ function buildBatchSystemInstruction(input: GenerateHtmlDesignInput, startIndex:
     }
   }
 
-  return `Você é um diretor de arte premiado especializado em social media premium. Você desenha em HTML e CSS, como um designer que codifica.
+  // Cérebro do Designer (só nas marcas com ele ligado): vem ANTES de tudo e é a autoridade
+  // sobre fidelidade, foto real e identidade do projeto. O restante deste prompt é mecânica
+  // de formato (JSON, classes, tamanho) e não o contradiz.
+  const brainBlock = input.brand.designerBrain
+    ? `${input.brand.designerBrain}\n\n=== MECÂNICA DE SAÍDA (formato do JSON e do HTML; não altera as regras acima) ===\n\n`
+    : '';
+
+  return `${brainBlock}Você é um diretor de arte premiado especializado em social media premium. Você desenha em HTML e CSS, como um designer que codifica.
 
 ${renderStyleBible(bible)}
 
@@ -425,8 +438,8 @@ function buildBatchUserPrompt(
   return `Marca: ${b.name}
 Cores oficiais: ${b.colors.length ? b.colors.join(', ') : 'livre, profissional'}
 Fontes sugeridas: ${b.primaryFonts.length ? b.primaryFonts.join(', ') : 'escolha tipografia premium'}
-Diretrizes: ${b.guidelines || 'não definidas'}
-${b.agentPrompt ? `Instruções do agente: ${b.agentPrompt}` : ''}
+${b.designerBrain ? '' : `Diretrizes: ${b.guidelines || 'não definidas'}`}
+${!b.designerBrain && b.agentPrompt ? `Instruções do agente: ${b.agentPrompt}` : ''}
 ${b.logoUrl ? `Logo: ${b.logoUrl}` : ''}
 ${assetsBlock(b.assetUrls)}
 ${presentationConfigBlock(b.presentationConfig)}
