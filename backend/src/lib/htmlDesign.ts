@@ -118,13 +118,42 @@ export function sanitizeSlideCss(css: string): string {
 }
 
 // ── Google Fonts ────────────────────────────────────────────────────────────────
-function googleFontsHref(fonts: string[]): string {
-  const families = fonts
-    .filter((f) => typeof f === 'string' && f.trim() && /^[\w\s]+$/.test(f.trim()))
-    .slice(0, 4)
-    .map((f) => `family=${encodeURIComponent(f.trim())}:wght@300;400;500;600;700;800;900`);
-  if (families.length === 0) families.push('family=Inter:wght@400;500;700;800');
-  return `https://fonts.googleapis.com/css2?${families.join('&')}&display=swap`;
+
+/**
+ * Nomes de família limpos, na ordem, sem repetição e no máximo 4.
+ *
+ * O modelo costuma devolver a família COM a especificação da API ("Playfair Display:ital,wght@0,400;1,400").
+ * Antes o nome inteiro era descartado por conter ':' e ';', e o slide saía em Times/Arial em
+ * vez da fonte pedida. Aqui só o nome da família sobrevive; os pesos são decididos por nós.
+ */
+export function normalizeFontFamilies(fonts: unknown): string[] {
+  if (!Array.isArray(fonts)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const f of fonts) {
+    if (typeof f !== 'string') continue;
+    const family = f.split(':')[0]!.replace(/['"]/g, '').replace(/\s+/g, ' ').trim();
+    if (!family || !/^[\w ]+$/.test(family)) continue;
+    const key = family.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(family);
+    if (out.length === 4) break;
+  }
+  return out;
+}
+
+/**
+ * UM link por família, e não uma URL só com todas. A API do Google Fonts recusa o pedido
+ * inteiro quando UMA família não existe (Queens, Aeonik e outras fontes de marca não são
+ * Google Fonts): com tudo junto, uma desconhecida derrubava também as que existem.
+ */
+export function googleFontHrefs(fonts: unknown): string[] {
+  const families = normalizeFontFamilies(fonts);
+  if (families.length === 0) families.push('Inter');
+  return families.map(
+    (f) => `https://fonts.googleapis.com/css2?family=${encodeURIComponent(f).replace(/%20/g, '+')}:wght@300;400;500;600;700;800;900&display=swap`,
+  );
 }
 
 // Monta o documento HTML completo de um slide (para rasterizar OU exibir no iframe).
@@ -134,7 +163,7 @@ export function buildSlideDocument(slide: HtmlDesignSlide, fonts: string[], widt
   return `<!doctype html><html><head><meta charset="utf-8">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="${googleFontsHref(fonts)}" rel="stylesheet">
+${googleFontHrefs(fonts).map((href) => `<link href="${href}" rel="stylesheet">`).join('\n')}
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
 html,body{width:${width}px;height:${height}px;overflow:hidden;}
@@ -162,7 +191,7 @@ export function validateHtmlDesign(value: unknown, expect: { width: number; heig
   }).filter((s) => s.html.trim().length > 0);
   if (slides.length === 0) throw new HtmlDesignValidationError('slides sem html');
 
-  const fonts = Array.isArray(root.fonts) ? root.fonts.filter((f): f is string => typeof f === 'string') : [];
+  const fonts = normalizeFontFamilies(root.fonts);
 
   return {
     kind: 'html-design',
@@ -641,7 +670,7 @@ export async function generateHtmlDesignBatched(
   if (!first.stop) {
     try {
       const firstRec = await runBatch(0, [], first.advice);
-      if (Array.isArray(firstRec.fonts)) fonts = (firstRec.fonts as unknown[]).filter((f): f is string => typeof f === 'string');
+      if (Array.isArray(firstRec.fonts)) fonts = normalizeFontFamilies(firstRec.fonts);
       if (typeof firstRec.reasoning === 'string') direction = firstRec.reasoning;
       bible.artDirection = direction;
       if (fonts.length) bible.fonts = fonts;

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { googleFontHrefs } from '@/lib/fontFamilies';
 
 export interface HtmlSlide {
   html: string;
@@ -37,15 +38,6 @@ function sanitize(s: string): string {
     .replace(/<\/?(?:iframe|object|embed|link|meta)[^>]*>/gi, '')
     .replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
     .replace(/javascript:/gi, '');
-}
-
-function fontsHref(fonts: string[]): string {
-  const fam = (Array.isArray(fonts) ? fonts : [])
-    .filter((f) => typeof f === 'string' && /^[\w\s]+$/.test(f.trim()))
-    .slice(0, 4)
-    .map((f) => `family=${encodeURIComponent(f.trim())}:wght@300;400;500;600;700;800;900`);
-  if (fam.length === 0) fam.push('family=Inter:wght@400;500;700;800');
-  return `https://fonts.googleapis.com/css2?${fam.join('&')}&display=swap`;
 }
 
 function buildSlideDoc(slide: HtmlSlide, fonts: string[], width: number, height: number, inspectorMode?: boolean): string {
@@ -121,7 +113,7 @@ function buildSlideDoc(slide: HtmlSlide, fonts: string[], width: number, height:
   return `<!doctype html><html><head><meta charset="utf-8">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="${fontsHref(fonts)}" rel="stylesheet">
+${googleFontHrefs(fonts).map((href) => `<link href="${href}" rel="stylesheet">`).join('\n')}
 <style>*{margin:0;padding:0;box-sizing:border-box;}html,body{width:${width}px;height:${height}px;overflow:hidden;}.slide-root{width:${width}px;height:${height}px;position:relative;overflow:hidden;}${css}</style>
 </head><body><div class="slide-root">${html}</div>${inspectorScript}</body></html>`;
 }
