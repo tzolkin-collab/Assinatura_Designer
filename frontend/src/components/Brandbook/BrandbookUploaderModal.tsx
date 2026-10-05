@@ -21,6 +21,16 @@ export interface IngestResultData {
   logoNeedsConfirmation: boolean;
   detectedLogoUrl?: string | null;
   currentLogoUrl?: string | null;
+  /**
+   * Estado real da extração por IA. Antes, qualquer falha (PDF grande demais, JSON
+   * truncado, conta sem crédito…) era engolida no backend e esta tela sempre mostrava
+   * "Indexado com sucesso!" — com tudo zerado por dentro. Agora o motivo aparece.
+   */
+  extraction?: {
+    status: 'ok' | 'partial' | 'failed';
+    warnings: string[];
+    reason?: string;
+  };
 }
 
 export interface BrandbookUploaderModalProps {
@@ -358,13 +368,45 @@ export default function BrandbookUploaderModal({
           </div>
         ) : (
           <div className={styles.resultBody}>
-            <div className={styles.successBanner}>
-              <CheckCircle size={24} color="#10B981" />
-              <div>
-                <h3>Brandbook Indexado com Sucesso!</h3>
-                <p>Diretrizes, cores e SVGs foram catalogados na memória da marca.</p>
+            {result.extraction?.status === 'failed' ? (
+              <div className={styles.failureBanner}>
+                <AlertCircle size={24} color="#ef4444" />
+                <div>
+                  <h3>Falha ao extrair o Brandbook com IA</h3>
+                  <p>
+                    {result.extraction.reason ||
+                      'A IA não conseguiu processar os arquivos enviados. Nada foi alterado na marca — tente novamente ou envie um arquivo menor.'}
+                  </p>
+                </div>
               </div>
-            </div>
+            ) : result.extraction?.status === 'partial' ? (
+              <div className={styles.partialBanner}>
+                <AlertCircle size={24} color="#F59E0B" />
+                <div>
+                  <h3>Brandbook indexado parcialmente</h3>
+                  <p>
+                    {result.extraction.reason ||
+                      'Parte dos arquivos enviados não pôde ser processada pela IA. O que deu certo já foi salvo.'}
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className={styles.successBanner}>
+                <CheckCircle size={24} color="#10B981" />
+                <div>
+                  <h3>Brandbook Indexado com Sucesso!</h3>
+                  <p>Diretrizes, cores e SVGs foram catalogados na memória da marca.</p>
+                </div>
+              </div>
+            )}
+
+            {result.extraction && result.extraction.warnings.length > 0 && (
+              <ul className={styles.warningsList}>
+                {result.extraction.warnings.map((w, i) => (
+                  <li key={i}>{w}</li>
+                ))}
+              </ul>
+            )}
 
             {/* Resumo da Ingestão */}
             <div className={styles.summaryGrid}>

@@ -2,6 +2,7 @@ import { S3Client, PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client
 import crypto from 'crypto';
 import { config } from '../config.js';
 import { createError } from '../middleware/errorHandler.js';
+import { prepareStorableFile } from './svgSanitize.js';
 
 export const s3 = new S3Client({
   region: 'auto',
@@ -30,6 +31,12 @@ export function assertR2Configured(): void {
 
 /**
  * Uploads a file Buffer to Cloudflare R2 and returns its public URL.
+ *
+ * Toda gravação passa por prepareStorableFile: o bucket é público, então um SVG (ou
+ * HTML) servido com o Content-Type errado é XSS armazenado a um clique de distância.
+ * As rotas já higienizam antes (para devolver 400 com contexto); esta é a rede de
+ * segurança de quem esquecer — e é quem garante que o Content-Type não vem do cliente.
+ * Lança InvalidSvgError se algo que se apresenta como SVG não for um.
  */
 export async function uploadFileToR2(
   buffer: Buffer,
@@ -38,6 +45,8 @@ export async function uploadFileToR2(
   folder: string = 'assets'
 ): Promise<string> {
   assertR2Configured();
+
+  const prepared = await prepareStorableFile({ buffer, fileName, mimeType });
 
   // Garante um nome de arquivo único para não sobrescrever
   const uniqueId = crypto.randomUUID();
@@ -48,8 +57,9 @@ export async function uploadFileToR2(
     new PutObjectCommand({
       Bucket: config.r2BucketName,
       Key: key,
-      Body: buffer,
-      ContentType: mimeType,
+      Body: prepared.buffer,
+      ContentType: prepared.mimeType,
+      ...(prepared.contentDisposition ? { ContentDisposition: prepared.contentDisposition } : {}),
     })
   );
 

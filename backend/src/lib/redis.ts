@@ -27,7 +27,7 @@ redis.on('reconnecting', () => logger.warn('Redis reconectando'));
 redis.on('connect', () => logger.info('Redis conectado'));
 
 // ── TTLs ──────────────────────────────────────────────────────────────────────
-const SESSION_TTL = 60 * 60 * 24;      // 24h
+export const SESSION_TTL = 60 * 60 * 24;      // 24h
 const RECENT_TTL  = 60 * 60 * 2;       // 2h  (hot cache para reabertura rápida)
 
 // ── Keys ──────────────────────────────────────────────────────────────────────
@@ -46,9 +46,16 @@ const RECENT_TTL  = 60 * 60 * 2;       // 2h  (hot cache para reabertura rápida
 //
 // O sufixo v2 é de propósito: as sessões antigas (JSON string na key antiga) têm tipo
 // incompatível com HASH e dariam WRONGTYPE. Assim elas simplesmente expiram sozinhas.
-const sessionMetaKey = (id: string) => `fabrica:session:v2:${id}:meta`;
+export const sessionMetaKey = (id: string) => `fabrica:session:v2:${id}:meta`;
 const sessionMsgsKey = (id: string) => `fabrica:session:v2:${id}:messages`;
 const sessionDesignKey = (id: string) => `fabrica:session:v2:${id}:design`;
+// Orientações em tempo real (lib/advice.ts) e pedido de interrupção cooperativa
+// (lib/interrupt.ts). Ficam em keys PRÓPRIAS, fora do blob da sessão, por dois
+// motivos: são mutadas por processos diferentes (API e worker) ao mesmo tempo, e
+// cada mutação precisa ser atômica sem passar pelo lock da sessão — que serializa
+// escritas pesadas e enfileiraria uma orientação atrás de um patch de design.
+export const sessionAdviceKey = (id: string) => `fabrica:session:v2:${id}:advice`;
+export const sessionInterruptKey = (id: string) => `fabrica:session:v2:${id}:interrupt`;
 const memBrandKey = (slug: string) => `fabrica:memory:brand:${slug}`;
 const memUserKey  = (uid: string)  => `fabrica:memory:user:${uid}`;
 /** Marcador de "esteve ativa" — não é mais uma CÓPIA da sessão, só uma bandeira. */
@@ -184,7 +191,7 @@ export interface UserMemory {
 // ── Session ───────────────────────────────────────────────────────────────────
 
 /** Campos escalares da sessão (tudo menos `messages` e `currentDesign`). */
-type SessionMeta = Omit<FabricaSession, 'messages' | 'currentDesign'>;
+export type SessionMeta = Omit<FabricaSession, 'messages' | 'currentDesign'>;
 
 /** Serializa os escalares para o HASH. `undefined` não vai (Redis não tem nulo). */
 function metaToHash(meta: Partial<SessionMeta>): Record<string, string> {
@@ -277,6 +284,19 @@ export async function getSession(sessionId: string): Promise<FabricaSession | nu
     messages: mensagensCruas.map((raw) => JSON.parse(raw) as ChatMessage),
     currentDesign: designCru ? (JSON.parse(designCru) as unknown[]) : [],
   };
+}
+
+/**
+ * Só os campos escalares da sessão (dono, fase, workerStatus...), SEM histórico nem
+ * design. Quem só precisa decidir "esta sessão é do usuário X?" ou "está ocupada?"
+ * não deve pagar a leitura de megabytes de design a cada checagem — as orientações
+ * em tempo real fazem essa pergunta a cada mensagem digitada. Não renova TTL: quem
+ * só espia não mantém a sessão viva.
+ */
+export async function getSessionMeta(sessionId: string): Promise<SessionMeta | null> {
+  const hash = await redis.hgetall(sessionMetaKey(sessionId));
+  if (Object.keys(hash).length === 0) return null;
+  return hashToMeta(hash);
 }
 
 // ── Lock por-sessão (serializa read-modify-write) ─────────────────────────────

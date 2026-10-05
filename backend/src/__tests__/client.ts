@@ -15,6 +15,15 @@ vi.mock('../lib/redis', () => {
         return n;
       }),
       expire: vi.fn(async () => 1),
+      // Faltava: middleware/rateLimit.ts chama `redis.ttl(key)` quando o contador
+      // ULTRAPASSA o teto, para montar o header Retry-After. Sem este método no mock, a
+      // chamada lançava `TypeError: redis.ttl is not a function` — capturado pelo
+      // `catch` fail-open do próprio rateLimit (silenciosamente deixava a requisição
+      // passar). Bug latente: nenhum teste, antes deste round, tinha derrubado um rate
+      // limiter até o teto de verdade dentro de uma única rodada de testes — por isso
+      // nunca tinha sido notado. Valor fixo (60s) é suficiente: os testes conferem que
+      // o header existe, não o segundo exato.
+      ttl: vi.fn(async () => 60),
       get: vi.fn(async () => null),
       set: vi.fn(async () => 'OK'),
       del: vi.fn(async () => 1),

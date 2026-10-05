@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import type { Prisma } from '@prisma/client';
 import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { s3 } from './r2.js';
+import { prepareStorableFile } from './svgSanitize.js';
 import { config as appConfig } from '../config.js';
 import { isPublicHttpUrlResolved } from './validate.js';
 import prisma from './prisma.js';
@@ -27,15 +28,20 @@ export interface CollectedMaterial {
 }
 
 export async function uploadBase64ToR2(base64Data: string, mimeType: string): Promise<string> {
+  // O mimeType vem do upload manual do usuário (`startsWith('image/')` deixa passar
+  // image/svg+xml). Este caminho grava direto no S3, então higieniza aqui: SVG limpo e
+  // Content-Type fixado, senão seria XSS armazenado no bucket público.
   const inputBuffer = Buffer.from(base64Data, 'base64');
-  const extension = mimeType.split('/')[1] || 'jpg';
-  const key = `references/${crypto.randomUUID()}.${extension}`;
+  const prepared = await prepareStorableFile({ buffer: inputBuffer, fileName: 'referencia', mimeType });
+  const subtype = prepared.mimeType === 'image/svg+xml' ? 'svg' : (prepared.mimeType.split('/')[1] || 'jpg').replace(/[^a-zA-Z0-9]/g, '');
+  const key = `references/${crypto.randomUUID()}.${subtype || 'jpg'}`;
 
   await s3.send(new PutObjectCommand({
     Bucket: appConfig.r2BucketName,
     Key: key,
-    Body: inputBuffer,
-    ContentType: mimeType,
+    Body: prepared.buffer,
+    ContentType: prepared.mimeType,
+    ...(prepared.contentDisposition ? { ContentDisposition: prepared.contentDisposition } : {}),
   }));
 
   return `${appConfig.r2PublicUrl}/${key}`;

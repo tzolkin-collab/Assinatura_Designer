@@ -11,7 +11,9 @@ export const errorHandler = (
   res: Response,
   _next: NextFunction
 ) => {
-  const statusCode = err.statusCode || 500;
+  // InvalidSvgError (lib/svgSanitize) não conhece HTTP: quem decide é a borda. SVG que
+  // não é SVG é erro do cliente, não do servidor.
+  const statusCode = err.statusCode || (err.code === 'INVALID_SVG' ? 400 : 500);
   const message = err.message || 'Internal server error';
 
   console.error(`[ERROR] ${statusCode} - ${message}`);

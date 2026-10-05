@@ -24,7 +24,16 @@ export type WsEventType =
   | 'error'
   | 'image:proposal:start'
   | 'image:proposal:done'
-  | 'image:proposal:error';
+  | 'image:proposal:error'
+  // Orientações em tempo real (lib/advice.ts). Nome pontuado de propósito: é o
+  // contrato pedido para a lista "Orientações" do cliente.
+  | 'advice.queued'
+  | 'advice.applied'
+  | 'advice.updated'
+  | 'advice.removed'
+  | 'advice.expired'
+  // O pipeline parou por pedido do usuário ("Pausar e enviar") mantendo o que gerou.
+  | 'generation.interrupted';
 
 export interface WsEvent {
   type: WsEventType;
@@ -37,7 +46,13 @@ export type WsInboundType =
   | 'review:approve'
   | 'review:decline'
   | 'mode:set'
-  | 'generation:cancel';
+  | 'generation:cancel'
+  // Orientações em tempo real e "Pausar e enviar" (ver lib/advice.ts, lib/interrupt.ts).
+  | 'advice:send'
+  | 'advice:update'
+  | 'advice:remove'
+  | 'advice:dismiss'
+  | 'message:interrupt';
 
 export interface WsAttachment {
   name: string;
@@ -240,6 +255,14 @@ export const ws = {
   // geração já concluída estava em andamento.
   done: (sessionId: string, postId: string) => {
     broadcast(sessionId, { type: 'job:done', data: { postId } });
+    persistirProgresso(sessionId, 0, '');
+  },
+
+  // A geração PAROU a pedido do usuário mantendo os slides prontos. Não é `done`
+  // (o deck não foi concluído) nem `error` (não falhou): o cliente volta ao estado
+  // ocioso e mostra onde parou. Zera o progresso guardado pelo mesmo motivo do done.
+  interrupted: (sessionId: string, info: { stage: string; slidesKept: number; total: number; postId?: string }) => {
+    broadcast(sessionId, { type: 'generation.interrupted', data: info });
     persistirProgresso(sessionId, 0, '');
   },
 

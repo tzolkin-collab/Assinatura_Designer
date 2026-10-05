@@ -14,12 +14,16 @@ import {
 } from '../../lib/redis.js';
 import type { FabricaQuestion, PresentationConfig, ReviewMode } from '../../lib/fabricaSession.js';
 import { ws, onWsMessage, type WsAttachment } from '../../lib/websocket.js';
-import { generateStreamWithRetry, generateWithRetry, humanizeGeminiError } from '../../lib/geminiRetry.js';
+import { generateStreamWithRetry, generateWithRetry, humanizeGeminiError, GenerationAbortedError } from '../../lib/geminiRetry.js';
+import { consumePendingAdvice, expirePendingAdvice, brainAdviceBlock, listAdvice, pruneAdvice, ADVICE_SCOPE_CHAT, type AdviceItem } from '../../lib/advice.js';
+import { beginBrainTurn } from './turnRegistry.js';
+import { initAdviceHandlers, isSessionBusy, settleAdviceAfterBrainTurn } from './adviceHandlers.js';
 import { extractJsonObject } from '../../lib/jsonHelper.js';
 import { editHtmlSlide, type HtmlDesignSlide } from '../../lib/htmlDesign.js';
 import { enqueuePipeline } from '../../lib/queue.js';
 import { uploadFileToR2 } from '../../lib/r2.js';
 import { buildMessageParts } from '../../lib/chatMessageParts.js';
+import { uploadChatAttachments } from '../../lib/chatAttachments.js';
 import { BRAIN_SYSTEM_PROMPT } from './prompts.js';
 import prisma from '../../lib/prisma.js';
 import { executeTool } from '../tools/index.js';
@@ -118,7 +122,14 @@ function stripQuestionTag(content: string): string {
   );
 }
 
-function emitSessionState(sessionId: string, session: NonNullable<Awaited<ReturnType<typeof getSession>>>) {
+function emitSessionState(
+  sessionId: string,
+  session: NonNullable<Awaited<ReturnType<typeof getSession>>>,
+  // Só a reconexão informa: as orientações vivem fora da sessão e o cliente que
+  // volta (F5, queda de rede) precisa reconstruir a lista a partir do servidor.
+  // Os demais emits omitem o campo, e o cliente então NÃO mexe na lista.
+  advice?: AdviceItem[],
+) {
   ws.sessionState(sessionId, {
     phase: session.phase,
     messages: session.messages,
@@ -128,6 +139,7 @@ function emitSessionState(sessionId: string, session: NonNullable<Awaited<Return
     activeQuestion: session.activeQuestion,
     progress: session.progress,
     progressLabel: session.progressLabel,
+    ...(advice ? { advice } : {}),
   });
 }
 
@@ -294,6 +306,13 @@ export function initBrainHandlers(): void {
     const { content, attachments } = data as { content: string; attachments?: unknown };
     if (!content?.trim()) return;
     await handleUserMessage(sessionId, userId, content.trim(), normalizeAttachments(attachments));
+  });
+
+  // Orientações em tempo real e "Pausar e enviar" (substituem o /btw). O único
+  // ponto em que precisam do cérebro é abrir o turno da mensagem que interrompeu.
+  initAdviceHandlers({
+    sendUserMessage: (sessionId, userId, content, attachments, opts) =>
+      handleUserMessage(sessionId, userId, content, normalizeAttachments(attachments), opts),
   });
 
   onWsMessage('question:answer', async (sessionId, userId, data) => {
@@ -485,7 +504,7 @@ export async function reconnectSession(sessionId: string, userId?: string) {
   const recent = await getRecentSession(sessionId);
   if (recent) {
     if (userId && recent.userId && recent.userId !== userId) return null;
-    emitSessionState(sessionId, recent);
+    emitSessionState(sessionId, recent, await adviceForReconnect(sessionId));
     return recent;
   }
 
@@ -534,8 +553,19 @@ export async function reconnectSession(sessionId: string, userId?: string) {
   if (!session) return null;
   if (userId && session.userId && session.userId !== userId) return null;
 
-  emitSessionState(sessionId, session);
+  emitSessionState(sessionId, session, await adviceForReconnect(sessionId));
   return session;
+}
+
+/**
+ * Orientações para reidratar o cliente que reconectou. Se ninguém está trabalhando,
+ * pendente é resto de uma geração que caiu sem varrer (crash do worker, retry
+ * esgotado): expira agora, em vez de mostrar para sempre um "pendente" que nada
+ * vai consumir. O evento advice.expired devolve o texto ao campo de quem o enviou.
+ */
+async function adviceForReconnect(sessionId: string): Promise<AdviceItem[]> {
+  if (!(await isSessionBusy(sessionId))) await expirePendingAdvice(sessionId, 'ended');
+  return listAdvice(sessionId);
 }
 
 // ── Processar mensagem do usuário ─────────────────────────────────────────────
@@ -551,12 +581,39 @@ async function handleUserMessage(
   userId: string | undefined,
   userMessage: string,
   attachments?: ChatAttachment[],
+  opts?: { interruptionNote?: string },
 ): Promise<void> {
-  // O chat é o caminho mais usado do produto: sem o contexto aqui, o gasto de IA
-  // dele ficaria sem marca e o teto por marca seria furado justamente por ele.
-  return runWithAiContext({ sessionId, userId, feature: 'chat', requestId: sessionId }, () =>
-    handleUserMessageInner(sessionId, userId, userMessage, attachments),
-  );
+  // Registrado ANTES de qualquer await: a partir daqui o cérebro conta como ocupado
+  // (orientações passam a ser aceitas) e o stream pode ser abortado por "Pausar e enviar".
+  const { turn, end } = beginBrainTurn(sessionId);
+  try {
+    // O chat é o caminho mais usado do produto: sem o contexto aqui, o gasto de IA
+    // dele ficaria sem marca e o teto por marca seria furado justamente por ele.
+    return await runWithAiContext({ sessionId, userId, feature: 'chat', requestId: sessionId }, () =>
+      handleUserMessageInner(sessionId, userId, userMessage, attachments, opts?.interruptionNote, turn.controller.signal),
+    );
+  } finally {
+    // Sai do registro ANTES de varrer as pendentes: a varredura decide pelo estado, e
+    // a segunda checagem de submitAdvice só fecha a corrida se a ordem for esta.
+    end();
+    await settleAdviceAfterBrainTurn(sessionId).catch((err) =>
+      logger.warn('Falha ao varrer orientações ao fim do turno', { sessionId, error: (err as Error).message }),
+    );
+  }
+}
+
+/**
+ * Escopos de orientação "aplicada" que ainda valem ao começar um turno normal: as do
+ * deck em andamento (retry do job, retomada após Amostra de Estilo). As do chat e as
+ * de decks antigos saem da lista.
+ */
+function keepAdviceScopes(session: FabricaSession): string[] {
+  const ids = [
+    (session.currentDesign?.[0] as { postId?: string } | undefined)?.postId,
+    session.pendingStyleProof?.postId,
+    session.pendingImageCandidates?.postId,
+  ];
+  return ids.filter((id): id is string => typeof id === 'string' && id.length > 0);
 }
 
 async function handleUserMessageInner(
@@ -564,6 +621,8 @@ async function handleUserMessageInner(
   userId: string | undefined,
   userMessage: string,
   attachments?: ChatAttachment[],
+  interruptionNote?: string,
+  signal?: AbortSignal,
 ): Promise<void> {
   // Retry curto para absorver gap de reconexão Redis pós-ECONNRESET
   let session = await getSession(sessionId);
@@ -578,23 +637,21 @@ async function handleUserMessageInner(
 
   if (userId && session.userId && session.userId !== userId) return;
 
+  // Turno normal = ciclo novo: some da lista o que já foi resolvido. Num "Pausar e
+  // enviar" NÃO limpa — as orientações levadas junto com a mensagem ainda estão sendo
+  // mostradas como aplicadas, e o usuário acabou de vê-las mudarem de estado.
+  if (!interruptionNote) {
+    await pruneAdvice(sessionId, { keepScopes: keepAdviceScopes(session) });
+  }
+
   // A marca só se conhece depois de carregar a sessão; sem isto o gasto do chat
   // não cairia no teto da marca.
   enrichAiContext({ brandSlug: session.brandSlug });
 
-  // Sobe cada foto anexada pro R2 assim que chega — antes ela só existia como
-  // base64 dentro da mensagem: o cérebro via só o NOME do arquivo em texto (nunca
-  // o pixel), e a geração nunca tinha como usá-la (nenhuma URL real pra embutir
-  // num <img>). Com a URL em mãos, os dois casos passam a funcionar de verdade.
+  // Sobe cada foto anexada pro R2 assim que chega (com SVG higienizado) — ver
+  // lib/chatAttachments.ts pelo porquê.
   if (attachments && attachments.length > 0) {
-    await Promise.all(attachments.map(async (a) => {
-      try {
-        const buffer = Buffer.from(a.dataBase64, 'base64');
-        a.url = await uploadFileToR2(buffer, a.name, a.mimeType, `brands/${session!.brandSlug}/chat-attachments`);
-      } catch (err) {
-        logger.warn('Falha ao subir anexo do chat pro R2 — segue só com o base64 (sem URL pra geração)', { error: (err as Error).message });
-      }
-    }));
+    await uploadChatAttachments(attachments, session.brandSlug);
   }
 
   // Persiste mensagem do usuário
@@ -728,62 +785,93 @@ async function handleUserMessageInner(
   const historyWithoutLast = history.slice(0, -1);
   const currentTurnContents: any[] = [
     ...historyWithoutLast,
-    { role: 'user', parts: buildMessageParts(`[FASE: ${latestSession.phase.toUpperCase()}]\n\n${userMessage}`, attachments) },
+    // A nota de interrupção vai só neste turno do modelo; a mensagem PERSISTIDA (e o que
+    // o usuário vê no chat) continua sendo exatamente o que ele digitou.
+    { role: 'user', parts: buildMessageParts(
+      `[FASE: ${latestSession.phase.toUpperCase()}]\n\n${interruptionNote ? `[CONTEXTO DO SISTEMA]\n${interruptionNote}\n\n[MENSAGEM DO USUÁRIO]\n` : ''}${userMessage}`,
+      attachments,
+    ) },
   ];
 
   try {
     let activeQuestion = null;
     let fullResponse = '';
+    // Orientações do usuário que chegaram enquanto este turno trabalhava. Cresce a cada
+    // passo do loop e vai inteira no systemInstruction dos passos seguintes.
+    const adviceTexts: string[] = [];
+    let aborted = false;
 
     // Agent Loop (máximo de 3 iterações para evitar loop infinito com tools)
     for (let iteration = 0; iteration < 3; iteration++) {
       let functionCallsToExecute: Array<{ name: string; args: any }> = [];
       let stepResponse = '';
 
-      const stream = await generateStreamWithRetry(ai, {
-        model: BRAIN_MODEL,
-        contents: currentTurnContents,
-        config: {
-          systemInstruction: [
-            BRAIN_SYSTEM_PROMPT,
-            brandContextSummary ? `## Contexto atual da marca\n${brandContextSummary}` : '',
-          ].filter(Boolean).join('\n\n'),
-          temperature: 0.7,
-          thinkingConfig: { thinkingBudget: 6000 },
-          tools: brainTools,
-        },
-      }, BRAIN_MODEL, {
-        onRetry: ({ attempt }) => {
-          ws.token(sessionId, attempt === 1
-            ? '\n\nO modelo está com alta demanda. Tentando novamente...\n\n'
-            : '\n\nAinda estou tentando destravar a geração...\n\n');
-        },
-        onFallback: () => {
-          ws.token(sessionId, '\n\nTroquei para um modelo de fallback para não travar sua criação.\n\n');
-        },
+      if (signal?.aborted) { aborted = true; break; }
+
+      // Ponto seguro de CONSUMO: o início de cada turno do modelo. Drena o que chegou
+      // desde o último (atômico: já marca aplicada, com o passo em que entrou).
+      const novas = await consumePendingAdvice(sessionId, {
+        stage: iteration === 0 ? 'resposta do chat' : `resposta do chat (passo ${iteration + 1})`,
+        scope: ADVICE_SCOPE_CHAT,
       });
+      adviceTexts.push(...novas.map((a) => a.text));
 
-      for await (const chunk of stream) {
-        for (const part of chunk.candidates?.[0]?.content?.parts ?? []) {
-          if ((part as any).functionCall) {
-            functionCallsToExecute.push((part as any).functionCall);
-            continue;
-          }
+      try {
+        const stream = await generateStreamWithRetry(ai, {
+          model: BRAIN_MODEL,
+          contents: currentTurnContents,
+          config: {
+            systemInstruction: [
+              BRAIN_SYSTEM_PROMPT,
+              brandContextSummary ? `## Contexto atual da marca\n${brandContextSummary}` : '',
+              brainAdviceBlock(adviceTexts),
+            ].filter(Boolean).join('\n\n'),
+            temperature: 0.7,
+            thinkingConfig: { thinkingBudget: 6000 },
+            tools: brainTools,
+          },
+        }, BRAIN_MODEL, {
+          onRetry: ({ attempt }) => {
+            ws.token(sessionId, attempt === 1
+              ? '\n\nO modelo está com alta demanda. Tentando novamente...\n\n'
+              : '\n\nAinda estou tentando destravar a geração...\n\n');
+          },
+          onFallback: () => {
+            ws.token(sessionId, '\n\nTroquei para um modelo de fallback para não travar sua criação.\n\n');
+          },
+          abortSignal: signal,
+        });
 
-          if ((part as { thought?: boolean }).thought) {
-            const thoughtText = (part as { text?: string }).text ?? '';
-            if (thoughtText) {
-              ws.emit(sessionId, 'thinking', { text: thoughtText });
+        for await (const chunk of stream) {
+          // "Pausar e enviar": para de consumir e mantém o que já foi emitido.
+          if (signal?.aborted) break;
+          for (const part of chunk.candidates?.[0]?.content?.parts ?? []) {
+            if ((part as any).functionCall) {
+              functionCallsToExecute.push((part as any).functionCall);
+              continue;
             }
-            continue;
+
+            if ((part as { thought?: boolean }).thought) {
+              const thoughtText = (part as { text?: string }).text ?? '';
+              if (thoughtText) {
+                ws.emit(sessionId, 'thinking', { text: thoughtText });
+              }
+              continue;
+            }
+            const text = (part as { text?: string }).text ?? '';
+            if (!text) continue;
+            stepResponse += text;
+            fullResponse += text;
+            ws.token(sessionId, text);
           }
-          const text = (part as { text?: string }).text ?? '';
-          if (!text) continue;
-          stepResponse += text;
-          fullResponse += text;
-          ws.token(sessionId, text);
         }
+      } catch (err) {
+        // Abort do fetch chega como erro; o que importa é que FOI o usuário.
+        if (signal?.aborted || err instanceof GenerationAbortedError) aborted = true;
+        else throw err;
       }
+
+      if (aborted || signal?.aborted) { aborted = true; break; }
 
       // Adiciona o que o modelo disse até agora no histórico da iteração
       if (stepResponse || functionCallsToExecute.length > 0) {
@@ -804,6 +892,9 @@ async function handleUserMessageInner(
       // Executa as tools e devolve para o modelo
       const functionResponseParts: any[] = [];
       for (const call of functionCallsToExecute) {
+        // Não dispara ferramenta nova depois do "Pausar e enviar"; a que já está em
+        // andamento termina (não há como desfazê-la no meio).
+        if (signal?.aborted) { aborted = true; break; }
         // Evento próprio em vez de texto enfiado no raciocínio: o front consegue
         // desenhar a ferramenta como ferramenta, e não como mais uma frase no
         // meio do pensamento. Os dois tipos já existiam no protocolo e nunca
@@ -853,6 +944,24 @@ async function handleUserMessageInner(
         });
       }
       currentTurnContents.push({ role: 'user', parts: functionResponseParts });
+    }
+
+    // Interrompido por "Pausar e enviar": guarda o que o usuário chegou a ver, marcado
+    // como cortado, e ENCERRA — sem dispatch, sem [EDIT], sem pergunta. Uma tag de ação
+    // no meio de um texto pela metade não é um pedido; agir sobre ela refaria trabalho
+    // que a pessoa acabou de mandar parar. Sem `session:state` de propósito: ele
+    // devolveria o histórico do servidor e apagaria da tela a mensagem nova do
+    // usuário, que só é persistida quando o turno seguinte abre.
+    if (aborted) {
+      const parcial = stripQuestionTag(fullResponse).replace(/\[(?:QUESTION|EDIT|DISPATCH|MEMORY|GENERATE_IMAGE)\b[\s\S]*$/, '').trim();
+      if (parcial) {
+        const marcador = '\n\n*[resposta interrompida]*';
+        ws.token(sessionId, marcador);
+        await appendMessage(sessionId, { role: 'assistant', content: parcial + marcador, timestamp: Date.now() });
+      }
+      await updateSession(sessionId, { activeQuestion: null });
+      ws.end(sessionId);
+      return;
     }
 
     const assistantMessage = stripQuestionTag(fullResponse);

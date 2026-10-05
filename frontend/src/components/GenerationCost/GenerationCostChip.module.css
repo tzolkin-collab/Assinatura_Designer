@@ -1,0 +1,257 @@
+/* Chip de custo estimado por deck + popover de detalhamento.
+   Mesma linguagem visual do AiSpendBadge (badge pequeno, popover de 320px) para não
+   parecer um corpo estranho no header do editor nem na barra do artefato. Os tokens
+   têm fallback porque o editor usa estilo inline com valores de reserva. */
+
+.wrap {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--color-border, rgba(0, 0, 0, 0.12));
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-text-secondary, #4b5563);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.chip:hover {
+  border-color: var(--color-border-hover, rgba(0, 0, 0, 0.25));
+  background: var(--color-bg-secondary, rgba(0, 0, 0, 0.04));
+}
+.chip:focus-visible {
+  outline: 2px solid var(--color-brand, #d97757);
+  outline-offset: 2px;
+}
+
+.icon {
+  color: var(--color-brand, #d97757);
+  flex-shrink: 0;
+}
+
+/* Carregando / indisponível: discreto, para não competir com as ações do header. */
+.muted {
+  color: var(--color-text-tertiary, #96948f);
+  border-style: dashed;
+}
+.muted .icon {
+  color: inherit;
+}
+.errorChip {
+  color: var(--color-error, #b91c1c);
+}
+
+/* Total parcial (piso): âmbar, sem gritar. */
+.partial {
+  border-color: rgba(217, 119, 6, 0.45);
+}
+
+.label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Em telas estreitas o texto é cortado com reticências em vez de empurrar o resto
+   do header (que já quebra linha); o valor completo continua no popover. */
+@media (max-width: 480px) {
+  .label {
+    max-width: 150px;
+  }
+}
+
+.spin {
+  animation: gcSpin 1s linear infinite;
+}
+@keyframes gcSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .spin {
+    animation: none;
+  }
+}
+
+/* ── Popover ─────────────────────────────────────────────────────────────── */
+.popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  z-index: 60;
+  width: 320px;
+  max-width: calc(100vw - 24px);
+  padding: 14px;
+  background: var(--color-surface, #fff);
+  border: 1px solid var(--color-border, rgba(0, 0, 0, 0.12));
+  border-radius: 14px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
+  color: var(--color-text, #111827);
+  text-align: left;
+  white-space: normal;
+}
+.popoverEnd {
+  right: 0;
+}
+.popoverStart {
+  left: 0;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+}
+.badgeEstimate {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: rgba(217, 119, 6, 0.12);
+  color: #b45309;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.totalRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.total {
+  font-size: 22px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.totalMeta {
+  font-size: 11px;
+  color: var(--color-text-secondary, #4b5563);
+}
+.summary {
+  margin: 2px 0 10px;
+  padding-bottom: 10px;
+  border-bottom: 1px dashed var(--color-border, rgba(0, 0, 0, 0.12));
+  font-size: 12px;
+  color: var(--color-text-secondary, #4b5563);
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.row {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.rowMain {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12.5px;
+}
+.rowLabel {
+  font-weight: 600;
+}
+.rowUsd {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.rowMeta {
+  font-size: 11px;
+  color: var(--color-text-tertiary, #96948f);
+}
+
+.warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(217, 119, 6, 0.08);
+  color: #92400e;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.warning svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.message {
+  padding: 8px 0;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--color-text-secondary, #4b5563);
+}
+
+.footer {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--color-border, rgba(0, 0, 0, 0.08));
+}
+.footnote {
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: var(--color-text-tertiary, #96948f);
+}
+.refresh {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  border: 1px solid var(--color-border, rgba(0, 0, 0, 0.12));
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-text-secondary, #4b5563);
+  cursor: pointer;
+}
+.refresh:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Celular: o chip fica no meio do header, então um popover de 320px ancorado nele vazaria
+   para fora da tela. Aqui o wrapper deixa de ser o ponto de ancoragem e o popover se
+   ancora no header/barra que o contém (ambos `position: relative`), ocupando a largura
+   toda com uma folga de 12px de cada lado. */
+@media (max-width: 480px) {
+  .wrap {
+    position: static;
+  }
+  .popover,
+  .popoverEnd,
+  .popoverStart {
+    left: 12px;
+    right: 12px;
+    width: auto;
+    max-width: none;
+  }
+}
