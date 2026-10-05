@@ -3,51 +3,20 @@
 import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Bot, Palette, Eye, PlugZap, ChevronRight, Trash2, X, Users, Image as ImageIcon, BarChart3, Brain } from 'lucide-react';
+import { ArrowLeft, ChevronRight, Trash2, X } from 'lucide-react';
 import PageHeader from '@/components/ui/PageHeader';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import styles from './configuracoes.module.css';
 import { api } from '@/lib/api';
+import { BRAND_SETTINGS } from '@/lib/navigation';
 
-const CONFIG_SECTIONS = [
-  {
-    key: 'agent',
-    label: 'Agente e Memória',
-    description: 'Configure o SystemPrompt do Gemini e gerencie as regras/preferências aprendidas da marca.',
-    icon: <Bot size={20} />,
-  },
-  {
-    key: 'branding',
-    label: 'Branding',
-    description: 'Identidade visual, cores, tipografia e diretrizes da marca.',
-    icon: <Palette size={20} />,
-  },
-  {
-    key: 'referencias',
-    label: 'Referências',
-    description: 'Marcas de referência analisadas pelo agente.',
-    icon: <Eye size={20} />,
-  },
-  {
-    key: 'equipe',
-    label: 'Equipe e Permissões',
-    description: 'Convide clientes e designers e defina quem pode editar ou apenas visualizar.',
-    icon: <Users size={20} />,
-  },
-  {
-    key: 'midia',
-    label: 'Biblioteca de Mídia',
-    description: 'Gerencie os uploads (imagens e fontes) compartilhados por esta marca.',
-    icon: <ImageIcon size={20} />,
-  },
-  {
-    key: 'billing',
-    label: 'Gastos de IA',
-    description: 'Consumo e custo estimado por modelo, mês a mês — gasto e impostos separados.',
-    icon: <BarChart3 size={20} />,
-  },
-];
+const CONFIG_SECTIONS = BRAND_SETTINGS.map((section) => ({
+  key: section.key,
+  label: section.label,
+  description: section.description,
+  icon: <section.icon size={20} />,
+}));
 
 export default function ConfiguracoesPage() {
   const params = useParams();

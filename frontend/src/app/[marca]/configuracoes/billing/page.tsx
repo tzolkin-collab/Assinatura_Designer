@@ -33,8 +33,10 @@ export default function BillingPage() {
 
       {error ? (
         <p className={styles.error}>Erro ao carregar: {error}</p>
-      ) : loading || !billing ? (
+      ) : loading && !billing ? (
         <p>Carregando…</p>
+      ) : !billing ? (
+        <p>Sem dados de consumo para mostrar.</p>
       ) : (
         <>
           <div className={styles.toolbar}>
@@ -82,7 +84,25 @@ export default function BillingPage() {
           </div>
 
           {billing.models.length === 0 ? (
-            <div className={styles.empty}>Nenhuma geração de IA registrada em {formatMonth(billing.month)}.</div>
+            <div className={styles.empty}>
+              <p style={{ margin: 0 }}>Nenhuma geração de IA registrada em {formatMonth(billing.month)}.</p>
+              {/* Mês atual zerado parecia "a tela não funciona": mostra onde há consumo de verdade. */}
+              {billing.availableMonths.filter((m) => m !== billing.month).length > 0 && (
+                <p style={{ margin: '10px 0 0', display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center' }}>
+                  Meses com consumo:
+                  {billing.availableMonths.filter((m) => m !== billing.month).map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => setMonth(m)}
+                      style={{ padding: '4px 10px', borderRadius: 999, border: '1px solid var(--color-border-hover)', background: 'var(--color-surface)', cursor: 'pointer', fontSize: 'var(--text-sm)', color: 'var(--color-text)' }}
+                    >
+                      {formatMonth(m)}
+                    </button>
+                  ))}
+                </p>
+              )}
+            </div>
           ) : (
             <div className={styles.tableWrap}>
               <table className={styles.table}>
