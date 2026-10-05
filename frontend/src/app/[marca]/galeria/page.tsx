@@ -8,6 +8,12 @@ import { ArrowLeft, Download, FileDown, Loader2, Maximize2, X, Folder, FolderPlu
 import Link from 'next/link';
 import Image from 'next/image';
 import styles from './brand-galeria.module.css';
+import { PreviewModal } from './components/PreviewModal';
+import { CanvaExportModal } from './components/CanvaExportModal';
+import { ChatHistoryModal } from './components/ChatHistoryModal';
+import { AiReportModal } from './components/AiReportModal';
+import { FolderModal } from './components/FolderModal';
+
 import { useBrandPosts, useBrand, type Post } from '@/lib/hooks';
 import { useState, useEffect, useMemo } from 'react';
 import { api, getApiErrorMessage } from '@/lib/api';
@@ -112,13 +118,12 @@ export default function BrandGaleriaPage() {
     return () => { cancelled = true; };
   }, [publicHostUrl]);
 
-  const handlePublishPresentation = async () => {
-    if (!activePreviewPost) return;
+  const publishPostWithMutate = async (postId: string, config: { autoplay: boolean; showCounter: boolean }) => {
     setPublishingHost(true);
     setHostErro(null);
     try {
-      const result = await publishPost(activePreviewPost.id, { autoplay: hostAutoplay, showCounter: hostShowCounter });
-      setActivePreviewPost((prev) => prev ? { ...prev, publicSlug: result.publicSlug, publishedAt: result.publishedAt } : prev);
+      const result = await publishPost(postId, config);
+      setActivePreviewPost((prev) => prev && prev.id === postId ? { ...prev, publicSlug: result.publicSlug, publishedAt: result.publishedAt } : prev);
       if (mutate) mutate();
     } catch (err) {
       setHostErro(getApiErrorMessage(err, 'Falha ao publicar a apresentação.'));
@@ -127,18 +132,67 @@ export default function BrandGaleriaPage() {
     }
   };
 
-  const handleUnpublishPresentation = async () => {
-    if (!activePreviewPost) return;
+  const unpublishPostWithMutate = async (postId: string) => {
     setPublishingHost(true);
     setHostErro(null);
     try {
-      await unpublishPost(activePreviewPost.id);
-      setActivePreviewPost((prev) => prev ? { ...prev, publicSlug: null, publishedAt: null } : prev);
+      await unpublishPost(postId);
+      setActivePreviewPost((prev) => prev && prev.id === postId ? { ...prev, publicSlug: null, publishedAt: null } : prev);
       if (mutate) mutate();
     } catch (err) {
       setHostErro(getApiErrorMessage(err, 'Falha ao despublicar.'));
     } finally {
       setPublishingHost(false);
+    }
+  };
+
+  const handleExecutarCanvaExportWrapper = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (!activeCanvaExportPost) return;
+    if (canvaFormat === 'png') {
+      await handleExportCanva(e, activeCanvaExportPost.id);
+      return;
+    }
+    if (canvaFormat === 'pptx') {
+      setExportandoCanva({ postId: activeCanvaExportPost.id, done: 0, total: 0 });
+      try {
+        const { jobId } = await api.post<{ jobId: string; total: number }>(
+          `/posts/${activeCanvaExportPost.id}/export-canva`,
+          { mode: 'pptx' },
+        );
+        const { acompanharExport } = await import('@/lib/canvaExport');
+        const resultado = await acompanharExport(
+          activeCanvaExportPost.id,
+          jobId,
+          (done, total) => setExportandoCanva({ postId: activeCanvaExportPost.id, done, total }),
+        );
+        if (resultado.designUrl) {
+          window.open(resultado.designUrl, '_blank', 'noopener');
+        }
+        alert('Design editável criado no Canva!');
+        setActiveCanvaExportPost(null);
+      } catch (err) {
+        console.error('[export canva pptx]', err);
+        alert(getApiErrorMessage(err, 'Não consegui exportar para o Canva.'));
+      } finally {
+        setExportandoCanva(null);
+      }
+      return;
+    }
+    setMostrarCanvaInstrucoes(false);
+    try {
+      await exportarDeck(
+        activeCanvaExportPost.id,
+        canvaFormat,
+        (done, total) => setExportando({ postId: activeCanvaExportPost.id, formato: canvaFormat, done, total }),
+        {}
+      );
+      setMostrarCanvaInstrucoes(true);
+    } catch (err) {
+      console.error(err);
+      alert('Não consegui exportar o arquivo.');
+    } finally {
+      setExportando(null);
     }
   };
 
@@ -591,697 +645,70 @@ export default function BrandGaleriaPage() {
   return (
     <div>
       {showFolderModal && (
-        <div className={styles.modalOverlay} onClick={() => setShowFolderModal(false)}>
-          <div className={styles.modalContent} onClick={(e) => e.stopPropagation()}>
-            <div className={styles.modalHeader}>
-              <h3 className={styles.modalTitle}>
-                {newFolderParentId
-                  ? `Nova subpasta em "${folders.find(f => f.id === newFolderParentId)?.name ?? ''}"`
-                  : 'Criar Pasta'}
-              </h3>
-              <button className={styles.closeBtn} onClick={() => setShowFolderModal(false)}>
-                <X size={20} />
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateFolder} className={styles.folderForm} style={{ marginBottom: 0 }}>
-              <input
-                type="text"
-                placeholder="Ex: Conteúdo orgânico"
-                value={newFolderName}
-                onChange={e => setNewFolderName(e.target.value)}
-                className={styles.folderInput}
-                autoFocus
-              />
-              <Button type="submit" size="sm" disabled={!newFolderName.trim() || creatingFolder}>
-                <Plus size={14} />
-                {creatingFolder ? 'Criando...' : 'Criar'}
-              </Button>
-            </form>
-          </div>
-        </div>
+        <FolderModal
+          onClose={() => setShowFolderModal(false)}
+          newFolderParentId={newFolderParentId}
+          folders={folders}
+          newFolderName={newFolderName}
+          setNewFolderName={setNewFolderName}
+          creatingFolder={creatingFolder}
+          handleCreateFolder={handleCreateFolder}
+        />
       )}
 
-      {activePreviewPost && (() => {
-        const preview = extractPreviewSource(activePreviewPost.content, null);
-        const imageUrl = activePreviewPost.previewUrl || (preview?.kind === 'image' ? preview.url : null);
-        const htmlContent = preview?.kind === 'html-design' ? preview.content : null;
-        const chatHistory = extractChatHistory(activePreviewPost.content);
-        const sessionId = extractSessionId(activePreviewPost.content);
-        const usedAssets = extractUsedAssets(activePreviewPost.content);
+      {activePreviewPost && (
+        <PreviewModal
+          post={activePreviewPost}
+          onClose={() => setActivePreviewPost(null)}
+          slug={slug}
+          canEdit={canEdit}
+          folders={folders}
+          onMoveToFolder={handleMoveToFolder}
+          onDeletePost={handleDeletePost}
+          onDownload={handleDownload}
+          onDownloadDeck={handleDownloadDeck}
+          exportando={exportando}
+          onCanvaExport={(post) => {
+            setActiveCanvaExportPost(post);
+            setCanvaFormat('png');
+            setMostrarCanvaInstrucoes(false);
+          }}
+          onPublishPresentation={publishPostWithMutate}
+          onUnpublishPresentation={unpublishPostWithMutate}
+          publishingHost={publishingHost}
+          hostErro={hostErro}
+        />
+      )}
 
-        // Calcular proporção real das páginas
-        const contentWidth = htmlContent?.width || 1080;
-        const contentHeight = htmlContent?.height || 1080;
-        const aspectRatio = `${contentWidth} / ${contentHeight}`;
-
-        return (
-          <div className={styles.adobeModalOverlay} onClick={() => setActivePreviewPost(null)}>
-            <div className={styles.adobeModalContainer} onClick={(e) => e.stopPropagation()}>
-              
-              {/* Lado Esquerdo: Área de Preview (Fundo Escuro) */}
-              <div className={styles.adobePreviewArea}>
-                <button className={styles.adobeCloseBtn} onClick={() => setActivePreviewPost(null)}>
-                  <X size={20} />
-                </button>
-                
-                <div className={styles.adobePreviewWrapper}>
-                  {imageUrl ? (
-                    <div className={styles.adobePreviewSlideContainer}>
-                      <div className={styles.adobePreviewSlideHeader}>Imagem Final</div>
-                      <div className={styles.adobePreviewSlideContent} style={{ aspectRatio }}>
-                        <img
-                          src={imageUrl}
-                          alt="Preview"
-                          className={styles.adobePreviewImage}
-                        />
-                      </div>
-                    </div>
-                  ) : htmlContent ? (
-                    htmlContent.slides.map((slide: any, idx: number) => (
-                      <div key={idx} className={styles.adobePreviewSlideContainer}>
-                        <div className={styles.adobePreviewSlideHeader}>
-                          Slide {idx + 1}
-                        </div>
-                        <div className={styles.adobePreviewSlideContent} style={{ aspectRatio }}>
-                          <HtmlSlideRenderer
-                            content={{ ...htmlContent, slides: [slide] }}
-                            mode="contain"
-                            hideNav
-                          />
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    <div style={{ color: 'var(--color-text-tertiary)' }}>Sem preview disponível</div>
-                  )}
-                </div>
-              </div>
-
-              {/* Lado Direito: Barra de Configurações e Propriedades (Adobe-like) */}
-              <div className={styles.adobePanelArea}>
-                <div className={styles.adobePanelHeader}>
-                  <div className={styles.adobeMetaBadge}>
-                    {formatPostType(activePreviewPost.type)}
-                  </div>
-                  <h3 className={styles.adobePostTitle}>
-                    {activePreviewPost.name || `Arte ${activePreviewPost.id.split('-')[0]}`}
-                  </h3>
-                  <div className={styles.adobePanelMeta}>
-                    <span>Criado em: {new Date(activePreviewPost.createdAt).toLocaleDateString()}</span>
-                    <span>ID: {activePreviewPost.id.split('-')[0]}</span>
-                    {activePreviewPost.createdBy && (
-                      <span title={activePreviewPost.createdBy.email}>
-                        Por: {activePreviewPost.createdBy.name}
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                <div className={styles.adobePanelBody}>
-                  {/* Seção: Ações Rápidas */}
-                  {htmlContent && canEdit && (
-                    <div className={styles.adobePanelSection}>
-                      <h4 className={styles.adobeSectionTitle}>Editar</h4>
-                      <Link
-                        href={`/${slug}/editor/${activePreviewPost.id}`}
-                        className={styles.adobeMainActionBtn}
-                        onClick={() => setActivePreviewPost(null)}
-                      >
-                        <PenLine size={16} />
-                        Abrir no Editor
-                      </Link>
-                    </div>
-                  )}
-
-                  {/* Seção: Assets da marca usados neste deck */}
-                  {usedAssets.length > 0 && (
-                    <div className={styles.adobePanelSection}>
-                      <h4 className={styles.adobeSectionTitle}>Assets da marca usados ({usedAssets.length})</h4>
-                      <div className={styles.usedAssetsGrid}>
-                        {usedAssets.map((asset) => (
-                          <div key={asset.id} className={styles.usedAssetCard} title={asset.name}>
-                            <img src={asset.url} alt={asset.name} className={styles.usedAssetThumb} />
-                            <span className={styles.usedAssetName}>{asset.name}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Seção: Exportar / Downloads */}
-                  <div className={styles.adobePanelSection}>
-                    <h4 className={styles.adobeSectionTitle}>Exportar e Downloads</h4>
-                    <div className={styles.adobeBtnGrid}>
-                      {imageUrl && (
-                        <button
-                          className={styles.adobeSecondaryBtn}
-                          onClick={(e) => handleDownload(e, imageUrl, `post-${activePreviewPost.id}.png`)}
-                        >
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <LucideImage size={14} style={{ opacity: 0.7 }} />
-                            <span>Baixar Imagem (PNG)</span>
-                          </div>
-                          <Download size={14} style={{ opacity: 0.5 }} />
-                        </button>
-                      )}
-                      
-                      {htmlContent && (
-                        <>
-                          <button
-                            className={styles.adobeSecondaryBtn}
-                            onClick={(e) => handleDownloadDeck(e, activePreviewPost.id, 'pptx')}
-                            disabled={exportando !== null}
-                          >
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                              <Presentation size={14} style={{ opacity: 0.7 }} />
-                              <span>Apresentação (PPTX)</span>
-                            </div>
-                            {exportando?.postId === activePreviewPost.id && exportando.formato === 'pptx' ? (
-                              <Loader2 size={14} className={styles.spin} />
-                            ) : (
-                              <Download size={14} style={{ opacity: 0.5 }} />
-                            )}
-                          </button>
-                          <button
-                            className={styles.adobeSecondaryBtn}
-                            onClick={(e) => handleDownloadDeck(e, activePreviewPost.id, 'pdf')}
-                            disabled={exportando !== null}
-                          >
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                              <FileDown size={14} style={{ opacity: 0.7 }} />
-                              <span>Documento (PDF)</span>
-                            </div>
-                            {exportando?.postId === activePreviewPost.id && exportando.formato === 'pdf' ? (
-                              <Loader2 size={14} className={styles.spin} />
-                            ) : (
-                              <Download size={14} style={{ opacity: 0.5 }} />
-                            )}
-                          </button>
-                          <button
-                            className={styles.adobeSecondaryBtn}
-                            onClick={(e) => handleDownloadDeck(e, activePreviewPost.id, 'zip')}
-                            disabled={exportando !== null}
-                          >
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                              <Folder size={14} style={{ opacity: 0.7 }} />
-                              <span>Imagens Separadas (ZIP)</span>
-                            </div>
-                            {exportando?.postId === activePreviewPost.id && exportando.formato === 'zip' ? (
-                              <Loader2 size={14} className={styles.spin} />
-                            ) : (
-                              <Download size={14} style={{ opacity: 0.5 }} />
-                            )}
-                          </button>
-                          {htmlContent && (
-                            <button
-                              className={styles.adobeSecondaryBtn}
-                              onClick={(e) => handleDownloadDeck(e, activePreviewPost.id, 'html')}
-                              disabled={exportando !== null}
-                            >
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                <FileDown size={14} style={{ opacity: 0.7 }} />
-                                <span>Código Fonte (HTML)</span>
-                              </div>
-                              {exportando?.postId === activePreviewPost.id && exportando.formato === 'html' ? (
-                                <Loader2 size={14} className={styles.spin} />
-                              ) : (
-                                <Download size={14} style={{ opacity: 0.5 }} />
-                              )}
-                            </button>
-                          )}
-                          <button
-                            className={styles.adobeSecondaryBtn}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setActiveCanvaExportPost(activePreviewPost);
-                              setCanvaFormat('png');
-                              setMostrarCanvaInstrucoes(false);
-                            }}
-                          >
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                              <Send size={14} style={{ opacity: 0.7 }} />
-                              <span>Exportar para o Canva</span>
-                            </div>
-                            <ExternalLink size={14} style={{ opacity: 0.5 }} />
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Seção: Publicar apresentação — link público vivo, diferente dos downloads acima */}
-                  {htmlContent && (
-                    <div className={styles.adobePanelSection}>
-                      <h4 className={styles.adobeSectionTitle}>Publicar Apresentação</h4>
-                      <p className={styles.hostSectionHint}>
-                        Gera uma página pública navegável (sem login) com o design atual — um link vivo pra compartilhar, não um arquivo.
-                      </p>
-
-                      {activePreviewPost.publicSlug ? (
-                        <>
-                          <div className={styles.hostPublicUrlRow}>
-                            <span className={styles.hostPublicUrlText} title={publicHostUrl}>{publicHostUrl}</span>
-                            <button type="button" className={styles.hostIconBtn} onClick={handleCopyPublicHostUrl} title="Copiar link">
-                              {hostCopiado ? <Check size={13} /> : <Copy size={13} />}
-                            </button>
-                            <a href={publicHostUrl} target="_blank" rel="noreferrer" className={styles.hostIconBtn} title="Abrir em nova aba">
-                              <ExternalLink size={13} />
-                            </a>
-                          </div>
-                          {hostQrDataUrl && (
-                            <div className={styles.hostQrRow}>
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img src={hostQrDataUrl} alt="QR code do link público" width={132} height={132} className={styles.hostQrImage} />
-                            </div>
-                          )}
-                          {hostErro && <p className={styles.hostErrorText}>{hostErro}</p>}
-                          <div className={styles.adobeBtnGrid}>
-                            <button
-                              className={styles.adobeSecondaryBtn}
-                              onClick={(e) => { e.stopPropagation(); void handleUnpublishPresentation(); }}
-                              disabled={publishingHost}
-                            >
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                <Globe size={14} style={{ opacity: 0.7 }} />
-                                <span>{publishingHost ? 'Despublicando…' : 'Despublicar'}</span>
-                              </div>
-                            </button>
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          <label className={styles.hostToggleLabel}>
-                            <input type="checkbox" checked={hostShowCounter} onChange={(e) => setHostShowCounter(e.target.checked)} />
-                            Mostrar contador de slides (ex.: &quot;2 / 6&quot;)
-                          </label>
-                          <label className={styles.hostToggleLabel}>
-                            <input type="checkbox" checked={hostAutoplay} onChange={(e) => setHostAutoplay(e.target.checked)} />
-                            Avançar automaticamente (autoplay)
-                          </label>
-                          {hostErro && <p className={styles.hostErrorText}>{hostErro}</p>}
-                          <div className={styles.adobeBtnGrid}>
-                            <button
-                              className={styles.adobeSecondaryBtn}
-                              onClick={(e) => { e.stopPropagation(); void handlePublishPresentation(); }}
-                              disabled={publishingHost}
-                            >
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                <Globe size={14} style={{ opacity: 0.7 }} />
-                                <span>{publishingHost ? 'Publicando…' : 'Publicar apresentação'}</span>
-                              </div>
-                            </button>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Seção: Organização e Pastas */}
-                  {canEdit && (
-                    <div className={styles.adobePanelSection}>
-                      <h4 className={styles.adobeSectionTitle}>Organizar</h4>
-                      <div className={styles.adobeFolderRow}>
-                        <span className={styles.adobeLabel}>Pasta destino:</span>
-                        <select 
-                          className={styles.folderSelect}
-                          value={activePreviewPost.folderId || ''}
-                          onChange={(e) => handleMoveToFolder(activePreviewPost.id, e.target.value || null)}
-                        >
-                          <option value="">Sem Pasta</option>
-                          {folders.map(f => (
-                            <option key={f.id} value={f.id}>{f.name}</option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Seção: Histórico de Conversa com IA */}
-                  {chatHistory.length > 0 && (
-                    <div className={styles.adobePanelSection}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                        <h4 className={styles.adobeSectionTitle} style={{ margin: 0 }}>Histórico</h4>
-                        {sessionId && (
-                          <Link
-                            href={`/${slug}/fabrica?sessionId=${encodeURIComponent(sessionId)}`}
-                            className={styles.adobeInlineLink}
-                            onClick={() => setActivePreviewPost(null)}
-                          >
-                            <ExternalLink size={12} />
-                            Continuar chat
-                          </Link>
-                        )}
-                      </div>
-                      <div className={styles.adobeChatHistoryList}>
-                        {chatHistory.map((message, index) => (
-                          <div key={index} className={styles.adobeChatItem}>
-                            <span className={styles.adobeChatItemRole} data-role={message.role}>{message.role}</span>
-                            <p className={styles.adobeChatItemText}>{message.content}</p>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Seção: Perigo */}
-                  {canEdit && (
-                    <div className={styles.adobePanelSection} style={{ marginTop: 'auto', borderTop: '1px solid rgba(0, 0, 0, 0.08)', paddingTop: '16px' }}>
-                      <button
-                        className={styles.adobeDangerBtn}
-                        onClick={(e) => {
-                          handleDeletePost(activePreviewPost.id, e);
-                        }}
-                      >
-                        <Trash2 size={14} />
-                        Excluir Arte
-                      </button>
-                    </div>
-                  )}
-
-                </div>
-              </div>
-
-            </div>
-          </div>
-        );
-      })()}
-
-      {activeCanvaExportPost && (() => {
-        const preview = extractPreviewSource(activeCanvaExportPost.content, null);
-        const imageUrl = activeCanvaExportPost.previewUrl || (preview?.kind === 'image' ? preview.url : null);
-        const htmlContent = preview?.kind === 'html-design' ? preview.content : null;
-
-        // Calcular proporção real das páginas
-        const contentWidth = htmlContent?.width || 1080;
-        const contentHeight = htmlContent?.height || 1080;
-        const aspectRatio = `${contentWidth} / ${contentHeight}`;
-
-        const isRunningExport = exportandoCanva?.postId === activeCanvaExportPost.id
-          || (exportando?.postId === activeCanvaExportPost.id && exportando.formato === 'html');
-
-        const handleExecutarCanvaExport = async (e: React.MouseEvent) => {
-          e.preventDefault();
-          if (canvaFormat === 'png') {
-            await handleExportCanva(e, activeCanvaExportPost.id);
-            return;
-          }
-          if (canvaFormat === 'pptx') {
-            // Caminho editável: gera PPTX → sobe no R2 → Canva importa via Design
-            // Import API. Mesma fila/progresso do PNG, resultado é um edit_url real.
-            setExportandoCanva({ postId: activeCanvaExportPost.id, done: 0, total: 0 });
-            try {
-              const { jobId } = await api.post<{ jobId: string; total: number }>(
-                `/posts/${activeCanvaExportPost.id}/export-canva`,
-                { mode: 'pptx' },
-              );
-              const { acompanharExport } = await import('@/lib/canvaExport');
-              const resultado = await acompanharExport(
-                activeCanvaExportPost.id,
-                jobId,
-                (done, total) => setExportandoCanva({ postId: activeCanvaExportPost.id, done, total }),
-              );
-              if (resultado.designUrl) {
-                window.open(resultado.designUrl, '_blank', 'noopener');
-              }
-              alert('Design editável criado no Canva!');
-              setActiveCanvaExportPost(null);
-            } catch (err) {
-              console.error('[export canva pptx]', err);
-              alert(getApiErrorMessage(err, 'Não consegui exportar para o Canva.'));
-            } finally {
-              setExportandoCanva(null);
-            }
-            return;
-          }
-          // HTML: o Canva não aceita HTML via API — só resta baixar e importar na UI.
-          setMostrarCanvaInstrucoes(false);
-          try {
-            await exportarDeck(
-              activeCanvaExportPost.id,
-              canvaFormat,
-              (done, total) => setExportando({ postId: activeCanvaExportPost.id, formato: canvaFormat, done, total }),
-              {}
-            );
-            setMostrarCanvaInstrucoes(true);
-          } catch (err) {
-            console.error(err);
-            alert('Não consegui exportar o arquivo.');
-          } finally {
-            setExportando(null);
-          }
-        };
-
-        return (
-          <div className={styles.canvaModalOverlay} onClick={() => { if (!isRunningExport) setActiveCanvaExportPost(null); }}>
-            <div className={styles.canvaModalContainer} onClick={(e) => e.stopPropagation()}>
-              
-              {/* Lado Esquerdo: Área de Preview (Fundo Escuro com Scroll) */}
-              <div className={styles.adobePreviewArea}>
-                <button className={styles.adobeCloseBtn} onClick={() => { if (!isRunningExport) setActiveCanvaExportPost(null); }}>
-                  <X size={20} />
-                </button>
-                
-                <div className={styles.adobePreviewWrapper}>
-                  {imageUrl ? (
-                    <div className={styles.adobePreviewSlideContainer}>
-                      <div className={styles.adobePreviewSlideHeader}>Imagem Final</div>
-                      <div className={styles.adobePreviewSlideContent} style={{ aspectRatio }}>
-                        <img src={imageUrl} alt="Preview" className={styles.adobePreviewImage} />
-                      </div>
-                    </div>
-                  ) : htmlContent ? (
-                    htmlContent.slides.map((slide: any, idx: number) => (
-                      <div key={idx} className={styles.adobePreviewSlideContainer}>
-                        <div className={styles.adobePreviewSlideHeader}>Slide {idx + 1}</div>
-                        <div className={styles.adobePreviewSlideContent} style={{ aspectRatio }}>
-                          <HtmlSlideRenderer content={{ ...htmlContent, slides: [slide] }} mode="contain" hideNav />
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    <div style={{ color: 'var(--color-text-tertiary)' }}>Sem preview disponível</div>
-                  )}
-                </div>
-              </div>
-
-              {/* Lado Direito: Opções de Exportação Canva */}
-              <div className={styles.adobePanelArea} style={{ width: '420px' }}>
-                <div className={styles.adobePanelHeader}>
-                  <div className={styles.adobeMetaBadge}>Canva Connect</div>
-                  <h3 className={styles.adobePostTitle}>Exportar / Baixar Design</h3>
-                  <p style={{ fontSize: '13px', color: 'var(--color-text-secondary)', margin: '4px 0 0 0' }}>
-                    Envie a arte para o Canva ou baixe o arquivo para editar localmente.
-                  </p>
-                </div>
-
-                <div className={styles.adobePanelBody}>
-                  <div className={styles.adobePanelSection}>
-                    <h4 className={styles.adobeSectionTitle}>Enviar para o Canva</h4>
-                    
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                      {/* PNG Card */}
-                      <div 
-                        className={styles.canvaFormatCard}
-                        data-selected={canvaFormat === 'png'}
-                        onClick={() => { if (!isRunningExport) { setCanvaFormat('png'); setMostrarCanvaInstrucoes(false); } }}
-                      >
-                        <input 
-                          type="radio" 
-                          className={styles.canvaFormatCardRadio} 
-                          checked={canvaFormat === 'png'}
-                          onChange={() => {}}
-                          disabled={isRunningExport}
-                        />
-                        <div>
-                          <div className={styles.canvaFormatCardTitle}>Imagem PNG (Automático)</div>
-                          <div className={styles.canvaFormatCardDesc}>
-                            Envia os slides renderizados como imagens de alta resolução direto para a sua conta do Canva, unidos num design multipágina. Fiel ao visual, mas o texto vira pixel — não dá pra editar depois.
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* PPTX Card — caminho editável via Design Import API */}
-                      {htmlContent && (
-                        <div
-                          className={styles.canvaFormatCard}
-                          data-selected={canvaFormat === 'pptx'}
-                          onClick={() => { if (!isRunningExport) { setCanvaFormat('pptx'); setMostrarCanvaInstrucoes(false); } }}
-                        >
-                          <input
-                            type="radio"
-                            className={styles.canvaFormatCardRadio}
-                            checked={canvaFormat === 'pptx'}
-                            onChange={() => {}}
-                            disabled={isRunningExport}
-                          />
-                          <div>
-                            <div className={styles.canvaFormatCardTitle}>Apresentação PPTX (Editável, Automático)</div>
-                            <div className={styles.canvaFormatCardDesc}>
-                              Gera um PowerPoint e importa direto no Canva como design estático, mantendo os textos editáveis. Funções JavaScript e links não são aceitos pela API do Canva e são descartados na importação.
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-
-
-                  {/* Progresso ou Instruções */}
-                  {isRunningExport && (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', padding: '12px', backgroundColor: 'var(--color-bg-secondary)', borderRadius: 'var(--radius-md)' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', fontWeight: 600 }}>
-                        <Loader2 size={16} className={styles.spin} />
-                        <span>Gerando arquivos e exportando...</span>
-                      </div>
-                      {exportando && (
-                        <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>
-                          Processado: {exportando.done} de {exportando.total} slides
-                        </div>
-                      )}
-                      {exportandoCanva && (
-                        <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>
-                          Enviado: {exportandoCanva.done} de {exportandoCanva.total} slides para o Canva
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-
-
-                  <div style={{ marginTop: 'auto', display: 'flex', gap: '12px' }}>
-                    <button
-                      className={styles.adobeDangerBtn}
-                      style={{ border: '1px solid var(--color-border)', color: 'var(--color-text)' }}
-                      onClick={() => setActiveCanvaExportPost(null)}
-                      disabled={isRunningExport}
-                    >
-                      Cancelar
-                    </button>
-                    <button
-                      className={styles.adobeMainActionBtn}
-                      onClick={handleExecutarCanvaExport}
-                      disabled={isRunningExport}
-                    >
-                      {isRunningExport
-                        ? 'Processando...'
-                        : canvaFormat === 'html'
-                          ? 'Baixar arquivo'
-                          : 'Exportar para o Canva'}
-                    </button>
-                  </div>
-                </div>
-
-              </div>
-
-            </div>
-          </div>
-        );
-      })()}
+      {activeCanvaExportPost && (
+        <CanvaExportModal
+          post={activeCanvaExportPost}
+          onClose={() => setActiveCanvaExportPost(null)}
+          canvaFormat={canvaFormat}
+          setCanvaFormat={setCanvaFormat}
+          mostrarCanvaInstrucoes={mostrarCanvaInstrucoes}
+          setMostrarCanvaInstrucoes={setMostrarCanvaInstrucoes}
+          exportando={exportando}
+          exportandoCanva={exportandoCanva}
+          onExecutarCanvaExport={handleExecutarCanvaExportWrapper}
+        />
+      )}
 
       {chatHistoryPreview && (
-        <div className={styles.modalOverlay} onClick={() => setChatHistoryPreview(null)}>
-          <div className={styles.chatHistoryModal} onClick={(e) => e.stopPropagation()}>
-            <div className={styles.modalHeader}>
-              <div>
-                <h3 className={styles.modalTitle}>Histórico da conversa</h3>
-                <p className={styles.chatHistorySubtitle}>{chatHistoryPreview.postLabel}</p>
-              </div>
-              <button className={styles.closeBtn} onClick={() => setChatHistoryPreview(null)}>
-                <X size={20} />
-              </button>
-            </div>
-            <div className={styles.chatHistoryMetaRow}>
-              <span className={styles.chatSessionBadge}>Sessão: {chatHistoryPreview.sessionId ?? 'não registrada'}</span>
-              {chatHistoryPreview.sessionId && (
-                <Link href={`/${slug}/fabrica?sessionId=${encodeURIComponent(chatHistoryPreview.sessionId)}`} className={styles.chatSessionLink}>
-                  <ExternalLink size={14} />
-                  Abrir sessão
-                </Link>
-              )}
-            </div>
-            <div className={styles.chatHistoryBody}>
-              {chatHistoryPreview.messages.length === 0 ? (
-                <div className={styles.empty}>Nenhuma mensagem foi salva neste design.</div>
-              ) : (
-                chatHistoryPreview.messages.map((message, index) => (
-                  <div key={`${message.timestamp}-${index}`} className={`${styles.chatBubble} ${styles[`chatBubble${message.role.charAt(0).toUpperCase()}${message.role.slice(1)}` as keyof typeof styles]}`}>
-                    <div className={styles.chatBubbleMeta}>
-                      <span className={styles.chatBubbleRole}>{message.role}</span>
-                      <span className={styles.chatBubbleTime}>{formatChatTimestamp(message.timestamp)}</span>
-                    </div>
-                    <p className={styles.chatBubbleContent}>{message.content}</p>
-                    {message.attachments && message.attachments.length > 0 && (
-                      <div className={styles.chatAttachmentsList}>
-                        {message.attachments.map((attachment, attachmentIndex) => (
-                          <span key={`${attachment.name}-${attachmentIndex}`} className={styles.chatAttachmentPill}>
-                            {formatAttachmentLabel(attachment.name, attachment.mimeType)}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
+        <ChatHistoryModal
+          chatHistoryPreview={chatHistoryPreview}
+          onClose={() => setChatHistoryPreview(null)}
+          slug={slug}
+        />
       )}
 
       {showAiReportModal && (
-        <div className={styles.modalOverlay} onClick={() => setShowAiReportModal(false)}>
-          <div className={styles.aiReportModal} onClick={(e) => e.stopPropagation()}>
-            <div className={styles.modalHeader}>
-              <div className={styles.aiReportHeader}>
-                <h3 className={styles.aiReportTitle}>
-                  <Sparkles size={24} style={{ color: 'var(--color-brand)' }} />
-                  Relatório de Direção de Arte
-                </h3>
-                <span className={styles.aiReportSubtitle}>
-                  Análise da pasta <strong>{activeFolder ? folders.find(f => f.id === activeFolder)?.name : 'Todas as Artes'}</strong> gerada por Inteligência Artificial
-                </span>
-              </div>
-              <button className={styles.closeBtn} onClick={() => setShowAiReportModal(false)} style={{ alignSelf: 'flex-start' }}>
-                <X size={20} />
-              </button>
-            </div>
-
-            <div className={styles.aiReportContent}>
-              {isGeneratingReport ? (
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 'var(--space-4)', padding: 'var(--space-8) 0', color: 'var(--color-text-secondary)' }}>
-                  <Sparkles size={32} className={styles.sparkleIcon} style={{ color: 'var(--color-brand)' }} />
-                  <p>A Inteligência Artificial está analisando os criativos e os passos de decisão...</p>
-                </div>
-              ) : (
-                <>
-                  <div className={styles.aiReportSection}>
-                    <h4>Contexto e Tom de Voz</h4>
-                    <p>Esta coleção demonstra uma abordagem visual voltada para a autoridade e clareza. Os criativos utilizam predominantemente layouts de alto contraste (Texto | Imagem) que favorecem a leitura rápida e a retenção da mensagem. A paleta de cores sugere um posicionamento premium e direto.</p>
-                  </div>
-                  
-                  <div className={styles.aiReportSection}>
-                    <h4>Padrões Identificados</h4>
-                    <ul>
-                      <li><strong>Estrutura de Carrossel:</strong> A maioria das apresentações segue a estrutura &ldquo;Problema → Solução → Call to Action&rdquo;, mantendo o usuário engajado até o último slide.</li>
-                      <li><strong>Densidade de Texto:</strong> Os slides estão configurados com densidade &ldquo;Breve&rdquo;, o que é ideal para o Instagram e LinkedIn, garantindo que o visual não fique sobrecarregado.</li>
-                      <li><strong>Uso de Imagens:</strong> Imagens de referência são frequentemente usadas no lado direito, criando uma âncora visual enquanto o texto à esquerda conduz a narrativa.</li>
-                    </ul>
-                  </div>
-
-                  <div className={styles.aiReportSection}>
-                    <h4>Sugestões da IA para os Próximos Passos</h4>
-                    <ul>
-                      <li>Experimente alternar para o layout &ldquo;Citação&rdquo; no meio dos carrosséis para quebrar o ritmo e dar destaque a uma frase de efeito.</li>
-                      <li>Para os posts únicos (Single Image), teste abordagens com a densidade &ldquo;Média&rdquo; caso precise explicar conceitos um pouco mais complexos na mesma imagem.</li>
-                      <li>Considere criar uma pasta separada apenas para &ldquo;Templates Testados&rdquo; para manter os melhores desempenhos isolados para reutilização futura.</li>
-                    </ul>
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
+        <AiReportModal
+          onClose={() => setShowAiReportModal(false)}
+          isGeneratingReport={isGeneratingReport}
+          activeFolder={activeFolder}
+          folders={folders}
+        />
       )}
 
       <Link href="/galeria" className={styles.backLink}>
