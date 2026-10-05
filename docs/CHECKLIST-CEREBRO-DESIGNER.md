@@ -4,7 +4,8 @@
 > `docs/ROADMAP.md`, `docs/PLANO-CONSOLIDACAO.md` e `docs/ACABAMENTOS-DESIGNER.md`
 > (este último só existe na branch `docs/acabamentos-designer`).
 > **Levantado em:** 2026-10-05
-> **Estado:** nenhuma implementação iniciada. Este arquivo é o plano de trabalho a validar.
+> **Estado (05/10):** cérebro ainda não implementado. As 4 branches pendentes do plano antigo já estão no `main`
+> (seção D). Este arquivo é o plano de trabalho a validar.
 > **Convenção:** ☐ pendente · ☑ feito · 🟡 HIPÓTESE (não verificado) · ❓ depende de decisão
 
 ---
@@ -35,10 +36,10 @@ nos projetos, e a identidade de um projeto nunca contamina outro.
 | ☐ | Quem gera a peça ❓ | Decidir entre HTML + Nano Banana só nas imagens, ou Nano Banana gerando o slide inteiro | Escolher (recomendação: manter HTML) | Gustavo / Gabriela |
 | ☐ | Ativos da Amanda em arquivo | Ter logo, fontes, paleta e moodboards de verdade | Compartilhar a subpasta Fontes e os arquivos, ou enviar ZIP | Gabriela |
 | ☐ | Fotos reais da Amanda | Rodar o Teste 2 | Enviar as fotos | Gabriela |
-| ☐ | Branches pendentes | Ter a base limpa antes de construir | Autorizar o merge das 4 branches após revisão | Gustavo |
+| ☑ | Branches pendentes | Ter a base limpa antes de construir | Feito em 05/10: 4 branches mergeadas (PRs #53 a #56). Ver seção D | Gustavo |
 | ☐ | Checagem final por IA | Cumprir "revisar antes de marcar final" | Aprovar o custo extra de uma 2ª passada de IA | Gustavo |
 | ☐ | Status do texto | Separar texto visível de fala, contexto e interno | Confirmar que o usuário marca o status bloco a bloco | Gustavo |
-| ☐ | Quais são as 5 alterações pendentes | A ata de 02/10 cita ~15 alterações, ~10 subidas e ~5 faltando | Confirmar se são as 4 branches da seção D 🟡 | Gustavo |
+| ☐ | Quais são as 5 alterações pendentes | A ata de 02/10 cita ~15 alterações, ~10 subidas e ~5 faltando | Confirmar se eram as 4 branches da seção D, já mergeadas 🟡 | Gustavo |
 
 ---
 
@@ -84,17 +85,29 @@ O cérebro só é considerado pronto depois de passar nos 8 testes, antes de rep
 
 Origem: `docs/ACABAMENTOS-DESIGNER.md` (21/09) e `docs/PLANO-CONSOLIDACAO.md` (20/07).
 
-### Branches com trabalho pronto e não mergeado
+### Branches com trabalho pronto
 
-> Comparação feita contra o `main` local (`d7ab464`, 25/08). Conferir também o remoto.
+> **05/10:** as 4 primeiras foram revisadas em integração (backend `tsc` limpo + 725 testes; frontend `tsc` limpo + 128 testes;
+> sem conflito, sem migration) e mergeadas no `main` (`e519e33`). A validação foi por testes e compilação, **não** por geração
+> real nem com o app rodando.
 
-| ☐ | Branch | Objetivo | Pedido |
+| ☐ | Branch | Objetivo | Estado |
 |---|---|---|---|
-| ☐ | `fix/svg-sanitizacao` | Fechar o XSS por SVG | Revisar e mergear primeiro: projetos novos recebem logos e arquivos |
-| ☐ | `fix/brandbook-ingestao` | Ingestão sem prompt preso à Assinatura | Revisar e mergear |
-| ☐ | `feat/orientacoes-tempo-real` | Orientações e "Pausar e enviar" no chat (substitui `/btw`) | Revisar e mergear |
-| ☐ | `feat/custo-por-deck` | Custo estimado por deck | Revisar e mergear |
-| ☐ | `docs/acabamentos-designer` | Trazer o plano de 21/09 para o `main` | Mergear (só documentação) |
+| ☑ | `fix/svg-sanitizacao` | Fechar o XSS por SVG | Mergeada, PR #53 |
+| ☑ | `fix/brandbook-ingestao` | Ingestão sem prompt preso à Assinatura | Mergeada, PR #54 |
+| ☑ | `feat/orientacoes-tempo-real` | Orientações e "Pausar e enviar" no chat (substitui `/btw`) | Mergeada, PR #55 |
+| ☑ | `feat/custo-por-deck` | Custo estimado por deck | Mergeada, PR #56 |
+| ☐ | `docs/acabamentos-designer` | Trazer o plano de 21/09 para o `main` | Só existe na branch, sem PR. Mergear (só documentação) |
+| ☐ | PR #50 (Jules) — extrair modais de `BrandGaleriaPage` | Refatoração da página de galeria | Aberto. Mexe em `galeria/page.tsx`, que a "Galeria de projetos" vai reformular: decidir antes de construir |
+
+**Ainda não verificado em ambiente vivo (precisa de alguém exercitando o app):**
+
+| ☐ | Item | Como verificar |
+|---|---|---|
+| ☐ | Upload de SVG sanitizado | Enviar um SVG com `<script>` e conferir que o arquivo gravado vem limpo |
+| ☐ | Ingestão de brandbook | Rodar com os 2 PDFs reais da Assinatura (`backend/scripts/testBrandbookExtraction.ts`) |
+| ☐ | Orientações e Pausar | Enviar uma orientação no meio de um deck de 30 slides e ver o lote em que ela entrou |
+| ☐ | Chip de custo | Gerar um deck e comparar o custo estimado com o uso real |
 
 ### Ajustes no código atual que conflitam com o cérebro
 
@@ -125,7 +138,7 @@ Segundo a ata de 02/10 ("foco em ajuste funcional, sem desenvolvimento novo desc
 ## F. Ordem proposta
 
 1. Resolver os bloqueios da seção A.
-2. Revisar e mergear as branches da seção D, começando pelo SVG.
+2. ~~Revisar e mergear as branches da seção D, começando pelo SVG.~~ Feito em 05/10. Falta decidir o PR #50 e trazer o plano de 21/09.
 3. Modelar projeto-base e collab sobre o que o plano de 21/09 já desenhou, sem criar modelo paralelo.
 4. Implementar o prompt global e a montagem em camadas (seção B).
 5. Carregar a Amanda e rodar os 8 testes (seção C).
