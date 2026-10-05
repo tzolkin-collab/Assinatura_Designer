@@ -94,6 +94,7 @@
   background-color: var(--color-surface);
   color: var(--color-text);
   font-family: var(--font-mono);
+  font-size-adjust: none;
   font-size: var(--text-sm);
   line-height: var(--leading-relaxed);
   resize: vertical;
@@ -159,6 +160,7 @@
 .memoryKey {
   font-size: var(--text-xs);
   font-family: var(--font-mono);
+  font-size-adjust: none;
   font-weight: 600;
   color: var(--color-accent);
 }

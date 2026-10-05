@@ -1,11 +1,13 @@
 import type { Metadata, Viewport } from 'next';
-import { Inter, Newsreader } from 'next/font/google';
+import { Source_Sans_3, Newsreader } from 'next/font/google';
 import './globals.css';
 import AppShell from '@/components/AppShell/AppShell';
 
-const inter = Inter({
+// Fonte da interface: Source Sans 3 (Adobe, open source, sucessora do Source Sans Pro e alternativa
+// livre ao Myriad Pro). É variável: todos os pesos de 200 a 900 saem de um arquivo só.
+const sourceSans = Source_Sans_3({
   subsets: ['latin'],
-  variable: '--font-inter',
+  variable: '--font-source-sans',
   display: 'swap',
 });
 
@@ -41,7 +43,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="pt-BR" data-scroll-behavior="smooth" className={`${inter.variable} ${newsreader.variable}`}>
+    <html lang="pt-BR" data-scroll-behavior="smooth" className={`${sourceSans.variable} ${newsreader.variable}`}>
       <body suppressHydrationWarning>
         <AppShell>{children}</AppShell>
       </body>

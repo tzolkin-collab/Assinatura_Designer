@@ -810,6 +810,7 @@
   font-size: 10px;
   color: var(--color-text-tertiary);
   font-family: var(--font-mono);
+  font-size-adjust: none;
   flex-shrink: 0;
 }
 
@@ -842,4 +843,5 @@
   font-size: var(--text-xs);
   color: var(--color-text-secondary);
   font-family: var(--font-mono);
+  font-size-adjust: none;
 }

@@ -52,6 +52,7 @@
 
 .metaId {
   font-family: var(--font-serif);
+  font-size-adjust: none;
   font-size: var(--text-lg);
   font-weight: 500;
   color: var(--color-text);

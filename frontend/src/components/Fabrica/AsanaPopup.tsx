@@ -361,7 +361,7 @@ const EXPORT_WRAPPER: React.CSSProperties = {
   width: 800,
   padding: '40px 40px',
   background: '#ffffff',
-  fontFamily: 'Inter, system-ui, sans-serif',
+  fontFamily: 'var(--font-sans)',
 };
 
 const EXPORT_HEADER: React.CSSProperties = {

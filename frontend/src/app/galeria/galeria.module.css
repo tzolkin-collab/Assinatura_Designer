@@ -186,6 +186,7 @@
 
 .modalTitle {
   font-family: var(--font-serif);
+  font-size-adjust: none;
   font-size: var(--text-2xl);
   font-weight: 500;
   color: var(--color-text);
@@ -262,6 +263,7 @@
   font-size: var(--text-sm);
   color: var(--color-text-secondary);
   font-family: var(--font-mono);
+  font-size-adjust: none;
 }
 
 .formError {
