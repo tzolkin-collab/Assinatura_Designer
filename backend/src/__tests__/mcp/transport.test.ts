@@ -69,9 +69,8 @@ describe('autenticação (401 com WWW-Authenticate)', () => {
     const res = await mcpPost(h.app, undefined, rpc('tools/list'));
     expect(res.status).toBe(401);
     const header = res.headers['www-authenticate'];
-    expect(header).toMatch(/^Bearer /);
-    expect(header).toContain(`resource_metadata="${METADATA_URL}"`);
-    expect(header).toContain('scope="designer.read"');
+    // Formato EXATO do doc de auth do ChatGPT, e sem `error` (nenhuma credencial foi enviada).
+    expect(header).toBe(`Bearer resource_metadata="${METADATA_URL}", scope="designer.read"`);
     // O metadata que o header aponta realmente existe e descreve o recurso certo.
     const meta = await request(h.app).get(new URL(METADATA_URL).pathname);
     expect(meta.body.resource).toBe(RESOURCE);

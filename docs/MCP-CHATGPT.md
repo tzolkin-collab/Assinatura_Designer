@@ -15,8 +15,10 @@ O ChatGPT (na assinatura do usuário) vira o "cérebro" da conversa; o Designer 
    acessível por **HTTPS público** — o ChatGPT chama de servidor para servidor.
 2. No ChatGPT: ative o **modo desenvolvedor** → **Conectores** → **Criar**. (Os nomes dos menus mudam conforme o plano
    e a versão do ChatGPT; confira a documentação atual da OpenAI.)
-3. **URL do servidor MCP:** `https://<PUBLIC_BASE_URL>/mcp` (ex.: `https://api.exemplo.com/mcp`). É essa URL, byte a byte,
-   que o ChatGPT envia como `resource` no OAuth — e é ela que vira a audiência dos tokens.
+3. **URL do servidor MCP:** `https://<PUBLIC_BASE_URL>/mcp` (ex.: `https://api.exemplo.com/mcp`). É essa URL que o ChatGPT deve enviar
+   como `resource` no OAuth, e é ela (sempre a forma canônica `<origem>/mcp`) que vira a audiência dos tokens. Também
+   aceitamos a origem do servidor sem o `/mcp` como apelido do mesmo recurso (alguns clientes a usam como identificador),
+   e uma barra final; qualquer outro `resource` é recusado com `invalid_target`.
 4. **Autenticação:** OAuth. O ChatGPT descobre o resto sozinho (metadados `.well-known`), registra-se por DCR e abre o
    navegador na tela de consentimento do Designer (`FRONTEND_URL/mcp/consent?request=…`). O usuário faz login no app,
    escolhe as marcas e aprova.
@@ -33,7 +35,7 @@ O ChatGPT (na assinatura do usuário) vira o "cérebro" da conversa; o Designer 
 | `PUBLIC_BASE_URL` | — (em dev: `http://localhost:<PORT>`) | Origem pública da API, **https e sem path** (`http` só em localhost). `issuer` = esta origem; `resource` = `<origem>/mcp`. **Nunca** derivados do header `Host`. Em produção, se faltar (ou for inválida) o módulo **não monta** e loga o motivo. |
 | `FRONTEND_URL` | primeiro valor de `CORS_ORIGIN` | Origem do frontend. O `/authorize` redireciona o navegador para `<FRONTEND_URL>/mcp/consent?request=<id>`. |
 | `MCP_ALLOWED_REDIRECT_URIS` | os 2 do ChatGPT (abaixo) | `redirect_uri`s aceitas **no registro** (DCR), separadas por vírgula. Match exato; o único curinga é o segmento `{id}`. Definir **substitui** o padrão. |
-| `MCP_ALLOW_LOCALHOST_REDIRECT` | `false` | Aceita redirect `http://localhost|127.0.0.1|[::1]:<porta>/…` e Origin de loopback. **Só para testar com o Inspector.** Loga aviso se ligado em produção. |
+| `MCP_ALLOW_LOCALHOST_REDIRECT` | `false` | Aceita redirect `http://<loopback>:<porta>/…` (loopback = `localhost`, `127.0.0.1` ou `[::1]`) e Origin de loopback. **Só para testar com o Inspector.** Loga aviso se ligado em produção. |
 | `MCP_ALLOWED_ORIGINS` | `PUBLIC_BASE_URL` + `FRONTEND_URL` | Origens (`https://host[:porta]`) aceitas no header `Origin` de `/mcp`. |
 | `MCP_MAX_CLIENTS` | `500` | Teto de clientes DCR ativos ao mesmo tempo. |
 
@@ -114,7 +116,9 @@ corrigir e tentar de novo. A decisão que passa consome o pedido (uso único, at
 | `designer.read` | listar e ler | qualquer membro (VIEWER+) |
 | `designer.write` | criar/editar/pausar (e **inclui** leitura) | EDITOR+ |
 
-Sem `scope` no `/authorize`, o pedido nasce só com `designer.read` (menor privilégio). A regra de papel é a mesma de
+Sem `scope` no `/authorize` (ausente, vazio ou só `offline_access`), o pedido nasce só com `designer.read` (menor
+privilégio). `offline_access` é ignorado — sempre emitimos refresh token —, mas qualquer outro escopo desconhecido é
+`invalid_scope`. O `state` aceita até 512 caracteres. A regra de papel é a mesma de
 `middleware/brandAccess.ts` (`ANY_MEMBER` / `EDITORS`) — o conector nunca concede mais do que o app web.
 
 ## Ferramentas
@@ -273,6 +277,11 @@ Pré-requisitos: Redis local e a API rodando em dev. **Não** aponte para o Redi
 
 4. Em **Tools**: *List Tools* mostra `list_brands` e `get_brand_kit`; rode `list_brands` e depois `get_brand_kit` com um `brandSlug`
    da lista. Peça uma marca fora da aprovada: a resposta é a recusa genérica.
+
+> **Não verificado:** o Inspector (a versão atual no npm é a 2.x) **não foi executado** ao escrever este guia — não havia cópia local e
+> rodá-lo exigiria baixar e instalar o pacote (`npx`), o que não foi forçado. O fluxo acima e os flags abaixo seguem a documentação do
+> Inspector; se algum flag divergir na sua versão, consulte `npx @modelcontextprotocol/inspector --help`. O que **foi**
+> provado, com o cliente oficial do SDK do MCP, é o mesmo caminho de ponta a ponta (ver [Verificação](#verificação)).
 
 Alternativa sem navegador (CLI do Inspector), com um access token obtido como acima:
 

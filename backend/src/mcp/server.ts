@@ -98,6 +98,19 @@ export function createMcpEndpointRouter(deps: {
     expectedResource: config.resourceUrl,
   });
 
+  /**
+   * Sem NENHUMA credencial, o desafio é exatamente o do doc de auth do ChatGPT:
+   * `Bearer resource_metadata="…", scope="…"` — sem `error` (RFC 6750 §3.1: quem não mandou
+   * credencial não errou nada). O `requireBearerAuth` do SDK põe `error="invalid_token"`
+   * mesmo nesse caso, e um parser mais estrito do lado do ChatGPT não deveria tropeçar nisso.
+   * Token PRESENTE e inválido continua sendo respondido pelo bearer do SDK (com `error`).
+   */
+  const challengeWithoutCredentials: RequestHandler = (req, res, next) => {
+    if (req.headers.authorization) return next();
+    res.setHeader('WWW-Authenticate', `Bearer resource_metadata="${config.resourceMetadataUrl}", scope="${READ_SCOPE}"`);
+    res.status(401).json({ error: 'invalid_token', error_description: 'Missing Authorization header' });
+  };
+
   /** Identifica o usuário para o rate limit por conta e para os logs. */
   const attachUser: RequestHandler = (req: AuthRequest, _res, next) => {
     const userId = req.auth?.extra?.userId;
@@ -162,6 +175,7 @@ export function createMcpEndpointRouter(deps: {
     corsMiddleware,
     createOriginGuard(config),
     rateLimit({ ...limits.mcpIp, keyPrefix: `${limits.keyPrefix}-mcp-ip` }),
+    challengeWithoutCredentials,
     bearer,
     attachUser,
     methodGate,

@@ -3,11 +3,16 @@
 import '../client'; // mocka prisma e redis do processo de teste (precisa vir antes do resto)
 import { beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
+import { InvalidGrantError } from '@modelcontextprotocol/sdk/server/auth/errors.js';
 import { ANY_MEMBER, EDITORS } from '../../middleware/brandAccess';
+import { DesignerClientsStore } from '../../mcp/auth/clientsStore';
+import { DesignerOAuthProvider } from '../../mcp/auth/provider';
 import { ROLES_FOR_SCOPE } from '../../mcp/config';
 import {
   CHATGPT_REDIRECT,
   ISSUER,
+  callTool,
+  mcpPost,
   RESOURCE,
   authorize,
   authorizeQuery,
@@ -124,5 +129,41 @@ describe('papéis do conector = papéis do app web', () => {
   it('leitura = ANY_MEMBER e escrita = EDITORS (se brandAccess mudar, este teste obriga a revisar o conector)', () => {
     expect([...ROLES_FOR_SCOPE['designer.read']].sort()).toEqual([...ANY_MEMBER].sort());
     expect([...ROLES_FOR_SCOPE['designer.write']].sort()).toEqual([...EDITORS].sort());
+  });
+});
+
+describe('reuso de código na CORRIDA (o caminho do exchange, que o challenge não cobre)', () => {
+  // O SDK chama challengeForAuthorizationCode antes de trocar o código; um reuso comum morre
+  // lá. Mas duas trocas simultâneas passam as duas pelo challenge — e só o consumo atômico do
+  // exchange as distingue. Aqui o exchange é chamado direto, como o segundo da corrida.
+  it('o segundo consumo derruba a família que o primeiro acabou de criar', async () => {
+    const clientId = await newClientId();
+    const pkce = pkcePair();
+    const auth = await authorize(h.app, authorizeQuery(clientId, pkce.challenge));
+    const approve = await decide(h, requestIdFromLocation(auth.headers.location), 'user-1', { decision: 'approve', brandSlugs: ['marca-a'] });
+    const code = new URL(approve.body.data.redirectUrl).searchParams.get('code')!;
+
+    const first = await exchange(h.app, {
+      grant_type: 'authorization_code',
+      client_id: clientId,
+      code,
+      code_verifier: pkce.verifier,
+      redirect_uri: CHATGPT_REDIRECT,
+    });
+    expect(first.status).toBe(200);
+    expect((await mcpPost(h.app, first.body.access_token, callTool('list_brands'))).status).toBe(200);
+
+    const provider = new DesignerOAuthProvider({
+      store: h.store,
+      config: h.config,
+      clientsStore: new DesignerClientsStore(h.store, h.config.redirectPolicy, 10),
+      now: h.clock.now,
+    });
+    const client = (await h.store.getClient(clientId))!;
+    await expect(provider.exchangeAuthorizationCode(client, code, undefined, CHATGPT_REDIRECT)).rejects.toBeInstanceOf(InvalidGrantError);
+
+    // A conexão criada pelo primeiro consumo foi revogada junto.
+    expect((await mcpPost(h.app, first.body.access_token, callTool('list_brands'))).status).toBe(401);
+    expect(await h.store.listFamiliesByUser('user-1')).toEqual([]);
   });
 });
