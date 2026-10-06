@@ -15,13 +15,15 @@ import { CALL_LOG_MAX_ENTRIES, TTL } from './auth/constants.js';
  *  - toda chave de credencial chega aqui JÁ HASHEADA (SHA-256) — o store nunca vê o
  *    segredo em claro e não deve tentar reconstruí-lo;
  *  - `consume*` é ATÔMICO e de uso único: sob chamadas concorrentes, no máximo uma
- *    recebe o registro (GETDEL no Redis; `DELETE ... RETURNING` no Postgres);
+ *    recebe o registro (`MULTI(GET + DEL)` no Redis; `DELETE ... RETURNING` no Postgres);
  *  - `consumeAuthCode`/`consumeRefreshToken` lembram que o segredo foi consumido
  *    (tombstone) para responder `reused` com a família — é daí que sai a revogação
  *    em cascata quando alguém reapresenta um código/refresh já usado;
  *  - expiração é responsabilidade do store (TTL): registro expirado = `undefined`/`null`.
  *
- * Requisito de infra: Redis >= 6.2 (comando GETDEL).
+ * Requisito de infra: qualquer Redis com MULTI/EXEC e `SET ... EX ... NX` (>= 2.6.12). O
+ * consumo atômico NÃO usa GETDEL (só existe a partir do Redis 6.2): num Redis mais antigo
+ * esse comando falharia com "unknown command" em produção, no meio do consentimento.
  */
 
 /** Pedido de autorização validado em /authorize, aguardando o usuário na tela de consentimento. */
@@ -143,16 +145,31 @@ export interface McpCallLog {
 }
 
 /**
+ * Transação do Redis (`MULTI` ... `EXEC`): os comandos enfileirados rodam em bloco, sem
+ * que nenhum outro cliente intercale um comando entre eles. O resultado segue o formato
+ * do ioredis: um par `[erro, resultado]` por comando (ou `null` se a transação abortou).
+ */
+export interface RedisMulti {
+  get(key: string): RedisMulti;
+  del(...keys: string[]): RedisMulti;
+  lpush(key: string, ...values: string[]): RedisMulti;
+  ltrim(key: string, start: number, stop: number): RedisMulti;
+  expire(key: string, seconds: number): RedisMulti;
+  sadd(key: string, ...members: string[]): RedisMulti;
+  exec(): Promise<Array<[Error | null, unknown]> | null>;
+}
+
+/**
  * Subconjunto de comandos do ioredis que o store usa. Existe como interface própria
  * para o store ser testável com uma emulação em memória (`memoryRedis.ts`) — não há
  * Redis em teste — e para deixar explícito o quão pouco do Redis dependemos
- * (nada de Lua nem de scripting: só comandos simples e atômicos por si).
+ * (nada de Lua nem de scripting: só comandos simples e MULTI/EXEC).
  */
 export interface RedisLike {
   get(key: string): Promise<string | null>;
   set(key: string, value: string, mode: 'EX', seconds: number): Promise<unknown>;
   set(key: string, value: string, mode: 'EX', seconds: number, flag: 'NX'): Promise<'OK' | null>;
-  getdel(key: string): Promise<string | null>;
+  multi(): RedisMulti;
   del(...keys: string[]): Promise<number>;
   expire(key: string, seconds: number): Promise<number>;
   sadd(key: string, ...members: string[]): Promise<number>;
@@ -200,6 +217,20 @@ export class RedisMcpStore implements McpOAuthStore, McpCallLog {
     private readonly now: () => number = Date.now,
   ) {}
 
+  /**
+   * Lê e apaga numa transação só (`MULTI` GET + DEL ... `EXEC`): sob chamadas concorrentes
+   * exatamente UMA enxerga o valor, as demais veem `null`. É o substituto do GETDEL, que
+   * só existe no Redis >= 6.2 — o MULTI é atômico em qualquer versão.
+   */
+  private async takeOnce(k: string): Promise<string | null> {
+    const results = await this.redis.multi().get(k).del(k).exec();
+    const first = results?.[0];
+    if (!first) throw new Error('MULTI/EXEC abortou sem resultado');
+    // Erro do próprio comando (ex.: Redis recusou): propaga — o chamador falha FECHADO, nunca "consumiu".
+    if (first[0]) throw first[0];
+    return typeof first[1] === 'string' ? first[1] : null;
+  }
+
   // ── Clientes ──
 
   async saveClient(client: OAuthClientInformationFull, maxClients: number): Promise<'ok' | 'limit'> {
@@ -236,7 +267,7 @@ export class RedisMcpStore implements McpOAuthStore, McpCallLog {
   }
 
   async consumePendingRequest(idHash: string): Promise<PendingAuthRequest | undefined> {
-    return parse<PendingAuthRequest>(await this.redis.getdel(key.request(idHash)));
+    return parse<PendingAuthRequest>(await this.takeOnce(key.request(idHash)));
   }
 
   // ── Códigos ──
@@ -251,10 +282,10 @@ export class RedisMcpStore implements McpOAuthStore, McpCallLog {
 
   async consumeAuthCode(codeHash: string, familyId: string): Promise<ConsumeResult<AuthCodeRecord>> {
     // Ordem deliberada: PRIMEIRO a tombstone (SET NX), DEPOIS o GETDEL. Se fosse o
-    // contrário, um segundo uso que chegasse entre o GETDEL e a escrita da tombstone
+    // contrário, um segundo uso que chegasse entre o consumo e a escrita da tombstone
     // veria "código inexistente" em vez de "reuso" e a revogação em cascata se perderia.
     const created = await this.redis.set(key.codeUsed(codeHash), familyId, 'EX', TTL.codeTombstone, 'NX');
-    const raw = await this.redis.getdel(key.code(codeHash));
+    const raw = await this.takeOnce(key.code(codeHash));
     const record = parse<AuthCodeRecord>(raw);
     if (record) return { status: 'ok', record };
 
@@ -326,11 +357,11 @@ export class RedisMcpStore implements McpOAuthStore, McpCallLog {
   }
 
   async consumeRefreshToken(tokenHash: string): Promise<ConsumeResult<RefreshTokenRecord>> {
-    // Aqui a família só é conhecida lendo o registro, então GETDEL vem primeiro e a
+    // Aqui a família só é conhecida lendo o registro, então o consumo vem primeiro e a
     // tombstone logo depois. A janela entre os dois comandos é de microssegundos e o
     // pior caso é um reuso simultâneo ser tratado como "inválido" (sem revogar a
     // família) — o segundo uso falha do mesmo jeito, só a cascata deixa de disparar.
-    const record = parse<RefreshTokenRecord>(await this.redis.getdel(key.refresh(tokenHash)));
+    const record = parse<RefreshTokenRecord>(await this.takeOnce(key.refresh(tokenHash)));
     if (record) {
       await this.redis.set(key.refreshUsed(tokenHash), record.familyId, 'EX', TTL.refreshToken);
       return { status: 'ok', record };

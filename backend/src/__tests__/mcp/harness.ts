@@ -7,6 +7,7 @@
 //             que aplica os filtros `where` de verdade (userId, brandId in, role in, brand.slug in);
 //  - Tempo  → relógio controlável, compartilhado por store e provider (expiração sem esperar).
 import { createHash, randomBytes } from 'node:crypto';
+import { vi } from 'vitest';
 import cors from 'cors';
 import express, { type Express } from 'express';
 import jwt from 'jsonwebtoken';
@@ -206,6 +207,17 @@ export function buildHarness(options: HarnessOptions = {}) {
 }
 
 export type Harness = ReturnType<typeof buildHarness>;
+
+/** Captura TUDO que o processo escreve em console (é por onde o logger estruturado sai). */
+export function captureConsole() {
+  const lines: string[] = [];
+  for (const method of ['log', 'info', 'warn', 'error', 'debug'] as const) {
+    vi.spyOn(console, method).mockImplementation((...args: unknown[]) => {
+      lines.push(args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' '));
+    });
+  }
+  return lines;
+}
 
 // ── PKCE e fluxo OAuth ──
 

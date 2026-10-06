@@ -4,6 +4,7 @@ import { redis } from '../lib/redis.js';
 import { logger } from '../lib/logger.js';
 import { requireAuth } from '../middleware/auth.js';
 import { loadMcpConfig, type McpConfigLoad } from './config.js';
+import { mcpApiErrorHandler } from './auth/apiErrors.js';
 import { createConsentRouter } from './auth/consent.js';
 import { DEFAULT_LIMITS, type McpLimits } from './limits.js';
 import { createMcpRuntime } from './routes.js';
@@ -68,6 +69,8 @@ export function mountMcp(app: Express, options: MountMcpOptions): { mounted: boo
     express.json({ limit: '100kb' }),
     requireAuth,
     createConsentRouter({ store, config, provider: runtime.provider, limits, now: options.now }),
+    // Depois do roteador: falha de infra (Redis, Prisma) vira mensagem genérica, sem eco do erro.
+    mcpApiErrorHandler,
   );
 
   logger.info('MCP: conector montado', { issuer: config.issuer, resource: config.resourceUrl.href });
