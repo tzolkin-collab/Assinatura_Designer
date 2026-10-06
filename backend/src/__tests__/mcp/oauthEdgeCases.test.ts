@@ -166,4 +166,23 @@ describe('reuso de c처digo na CORRIDA (o caminho do exchange, que o challenge n�
     expect((await mcpPost(h.app, first.body.access_token, callTool('list_brands'))).status).toBe(401);
     expect(await h.store.listFamiliesByUser('user-1')).toEqual([]);
   });
+
+  it('o exchange confere o dono do c처digo por conta pr처pria (n찾o depende de o challenge ter rodado antes)', async () => {
+    const clientId = await newClientId();
+    const outroId = await newClientId();
+    const pkce = pkcePair();
+    const auth = await authorize(h.app, authorizeQuery(clientId, pkce.challenge));
+    const approve = await decide(h, requestIdFromLocation(auth.headers.location), 'user-1', { decision: 'approve', brandSlugs: ['marca-a'] });
+    const code = new URL(approve.body.data.redirectUrl).searchParams.get('code')!;
+
+    const provider = new DesignerOAuthProvider({
+      store: h.store,
+      config: h.config,
+      clientsStore: new DesignerClientsStore(h.store, h.config.redirectPolicy, 10),
+      now: h.clock.now,
+    });
+    const outro = (await h.store.getClient(outroId))!;
+    await expect(provider.exchangeAuthorizationCode(outro, code, undefined, CHATGPT_REDIRECT)).rejects.toBeInstanceOf(InvalidGrantError);
+    expect(await h.store.listFamiliesByUser('user-1')).toEqual([]); // nenhuma conex찾o nasceu
+  });
 });

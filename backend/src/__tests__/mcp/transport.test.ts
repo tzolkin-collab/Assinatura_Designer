@@ -97,6 +97,23 @@ describe('autenticação (401 com WWW-Authenticate)', () => {
     expect(res.headers['www-authenticate']).toContain('invalid_token');
   });
 
+  it('token com expiresAt vencido é recusado mesmo que o store ainda o devolva (não depende só do TTL do Redis)', async () => {
+    // Num store sem TTL nativo (ex.: um Postgres futuro) ou com relógio fora de compasso, a
+    // chave sobreviveria; o `expiresAt` gravado no próprio registro é o que vale.
+    const flow = await connect(h);
+    const families = await h.store.listFamiliesByUser('user-1');
+    const stale = 'dsg_at_vencido_vencido_vencido_vencido_vencido_vencido';
+    await h.store.saveAccessToken(sha256Hex(stale), {
+      familyId: families[0].id,
+      scopes: ['designer.read'],
+      expiresAt: h.clock.now() - 1000,
+    });
+    const res = await mcpPost(h.app, stale, rpc('tools/list'));
+    expect(res.status).toBe(401);
+    expect(res.headers['www-authenticate']).toContain('invalid_token');
+    expect((await mcpPost(h.app, flow.accessToken, rpc('tools/list'))).status).toBe(200);
+  });
+
   it('token REVOGADO → 401', async () => {
     const flow = await connect(h);
     await request(h.app).post('/revoke').type('form').send({ client_id: flow.clientId, token: flow.accessToken });
