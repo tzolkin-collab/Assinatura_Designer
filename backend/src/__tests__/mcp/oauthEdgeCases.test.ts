@@ -3,9 +3,10 @@
 import '../client'; // mocka prisma e redis do processo de teste (precisa vir antes do resto)
 import { beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
-import { InvalidGrantError } from '@modelcontextprotocol/sdk/server/auth/errors.js';
+import { InvalidGrantError, InvalidTokenError } from '@modelcontextprotocol/sdk/server/auth/errors.js';
 import { ANY_MEMBER, EDITORS } from '../../middleware/brandAccess';
 import { DesignerClientsStore } from '../../mcp/auth/clientsStore';
+import { sha256Hex } from '../../mcp/auth/crypto';
 import { DesignerOAuthProvider } from '../../mcp/auth/provider';
 import { ROLES_FOR_SCOPE } from '../../mcp/config';
 import {
@@ -184,5 +185,67 @@ describe('reuso de código na CORRIDA (o caminho do exchange, que o challenge n�
     const outro = (await h.store.getClient(outroId))!;
     await expect(provider.exchangeAuthorizationCode(outro, code, undefined, CHATGPT_REDIRECT)).rejects.toBeInstanceOf(InvalidGrantError);
     expect(await h.store.listFamiliesByUser('user-1')).toEqual([]); // nenhuma conexão nasceu
+  });
+});
+
+describe('verifyAccessToken sozinho (as camadas do SDK no /mcp não mascaram o provider)', () => {
+  // No /mcp o `requireBearerAuth` do SDK repete a checagem de expiração e de audiência, então
+  // um bug aqui seria encoberto no teste HTTP. Chamando o verifier direto, cada regra é provada
+  // pelo que ELE faz.
+  function newProvider() {
+    return new DesignerOAuthProvider({
+      store: h.store,
+      config: h.config,
+      clientsStore: new DesignerClientsStore(h.store, h.config.redirectPolicy, 10),
+      now: h.clock.now,
+    });
+  }
+
+  async function family(resource = RESOURCE) {
+    const id = `fam-${Math.random().toString(36).slice(2)}`;
+    await h.store.createFamily({
+      id,
+      userId: 'user-1',
+      clientId: 'c1',
+      clientName: 'ChatGPT',
+      scopes: ['designer.read'],
+      brandIds: ['brand-a'],
+      resource,
+      createdAt: h.clock.now(),
+    });
+    return id;
+  }
+
+  it('aceita um token vivo e devolve usuário, escopo, audiência e marcas — mas não o token em claro', async () => {
+    const familyId = await family();
+    await h.store.saveAccessToken(sha256Hex('dsg_at_vivo'), { familyId, scopes: ['designer.read'], expiresAt: h.clock.now() + 60_000 });
+    const info = await newProvider().verifyAccessToken('dsg_at_vivo');
+    expect(info.extra).toEqual({ userId: 'user-1', familyId, brandIds: ['brand-a'] });
+    expect(info.resource?.href).toBe(RESOURCE);
+    expect(info.scopes).toEqual(['designer.read']);
+    expect(info.token).not.toContain('dsg_at_vivo');
+  });
+
+  it('recusa expiresAt vencido mesmo com a chave ainda no store', async () => {
+    const familyId = await family();
+    await h.store.saveAccessToken(sha256Hex('dsg_at_velho'), { familyId, scopes: ['designer.read'], expiresAt: h.clock.now() - 1 });
+    await expect(newProvider().verifyAccessToken('dsg_at_velho')).rejects.toBeInstanceOf(InvalidTokenError);
+  });
+
+  it('recusa token de outro recurso (audiência)', async () => {
+    const familyId = await family('https://outro.example.net/mcp');
+    await h.store.saveAccessToken(sha256Hex('dsg_at_outro'), { familyId, scopes: ['designer.read'], expiresAt: h.clock.now() + 60_000 });
+    await expect(newProvider().verifyAccessToken('dsg_at_outro')).rejects.toBeInstanceOf(InvalidTokenError);
+  });
+
+  it('recusa token cuja família foi revogada', async () => {
+    const familyId = await family();
+    await h.store.saveAccessToken(sha256Hex('dsg_at_rev'), { familyId, scopes: ['designer.read'], expiresAt: h.clock.now() + 60_000 });
+    await h.store.revokeFamily(familyId);
+    await expect(newProvider().verifyAccessToken('dsg_at_rev')).rejects.toBeInstanceOf(InvalidTokenError);
+  });
+
+  it('recusa token desconhecido', async () => {
+    await expect(newProvider().verifyAccessToken('dsg_at_nunca_existiu')).rejects.toBeInstanceOf(InvalidTokenError);
   });
 });
