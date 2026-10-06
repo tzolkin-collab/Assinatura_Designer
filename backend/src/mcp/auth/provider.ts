@@ -54,6 +54,16 @@ export interface ProviderDeps {
   now?: () => number;
 }
 
+/** `state` é opaco para nós; 512 caracteres sobra para qualquer cliente real. */
+const MAX_STATE_LENGTH = 512;
+
+/**
+ * Escopos que clientes OAuth genéricos mandam por hábito e que não significam nada aqui:
+ * sempre emitimos refresh token, então `offline_access` é redundante. Ignorar (em vez de
+ * `invalid_scope`) evita derrubar a conexão por um detalhe sem efeito.
+ */
+const IGNORED_SCOPES = new Set(['offline_access']);
+
 /** Mensagem única para "código inexistente, expirado, de outro cliente ou reusado". */
 const BAD_CODE = 'Código de autorização inválido, expirado ou já utilizado.';
 const BAD_REFRESH = 'Refresh token inválido, expirado ou já utilizado.';
@@ -86,17 +96,24 @@ export class DesignerOAuthProvider implements OAuthServerProvider {
 
     // Servidor com UM recurso: se o cliente informou `resource`, tem de ser o nosso.
     // Se omitiu, a audiência é o nosso recurso de qualquer forma (não há outro).
-    if (params.resource && !sameResource(params.resource, this.config.resourceUrl)) {
+    if (params.resource && !this.isOwnResource(params.resource)) {
       throw new InvalidTargetError('resource desconhecido: este servidor só emite tokens para o recurso MCP do Designer.');
     }
 
-    const requested = params.scopes ?? [];
-    const unknown = requested.filter((s) => s && !isMcpScope(s));
+    // O `state` é gravado no Redis e devolvido numa URL de redirect: precisa ser finito.
+    if (params.state !== undefined && params.state.length > MAX_STATE_LENGTH) {
+      throw new InvalidRequestError(`state grande demais (máximo de ${MAX_STATE_LENGTH} caracteres).`);
+    }
+
+    // `scope` chega como "a b  c" quebrado em espaço: descarta vazios (scope= ou espaços
+    // sobrando) e os escopos padrão que ignoramos de propósito.
+    const requested = (params.scopes ?? []).map((s) => s.trim()).filter((s) => s && !IGNORED_SCOPES.has(s));
+    const unknown = requested.filter((s) => !isMcpScope(s));
     if (unknown.length > 0) {
       throw new InvalidScopeError(`Escopo(s) desconhecido(s): ${unknown.slice(0, 5).join(', ')}`);
     }
     // Sem escopo pedido, o menor privilégio útil: leitura. Quem quer escrever precisa pedir.
-    const scopes = normalizeScopes(requested.length > 0 ? (requested.filter(isMcpScope) as McpScope[]) : [READ_SCOPE]);
+    const scopes = normalizeScopes(requested.length > 0 ? (requested as McpScope[]) : [READ_SCOPE]);
 
     const requestId = randomSecret(32);
     await this.store.savePendingRequest(sha256Hex(requestId), {
@@ -163,7 +180,7 @@ export class DesignerOAuthProvider implements OAuthServerProvider {
     if (!redirectUri || redirectUri !== code.redirectUri) {
       throw new InvalidGrantError('redirect_uri não confere com a do pedido de autorização.');
     }
-    if (resource && !sameResource(resource, code.resource)) {
+    if (resource && !this.isOwnResource(resource)) {
       throw new InvalidTargetError('resource não confere com o do pedido de autorização.');
     }
 
@@ -196,7 +213,7 @@ export class DesignerOAuthProvider implements OAuthServerProvider {
   ): Promise<OAuthTokens> {
     // Validações que NÃO dependem do registro vêm antes de consumir: um pedido malformado
     // do cliente (resource errado, escopo inventado) não pode queimar o refresh dele.
-    if (resource && !sameResource(resource, this.config.resourceUrl)) {
+    if (resource && !this.isOwnResource(resource)) {
       throw new InvalidTargetError('resource desconhecido: este servidor só emite tokens para o recurso MCP do Designer.');
     }
     const tokenHash = sha256Hex(refreshToken);
@@ -295,6 +312,17 @@ export class DesignerOAuthProvider implements OAuthServerProvider {
     await this.store.revokeFamily(familyId);
     logger.info('mcp.oauth.revoked_by_user', { clientId: family.clientId, familyId, userId });
     return true;
+  }
+
+  /**
+   * O recurso que o cliente nomeia é "o nosso"? Aceita a URL do MCP (`<origem>/mcp`, a
+   * forma canônica e a que o doc do ChatGPT manda) e a origem do servidor — alguns clientes
+   * usam a origem como identificador do servidor. Não abre nada: este servidor só TEM um
+   * recurso, e o token sai SEMPRE com a audiência canônica (`config.resourceUrl`),
+   * qualquer que seja o apelido que o cliente tenha usado.
+   */
+  private isOwnResource(value: string | URL): boolean {
+    return sameResource(value, this.config.resourceUrl) || sameResource(value, this.config.issuer);
   }
 
   private async issueTokens(family: GrantFamily, scopes: McpScope[]): Promise<OAuthTokens> {

@@ -22,9 +22,10 @@ export const READ_SCOPE: McpScope = 'designer.read';
 export const WRITE_SCOPE: McpScope = 'designer.write';
 
 /**
- * Papéis da marca que satisfazem cada escopo. Reaproveita a hierarquia de
- * `middleware/brandAccess.ts` (ANY_MEMBER / EDITORS) em vez de inventar outra: leitura =
- * qualquer membro, escrita = OWNER/ADMIN/EDITOR. É a MESMA regra do app web.
+ * Papéis da marca que satisfazem cada escopo: leitura = qualquer membro, escrita =
+ * OWNER/ADMIN/EDITOR — a MESMA hierarquia de `middleware/brandAccess.ts` (ANY_MEMBER /
+ * EDITORS). Fica espelhada aqui, e não importada, para este módulo de configuração não
+ * puxar o Prisma; `__tests__/mcp/oauthEdgeCases.test.ts` falha se as duas divergirem.
  */
 export const ROLES_FOR_SCOPE: Record<McpScope, BrandRole[]> = {
   'designer.read': ['OWNER', 'ADMIN', 'EDITOR', 'VIEWER'],
