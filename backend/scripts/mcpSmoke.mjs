@@ -38,6 +38,7 @@ redis.expire = async () => 1;
 redis.ttl = async () => 60;
 
 const { mountMcp } = await import(dist('mcp/index.js'));
+const { errorHandler } = await import(dist('middleware/errorHandler.js'));
 const { loadMcpConfig } = await import(dist('mcp/config.js'));
 const { MemoryRedis } = await import(dist('mcp/memoryRedis.js'));
 const { RedisMcpStore } = await import(dist('mcp/store.js'));
@@ -66,6 +67,7 @@ assert.equal(loaded.enabled, true, `config inválida: ${loaded.reason}`);
 const app = express();
 const result = mountMcp(app, { apiCors: cors(), config: loaded, store: new RedisMcpStore(new MemoryRedis()) });
 assert.equal(result.mounted, true);
+app.use(errorHandler); // o handler de erros do app real (as rotas /api/mcp respondem através dele)
 const { server, url } = await listen(app);
 
 try {
