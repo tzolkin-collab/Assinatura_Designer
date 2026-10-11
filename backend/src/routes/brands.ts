@@ -319,6 +319,20 @@ brandsRouter.get('/:slug/posts', async (req: Request, res: Response, next: NextF
       return;
     }
 
+    // ?recent=N devolve só os N mais recentes, sem slides: a visão geral do projeto lista
+    // "materiais recentes" e não precisa do conteúdo inteiro de cada deck.
+    const recent = Number.parseInt(String(req.query.recent ?? ''), 10);
+    if (Number.isFinite(recent) && recent > 0) {
+      const posts = await prisma.post.findMany({
+        where: { brandId: brand.id },
+        orderBy: { updatedAt: 'desc' },
+        take: Math.min(recent, 24),
+        select: { id: true, name: true, type: true, status: true, previewUrl: true, updatedAt: true },
+      });
+      res.json({ data: posts });
+      return;
+    }
+
     const posts = await prisma.post.findMany({
       where: { brandId: brand.id },
       orderBy: { createdAt: 'desc' },

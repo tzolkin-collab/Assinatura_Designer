@@ -1,0 +1,442 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  padding-bottom: 48px;
+}
+
+/* ── As 4 camadas, no topo ─────────────────────────────────────────────────── */
+.stepper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.step {
+  display: flex;
+  flex-direction: column;
+  padding: 10px 16px;
+  border-radius: 12px;
+  background: var(--color-surface, #f5f5f4);
+  color: var(--color-text-secondary, #666);
+  font-size: 13px;
+  line-height: 1.25;
+  min-width: 150px;
+}
+
+.stepCurrent {
+  background: #fff;
+  color: var(--color-text, #111);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.06), 0 0 0 1px var(--color-border, rgba(0, 0, 0, 0.1));
+}
+
+.stepName {
+  font-weight: 600;
+}
+
+.stepHint {
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.stepArrow {
+  color: var(--color-text-secondary, #999);
+  font-size: 14px;
+}
+
+/* ── Título e ações ────────────────────────────────────────────────────────── */
+.titleRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.title {
+  font-size: 40px;
+  line-height: 1.1;
+  margin: 0 0 8px;
+  font-weight: 500;
+}
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--color-text-secondary, #555);
+}
+
+.dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #22a55b;
+  flex-shrink: 0;
+}
+
+.dotPending {
+  background: #f59e0b;
+}
+
+.parentNote {
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--color-text-secondary, #666);
+}
+
+.parentNote a {
+  color: inherit;
+  text-decoration: underline;
+}
+
+.actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.btnPrimary,
+.btnGhost {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 18px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+  border: 1px solid transparent;
+  font-family: inherit;
+}
+
+.btnPrimary {
+  background: #171717;
+  color: #fff;
+}
+
+.btnGhost {
+  background: #fff;
+  color: var(--color-text, #111);
+  border-color: var(--color-border, rgba(0, 0, 0, 0.12));
+}
+
+.btnPrimary:disabled,
+.btnGhost:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* ── Seções ────────────────────────────────────────────────────────────────── */
+.sectionHead {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin: 0 0 12px;
+  flex-wrap: wrap;
+}
+
+.sectionTitle {
+  font-size: 24px;
+  font-weight: 500;
+  margin: 0;
+}
+
+.sectionNote {
+  font-size: 13px;
+  color: var(--color-text-secondary, #666);
+}
+
+/* ── Configuração do projeto: 5 cartões ────────────────────────────────────── */
+.configGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 14px;
+}
+
+.configCard {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px;
+  border-radius: 14px;
+  background: #fff;
+  border: 1px solid var(--color-border, rgba(0, 0, 0, 0.08));
+  text-decoration: none;
+  color: inherit;
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.configCard:hover {
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.07);
+  transform: translateY(-1px);
+}
+
+.cardHead {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.cardIcon {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: var(--color-surface, #f5f5f4);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+.cardTitle {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 2px;
+}
+
+.cardDesc {
+  font-size: 12.5px;
+  color: var(--color-text-secondary, #666);
+  margin: 0;
+  line-height: 1.35;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: auto;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  font-size: 12.5px;
+  background: var(--color-surface, #f5f5f4);
+  color: var(--color-text, #222);
+}
+
+.chipOk {
+  background: #e8f6ee;
+  color: #146c3a;
+}
+
+.chipWarn {
+  background: #fdf0e0;
+  color: #9a5b0b;
+}
+
+.cardNote {
+  font-size: 12px;
+  color: #9a5b0b;
+  background: #fdf0e0;
+  border-radius: 8px;
+  padding: 6px 10px;
+  margin: 0;
+}
+
+.miniList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.miniList a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.miniList a:hover {
+  text-decoration: underline;
+}
+
+.linkMore {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text, #111);
+  text-decoration: none;
+  margin-top: auto;
+}
+
+/* ── Lógica da criação ────────────────────────────────────────────────────── */
+.logic {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px;
+  align-items: stretch;
+}
+
+.logicBox {
+  background: #fff;
+  border: 1px solid var(--color-border, rgba(0, 0, 0, 0.08));
+  border-radius: 14px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.logicBox strong {
+  font-size: 14px;
+}
+
+.logicBox span {
+  font-size: 12.5px;
+  color: var(--color-text-secondary, #666);
+  line-height: 1.35;
+}
+
+.logicTag {
+  align-self: flex-start;
+  margin-top: auto;
+  padding: 3px 10px;
+  border-radius: 8px;
+  background: var(--color-surface, #f5f5f4);
+  font-size: 12px;
+}
+
+.logicResult {
+  background: #eaf6ee;
+}
+
+.summary {
+  background: #f7efe6;
+  border-radius: 14px;
+  padding: 16px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.summary ol {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  list-style: decimal;
+}
+
+/* ── Pendências da ficha ───────────────────────────────────────────────────── */
+.pendingList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pendingItem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: #fff;
+  border: 1px solid var(--color-border, rgba(0, 0, 0, 0.08));
+  border-radius: 10px;
+  font-size: 14px;
+}
+
+.badgeRequired {
+  margin-left: auto;
+  font-size: 11.5px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: #fdecec;
+  color: #a12626;
+}
+
+.badgeOptional {
+  margin-left: auto;
+  font-size: 11.5px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--color-surface, #f5f5f4);
+  color: var(--color-text-secondary, #666);
+}
+
+/* ── Desdobramentos ativos e materiais recentes ────────────────────────────── */
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+.collabCard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 18px;
+  border-radius: 14px;
+  background: #fff;
+  border: 1px solid var(--color-border, rgba(0, 0, 0, 0.08));
+  text-decoration: none;
+  color: inherit;
+}
+
+.collabCard:hover {
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.07);
+}
+
+.collabName {
+  font-size: 17px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.collabInherits {
+  font-size: 12.5px;
+  color: var(--color-text-secondary, #666);
+}
+
+.empty {
+  padding: 22px;
+  border: 1px dashed var(--color-border, rgba(0, 0, 0, 0.18));
+  border-radius: 14px;
+  font-size: 14px;
+  color: var(--color-text-secondary, #666);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.recent {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.recentItem {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: #fff;
+  border: 1px solid var(--color-border, rgba(0, 0, 0, 0.08));
+  border-radius: 10px;
+  text-decoration: none;
+  color: inherit;
+  font-size: 14px;
+}
+
+.recentWhen {
+  margin-left: auto;
+  font-size: 12.5px;
+  color: var(--color-text-secondary, #666);
+}
+
+.state {
+  padding: 32px 0;
+  color: var(--color-text-secondary, #666);
+}
