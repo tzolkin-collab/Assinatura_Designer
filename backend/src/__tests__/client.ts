@@ -63,7 +63,7 @@ vi.mock('../lib/redis', () => {
 
 vi.mock('../lib/prisma', () => {
   const prismaMock: Record<string, unknown> = {
-    brand: { findUnique: vi.fn(), findFirst: vi.fn() },
+    brand: { findUnique: vi.fn(), findFirst: vi.fn(), create: vi.fn() },
     invite: { create: vi.fn(), findUnique: vi.fn(), updateMany: vi.fn() },
     brandMember: {
       findUnique: vi.fn(),
