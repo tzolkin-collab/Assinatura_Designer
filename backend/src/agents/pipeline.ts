@@ -7,8 +7,10 @@ import { buildBrandContextSummary, resolveBrandContext } from '../lib/brandConte
 import {
   buildPipelineBrainContext,
   correctTextDivergences,
+  fontSubstitutionNotice,
   hasApprovedText,
   isDesignerBrainEnabled,
+  officialFontsFor,
   textIssuesToDeviations,
 } from '../lib/designerBrain/index.js';
 import type { TextIssue } from '../lib/designerBrain/index.js';
@@ -952,6 +954,20 @@ async function runPipelineInner(
           sessionId,
           `\n\n**Análise do revisor (score ${reviewResult.score}/100):** ${reviewResult.feedback}\n${deviationsText ? `\n${deviationsText}\n` : ''}\n*Mantive este design como está. Me diga se quer que eu ajuste algo específico ou refaça do zero.*\n`,
         );
+      }
+
+
+      // Fonte oficial do projeto que o sistema não consegue carregar: o artista usou uma substituta.
+      // Antes isso passava em silêncio; agora o resultado diz qual faltou e qual entrou no lugar.
+      if (designerBrainOn && design.slides.length > 0) {
+        const aviso = fontSubstitutionNotice({ official: officialFontsFor(brand.slug), used: design.fonts });
+        if (aviso) {
+          logger.warn('Fonte oficial do projeto indisponível, usando substituta', { brandSlug: brand.slug, usadas: design.fonts });
+          ws.token(sessionId, `
+
+${aviso}
+`);
+        }
       }
 
     } catch (err) {
