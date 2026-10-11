@@ -17,6 +17,7 @@ import { runPlanner, MAX_SLIDES, type SlideSkeletonItem } from './planner/index.
 import { runHtmlReviewer } from './reviewer/index.js';
 import type { ReviewResult } from './reviewer/index.js';
 import { editHtmlSlide, generateHtmlDesignBatched, type HtmlDesignSlide } from '../lib/htmlDesign.js';
+import { deriveDeckName } from '../lib/deckName.js';
 import { syncPostSlides } from '../lib/postHelper.js';
 import { researchBrand, type VisualRef } from '../lib/fabricaLegacy.js';
 import { resolveSlideImages, resolveImageCandidateDecisions, type AmbiguousImageCandidate, type ResolvedSlideImage } from '../lib/imageResolver.js';
@@ -451,6 +452,7 @@ async function runPipelineInner(
         data: {
           id: postId,
           brandId: brand.id,
+          name: deriveDeckName(skeleton),
           // O deck nasce JÁ dentro da pasta escolhida na fábrica. Antes nascia solto e
           // o usuário tinha de ir arrastá-lo na galeria — na prática, deck gerado era
           // deck perdido. `null` = raiz, que segue sendo o default.
