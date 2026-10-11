@@ -18,3 +18,5 @@ export {
   resolveProjectMemory,
 } from './pipelineContext.js';
 export type * from './types.js';
+export { checkApprovedText, hasApprovedText, textIssuesToDeviations } from './textCheck.js';
+export type { TextIssue } from './textCheck.js';

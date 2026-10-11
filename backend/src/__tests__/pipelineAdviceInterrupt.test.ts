@@ -382,10 +382,21 @@ describe('cérebro do Designer ligado por marca (DESIGNER_BRAIN_BRANDS)', () => 
   const GLOBAL = 'Você é a inteligência de direção de arte do sistema Designer';
 
   beforeEach(() => {
-    vi.mocked(runPlanner).mockClear();
+    vi.mocked(runPlanner).mockReset();
     vi.mocked(resolveSlideImages).mockClear();
     h.slideCount = 3; // um lote só
   });
+
+  // O planner distribui a copy aprovada pelos slides (modo roteirista). O artista do harness
+  // escreve "Slide N" em cada um, então copy "Slide N" confere e qualquer outra não.
+  const roteiro = (copy: (i: number) => string) =>
+    Array.from({ length: 3 }, (_, i) => ({
+      title: `Slide ${i + 1}`, goal: 'Objetivo', layout_type: 'content-split', order: i + 1, copy: copy(i),
+    }));
+  async function rodarComCopia(copy: (i: number) => string = (i) => `Slide ${i + 1}`) {
+    vi.mocked(runPlanner).mockResolvedValue(roteiro(copy) as never);
+    await runPipeline({ sessionId: S, brief: 'Apresentação de teste', format: 'presentation', postId: POST, sourceCopy: 'texto aprovado' });
+  }
 
   afterEach(() => {
     if (original === undefined) delete process.env.DESIGNER_BRAIN_BRANDS;
@@ -394,6 +405,7 @@ describe('cérebro do Designer ligado por marca (DESIGNER_BRAIN_BRANDS)', () => 
 
   it('desligado (padrão): nada muda — diretrizes legadas, sem cérebro, geração de foto como antes', async () => {
     delete process.env.DESIGNER_BRAIN_BRANDS;
+    vi.mocked(runPlanner).mockResolvedValue(roteiro(() => '') as never);
     await rodar();
 
     const planner = vi.mocked(runPlanner).mock.calls[0]![0] as { brandContext: string };
@@ -408,7 +420,7 @@ describe('cérebro do Designer ligado por marca (DESIGNER_BRAIN_BRANDS)', () => 
   it('ligado: planner e artista recebem as camadas, e o legado sai de cena', async () => {
     process.env.DESIGNER_BRAIN_BRANDS = 'amanda-coelho';
     h.session.brandSlug = 'amanda-coelho'; // tem seed de memória
-    await rodar();
+    await rodarComCopia();
 
     const planner = vi.mocked(runPlanner).mock.calls[0]![0] as { brandContext: string };
     expect(planner.brandContext).toContain(GLOBAL);
@@ -428,7 +440,7 @@ describe('cérebro do Designer ligado por marca (DESIGNER_BRAIN_BRANDS)', () => 
   it('ligado: o resolver de imagens não pode gerar foto nem buscar no Unsplash', async () => {
     process.env.DESIGNER_BRAIN_BRANDS = 'amanda-coelho';
     h.session.brandSlug = 'amanda-coelho';
-    await rodar();
+    await rodarComCopia();
 
     const resolver = vi.mocked(resolveSlideImages).mock.calls[0]![0] as { allowGeneratedGraphics?: boolean };
     expect(resolver.allowGeneratedGraphics).toBe(false);
@@ -437,12 +449,72 @@ describe('cérebro do Designer ligado por marca (DESIGNER_BRAIN_BRANDS)', () => 
   it('ligado sem memória de projeto: erro visível, e a geração não segue com as regras erradas', async () => {
     process.env.DESIGNER_BRAIN_BRANDS = 'marca-sem-memoria';
     h.session.brandSlug = 'marca-sem-memoria';
-    await rodar();
+    await rodarComCopia();
 
     const erro = wsOf('error');
     expect(erro).toHaveLength(1);
     expect(String(erro[0]!.args[1])).toContain('não tem memória de projeto');
     expect(h.modelCalls).toBe(0);
     expect(vi.mocked(runPlanner)).not.toHaveBeenCalled();
+  });
+
+  it('ligado e SEM texto aprovado: para e pede o texto, em vez de deixar o modelo inventar', async () => {
+    process.env.DESIGNER_BRAIN_BRANDS = 'amanda-coelho';
+    h.session.brandSlug = 'amanda-coelho';
+    await rodar(); // sem sourceCopy nem roteiro aprovado
+
+    const erro = wsOf('error');
+    expect(erro).toHaveLength(1);
+    expect(String(erro[0]!.args[1])).toContain('só gera com texto aprovado');
+    expect(h.modelCalls).toBe(0);
+    expect(vi.mocked(runPlanner)).not.toHaveBeenCalled();
+    expect(h.session.phase).toBe('listening'); // a pessoa pode mandar o texto e seguir na mesma conversa
+  });
+
+  it('marca SEM o cérebro continua gerando sem texto aprovado, como antes', async () => {
+    delete process.env.DESIGNER_BRAIN_BRANDS;
+    vi.mocked(runPlanner).mockResolvedValue(roteiro(() => '') as never);
+    await rodar();
+    expect(wsOf('error')).toHaveLength(0);
+    expect(h.modelCalls).toBeGreaterThan(0);
+  });
+
+  it('texto dos slides igual ao aprovado: nenhum desvio de texto, deck aprovado', async () => {
+    process.env.DESIGNER_BRAIN_BRANDS = 'amanda-coelho';
+    h.session.brandSlug = 'amanda-coelho';
+    await rodarComCopia(); // "Slide N" é exatamente o que o artista do harness escreve
+
+    expect(h.session.pendingReview.deviations).toEqual([]);
+    expect(wsOf('notify')[0]!.args[1]).toMatchObject({ kind: 'done' });
+  });
+
+  it('texto dos slides diferente do aprovado: vira desvio crítico, o deck fica "precisa de revisão" e a análise chega ao chat', async () => {
+    process.env.DESIGNER_BRAIN_BRANDS = 'amanda-coelho';
+    h.session.brandSlug = 'amanda-coelho';
+    await rodarComCopia((i) => `Decisões conscientes constroem negócios sólidos ${i + 1}`);
+
+    const devs = h.session.pendingReview.deviations as Array<{ severity: string; slideIndex: number; description: string }>;
+    expect(devs.some((d) => d.severity === 'critical' && d.description.includes('faltam'))).toBe(true);
+    expect(devs.some((d) => d.severity === 'major' && d.description.includes('não está no texto aprovado'))).toBe(true);
+    expect(devs.map((d) => d.slideIndex)).toContain(2); // aponta o slide certo
+    expect(wsOf('notify')[0]!.args[1]).toMatchObject({ kind: 'needs_review' });
+    expect(wsOf('token').map((c) => String(c.args[1])).join('')).toContain('Análise do revisor');
+  });
+
+  it('o aprovado do reviewer visual NÃO apaga o desvio de texto', async () => {
+    process.env.DESIGNER_BRAIN_BRANDS = 'amanda-coelho';
+    h.session.brandSlug = 'amanda-coelho';
+    await rodarComCopia(() => 'outra coisa inteira'); // o mock do reviewer devolve approved: true
+
+    expect(wsOf('notify')[0]!.args[1]).toMatchObject({ kind: 'needs_review' });
+  });
+
+  it('sem a copy distribuída por slide (planner caiu no esqueleto), a checagem é pulada e não acusa o deck', async () => {
+    process.env.DESIGNER_BRAIN_BRANDS = 'amanda-coelho';
+    h.session.brandSlug = 'amanda-coelho';
+    await rodarComCopia(() => '');
+
+    expect(h.session.pendingReview.deviations).toEqual([]);
+    expect(wsOf('notify')[0]!.args[1]).toMatchObject({ kind: 'done' });
   });
 });

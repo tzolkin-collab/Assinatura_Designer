@@ -4,7 +4,13 @@ import prisma from '../lib/prisma.js';
 import { getSession, updateSession, updateBrandMemory, getBrandMemory } from '../lib/redis.js';
 import { ws } from '../lib/websocket.js';
 import { buildBrandContextSummary, resolveBrandContext } from '../lib/brandContext.js';
-import { buildPipelineBrainContext, isDesignerBrainEnabled } from '../lib/designerBrain/index.js';
+import {
+  buildPipelineBrainContext,
+  checkApprovedText,
+  hasApprovedText,
+  isDesignerBrainEnabled,
+  textIssuesToDeviations,
+} from '../lib/designerBrain/index.js';
 import { executeTool } from './tools/index.js';
 import { runPlanner, MAX_SLIDES, type SlideSkeletonItem } from './planner/index.js';
 import { runHtmlReviewer } from './reviewer/index.js';
@@ -259,6 +265,17 @@ async function runPipelineInner(
   // Ligado, o contexto legado (resumo + regras aprendidas no chat) dá lugar às camadas
   // global → projeto → modo: a memória do projeto é a do cadastro, e o chat não a reescreve.
   const designerBrainOn = isDesignerBrainEnabled(session.brandSlug);
+  // Sem texto aprovado o cérebro não tem o que reproduzir literalmente, e o modelo preenche o
+  // vazio com texto inventado (visto em geração real: biografia, tópicos e botões que ninguém
+  // escreveu). Melhor parar e pedir o texto do que entregar texto que a marca nunca aprovou.
+  if (designerBrainOn && !hasApprovedText({ sourceCopy: params.sourceCopy, approvedSkeleton: params.approvedSkeleton })) {
+    ws.error(
+      sessionId,
+      'Esta marca só gera com texto aprovado. Envie o texto de cada slide (a copy) e eu o distribuo sem alterar nenhuma palavra.',
+    );
+    await updateSession(sessionId, { phase: 'listening', workerStatus: 'idle' });
+    return;
+  }
   let brandContext: string;
   if (designerBrainOn) {
     try {
@@ -400,7 +417,7 @@ async function runPipelineInner(
     ws.progress(sessionId, 20, 'Planejando estrutura lógica...');
     // Roteiro pré-aprovado (fluxo copy-first): o usuário JÁ viu e confirmou esta
     // estrutura no chat — replanejar aqui jogaria fora a aprovação.
-    const skeleton = params.approvedSkeleton?.length
+    const skeleton: SlideSkeletonItem[] = params.approvedSkeleton?.length
       ? params.approvedSkeleton
       : await runPlanner({
           brief: planBrief,
@@ -822,6 +839,36 @@ async function runPipelineInner(
         } catch (reviewErr) {
           logger.error('Reviewer HTML falhou; aprovando por segurança (fail-safe)', { error: (reviewErr as Error).message });
           reviewResult = { approved: true, score: 75, deviations: [], feedback: 'Revisão automática indisponível', correctionInstructions: undefined };
+        }
+
+        // Texto aprovado × texto do slide. É código, não prompt: o reviewer visual olha uma
+        // amostra e não confere palavras. Os problemas viram desvios do mesmo formato, então
+        // aparecem na análise do chat, deixam o deck como "precisa de revisão" e alimentam o
+        // ajuste cirúrgico quando a pessoa recusa.
+        const geradosDaCopia = params.resumeFromStyleProof ? enrichedSkeleton.slice(1) : enrichedSkeleton;
+        // Sem a copy distribuída por slide (o planner falhou e caiu no esqueleto genérico) não
+        // há como conferir slide a slide: pular com aviso é melhor que acusar o deck inteiro.
+        if (designerBrainOn && !geradosDaCopia.some((item) => item.copy?.trim())) {
+          logger.warn('Cérebro ligado, mas o roteiro não distribuiu a copy por slide: checagem de texto pulada', { brandSlug: brand.slug });
+        } else if (designerBrainOn) {
+          const issues = checkApprovedText(
+            geradosDaCopia.map((item) => item.copy),
+            design.slides.map((s) => s.html),
+            params.resumeFromStyleProof ? 1 : 0,
+          );
+          if (issues.length > 0) {
+            logger.warn('Texto dos slides difere do texto aprovado', {
+              slides: issues.map((i) => i.slideIndex + 1),
+              brandSlug: brand.slug,
+            });
+            const feedback = `O texto de ${issues.length} slide(s) não confere com o texto aprovado.`;
+            reviewResult = {
+              ...reviewResult,
+              approved: false,
+              deviations: [...(reviewResult.deviations ?? []), ...textIssuesToDeviations(issues)],
+              feedback: reviewResult.feedback ? `${feedback} ${reviewResult.feedback}` : feedback,
+            };
+          }
         }
 
         // Guarda o review na sessão MESMO quando aprovado: se o usuário recusar
