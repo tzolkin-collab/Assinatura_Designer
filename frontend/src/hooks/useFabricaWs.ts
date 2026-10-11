@@ -458,6 +458,8 @@ export function useFabricaWs(brandSlug: string, initialSessionId?: string | null
       case 'error': {
         const msg = normalizeUiMessage((data.message ?? 'Erro desconhecido') as string);
         setMsgs(prev => appendSystemMessage(prev, msg));
+        setWStatus('error');
+        setLabel('');
         setStreaming(false);
         setInterr(false);
         actionsRef.current.streamingMsgIdRef.current = null;

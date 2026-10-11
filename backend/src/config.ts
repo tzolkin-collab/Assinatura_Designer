@@ -152,6 +152,12 @@ export const config = {
   r2PublicUrl: process.env.R2_PUBLIC_URL || '',
   // ── Redis ──
   redisUrl: process.env.REDIS_URL || 'redis://localhost:6379',
+  // Namespace das filas BullMQ. O default preserva as filas atuais; ambientes de
+  // teste podem usar um prefixo próprio sem consumir jobs de outras instalações.
+  bullmqPrefix: process.env.BULLMQ_PREFIX || 'bull',
+  // Permite rodar um worker de teste sem classificar posts antigos de outras
+  // sessões como órfãos durante a rotina de inicialização do worker.
+  zombiePostSweepEnabled: process.env.ZOMBIE_POST_SWEEP_ENABLED !== 'false',
   // ── Fila de geração (BullMQ) ──
   // Quantos pipelines de design rodam em paralelo por worker. Cada um usa
   // Gemini + chromium (pesado), então o default é conservador.
@@ -205,6 +211,16 @@ export const config = {
   // de Google Search grounding. Free tier da Apify: $5/mês, sem cartão.
   apifyApiToken: process.env.APIFY_API_TOKEN || '',
 } as const;
+
+/** URI Redis pode conter usuário/senha; logs mostram apenas host e porta. */
+export function redisEndpointForLogs(value: string = config.redisUrl): string {
+  try {
+    const url = new URL(value);
+    return `${url.hostname}${url.port ? `:${url.port}` : ''}`;
+  } catch {
+    return 'URL Redis inválida';
+  }
+}
 
 // ── Fail-fast de configuração ────────────────────────────────────────────────
 // Em produção, segredos ausentes ou o JWT_SECRET de fallback são falha de
