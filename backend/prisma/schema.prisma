@@ -137,6 +137,23 @@ model Brand {
   accessRequests AccessRequest[]
   invites        Invite[]
   generationRuns GenerationRun[]
+
+  // Desdobramento / collab: uma marca derivada de um projeto-base. Herda a identidade da
+  // base e guarda só o que muda (`collab`). Marca comum = BASE, sem pai.
+  kind          BrandKind @default(BASE)
+  parentBrandId String?
+  parent        Brand?    @relation("BrandCollabs", fields: [parentBrandId], references: [id], onDelete: Cascade)
+  children      Brand[]   @relation("BrandCollabs")
+  // Só no desdobramento: contexto, parceiro e protagonismo. Shape em lib/brandCollab.ts.
+  collab        Json?
+
+  @@index([parentBrandId])
+}
+
+enum BrandKind {
+  BASE
+  INTERNAL
+  PARTNERSHIP
 }
 
 model BrandConfig {
