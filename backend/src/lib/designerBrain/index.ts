@@ -26,3 +26,4 @@ export type { TextIssue } from './textCheck.js';
 export { buildCorrectionInstruction, correctTextDivergences, MAX_ATTEMPTS as TEXT_CORRECTION_MAX_ATTEMPTS } from './correction.js';
 export type { CorrectionResult, EditSlideFn } from './correction.js';
 export { fontSubstitutionNotice, officialFontsFor, INSTALLED_CUSTOM_FONTS } from './fontNotice.js';
+export { onlyProvidedAssets } from './providedAssets.js';
