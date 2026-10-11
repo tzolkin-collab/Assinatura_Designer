@@ -8,6 +8,15 @@ import { useBrandPermissions } from '@/hooks/useBrandPermissions';
 import { api, ApiError } from '@/lib/api';
 import { asList, projectStatus, type ProjectProfileResponse } from '@/lib/projectOverview';
 import {
+  applyConflict,
+  importSummary,
+  mergeDraftIntoForm,
+  SECTION_TITLES,
+  type ImportConflict,
+  type MergeOutcome,
+  type ProfileImportResult,
+} from '@/lib/profileImport';
+import {
   emptyForm,
   formErrors,
   formToProfile,
@@ -132,6 +141,12 @@ export default function CerebroPage() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [savedAt, setSavedAt] = useState<number | null>(null);
+  const [manualFiles, setManualFiles] = useState<File[]>([]);
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState('');
+  const [importResult, setImportResult] = useState<ProfileImportResult | null>(null);
+  const [importOutcome, setImportOutcome] = useState<MergeOutcome | null>(null);
+  const [conflicts, setConflicts] = useState<ImportConflict[]>([]);
 
   const apply = useCallback((res: ProjectProfileResponse) => {
     const profile = res.profile as unknown as BrandProfile;
@@ -197,6 +212,35 @@ export default function CerebroPage() {
     }
   };
 
+  const runImport = async () => {
+    if (manualFiles.length === 0) return;
+    setImporting(true);
+    setImportError('');
+    setImportResult(null);
+    setImportOutcome(null);
+    setConflicts([]);
+    try {
+      const body = new FormData();
+      manualFiles.forEach((f) => body.append('files', f));
+      const res = await api.post<ProfileImportResult, FormData>(`/brands/${slug}/profile/import`, body);
+      // O rascunho entra no formulário (só em campo vazio) e NADA é salvo: quem aprova é a pessoa.
+      const outcome = mergeDraftIntoForm(form, res.draft);
+      setForm(outcome.form);
+      setImportResult(res);
+      setImportOutcome(outcome);
+      setConflicts(outcome.conflicts);
+    } catch (err) {
+      setImportError(err instanceof ApiError ? err.message : 'Não foi possível ler o manual.');
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const acceptConflict = (c: ImportConflict) => {
+    setForm((f) => applyConflict(f, c));
+    setConflicts((list) => list.filter((x) => x.section !== c.section));
+  };
+
   if (loading) return <div className={styles.state}>Carregando a ficha do projeto...</div>;
   if (!result) {
     return (
@@ -246,6 +290,82 @@ export default function CerebroPage() {
       ))}
       {saveError && <div className={[styles.notice, styles.noticeError].join(' ')} role="alert">{saveError}</div>}
       {savedAt && !dirty && !saveError && <div className={[styles.notice, styles.noticeOk].join(' ')}>Ficha salva.</div>}
+
+      {!readOnly && (
+        <div className={styles.importBox}>
+          <h2>Importar de um manual de marca</h2>
+          <p className={styles.hint}>
+            Envie o manual (PDF, imagens, .md, .txt ou .html). A IA lê e propõe o rascunho da ficha, citando o trecho de onde tirou cada item. Só campos vazios são
+            preenchidos e nada é salvo até você apertar &quot;Salvar ficha&quot;. Logo e manual visual não vêm do manual: escolha na biblioteca.
+          </p>
+          <div className={styles.importActions}>
+            <input
+              type="file"
+              multiple
+              accept=".pdf,.png,.jpg,.jpeg,.webp,.md,.txt,.html,.htm,application/pdf,image/png,image/jpeg,image/webp,text/markdown,text/plain,text/html"
+              disabled={importing}
+              onChange={(e) => setManualFiles(Array.from(e.target.files ?? []).slice(0, 6))}
+              aria-label="Arquivos do manual"
+            />
+            <button type="button" className={styles.btn} disabled={importing || manualFiles.length === 0} onClick={runImport}>
+              {importing ? 'Lendo o manual...' : 'Ler manual'}
+            </button>
+            {importing && <span className={styles.fileName}>Pode levar até 1 minuto.</span>}
+          </div>
+          {importError && <div className={[styles.notice, styles.noticeError].join(' ')} role="alert">{importError}</div>}
+          {importResult && importOutcome && (
+            <>
+              <div className={[styles.notice, importResult.status === 'failed' ? styles.noticeError : styles.noticeOk].join(' ')} role="status">
+                {importSummary(importResult, importOutcome)}
+                {importResult.status === 'partial' && importResult.reason ? ` Parte do material falhou: ${importResult.reason}` : ''}
+                {importResult.status !== 'failed' && importOutcome.applied.length > 0 ? ' Revise e salve para valer.' : ''}
+              </div>
+              {importResult.status !== 'failed' && !importResult.quotesChecked && (
+                <div className={[styles.notice, styles.noticeInfo].join(' ')}>
+                  Em PDF e imagem o sistema não consegue conferir se o trecho citado existe de verdade no manual: confira os trechos abaixo antes de salvar.
+                </div>
+              )}
+              {importResult.warnings.map((w) => (
+                <div key={w} className={[styles.notice, styles.noticeInfo].join(' ')}>{w}</div>
+              ))}
+              {conflicts.map((c) => (
+                <div key={c.section} className={styles.conflict}>
+                  <span>
+                    <strong>{c.title}:</strong> o manual diz diferente do que já está na ficha. A ficha foi mantida.
+                  </span>
+                  <button type="button" className={[styles.btn, styles.btnGhost, styles.btnSmall].join(' ')} onClick={() => acceptConflict(c)}>
+                    Usar sugestão do manual
+                  </button>
+                </div>
+              ))}
+              {importResult.notFound.length > 0 && (
+                <p className={styles.hint}>
+                  O manual não traz: {importResult.notFound.map((k) => SECTION_TITLES[k] ?? k).join(', ')}. Continuam pendentes.
+                </p>
+              )}
+              {Object.keys(importResult.evidence).length > 0 && (
+                <details>
+                  <summary>De onde veio cada coisa</summary>
+                  {Object.entries(importResult.evidence).map(([key, items]) => (
+                    <div key={key}>
+                      <p className={styles.hint} style={{ marginTop: 10 }}><strong>{SECTION_TITLES[key] ?? key}</strong></p>
+                      <ul className={styles.evidenceList}>
+                        {items.map((ev, i) => (
+                          <li key={i}>
+                            {ev.label ? <strong>{ev.label}: </strong> : null}
+                            <q>{ev.quote}</q>
+                            {ev.page ? ` (p. ${ev.page})` : ''}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+                </details>
+              )}
+            </>
+          )}
+        </div>
+      )}
 
       <div className={styles.globalBox}>
         <h2><Lock size={14} /> Regras globais do Designer</h2>
