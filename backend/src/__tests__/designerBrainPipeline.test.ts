@@ -41,6 +41,16 @@ describe('memória do projeto', () => {
     expect(resolveProjectMemory('Amanda-Coelho', null)).toBe(AMANDA_COELHO_MEMORY);
   });
 
+  it('ficha salva vence o cadastro antigo e o seed; ficha vazia cai para eles', () => {
+    const ficha = { essence: 'ESSENCIA-FICHA', palette: [{ hex: '#111111' }] };
+    const texto = resolveProjectMemory('amanda-coelho', 'texto antigo', ficha, 'Amanda');
+    expect(texto).toContain('PROJETO: Amanda');
+    expect(texto).toContain('ESSENCIA-FICHA');
+    expect(texto).not.toContain('texto antigo');
+    expect(resolveProjectMemory('amanda-coelho', 'texto antigo', {}, 'Amanda')).toBe('texto antigo');
+    expect(resolveProjectMemory('amanda-coelho', '', {}, 'Amanda')).toBe(AMANDA_COELHO_MEMORY);
+  });
+
   it('sem cadastro e sem seed, não inventa', () => {
     expect(resolveProjectMemory('marca-nova', '')).toBeNull();
   });

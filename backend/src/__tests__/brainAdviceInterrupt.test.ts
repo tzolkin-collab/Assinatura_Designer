@@ -67,7 +67,7 @@ vi.mock('../lib/queue.js', () => ({ enqueuePipeline: vi.fn(async (p: any) => {
   h.enqueued.push(p);
 }) }));
 vi.mock('../lib/r2.js', () => ({ uploadFileToR2: vi.fn(async () => 'https://r2/x.png') }));
-vi.mock('../lib/prisma.js', () => ({ default: { post: { findFirst: vi.fn(async () => null) } } }));
+vi.mock('../lib/prisma.js', () => ({ default: { post: { findFirst: vi.fn(async () => null) }, brandProfile: { findFirst: vi.fn(async () => null) } } }));
 vi.mock('../agents/tools/index.js', () => ({ executeTool: vi.fn() }));
 vi.mock('../lib/postHelper.js', () => ({ mergeSlidesIntoPost: vi.fn(), persistPostContent: vi.fn() }));
 vi.mock('../lib/postVersions.js', () => ({ snapshotPost: vi.fn() }));

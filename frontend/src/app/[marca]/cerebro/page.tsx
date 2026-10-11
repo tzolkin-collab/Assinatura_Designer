@@ -265,6 +265,10 @@ export default function CerebroPage() {
           As regras fixas do Designer valem para todos os projetos. Esta ficha guarda o que é só deste projeto: como a marca pensa, escreve e aparece.
           O que ficar em branco continua pendente, e a IA não preenche por conta própria.
         </p>
+        <p>
+          <strong>Ao salvar, o Designer passa a gerar este projeto com esta ficha</strong>: só com texto aprovado e só com foto real fornecida.
+          Enquanto não houver ficha salva, o projeto segue com as configurações antigas.
+        </p>
       </div>
 
       <div className={styles.bar}>

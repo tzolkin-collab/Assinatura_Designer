@@ -26,4 +26,16 @@ describe('fontSubstitutionNotice', () => {
     expect(officialFontsFor('amanda-coelho')).toEqual(['Queens', 'Aeonik']);
     expect(officialFontsFor('outra')).toEqual([]);
   });
+
+  it('com ficha salva, a ficha manda: só as fontes que não são Google Fonts', () => {
+    const ficha = {
+      typography: [
+        { family: 'Queens', source: 'reference' as const },
+        { family: 'Inter', source: 'google' as const },
+        { family: 'Aeonik', source: 'custom' as const },
+      ],
+    };
+    expect(officialFontsFor('amanda-coelho', ficha)).toEqual(['Queens', 'Aeonik']);
+    expect(officialFontsFor('amanda-coelho', {})).toEqual([]); // ficha existe e não declara fonte oficial: o seed não volta
+  });
 });

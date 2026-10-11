@@ -1,3 +1,4 @@
+import type { BrandProfileData } from '../brandProfile.js';
 import { PROJECT_OFFICIAL_FONTS } from './seeds/index.js';
 
 // Aviso de fonte oficial indisponível (achado S5).
@@ -17,7 +18,14 @@ export const INSTALLED_CUSTOM_FONTS: string[] = [];
 const norm = (s: string): string => s.trim().toLowerCase().replace(/['"]/g, '');
 const lista = (xs: string[]): string => xs.join(', ');
 
-export function officialFontsFor(brandSlug: string): string[] {
+/**
+ * Fontes oficiais do projeto que o sistema não carrega sozinho. Com ficha salva, a ficha manda:
+ * as famílias que não são Google Fonts (arquivo enviado ou só referência). Sem ficha, vale o seed.
+ */
+export function officialFontsFor(brandSlug: string, profile?: BrandProfileData | null): string[] {
+  if (profile) {
+    return (profile.typography ?? []).filter((t) => t.source !== 'google').map((t) => t.family);
+  }
   return PROJECT_OFFICIAL_FONTS[brandSlug] ?? [];
 }
 
