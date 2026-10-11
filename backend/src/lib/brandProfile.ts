@@ -73,6 +73,17 @@ export const brandProfileSchema = z.object({
   neverDo: z.array(text(300).min(1)).max(60).optional(),
   /** 11. Como saber se a peça pertence à marca. */
   approvalCriterion: text(1500).optional(),
+  /**
+   * Códigos que não podem sumir, por categoria (ex.: personalidade, tom, conteúdo, acabamento).
+   * Vem do manual de marca da Assinatura; o que o §3.3 do documento da Gabriela chama de "não pode mudar".
+   */
+  brandCodes: z.array(z.object({ category: text(80).min(1), items: z.array(text(120).min(1)).max(20) })).max(10).optional(),
+  /** O que pode variar de uma peça para outra sem a marca deixar de ser ela. */
+  mayVary: z.array(text(200).min(1)).max(20).optional(),
+  /** O que precisa ficar em toda peça. */
+  mustKeep: z.array(text(200).min(1)).max(20).optional(),
+  /** Regras desta marca quando faz collab: quem lidera, hierarquia de logos, o que manter. */
+  collabRules: text(2000).optional(),
   /** Texto de antes da ficha (diretrizes e instruções do agente), mantido até alguém reorganizar. */
   legacyNotes: text(8000).optional(),
 });
@@ -103,6 +114,9 @@ export const PROFILE_SECTIONS: ProfileSection[] = [
   { key: 'graphicElements', label: 'Elementos gráficos', required: false, filled: (p) => hasText(p.graphicElements) },
   { key: 'neverDo', label: 'O que nunca fazer', required: true, filled: (p) => (p.neverDo?.length ?? 0) > 0 },
   { key: 'approvalCriterion', label: 'Critério de aprovação', required: true, filled: (p) => hasText(p.approvalCriterion) },
+  { key: 'brandCodes', label: 'Códigos que não podem sumir', required: false, filled: (p) => (p.brandCodes?.some((c) => c.items.length > 0)) ?? false },
+  { key: 'variation', label: 'O que pode variar e o que precisa ficar', required: false, filled: (p) => (p.mayVary?.length ?? 0) > 0 || (p.mustKeep?.length ?? 0) > 0 },
+  { key: 'collabRules', label: 'Regras de collab', required: false, filled: (p) => hasText(p.collabRules) },
 ];
 
 export interface ProfileCompleteness {
@@ -193,6 +207,10 @@ export function renderProjectMemory(name: string, profile: BrandProfileData): st
     profile.logo?.rules?.trim() ?? '',
   ].filter(Boolean).join('\n');
   const neverDo = profile.neverDo?.map((n) => `- ${n}`).join('\n');
+  const codes = profile.brandCodes
+    ?.filter((c) => c.items.length > 0)
+    .map((c) => `- ${c.category}: ${c.items.join(', ')}`)
+    .join('\n');
   const assets = [
     profile.visualManual?.imageUrl ? '- Manual visual em imagem' : '',
     profile.logo?.files?.length ? `- Logo (${profile.logo.files.length} arquivo${profile.logo.files.length > 1 ? 's' : ''})` : '',
@@ -212,6 +230,11 @@ export function renderProjectMemory(name: string, profile: BrandProfileData): st
     block(9, 'O QUE NUNCA FAZER', neverDo),
     block(10, 'ATIVOS DISPONÍVEIS', assets),
     block(11, 'CRITÉRIO DE APROVAÇÃO', profile.approvalCriterion),
+    // Seções que vêm do manual de marca e não existem no §10.1: entram depois das 11, sem renumerá-las.
+    codes ? `CÓDIGOS QUE NÃO PODEM SUMIR\n${codes}` : '',
+    profile.mayVary?.length ? `O QUE PODE VARIAR\n${profile.mayVary.map((v) => `- ${v}`).join('\n')}` : '',
+    profile.mustKeep?.length ? `O QUE PRECISA FICAR\n${profile.mustKeep.map((v) => `- ${v}`).join('\n')}` : '',
+    profile.collabRules?.trim() ? `REGRAS DE COLLAB\n${profile.collabRules.trim()}` : '',
     profile.legacyNotes?.trim() ? `OBSERVAÇÕES ANTERIORES À FICHA\n${profile.legacyNotes.trim()}` : '',
   ].filter(Boolean).join('\n\n');
 }

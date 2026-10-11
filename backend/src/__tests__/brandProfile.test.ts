@@ -40,6 +40,10 @@ const fichaCompleta: BrandProfileData = {
   graphicElements: 'Linhas finas e monograma ampliado.',
   neverDo: ['Degradês coloridos', 'Texto sobre rosto'],
   approvalCriterion: 'Parece de uma empresária que constrói negócios.',
+  brandCodes: [{ category: 'Tom', items: ['Sofisticado', 'Seguro'] }],
+  mayVary: ['Layout dos slides', 'Ordem narrativa'],
+  mustKeep: ['Logo e aplicação correta', 'Paleta como base'],
+  collabRules: 'Definir quem lidera a narrativa e manter ao menos um código forte.',
 };
 
 describe('brandProfileSchema', () => {
@@ -69,7 +73,7 @@ describe('profileCompleteness', () => {
     const c = profileCompleteness({});
     expect(c.percent).toBe(0);
     expect(c.ready).toBe(false);
-    expect(c.pending).toHaveLength(11);
+    expect(c.pending).toHaveLength(14);
   });
 
   it('ficha completa: 100% e pronta', () => {
@@ -80,11 +84,11 @@ describe('profileCompleteness', () => {
   });
 
   it('só faltam as recomendadas: continua pronta, com percentual menor', () => {
-    const { writingDirection, logo, realPhoto, graphicElements, ...obrigatorias } = fichaCompleta;
-    void writingDirection; void logo; void realPhoto; void graphicElements;
+    const { writingDirection, logo, realPhoto, graphicElements, brandCodes, mayVary, mustKeep, collabRules, ...obrigatorias } = fichaCompleta;
+    void writingDirection; void logo; void realPhoto; void graphicElements; void brandCodes; void mayVary; void mustKeep; void collabRules;
     const c = profileCompleteness(obrigatorias);
     expect(c.ready).toBe(true);
-    expect(c.percent).toBe(64);
+    expect(c.percent).toBe(50);
     expect(c.pending.every((p) => !p.required)).toBe(true);
   });
 
@@ -151,6 +155,59 @@ describe('renderProjectMemory', () => {
   it('as notas antigas aparecem no fim, separadas da ficha', () => {
     const txt = renderProjectMemory('X', { essence: 'a', legacyNotes: 'texto antigo' });
     expect(txt.endsWith('OBSERVAÇÕES ANTERIORES À FICHA\ntexto antigo')).toBe(true);
+  });
+});
+
+// O manual de regras de marca da Assinatura (Canva, 14 páginas, 16/09) é o exemplo da Gabriela de como um
+// projeto que NÃO é a Amanda chega ao sistema. O que vai abaixo é só o que está escrito nas páginas lidas
+// (as páginas 13 e 14 são imagem). O teste prova que a mesma ficha serve a outro projeto e que o que o
+// manual não traz aparece como pendência, sem ser inventado.
+const manualAssinatura: BrandProfileData = {
+  writingDirection: 'Tom sofisticado, moderno, acolhedor, acessível e seguro.',
+  palette: ['#582731', '#233766', '#8A0E2E', '#545BAE', '#D41D59', '#E9BDA6'].map((hex) => ({ hex })),
+  typography: [
+    { family: 'Aileron', role: 'Textos, subtítulos, explicações e materiais institucionais' },
+    { family: 'Monument', role: 'Títulos curtos, chamadas fortes e palavras-chave' },
+  ],
+  artDirection:
+    'Respiro, elegância, clareza e qualidade visual premium. Imagens elegantes e com boa luz; texturas cosméticas, pele, embalagem, produto e bastidores estratégicos; composição limpa.',
+  neverDo: ['Poluição visual', 'Banco de imagem genérico', 'Excesso de informação', 'Descaracterizar a marca em collabs'],
+  approvalCriterion:
+    'Se eu tirar o logo, ainda parece Assinatura? Transmite sofisticação e autoridade? O tom está moderno, acolhedor e seguro? Cores e fontes estão coerentes? As imagens têm qualidade e respiro? O conteúdo reforça estratégia e valor percebido?',
+  brandCodes: [
+    { category: 'Personalidade', items: ['Imponente', 'Antenada', 'Altruísta', 'Sofisticada', 'Ambiciosa'] },
+    { category: 'Tom', items: ['Sofisticado', 'Moderno', 'Acolhedor', 'Acessível', 'Seguro'] },
+    { category: 'Conteúdo', items: ['Estratégia', 'Conhecimento', 'Inovação', 'Marca própria', 'Realização'] },
+    { category: 'Acabamento', items: ['Respiro', 'Elegância', 'Clareza', 'Qualidade visual', 'Premium'] },
+  ],
+  mayVary: ['Layout dos slides', 'Ordem narrativa', 'Imagens e mockups', 'Intensidade das cores', 'Elementos de apoio', 'Estética de campanha'],
+  mustKeep: ['Logo e aplicação correta', 'Paleta como base', 'Fonte e hierarquia', 'Tom seguro e acolhedor', 'Sofisticação visual', 'Estratégia no conteúdo'],
+  collabRules:
+    'Pode adaptar, não pode descaracterizar. Definir quem lidera a narrativa. Definir a hierarquia dos logos. Equilibrar a paleta da Assinatura com a da marca parceira. Manter pelo menos um código forte da Assinatura. Garantir que a parceria some valor sem apagar a marca.',
+};
+
+describe('o manual de marca da Assinatura cabe na ficha (outro projeto, não a Amanda)', () => {
+  it('é uma ficha válida', () => {
+    expect(brandProfileSchema.safeParse(manualAssinatura).success).toBe(true);
+  });
+
+  it('o que o manual não traz fica pendente, sem ser inventado', () => {
+    const c = profileCompleteness(manualAssinatura);
+    // A plataforma de marca em texto é outro documento, e o manual visual em imagem não foi enviado.
+    expect(c.pending.filter((p) => p.required).map((p) => p.key)).toEqual(['essence', 'visualManual']);
+    expect(c.pending.filter((p) => !p.required).map((p) => p.key)).toEqual(['logo', 'realPhoto', 'graphicElements']);
+    expect(c.ready).toBe(false);
+    expect(c.percent).toBe(64);
+  });
+
+  it('vira a memória do projeto com os códigos, o que varia e o que fica', () => {
+    const txt = renderProjectMemory('Assinatura', manualAssinatura);
+    expect(txt).toContain('Aileron — Textos, subtítulos, explicações e materiais institucionais');
+    expect(txt).toContain('CÓDIGOS QUE NÃO PODEM SUMIR\n- Personalidade: Imponente, Antenada, Altruísta, Sofisticada, Ambiciosa');
+    expect(txt).toContain('O QUE PODE VARIAR\n- Layout dos slides');
+    expect(txt).toContain('O QUE PRECISA FICAR\n- Logo e aplicação correta');
+    expect(txt).toContain('REGRAS DE COLLAB\nPode adaptar, não pode descaracterizar.');
+    expect(txt).not.toContain('1. ESSÊNCIA');
   });
 });
 
