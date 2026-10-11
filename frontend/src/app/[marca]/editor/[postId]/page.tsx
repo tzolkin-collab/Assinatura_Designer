@@ -14,13 +14,14 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import {
-  ArrowLeft, Check, ChevronDown, Clock, Crosshair, Download, History, Loader2,
+  ArrowLeft, Check, ChevronDown, Clock, Crosshair, Download, History, ImagePlus, Loader2,
   MessageSquareText, Presentation, RotateCcw, Sparkles, X,
 } from 'lucide-react';
 import { api, getApiErrorMessage } from '@/lib/api';
 import Button from '@/components/ui/Button';
 import HtmlSlideRenderer from '@/components/DesignDocument/HtmlSlideRenderer';
 import SlideCodeEditor, { type SlideCode } from '@/components/DesignDocument/SlideCodeEditor';
+import PhotoSlotsPanel from '@/components/DesignDocument/PhotoSlotsPanel';
 import GenerationCostChip from '@/components/GenerationCost/GenerationCostChip';
 import { baixarSlide, exportarDeck, type DeckFileFormat } from '@/lib/deckFile';
 
@@ -71,7 +72,7 @@ function formatDate(iso: string): string {
   }
 }
 
-type Painel = 'ia' | 'codigo' | 'versoes';
+type Painel = 'ia' | 'fotos' | 'codigo' | 'versoes';
 
 // ── Página ────────────────────────────────────────────────────────────────────
 
@@ -168,6 +169,8 @@ export default function EditorPage() {
   const safeSlide = Math.min(activeSlide, Math.max(0, slideCount - 1));
   const canvasW = content?.width ?? 1080;
   const canvasH = content?.height ?? 1080;
+  // Quantos espaços de foto o slide ativo tem (só para o selo da aba; o painel lê a lista de verdade).
+  const espacosDeFoto = (content?.slides[safeSlide]?.html.match(/data-photo-slot=/g) ?? []).length;
 
   const aplicarSlide = useCallback((idx: number, slide: SlideCode) => {
     setContent(prev => {
@@ -398,6 +401,7 @@ export default function EditorPage() {
         <div style={{ flex: '1 1 360px', minWidth: 300, maxWidth: 560, display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0 }}>
           <div style={{ display: 'flex', gap: 4 }}>
             {painelBtn('ia', 'Editar com IA', Sparkles)}
+            {painelBtn('fotos', espacosDeFoto > 0 ? `Fotos (${espacosDeFoto})` : 'Fotos', ImagePlus)}
             {painelBtn('codigo', 'Código', MessageSquareText)}
             {painelBtn('versoes', 'Versões', History)}
           </div>
@@ -461,6 +465,17 @@ export default function EditorPage() {
                   Enter quebra linha · {typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform) ? '⌘' : 'Ctrl'}+Enter aplica
                 </span>
               </div>
+            )}
+
+            {painel === 'fotos' && content.slides[safeSlide] && (
+              <PhotoSlotsPanel
+                key={`${postId}-${safeSlide}`}
+                postId={postId}
+                marca={marca}
+                slideIndex={safeSlide}
+                slideHtml={content.slides[safeSlide].html}
+                onApplied={aplicarSlide}
+              />
             )}
 
             {painel === 'codigo' && content.slides[safeSlide] && (

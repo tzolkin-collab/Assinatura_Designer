@@ -399,6 +399,7 @@ describe('cérebro do Designer ligado por marca (DESIGNER_BRAIN_BRANDS)', () => 
     const planner = vi.mocked(runPlanner).mock.calls[0]![0] as { brandContext: string };
     expect(planner.brandContext).toBe('contexto da marca');
     expect(h.prompts[0]!.sys).not.toContain(GLOBAL);
+    expect(h.prompts[0]!.sys).not.toContain('data-photo-slot'); // marcas sem o cérebro não mudam
     expect(promptOf(1)).toContain('Diretrizes: DIRETRIZ-LEGADA');
     const resolver = vi.mocked(resolveSlideImages).mock.calls[0]![0] as { allowGeneratedGraphics?: boolean };
     expect(resolver.allowGeneratedGraphics).toBeUndefined();
@@ -420,6 +421,8 @@ describe('cérebro do Designer ligado por marca (DESIGNER_BRAIN_BRANDS)', () => 
     expect(sys).toContain('REGRA DE FOTOGRAFIA PARA ESTA PEÇA');
     expect(sys).toContain('MECÂNICA DE SAÍDA');
     expect(promptOf(1)).not.toContain('DIRETRIZ-LEGADA');
+    // E o contrato do espaço de foto, que o editor usa para trocar a foto depois.
+    expect(sys).toContain('data-photo-slot');
   });
 
   it('ligado: o resolver de imagens não pode gerar foto nem buscar no Unsplash', async () => {
