@@ -479,6 +479,8 @@ export interface ResolveSlideImagesParams {
   postId?: string;
   /** Configurável em Presentation Config da marca. Default true — desligar é opt-out. */
   allowGeneratedGraphics?: boolean;
+  /** Cérebro ligado: só reaproveita o que alguém forneceu, nunca o que o sistema gerou (source ai-generated). */
+  onlyProvidedAssets?: boolean;
   imagePreference?: 'force-ai' | 'unsplash' | 'unsplash-remix';
 }
 
@@ -512,7 +514,11 @@ export async function resolveSlideImages(params: ResolveSlideImagesParams): Prom
   // verdade na decisão (ver decideImagePlan) — 24 imagens num call estouraria
   // custo/latência à toa. 8 casa com o teto que o artista já usa (assetsBlock).
   const existingAssets = await prisma.asset.findMany({
-    where: { brandId: { in: params.libraryBrandIds?.length ? params.libraryBrandIds : [params.brandId] }, fileType: { startsWith: 'image/' } },
+    where: {
+      brandId: { in: params.libraryBrandIds?.length ? params.libraryBrandIds : [params.brandId] },
+      fileType: { startsWith: 'image/' },
+      ...(params.onlyProvidedAssets ? { source: { not: 'ai-generated' } } : {}),
+    },
     orderBy: { createdAt: 'desc' },
     take: 8,
     select: { url: true, name: true, tags: true },

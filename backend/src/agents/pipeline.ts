@@ -22,6 +22,7 @@ import { runHtmlReviewer } from './reviewer/index.js';
 import type { ReviewResult } from './reviewer/index.js';
 import { editHtmlSlide, generateHtmlDesignBatched, type HtmlDesignSlide } from '../lib/htmlDesign.js';
 import { deriveDeckName } from '../lib/deckName.js';
+import { onlyProvidedAssets } from '../lib/designerBrain/index.js';
 import { normalizeEmptyPhotoSlots } from '../lib/photoSlot.js';
 import { syncPostSlides } from '../lib/postHelper.js';
 import { researchBrand, type VisualRef } from '../lib/fabricaLegacy.js';
@@ -592,6 +593,7 @@ async function runPipelineInner(
         // Foto real é regra absoluta no cérebro: nada de pessoa gerada nem Unsplash. Só
         // reaproveita o que está na biblioteca ou deixa o slide sem imagem.
         allowGeneratedGraphics: designerBrainOn ? false : brand.presentationConfig?.allowGeneratedGraphics,
+        onlyProvidedAssets: designerBrainOn,
         imagePreference: params.imagePreference,
       }).catch((err) => {
         logger.error('Resolução de imagens dos slides falhou; seguindo sem imagens geradas', { error: (err as Error).message });
@@ -723,7 +725,7 @@ async function runPipelineInner(
             logoUrl: brand.logoUrl,
             // Fotos anexadas pelo usuário no chat entram JUNTO com os assets da
             // marca — o artista as trata igual, prefere a inventar foto de banco.
-            assetUrls: [...contentAssets, ...brand.assetUrls],
+            assetUrls: [...contentAssets, ...(designerBrainOn ? onlyProvidedAssets(brand.assetUrls) : brand.assetUrls)],
             presentationConfig: brand.presentationConfig ?? undefined,
             references: brand.references,
             // Com o cérebro ligado a memória do projeto é a do cadastro: o que o chat
