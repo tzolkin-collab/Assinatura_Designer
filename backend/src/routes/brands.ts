@@ -11,6 +11,7 @@ import { getUsage, getBilling } from '../lib/aiBudget.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { parseBody } from '../lib/validate.js';
 import { createCollabSchema, collabSlug } from '../lib/brandCollab.js';
+import { brandProfileSchema, profileCompleteness, profileFromLegacy, type BrandProfileData } from '../lib/brandProfile.js';
 import type { Prisma } from '@prisma/client';
 import { SVG_SANITIZE_RATE_LIMIT } from '../lib/svgSanitizeRateLimit.js';
 
@@ -359,6 +360,62 @@ brandsRouter.post('/', async (req: Request, res: Response, next: NextFunction) =
     ensureInternalTeamMemberships().catch(() => {});
 
     res.status(201).json({ data: brand });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/brands/:slug/profile - Ficha do projeto (Cérebro de IA, §10) e o que falta preencher.
+//
+// Enquanto a marca não tem ficha salva, devolve uma ficha DERIVADA dos campos que o sistema já tem
+// (cores, fontes, logo, diretrizes), com `derived: true`. Nada é gravado só por ler.
+brandsRouter.get('/:slug/profile', requireBrandRole(ANY_MEMBER), async (req: BrandRequest, res: Response, next: NextFunction) => {
+  try {
+    const brand = req.brand!;
+    const row = await prisma.brandProfile.findUnique({ where: { brandId: brand.id } });
+    let profile: BrandProfileData;
+    if (row) {
+      // Dado gravado fora do esquema não derruba a tela: cai na ficha vazia e a pendência aparece.
+      const parsed = brandProfileSchema.safeParse(row.data);
+      profile = parsed.success ? parsed.data : {};
+    } else {
+      const config = await prisma.brandConfig.findUnique({ where: { brandId: brand.id } });
+      profile = profileFromLegacy(config);
+    }
+    res.json({ data: { profile, derived: !row, completeness: profileCompleteness(profile) } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// PUT /api/brands/:slug/profile - Salva a ficha inteira do projeto.
+//
+// Logo, manual visual e arquivos de fonte têm de ser da biblioteca DESTA marca (mesmo critério da
+// troca de foto): sem isso o cliente mandaria qualquer URL e o servidor iria buscá-la (SSRF) ou
+// usaria arquivo de outra marca.
+brandsRouter.put('/:slug/profile', requireBrandRole(EDITORS), async (req: BrandRequest, res: Response, next: NextFunction) => {
+  try {
+    const brand = req.brand!;
+    const profile = parseBody(brandProfileSchema, req.body ?? {});
+
+    const arquivos = [
+      ...(profile.logo?.files ?? []).map((f) => f.url),
+      profile.visualManual?.imageUrl,
+      ...(profile.typography ?? []).flatMap((t) => [t.fileUrl, t.referenceImageUrl]),
+    ].filter((u): u is string => Boolean(u));
+    for (const url of new Set(arquivos)) {
+      const asset = await prisma.asset.findFirst({ where: { brandId: brand.id, url }, select: { id: true } });
+      if (!asset) throw createError(400, 'Logo, manual visual e fontes precisam estar na biblioteca do projeto.');
+    }
+
+    const data = profile as unknown as Prisma.InputJsonValue;
+    await prisma.brandProfile.upsert({
+      where: { brandId: brand.id },
+      create: { brandId: brand.id, data },
+      update: { data },
+    });
+
+    res.json({ data: { profile, derived: false, completeness: profileCompleteness(profile) } });
   } catch (error) {
     next(error);
   }
