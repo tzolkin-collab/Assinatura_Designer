@@ -4,13 +4,13 @@
 // (htmlDesign), o serviço de orientações e o de interrupção — sobre stores em memória
 // com a mesma semântica atômica do Redis.
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const h = vi.hoisted(() => {
   const state = {
     session: {} as Record<string, any>,
     wsCalls: [] as Array<{ fn: string; args: any[] }>,
-    prompts: [] as Array<{ start: number; user: string }>,
+    prompts: [] as Array<{ start: number; user: string; sys: string }>,
     modelCalls: 0,
     onModelCall: null as null | ((n: number) => Promise<void> | void),
     reviewerBriefs: [] as string[],
@@ -56,7 +56,7 @@ vi.mock('../lib/websocket.js', () => {
 
 vi.mock('../lib/brandContext.js', () => ({
   resolveBrandContext: vi.fn(async () => ({
-    id: 'brand-1', name: 'Marca X', colors: ['#111111'], primaryFonts: ['Inter'], assetUrls: [], references: [],
+    id: 'brand-1', name: 'Marca X', slug: h.session.brandSlug, agentPrompt: '', guidelines: 'DIRETRIZ-LEGADA', colors: ['#111111'], primaryFonts: ['Inter'], assetUrls: [], references: [],
   })),
   buildBrandContextSummary: vi.fn(() => 'contexto da marca'),
 }));
@@ -96,12 +96,12 @@ vi.mock('../lib/imageResolver.js', () => ({
 
 vi.mock('../lib/geminiRetry.js', () => ({
   humanizeGeminiError: (e: unknown) => String(e),
-  generateWithRetry: vi.fn(async (_ai: unknown, opts: { contents: string }) => {
+  generateWithRetry: vi.fn(async (_ai: unknown, opts: { contents: string; config?: { systemInstruction?: string } }) => {
     const user = opts.contents;
     const m = user.match(/Gere os slides de (\d+) a (\d+)/);
     const start = m ? parseInt(m[1]!, 10) : 1;
     const end = m ? parseInt(m[2]!, 10) : 1;
-    h.prompts.push({ start, user });
+    h.prompts.push({ start, user, sys: String(opts.config?.systemInstruction ?? '') });
     h.modelCalls++;
     await h.onModelCall?.(h.modelCalls);
     return {
@@ -126,6 +126,8 @@ import { setAdviceStore, submitAdvice, listAdvice, type AdviceItem } from '../li
 import { setInterruptStore, requestInterrupt, getInterruptState } from '../lib/interrupt';
 import { createMemoryAdviceStore, createMemoryInterruptStore } from './helpers/memoryLiveControl';
 import { config } from '../config';
+import { runPlanner } from '../agents/planner/index.js';
+import { resolveSlideImages } from '../lib/imageResolver.js';
 
 const S = 'sessao-e2e';
 const POST = 'post-e2e-1';
@@ -372,5 +374,72 @@ describe('cancelamento cooperativo (Pausar e enviar)', () => {
     expect(wsOf('done')).toHaveLength(1);
     expect(h.closedRuns[0]!.params).toEqual({ status: 'COMPLETED' });
     expect(interruptStore.raw.size).toBe(0);
+  });
+});
+
+describe('cérebro do Designer ligado por marca (DESIGNER_BRAIN_BRANDS)', () => {
+  const original = process.env.DESIGNER_BRAIN_BRANDS;
+  const GLOBAL = 'Você é a inteligência de direção de arte do sistema Designer';
+
+  beforeEach(() => {
+    vi.mocked(runPlanner).mockClear();
+    vi.mocked(resolveSlideImages).mockClear();
+    h.slideCount = 3; // um lote só
+  });
+
+  afterEach(() => {
+    if (original === undefined) delete process.env.DESIGNER_BRAIN_BRANDS;
+    else process.env.DESIGNER_BRAIN_BRANDS = original;
+  });
+
+  it('desligado (padrão): nada muda — diretrizes legadas, sem cérebro, geração de foto como antes', async () => {
+    delete process.env.DESIGNER_BRAIN_BRANDS;
+    await rodar();
+
+    const planner = vi.mocked(runPlanner).mock.calls[0]![0] as { brandContext: string };
+    expect(planner.brandContext).toBe('contexto da marca');
+    expect(h.prompts[0]!.sys).not.toContain(GLOBAL);
+    expect(promptOf(1)).toContain('Diretrizes: DIRETRIZ-LEGADA');
+    const resolver = vi.mocked(resolveSlideImages).mock.calls[0]![0] as { allowGeneratedGraphics?: boolean };
+    expect(resolver.allowGeneratedGraphics).toBeUndefined();
+  });
+
+  it('ligado: planner e artista recebem as camadas, e o legado sai de cena', async () => {
+    process.env.DESIGNER_BRAIN_BRANDS = 'amanda-coelho';
+    h.session.brandSlug = 'amanda-coelho'; // tem seed de memória
+    await rodar();
+
+    const planner = vi.mocked(runPlanner).mock.calls[0]![0] as { brandContext: string };
+    expect(planner.brandContext).toContain(GLOBAL);
+    expect(planner.brandContext).toContain('#410C1C'); // memória da Amanda
+    expect(planner.brandContext).toContain('MODO: APRESENTAÇÃO');
+
+    // O artista é quem escreve o HTML: o cérebro tem de chegar nele, antes da mecânica de saída.
+    const sys = h.prompts[0]!.sys;
+    expect(sys.startsWith(GLOBAL)).toBe(true);
+    expect(sys).toContain('REGRA DE FOTOGRAFIA PARA ESTA PEÇA');
+    expect(sys).toContain('MECÂNICA DE SAÍDA');
+    expect(promptOf(1)).not.toContain('DIRETRIZ-LEGADA');
+  });
+
+  it('ligado: o resolver de imagens não pode gerar foto nem buscar no Unsplash', async () => {
+    process.env.DESIGNER_BRAIN_BRANDS = 'amanda-coelho';
+    h.session.brandSlug = 'amanda-coelho';
+    await rodar();
+
+    const resolver = vi.mocked(resolveSlideImages).mock.calls[0]![0] as { allowGeneratedGraphics?: boolean };
+    expect(resolver.allowGeneratedGraphics).toBe(false);
+  });
+
+  it('ligado sem memória de projeto: erro visível, e a geração não segue com as regras erradas', async () => {
+    process.env.DESIGNER_BRAIN_BRANDS = 'marca-sem-memoria';
+    h.session.brandSlug = 'marca-sem-memoria';
+    await rodar();
+
+    const erro = wsOf('error');
+    expect(erro).toHaveLength(1);
+    expect(String(erro[0]!.args[1])).toContain('não tem memória de projeto');
+    expect(h.modelCalls).toBe(0);
+    expect(vi.mocked(runPlanner)).not.toHaveBeenCalled();
   });
 });
