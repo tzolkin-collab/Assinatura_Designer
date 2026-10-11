@@ -5,7 +5,7 @@
 // O worker precisa do client Redis compartilhado (o pipeline lê/escreve sessões
 // por ele) além das conexões próprias do BullMQ.
 
-import { config, validateConfig } from './config.js';
+import { config, redisEndpointForLogs, validateConfig } from './config.js';
 import { redis } from './lib/redis.js';
 import { initEventBus, closeEventBus } from './lib/eventBus.js';
 import { startPipelineWorker, startCanvaExportWorker, startDeckExportWorker, startAssetCaptureWorker, startReferenceSyncWorker, closeQueue } from './lib/queue.js';
@@ -17,13 +17,13 @@ const start = async () => {
     await redis.connect();
   } catch (err) {
     console.error('\n❌ Redis connection failed:', err instanceof Error ? err.message : String(err));
-    console.error(`   URL: ${config.redisUrl}\n`);
+    console.error(`   Redis: ${redisEndpointForLogs()}\n`);
     process.exit(1);
   }
 
   console.log(`\n  ⚙️  Assinatura Worker`);
   console.log(`  ├─ Environment: ${config.nodeEnv}`);
-  console.log(`  ├─ Redis:        ${config.redisUrl}`);
+  console.log(`  ├─ Redis:        ${redisEndpointForLogs()}`);
 
   // O worker precisa do EventBus publisher para que chamadas como
   // ws.progress(sessionId, ...) cheguem ao processo da API via Redis Pub/Sub.

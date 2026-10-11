@@ -44,6 +44,30 @@ import {
 import { isInterruptRequested, markInterruptStopped } from '../lib/interrupt.js';
 
 const ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
+
+async function loadStyleReferenceParts(images: Array<{ url: string; name: string; role?: 'style-reference' | 'content-asset' }> | undefined, brandSlug: string) {
+  const base = config.r2PublicUrl.replace(/\/$/, '');
+  if (!base) return [] as Array<{ text?: string; inlineData?: { mimeType: string; data: string } }>;
+  const refs = (images ?? []).filter((image) => image.role === 'style-reference').slice(0, 3);
+  const parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [];
+  for (const ref of refs) {
+    // Somente anexos de chat deste bucket/marca; URLs arbitrárias não viram fetch do servidor.
+    if (!ref.url.startsWith(`${base}/brands/${encodeURIComponent(brandSlug)}/chat-attachments/`)) continue;
+    try {
+      const response = await fetch(ref.url, { signal: AbortSignal.timeout(8000) });
+      if (!response.ok) continue;
+      const mimeType = response.headers.get('content-type')?.split(';')[0]?.trim() ?? '';
+      if (!['image/jpeg', 'image/png', 'image/webp'].includes(mimeType)) continue;
+      const bytes = Buffer.from(await response.arrayBuffer());
+      if (bytes.length > 8 * 1024 * 1024) continue;
+      parts.push({ text: `Moodboard de referência visual: ${ref.name}. Use somente para direção de arte, paleta, composição e tipografia; nunca insira esta imagem no slide.` });
+      parts.push({ inlineData: { mimeType, data: bytes.toString('base64') } });
+    } catch (error) {
+      logger.warn('Não foi possível carregar moodboard para referência multimodal', { name: ref.name, error: (error as Error).message });
+    }
+  }
+  return parts;
+}
 // Extrai uma contagem de slides pedida no brief ("de 200 slides", "50 lâminas",
 // "30 páginas"). Clampa ao teto de sanidade. Retorna undefined se não citada.
 export function parseRequestedSlideCount(brief: string): number | undefined {
@@ -138,7 +162,7 @@ export interface PipelineParams {
   resumeFromStyleProof?: boolean;
   /** Fotos que o usuário anexou no chat desta sessão (já com URL do R2) — o
    *  artista as recebe igual a um asset da marca, podendo embutir de verdade. */
-  attachmentImages?: Array<{ url: string; name: string }>;
+  attachmentImages?: Array<{ url: string; name: string; role?: 'style-reference' | 'content-asset' }>;
   /** Proporção do Design (1:1 default) — "16:9"/"1:1"/"4:5"/"3:4"/"9:16". Ignorado
    *  para apresentação (sempre 16:9). */
   aspectRatio?: string;
@@ -639,14 +663,20 @@ async function runPipelineInner(
         agentPromptLength: brand?.agentPrompt?.length,
         logoUrlLength: brand?.logoUrl?.length,
         referencesCount: brand?.references?.length,
+        visualMoodboardCount: (params.attachmentImages ?? []).filter((image) => image.role === 'style-reference').length,
       });
+
+      const moodboardParts = await loadStyleReferenceParts(params.attachmentImages, brand.slug);
+      const contentAssets = (params.attachmentImages ?? []).filter((image) => image.role !== 'style-reference');
 
       const design = await generateHtmlDesignBatched(
         async (systemInstruction, userPrompt) => {
           await checkCancelled();
           const response = await generateWithRetry(ai, {
             model: preferredModel,
-            contents: userPrompt,
+            contents: moodboardParts.length
+              ? [{ role: 'user', parts: [{ text: userPrompt }, ...moodboardParts] }]
+              : userPrompt,
             config: {
               systemInstruction,
               responseMimeType: 'application/json',
@@ -679,7 +709,7 @@ async function runPipelineInner(
             logoUrl: brand.logoUrl,
             // Fotos anexadas pelo usuário no chat entram JUNTO com os assets da
             // marca — o artista as trata igual, prefere a inventar foto de banco.
-            assetUrls: [...(params.attachmentImages ?? []), ...brand.assetUrls],
+            assetUrls: [...contentAssets, ...brand.assetUrls],
             presentationConfig: brand.presentationConfig ?? undefined,
             references: brand.references,
             // Com o cérebro ligado a memória do projeto é a do cadastro: o que o chat

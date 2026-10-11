@@ -17,6 +17,7 @@ const h = vi.hoisted(() => {
     /** Cada item descreve o stream de UMA chamada ao modelo. */
     streams: [] as Array<(call: { hooks: any }) => AsyncGenerator<any>>,
     enqueued: [] as any[],
+    enqueueError: null as Error | null,
     appended: [] as any[],
     onAppend: null as null | ((msg: any) => Promise<void> | void),
     skillCalls: [] as string[],
@@ -61,7 +62,10 @@ vi.mock('../lib/geminiRetry.js', () => ({
   }),
 }));
 
-vi.mock('../lib/queue.js', () => ({ enqueuePipeline: vi.fn(async (p: any) => { h.enqueued.push(p); }) }));
+vi.mock('../lib/queue.js', () => ({ enqueuePipeline: vi.fn(async (p: any) => {
+  if (h.enqueueError) throw h.enqueueError;
+  h.enqueued.push(p);
+}) }));
 vi.mock('../lib/r2.js', () => ({ uploadFileToR2: vi.fn(async () => 'https://r2/x.png') }));
 vi.mock('../lib/prisma.js', () => ({ default: { post: { findFirst: vi.fn(async () => null) } } }));
 vi.mock('../agents/tools/index.js', () => ({ executeTool: vi.fn() }));
@@ -109,6 +113,7 @@ beforeEach(() => {
   h.streamCalls.length = 0;
   h.streams.length = 0;
   h.enqueued.length = 0;
+  h.enqueueError = null;
   h.appended.length = 0;
   h.skillCalls.length = 0;
   h.onAppend = null;
@@ -195,6 +200,59 @@ describe('orientações consumidas pelo cérebro', () => {
     expect(h.enqueued).toHaveLength(1);
     expect(h.session.workerStatus).toBe('running');
     expect((await listAdvice(S))[0]).toMatchObject({ status: 'pending' });
+  });
+
+  it('falha ao enfileirar persiste fase de erro e libera a sessão', async () => {
+    h.enqueueError = new Error('Redis indisponível');
+    h.streams.push(async function* () {
+      yield { candidates: [{ content: { parts: [{ text: 'Gerando! [DISPATCH:carousel]' }] } }] };
+    });
+
+    await send('cria o carrossel');
+
+    expect(h.session).toMatchObject({ phase: 'error', workerStatus: 'error' });
+    expect(wsOf('error')).toHaveLength(1);
+    expect(wsOf('sessionState').at(-1)?.args[1]).toMatchObject({ phase: 'error', workerStatus: 'error' });
+  });
+
+  it('no modo Auto, roteiriza a copy e despacha sem pedir aprovação manual', async () => {
+    const planner = await import('../agents/planner/index');
+    vi.mocked(planner.runPlanner).mockResolvedValueOnce([{
+      order: 1, title: 'Abertura', goal: 'Apresentar o tema', layout_type: 'title-hero',
+      copy: 'Copy aprovada',
+    }]);
+    h.session.reviewMode = 'auto';
+    h.streams.push(texto('Vou criar agora [DISPATCH:presentation]'));
+
+    await send('Copy oficial longa. '.repeat(80));
+
+    expect(h.enqueued).toHaveLength(1);
+    expect(h.enqueued[0].approvedSkeleton).toEqual(expect.arrayContaining([
+      expect.objectContaining({ title: 'Abertura', copy: 'Copy aprovada' }),
+    ]));
+    expect(h.session.pendingPlan).toBeFalsy();
+    expect(h.session.activeQuestion).toBeNull();
+    expect(tokens()).toContain('aprovado automaticamente');
+  });
+
+  it('preserva moodboards na pausa e os encaminha ao aprovar o roteiro', async () => {
+    const planner = await import('../agents/planner/index');
+    vi.mocked(planner.runPlanner).mockResolvedValueOnce([{
+      order: 1, title: 'Abertura', goal: 'Apresentar o tema', layout_type: 'title-hero', copy: 'Copy oficial',
+    }]);
+    const moodboard = { name: 'Moodboard apresentações.png', mimeType: 'image/png', dataBase64: 'aGVsbG8=', url: 'https://r2/x.png' };
+    h.session.messages.push({ role: 'user', content: 'Copy oficial. '.repeat(100), timestamp: 1, attachments: [moodboard] });
+    h.streams.push(texto('Vou criar agora [DISPATCH:presentation]'));
+
+    await send('crie a apresentação');
+
+    const expectedImages = [{ url: moodboard.url, name: moodboard.name, role: 'style-reference' }];
+    expect(h.session.pendingPlan.attachmentImages).toEqual(expectedImages);
+    expect(h.enqueued).toHaveLength(0);
+
+    await send('Aprovar roteiro e gerar');
+
+    expect(h.enqueued[0].attachmentImages).toEqual(expectedImages);
   });
 
   it('um turno normal (novo ciclo) limpa da lista o que já foi resolvido', async () => {

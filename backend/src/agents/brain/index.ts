@@ -41,6 +41,35 @@ import { generatePhotoBuffer } from '../../lib/imageResolver.js';
 
 const ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
 
+/** A fila falhou antes do worker receber o job; não deixe a sessão ocupada. */
+async function enqueuePipelineOrFailSession(
+  params: Parameters<typeof enqueuePipeline>[0],
+  action: string,
+): Promise<void> {
+  try {
+    await enqueuePipeline(params);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    logger.error(`Falha ao enfileirar o pipeline (${action})`, { error: detail, sessionId: params.sessionId });
+    try {
+      await updateSession(params.sessionId, {
+        phase: 'error',
+        workerStatus: 'error',
+        progress: 0,
+        progressLabel: '',
+      });
+      const session = await getSession(params.sessionId);
+      if (session) emitSessionState(params.sessionId, session);
+    } catch (stateError) {
+      logger.error('Não foi possível persistir o erro de enfileiramento', {
+        error: stateError instanceof Error ? stateError.message : String(stateError),
+        sessionId: params.sessionId,
+      });
+    }
+    ws.error(params.sessionId, `Não consegui iniciar a geração (${action}). Verifique a fila e tente novamente.`);
+  }
+}
+
 function parseQuestionTag(response: string, mode: ReviewMode): FabricaQuestion | null {
   // Extrator balanceado: a regex lazy antiga truncava no primeiro `}` seguido de
   // `]`, o que quebrava a tag sempre que uma opção era objeto (`{label, ...}`).
@@ -227,11 +256,14 @@ async function planAndAskApproval(
   fullBrief: string,
   sourceCopy: string,
   aspectRatio?: string,
+  attachmentImages?: Array<{ url: string; name: string; role?: 'style-reference' | 'content-asset' }>,
 ): Promise<void> {
   await updateSession(sessionId, { phase: 'ready', workerStatus: 'running' });
   const planning = await getSession(sessionId);
   if (planning) emitSessionState(sessionId, planning);
-  ws.token(sessionId, '\n\nRecebi a copy oficial — montando o roteiro slide a slide para você aprovar antes de eu gerar...\n');
+  ws.token(sessionId, session.reviewMode === 'auto'
+    ? '\n\nRecebi a copy oficial — montando o roteiro para iniciar a geração automaticamente...\n'
+    : '\n\nRecebi a copy oficial — montando o roteiro slide a slide para você aprovar antes de eu gerar...\n');
 
   try {
     const skeleton = await runPlanner({
@@ -242,12 +274,29 @@ async function planAndAskApproval(
       sourceCopy,
     });
 
+    if (session.reviewMode === 'auto') {
+      await updateSession(sessionId, { phase: 'ready', workerStatus: 'running', activeQuestion: null });
+      const atual = await getSession(sessionId);
+      if (atual) emitSessionState(sessionId, atual);
+      ws.token(sessionId, '\n\nRoteiro montado e aprovado automaticamente — iniciando a geração.\n');
+      await enqueuePipelineOrFailSession({
+        sessionId,
+        brief: fullBrief,
+        format,
+        aspectRatio,
+        approvedSkeleton: skeleton,
+        sourceCopy,
+        attachmentImages,
+      }, 'roteiro automático');
+      return;
+    }
+
     const texto = `\n**Roteiro proposto (${skeleton.length} slides, copy oficial distribuída):**\n\n${resumoDoRoteiro(skeleton)}\n\n*Confira se a divisão da copy faz sentido. Ao aprovar, eu gero o deck inteiro de uma vez, sem mais pausas.*`;
     ws.token(sessionId, texto);
     await appendMessage(sessionId, { role: 'assistant', content: texto.trim(), timestamp: Date.now() });
 
     await updateSession(sessionId, {
-      pendingPlan: { format, aspectRatio, skeleton, sourceCopy, brief: fullBrief },
+      pendingPlan: { format, aspectRatio, skeleton, sourceCopy, brief: fullBrief, attachmentImages },
       activeQuestion: {
         id: randomUUID(),
         kind: 'generic',
@@ -270,10 +319,7 @@ async function planAndAskApproval(
     // recebe a copy e replaneja lá dentro, só perde a pausa de aprovação).
     logger.error('Roteiro copy-first falhou; caindo para geração direta', { error: (err as Error).message });
     ws.token(sessionId, '\n\n*Não consegui montar o roteiro prévio agora — vou gerar direto usando a copy como fonte.*\n');
-    enqueuePipeline({ sessionId, brief: fullBrief, format, sourceCopy, aspectRatio }).catch((e) => {
-      logger.error('Falha ao enfileirar o pipeline (fallback copy-first)', { error: (e as Error).message });
-      ws.error(sessionId, `Erro ao iniciar a geração: ${(e as Error).message}`);
-    });
+    await enqueuePipelineOrFailSession({ sessionId, brief: fullBrief, format, sourceCopy, aspectRatio }, 'fallback copy-first');
   }
 }
 
@@ -285,10 +331,10 @@ function normalizeAttachments(value: unknown): ChatAttachment[] | undefined {
     .map((item) => item as WsAttachment)
     .filter((item) => typeof item.name === 'string'
       && typeof item.mimeType === 'string'
-      && item.mimeType.startsWith('image/')
+      && (item.mimeType.startsWith('image/') || item.mimeType === 'application/pdf')
       && typeof item.dataBase64 === 'string'
       && item.dataBase64.trim().length > 0)
-    .slice(0, 6)
+    .slice(0, 5)
     .map((item) => ({
       name: item.name,
       mimeType: item.mimeType,
@@ -370,11 +416,11 @@ export function initBrainHandlers(): void {
       const updated = await getSession(sessionId);
       if (updated) emitSessionState(sessionId, updated);
       ws.token(sessionId, '\n\nEntendido, vou corrigir. Um momento...');
-      await enqueuePipeline({
+      await enqueuePipelineOrFailSession({
         sessionId,
         brief,
         format: 'presentation',
-      });
+      }, 'regeneração após recusa');
     };
 
     // Fonte de verdade da arte é o Post (mesmo padrão do applySlideEdits): o
@@ -682,17 +728,15 @@ async function handleUserMessageInner(
       if (aprovada) emitSessionState(sessionId, aprovada);
       ws.token(sessionId, '\nRoteiro aprovado — gerando o deck inteiro agora, sem mais pausas.\n');
       ws.end(sessionId);
-      enqueuePipeline({
+      await enqueuePipelineOrFailSession({
         sessionId,
         brief: plan.brief,
         format: plan.format,
         aspectRatio: plan.aspectRatio,
         approvedSkeleton: plan.skeleton,
         sourceCopy: plan.sourceCopy,
-      }).catch((err) => {
-        logger.error('Falha ao enfileirar o pipeline (roteiro aprovado)', { error: (err as Error).message });
-        ws.error(sessionId, `Erro ao iniciar a geração: ${(err as Error).message}`);
-      });
+        attachmentImages: plan.attachmentImages,
+      }, 'roteiro aprovado');
       return;
     }
     await updateSession(sessionId, { pendingPlan: null });
@@ -709,7 +753,7 @@ async function handleUserMessageInner(
       if (aprovada) emitSessionState(sessionId, aprovada);
       ws.token(sessionId, '\nEstilo aprovado — gerando o restante da apresentação com essa linguagem visual.\n');
       ws.end(sessionId);
-      enqueuePipeline({
+      await enqueuePipelineOrFailSession({
         sessionId,
         brief: proof.brief,
         format: proof.format,
@@ -718,10 +762,7 @@ async function handleUserMessageInner(
         sourceCopy: proof.sourceCopy,
         postId: proof.postId,
         resumeFromStyleProof: true,
-      }).catch((err) => {
-        logger.error('Falha ao enfileirar o pipeline (estilo aprovado)', { error: (err as Error).message });
-        ws.error(sessionId, `Erro ao retomar a geração: ${(err as Error).message}`);
-      });
+      }, 'retomada de estilo');
       return;
     }
     // Se não aprovou, o fluxo morre aqui e o LLM responde (podendo disparar outro DISPATCH).
@@ -745,7 +786,7 @@ async function handleUserMessageInner(
         ? '\nCombinado, usando as fotos sugeridas da biblioteca — gerando o restante do design.\n'
         : '\nSem problema, gerando fotos novas pra esses slides.\n');
       ws.end(sessionId);
-      enqueuePipeline({
+      await enqueuePipelineOrFailSession({
         sessionId,
         brief: pending.brief,
         format: pending.format,
@@ -758,10 +799,7 @@ async function handleUserMessageInner(
           decision: aceitouBiblioteca ? 'accept' : 'regenerate',
           candidates: pending.candidates,
         },
-      }).catch((err) => {
-        logger.error('Falha ao enfileirar o pipeline (bundle de imagens resolvido)', { error: (err as Error).message });
-        ws.error(sessionId, `Erro ao retomar a geração: ${(err as Error).message}`);
-      });
+      }, 'decisão de imagens');
       return;
     }
     // Resposta inesperada (não deveria acontecer com allowFreeform:false, mas por
@@ -1106,16 +1144,21 @@ async function detectAndDispatch(
   const attachmentImages = session.messages
     .filter(m => m.role === 'user')
     .flatMap(m => m.attachments ?? [])
+    .filter(a => a.mimeType.startsWith('image/'))
     .filter((a): a is typeof a & { url: string } => typeof a.url === 'string')
     .slice(0, 6)
-    .map(a => ({ url: a.url, name: a.name }));
+    .map(a => ({
+      url: a.url,
+      name: a.name,
+      role: /mood\s*board|moodboard|refer[eê]ncia\s+visual/i.test(a.name) ? 'style-reference' as const : 'content-asset' as const,
+    }));
 
   // Fluxo copy-first: com copy oficial na conversa (colada ou anexo de texto),
   // o roteiro é planejado ANTES e pausado para aprovação — a geração cara só
   // roda depois do "aprovar". Sem copy, o fluxo direto continua o mesmo.
   const sourceCopy = extractSourceCopy(session.messages);
   if (sourceCopy) {
-    await planAndAskApproval(sessionId, session, format, fullBrief, sourceCopy, aspectRatio);
+    await planAndAskApproval(sessionId, session, format, fullBrief, sourceCopy, aspectRatio, attachmentImages);
     return;
   }
 
@@ -1126,10 +1169,7 @@ async function detectAndDispatch(
   // Enfileira a geração (durável, com retry) — não bloqueia o stream. O erro
   // aqui é só de enfileiramento (ex.: Redis fora); falhas da geração em si são
   // tratadas no worker (queue.ts) e notificadas via ws.
-  enqueuePipeline({ sessionId, brief: fullBrief, format, generateStyleProofOnly: isProof, attachmentImages, aspectRatio, imagePreference }).catch(err => {
-    logger.error('Falha ao enfileirar o pipeline', { error: (err as Error).message });
-    ws.error(sessionId, `Erro ao iniciar a geração: ${err instanceof Error ? err.message : String(err)}`);
-  });
+  await enqueuePipelineOrFailSession({ sessionId, brief: fullBrief, format, generateStyleProofOnly: isProof, attachmentImages, aspectRatio, imagePreference }, 'nova geração');
 }
 
 // ── Ajuste cirúrgico de slides (preserva o design existente) ──────────────────

@@ -117,6 +117,7 @@ export interface FabricaSession {
     skeleton: Array<{ title: string; goal: string; layout_type: string; order: number; copy?: string }>;
     sourceCopy?: string;
     brief: string;
+    attachmentImages?: Array<{ url: string; name: string; role?: 'style-reference' | 'content-asset' }>;
   } | null;
   /**
    * Pausa estratégica (Amostra de Estilo): o pipeline gera apenas o slide 0 e
