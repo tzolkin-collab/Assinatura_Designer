@@ -27,9 +27,9 @@ Regras que o código impõe e que **não devem ser afrouxadas**:
 Fora da pilha: #74 (fix: só foto real fornecida, vale revisar/mergear), #73 (galeria, já mergeada), #50 (Jules, decisão pendente), #62–#66 (UI/fonte/sidebar, empilhados entre si), #66 (docs Amanda).
 Ao mergear, **retarget a base de cada PR** para `main` depois que o anterior entrar.
 
-## 3. Migrations: NÃO aplicadas no banco
+## 3. Migrations (APLICADAS no banco em 11/10)
 
-`20261011120000_add_brand_collab` e `20261011150000_add_brand_profile` (ambas aditivas). Antes de gerar de verdade com ficha, aplique-as. O código novo **não quebra sem elas**: se a leitura da ficha falha, a geração segue sem cérebro, com aviso no log (`Não foi possível ler a ficha do projeto`). Mas as telas Cérebro, Visão geral, Galeria de desdobramentos e a importação dependem das tabelas.
+`20261011120000_add_brand_collab` e `20261011150000_add_brand_profile` (ambas aditivas). Já aplicadas; o texto abaixo descreve o comportamento de quem rodar o código novo num banco sem elas. O código novo **não quebra sem elas**: se a leitura da ficha falha, a geração segue sem cérebro, com aviso no log (`Não foi possível ler a ficha do projeto`). Mas as telas Cérebro, Visão geral, Galeria de desdobramentos e a importação dependem das tabelas.
 
 ## 4. Como funciona agora (mapa do código)
 
@@ -52,7 +52,8 @@ Salvar a ficha de um projeto **liga o cérebro dele** (só texto aprovado, só f
 ## 5. O que NÃO foi feito (próximos passos)
 
 1. **Fatia 4 (parte 1 feita, PR da branch `feat/amanda-como-ficha`): a Amanda como ficha.** `seeds/amandaCoelhoProfile.ts` tem a memória da Gabriela dividida nas seções da ficha, palavra por palavra (um teste compara com o seed). `scripts/loadAmandaProfile.ts` simula por padrão e só grava com `--apply` (e só se o projeto ainda não tem ficha; `--force` sobrescreve). O que a memória original não traz fica pendente: tom, logo, manual visual (único obrigatório que falta) e regras de collab.
-   **Parte 2 (NÃO feita, depende do banco):** (a) aplicar as migrations; (b) `pnpm exec tsx scripts/loadAmandaProfile.ts` e depois `--apply`; (c) enviar logo/manual para a biblioteca e completar a ficha na tela; (d) rodar uma geração real da Amanda **sem** `DESIGNER_BRAIN_BRANDS` e conferir; (e) só então remover `DESIGNER_BRAIN_BRANDS` (`enabled.ts`, usos em `pipeline.ts`/`brain`), `seeds/amandaCoelho.ts`, `PROJECT_MEMORY_SEEDS`, `PROJECT_OFFICIAL_FONTS` e o teste de equivalência `amandaProfile.test.ts`. Remover antes de (b) tira o cérebro da Amanda.
+   **Atualização 11/10 (noite):** (a) as migrations `add_brand_collab` e `add_brand_profile` **foram aplicadas** no banco (`migrate status`: up to date) e (b) a ficha da Amanda **foi gravada** (`--apply`; rodar de novo recusa sem `--force`). Conferido lendo do banco: `loadBrainLayers('amanda-coelho')` devolve a ficha, o cérebro fica ativo sem a flag, fontes oficiais Queens/Aeonik, e marcas sem ficha seguem desligadas. A produção atual (`main`) ignora a ficha: ela só passa a valer quando o #79 for mergeado.
+   **Parte 2 (resta):** (c) enviar logo/manual para a biblioteca e completar a ficha na tela; (d) rodar uma geração real da Amanda **sem** `DESIGNER_BRAIN_BRANDS` e conferir; (e) só então remover `DESIGNER_BRAIN_BRANDS` (`enabled.ts`, usos em `pipeline.ts`/`brain`), `seeds/amandaCoelho.ts`, `PROJECT_MEMORY_SEEDS`, `PROJECT_OFFICIAL_FONTS` e o teste de equivalência `amandaProfile.test.ts`. Remover antes de a ficha estar no banco tira o cérebro da Amanda (já está; falta só a geração real e o item (c)).
 2. **Modo e-book A4**: o pipeline só gera apresentação 16:9 e carrossel (imagem avulsa com proporção). E-book A4 precisa de formato/tela/renderizador novos.
 3. **Geração real com ficha no banco**: nunca rodou (banco sem migrations). Tudo está coberto por testes (971 no backend, 174 no frontend), mas não por Gemini real com ficha.
 4. **Páginas Histórico e Desdobramentos**, reorganização da sidebar (renomear "Marca" → "Projeto"; remover duplicidade "Minhas Marcas/Projetos da Equipe"), conforme o review por função.
