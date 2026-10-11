@@ -5,6 +5,7 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
+  Brain,
   LayoutDashboard,
   LayoutGrid,
   Factory,
@@ -47,6 +48,7 @@ const extrasNav: NavItem[] = [
 function getBrandNav(marca: string): NavItem[] {
   return [
     { label: 'Visão geral', href: `/${marca}`, icon: <LayoutDashboard size={18} /> },
+    { label: 'Cérebro da IA', href: `/${marca}/cerebro`, icon: <Brain size={18} /> },
     { label: 'Galeria', href: `/${marca}/galeria`, icon: <Eye size={18} /> },
     { label: 'Fábrica', href: `/${marca}/fabrica`, icon: <Factory size={18} /> },
     { label: 'Editor', href: `/${marca}/editor`, icon: <PenTool size={18} /> },

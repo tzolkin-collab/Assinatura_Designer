@@ -222,7 +222,7 @@ export default function ProjectOverviewPage() {
           </div>
         ) : (
         <div className={styles.configGrid}>
-          <Link href={`/${slug}/configuracoes/agent`} className={styles.configCard}>
+          <Link href={`/${slug}/cerebro`} className={styles.configCard}>
             <div className={styles.cardHead}>
               <span className={styles.cardIcon}><Brain size={20} /></span>
               <div>
