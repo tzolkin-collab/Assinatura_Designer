@@ -23,6 +23,7 @@ const h = vi.hoisted(() => {
     slideCount: 12,
     savedProfile: null as Record<string, unknown> | null,
     profileLookupFails: false,
+    brandRow: null as Record<string, unknown> | null,
   };
   return state;
 });
@@ -35,7 +36,13 @@ vi.mock('../lib/prisma.js', () => ({
     },
     slide: { findFirst: vi.fn(async () => ({ id: 'slide-row' })), update: vi.fn(async () => ({})) },
     asset: { findMany: vi.fn(async () => []) },
-    brandProfile: { findFirst: vi.fn(async () => { if (h.profileLookupFails) throw new Error('relation "BrandProfile" does not exist'); return h.savedProfile ? { data: h.savedProfile } : null; }) },
+    brand: {
+      findUnique: vi.fn(async () => {
+        if (h.profileLookupFails) throw new Error('relation "BrandProfile" does not exist');
+        if (h.brandRow) return h.brandRow;
+        return h.savedProfile ? { name: 'Marca X', kind: 'BASE', collab: null, profile: { data: h.savedProfile }, parent: null } : null;
+      }),
+    },
   },
 }));
 
@@ -59,7 +66,7 @@ vi.mock('../lib/websocket.js', () => {
 
 vi.mock('../lib/brandContext.js', () => ({
   resolveBrandContext: vi.fn(async () => ({
-    id: 'brand-1', name: 'Marca X', slug: h.session.brandSlug, agentPrompt: '', guidelines: 'DIRETRIZ-LEGADA', colors: ['#111111'], primaryFonts: ['Inter'], assetUrls: [], references: [],
+    id: 'brand-1', name: 'Marca X', slug: h.session.brandSlug, agentPrompt: '', guidelines: 'DIRETRIZ-LEGADA', colors: ['#111111'], primaryFonts: ['Inter'], assetUrls: [], libraryBrandIds: ['brand-1'], references: [],
   })),
   buildBrandContextSummary: vi.fn(() => 'contexto da marca'),
 }));
@@ -151,6 +158,7 @@ async function rodar() {
 beforeEach(() => {
   h.savedProfile = null;
   h.profileLookupFails = false;
+  h.brandRow = null;
   h.wsCalls.length = 0;
   h.prompts.length = 0;
   h.reviewerBriefs.length = 0;
@@ -461,6 +469,102 @@ describe('cérebro do Designer ligado por marca (DESIGNER_BRAIN_BRANDS)', () => 
     expect(h.prompts[0]!.sys.startsWith(GLOBAL)).toBe(true);
     const resolver = vi.mocked(resolveSlideImages).mock.calls[0]![0] as { allowGeneratedGraphics?: boolean };
     expect(resolver.allowGeneratedGraphics).toBe(false);
+  });
+
+  it('desdobramento: a ficha é a da base, a camada de collab traz só o que muda, e o parceiro entra nos ativos', async () => {
+    delete process.env.DESIGNER_BRAIN_BRANDS;
+    h.session.brandSlug = 'base-collab-parceiro';
+    h.brandRow = {
+      name: 'Base + Parceiro',
+      kind: 'PARTNERSHIP',
+      collab: {
+        context: 'CONTEXTO-DO-COLLAB',
+        partner: { name: 'Estadão', logoUrl: 'https://cdn.example/estadao.png' },
+        baseProtagonism: 70,
+      },
+      profile: { data: { essence: 'ESSENCIA-DO-DESDOBRAMENTO' } },
+      parent: { name: 'Base', slug: 'base', profile: { data: { essence: 'ESSENCIA-DA-BASE', collabRules: 'REGRA-DE-COLLAB-DA-BASE' } } },
+    };
+    await rodarComCopia();
+
+    const ctx = (vi.mocked(runPlanner).mock.calls[0]![0] as { brandContext: string }).brandContext;
+    expect(ctx).toContain('PROJETO: Base');
+    expect(ctx).toContain('ESSENCIA-DA-BASE');
+    expect(ctx).toContain('REGRA-DE-COLLAB-DA-BASE');
+    expect(ctx).toContain('DESDOBRAMENTO ATIVO: Base + Parceiro');
+    expect(ctx).toContain('PROTAGONISMO: a marca-mãe lidera com 70%');
+    expect(ctx).toContain('CONTEXTO-DO-COLLAB');
+    expect(ctx).toContain('Logo do parceiro Estadão');
+    // O que é só do desdobramento entra como ajuste, nunca no lugar da base.
+    expect(ctx).toContain('AJUSTES PRÓPRIOS DESTE DESDOBRAMENTO');
+  });
+
+  it('desdobramento cuja base não tem ficha usa a do próprio desdobramento como projeto', async () => {
+    delete process.env.DESIGNER_BRAIN_BRANDS;
+    h.session.brandSlug = 'so-o-desdobramento';
+    h.brandRow = {
+      name: 'Interno',
+      kind: 'INTERNAL',
+      collab: { context: 'CTX' },
+      profile: { data: { essence: 'ESSENCIA-PROPRIA' } },
+      parent: { name: 'Base', slug: 'base', profile: null },
+    };
+    await rodarComCopia();
+    const ctx = (vi.mocked(runPlanner).mock.calls[0]![0] as { brandContext: string }).brandContext;
+    expect(ctx).toContain('ESSENCIA-PROPRIA');
+    expect(ctx).not.toContain('AJUSTES PRÓPRIOS');
+  });
+
+  it('status por bloco: só o aprovado vira slide; fala e contexto orientam; interno nunca chega ao modelo', async () => {
+    delete process.env.DESIGNER_BRAIN_BRANDS;
+    h.session.brandSlug = 'marca-com-ficha';
+    h.savedProfile = { essence: 'X' };
+    vi.mocked(runPlanner).mockResolvedValue(roteiro(() => 'copy') as never);
+    await runPipeline({
+      sessionId: S,
+      brief: 'Apresentação de teste',
+      format: 'presentation',
+      postId: POST,
+      sourceCopy: ['[APROVADO]', 'TITULO-APROVADO', '[FALA]', 'FALA-DO-PALESTRANTE', '[CONTEXTO]', 'CONTEXTO-DA-REUNIAO', '[INTERNO]', 'VALOR-DO-CONTRATO'].join('\n'),
+    });
+    const call = vi.mocked(runPlanner).mock.calls[0]![0] as { brandContext: string; sourceCopy?: string };
+    expect(call.sourceCopy).toBe('TITULO-APROVADO');
+    expect(call.brandContext).toContain('FALA-DO-PALESTRANTE');
+    expect(call.brandContext).toContain('CONTEXTO-DA-REUNIAO');
+    expect(call.brandContext).toContain('NÃO é texto da peça');
+    const tudo = JSON.stringify([call, h.prompts]);
+    expect(tudo).not.toContain('VALOR-DO-CONTRATO');
+    // E o resultado diz o que ficou de fora da arte, sem repetir o conteúdo.
+    const avisos = wsOf('token').map((c) => String(c.args[1])).join('');
+    expect(avisos).toContain('2 blocos de fala/contexto/apoio serviram só de orientação');
+    expect(avisos).toContain('1 bloco interno/não exibir não foi enviado à IA');
+    expect(avisos).not.toContain('VALOR-DO-CONTRATO');
+  });
+
+  it('status por bloco: texto em revisão é diagramado, mas o resultado avisa que a peça não é final', async () => {
+    delete process.env.DESIGNER_BRAIN_BRANDS;
+    h.session.brandSlug = 'marca-com-ficha';
+    h.savedProfile = { essence: 'X' };
+    vi.mocked(runPlanner).mockResolvedValue(roteiro(() => 'copy') as never);
+    await runPipeline({
+      sessionId: S,
+      brief: 'Apresentação de teste',
+      format: 'presentation',
+      postId: POST,
+      sourceCopy: '[APROVADO] FECHADO\n[EM REVISÃO] TALVEZ-MUDE',
+    });
+    const call = vi.mocked(runPlanner).mock.calls[0]![0] as { sourceCopy?: string };
+    expect(call.sourceCopy).toBe('FECHADO\n\nTALVEZ-MUDE');
+    expect(wsOf('token').map((c) => String(c.args[1])).join('')).toContain('não deve ser tratada como final');
+  });
+
+  it('status por bloco: sem nenhum texto aprovado (só fala/contexto), para e pede o texto', async () => {
+    delete process.env.DESIGNER_BRAIN_BRANDS;
+    h.session.brandSlug = 'marca-com-ficha';
+    h.savedProfile = { essence: 'X' };
+    await runPipeline({ sessionId: S, brief: 'Apresentação de teste', format: 'presentation', postId: POST, sourceCopy: '[FALA] só falado\n[CONTEXTO] só contexto' });
+    expect(String(wsOf('error')[0]!.args[1])).toContain('só gera com texto aprovado');
+    expect(vi.mocked(runPlanner)).not.toHaveBeenCalled();
   });
 
   it('ficha salva e SEM texto aprovado: para e pede o texto, como nas marcas piloto', async () => {

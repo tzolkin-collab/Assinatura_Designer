@@ -25,7 +25,7 @@ import { uploadFileToR2 } from '../../lib/r2.js';
 import { buildMessageParts } from '../../lib/chatMessageParts.js';
 import { uploadChatAttachments } from '../../lib/chatAttachments.js';
 import { BRAIN_SYSTEM_PROMPT, DESIGNER_BRAIN_CHAT_NOTE } from './prompts.js';
-import { isBrainActiveForBrand } from '../../lib/designerBrain/index.js';
+import { isBrainActiveForBrand, parseCopyBlocks } from '../../lib/designerBrain/index.js';
 import prisma from '../../lib/prisma.js';
 import { executeTool } from '../tools/index.js';
 import { mergeSlidesIntoPost, persistPostContent } from '../../lib/postHelper.js';
@@ -258,6 +258,20 @@ async function planAndAskApproval(
   aspectRatio?: string,
   attachmentImages?: Array<{ url: string; name: string; role?: 'style-reference' | 'content-asset' }>,
 ): Promise<void> {
+  // Status por bloco: só o aprovado (e o em revisão, como rascunho) vira roteiro. O texto com as
+  // marcas segue intacto para o pipeline, que também usa fala/contexto como orientação.
+  const marked = (await isBrainActiveForBrand(session.brandSlug)) ? parseCopyBlocks(sourceCopy) : null;
+  const copyForPlanner = marked?.hasMarkers ? marked.copyForSlides : sourceCopy;
+  if (marked?.hasMarkers && !copyForPlanner.trim()) {
+    const aviso =
+      'Todo o texto que você mandou está marcado como fala, contexto, apoio ou interno, e nada disso vira texto da peça. ' +
+      'Me mande o texto de cada slide marcado como [APROVADO] (ou sem marca) que eu distribuo sem alterar nenhuma palavra.';
+    ws.token(sessionId, `\n\n${aviso}\n`);
+    await appendMessage(sessionId, { role: 'assistant', content: aviso, timestamp: Date.now() });
+    await updateSession(sessionId, { phase: 'listening', workerStatus: 'idle' });
+    return;
+  }
+
   await updateSession(sessionId, { phase: 'ready', workerStatus: 'running' });
   const planning = await getSession(sessionId);
   if (planning) emitSessionState(sessionId, planning);
@@ -271,7 +285,7 @@ async function planAndAskApproval(
       brandContext: getSessionBrandContextSummary(session),
       format,
       targetSlideCount: parseRequestedSlideCount(fullBrief),
-      sourceCopy,
+      sourceCopy: copyForPlanner,
     });
 
     if (session.reviewMode === 'auto') {

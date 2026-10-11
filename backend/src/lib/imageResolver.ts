@@ -468,6 +468,8 @@ async function resolvePhoto(
 // ── Passo 2b: gera SVG (ícone/ilustração vetorial) via texto — inline no HTML ───
 export interface ResolveSlideImagesParams {
   brandId: string;
+  /** Bibliotecas de onde as fotos podem sair (a da marca e, num desdobramento, a da base). Padrão: só a da marca. */
+  libraryBrandIds?: string[];
   brandName: string;
   brandColors: string[];
   width: number;
@@ -510,7 +512,7 @@ export async function resolveSlideImages(params: ResolveSlideImagesParams): Prom
   // verdade na decisão (ver decideImagePlan) — 24 imagens num call estouraria
   // custo/latência à toa. 8 casa com o teto que o artista já usa (assetsBlock).
   const existingAssets = await prisma.asset.findMany({
-    where: { brandId: params.brandId, fileType: { startsWith: 'image/' } },
+    where: { brandId: { in: params.libraryBrandIds?.length ? params.libraryBrandIds : [params.brandId] }, fileType: { startsWith: 'image/' } },
     orderBy: { createdAt: 'desc' },
     take: 8,
     select: { url: true, name: true, tags: true },

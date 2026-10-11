@@ -2,7 +2,7 @@
 // orientações consumidas ao iniciar cada turno do modelo, "Pausar e enviar" abortando
 // o stream com o texto parcial preservado, e a reidratação da lista na reconexão.
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const h = vi.hoisted(() => {
   class GenerationAbortedError extends Error {
@@ -67,7 +67,7 @@ vi.mock('../lib/queue.js', () => ({ enqueuePipeline: vi.fn(async (p: any) => {
   h.enqueued.push(p);
 }) }));
 vi.mock('../lib/r2.js', () => ({ uploadFileToR2: vi.fn(async () => 'https://r2/x.png') }));
-vi.mock('../lib/prisma.js', () => ({ default: { post: { findFirst: vi.fn(async () => null) }, brandProfile: { findFirst: vi.fn(async () => null) } } }));
+vi.mock('../lib/prisma.js', () => ({ default: { post: { findFirst: vi.fn(async () => null) }, brand: { findUnique: vi.fn(async () => null) } } }));
 vi.mock('../agents/tools/index.js', () => ({ executeTool: vi.fn() }));
 vi.mock('../lib/postHelper.js', () => ({ mergeSlidesIntoPost: vi.fn(), persistPostContent: vi.fn() }));
 vi.mock('../lib/postVersions.js', () => ({ snapshotPost: vi.fn() }));
@@ -233,6 +233,42 @@ describe('orientações consumidas pelo cérebro', () => {
     expect(h.session.pendingPlan).toBeFalsy();
     expect(h.session.activeQuestion).toBeNull();
     expect(tokens()).toContain('aprovado automaticamente');
+  });
+
+  describe('status por bloco (marca com cérebro ligado)', () => {
+    const original = process.env.DESIGNER_BRAIN_BRANDS;
+    afterEach(() => {
+      if (original === undefined) delete process.env.DESIGNER_BRAIN_BRANDS;
+      else process.env.DESIGNER_BRAIN_BRANDS = original;
+    });
+
+    it('o planner recebe só o texto aprovado; o texto com as marcas segue intacto para o pipeline', async () => {
+      process.env.DESIGNER_BRAIN_BRANDS = h.session.brandSlug;
+      const planner = await import('../agents/planner/index');
+      vi.mocked(planner.runPlanner).mockResolvedValueOnce([{ order: 1, title: 'Abertura', goal: 'g', layout_type: 'title-hero', copy: 'TITULO' }]);
+      h.session.reviewMode = 'auto';
+      h.streams.push(texto('Vou criar agora [DISPATCH:presentation]'));
+
+      const bruto = '[APROVADO]\nTITULO\n[FALA]\nFALA-SECRETA\n[INTERNO]\nVALOR-INTERNO\n' + 'Texto de apoio longo. '.repeat(60);
+      await send(bruto);
+
+      const enviado = vi.mocked(planner.runPlanner).mock.calls.at(-1)![0] as { sourceCopy?: string };
+      expect(enviado.sourceCopy).toContain('TITULO');
+      expect(enviado.sourceCopy).not.toContain('FALA-SECRETA');
+      expect(enviado.sourceCopy).not.toContain('VALOR-INTERNO');
+      expect(h.enqueued[0].sourceCopy).toContain('FALA-SECRETA'); // o pipeline usa como orientação
+    });
+
+    it('tudo marcado como fala/contexto: não gera e pede o texto aprovado', async () => {
+      process.env.DESIGNER_BRAIN_BRANDS = h.session.brandSlug;
+      h.streams.push(texto('Vou criar agora [DISPATCH:presentation]'));
+
+      await send('[FALA]\n' + 'Só falado, sem texto de slide. '.repeat(60));
+
+      expect(h.enqueued).toHaveLength(0);
+      expect(tokens()).toContain('marcado como fala, contexto, apoio ou interno');
+      expect(h.session.phase).toBe('listening');
+    });
   });
 
   it('preserva moodboards na pausa e os encaminha ao aprovar o roteiro', async () => {
