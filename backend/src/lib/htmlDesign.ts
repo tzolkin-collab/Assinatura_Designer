@@ -337,6 +337,23 @@ const PHOTO_SLOT_RULE = `ESPAÇO DE FOTO (para a foto poder entrar ou ser trocad
 - Nenhuma foto fornecida para o slide: deixe o <div data-photo-slot="N"> VAZIO. Dê a ele um fundo e uma borda sutis, tirados da paleta, que fiquem bonitos mesmo sem foto. NUNCA escreva "inserir foto", ícone, legenda nem texto dentro dele.
 - Pense na proporção e na posição da área como a de uma fotografia de verdade (retrato, paisagem), e não ponha texto essencial sobre ela.`;
 
+/**
+ * Texto na arte quando o cérebro está ligado: só o texto aprovado do slide. Cobre dois erros vistos
+ * na geração real (achados S1 e S2): o nome da marca digitado no lugar de um logo que não existia,
+ * e numeração "01 02 03" inventada. A checagem em código (designerBrain/textCheck) pega o que
+ * escapar; esta regra evita o erro na origem, que é mais barato que corrigir depois.
+ */
+export function brainTextRule(hasLogo: boolean): string {
+  const logo = hasLogo
+    ? '- O logo é a imagem fornecida (<img>), nunca o nome da marca digitado.'
+    : '- NENHUM logo foi fornecido: NÃO digite o nome da marca (nem monograma, iniciais ou "assinatura" em letras) para fazer as vezes de logo. Omita o logo; se o layout precisar de um canto de marca, deixe-o vazio.';
+  return `TEXTO NA ARTE (só o texto aprovado do slide, e mais nada):
+- Todo texto visível do slide vem do texto aprovado desse slide. Não escreva nada além dele.
+- NUNCA invente numeração ou paginação ("01", "02/07", "1 de 5"), rótulos, legendas, categorias, botões, setas com texto, frases de apoio nem créditos.
+${logo}
+- Quebrar o texto em várias linhas ou elementos e mudar o tamanho é livre; trocar, resumir ou acrescentar palavras não é.`;
+}
+
 function buildBatchSystemInstruction(input: GenerateHtmlDesignInput, startIndex: number, total: number, bible: StyleBible, batchSize: number): string {
   const endIndex = Math.min(startIndex + batchSize, total);
 
@@ -352,7 +369,7 @@ function buildBatchSystemInstruction(input: GenerateHtmlDesignInput, startIndex:
   // sobre fidelidade, foto real e identidade do projeto. O restante deste prompt é mecânica
   // de formato (JSON, classes, tamanho) e não o contradiz.
   const brainBlock = input.brand.designerBrain
-    ? `${input.brand.designerBrain}\n\n=== MECÂNICA DE SAÍDA (formato do JSON e do HTML; não altera as regras acima) ===\n\n${PHOTO_SLOT_RULE}\n\n`
+    ? `${input.brand.designerBrain}\n\n=== MECÂNICA DE SAÍDA (formato do JSON e do HTML; não altera as regras acima) ===\n\n${PHOTO_SLOT_RULE}\n\n${brainTextRule(Boolean(input.brand.logoUrl))}\n\n`
     : '';
 
   return `${brainBlock}Você é um diretor de arte premiado especializado em social media premium. Você desenha em HTML e CSS, como um designer que codifica.
