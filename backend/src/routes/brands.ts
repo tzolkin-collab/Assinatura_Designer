@@ -9,6 +9,9 @@ import { deleteFromR2 } from '../lib/r2.js';
 import { requireBrandRole, ANY_MEMBER, EDITORS, type BrandRequest } from '../middleware/brandAccess.js';
 import { getUsage, getBilling } from '../lib/aiBudget.js';
 import { rateLimit } from '../middleware/rateLimit.js';
+import { parseBody } from '../lib/validate.js';
+import { createCollabSchema, collabSlug } from '../lib/brandCollab.js';
+import type { Prisma } from '@prisma/client';
 import { SVG_SANITIZE_RATE_LIMIT } from '../lib/svgSanitizeRateLimit.js';
 
 import multer from 'multer';
@@ -356,6 +359,60 @@ brandsRouter.post('/', async (req: Request, res: Response, next: NextFunction) =
     ensureInternalTeamMemberships().catch(() => {});
 
     res.status(201).json({ data: brand });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/brands/:slug/collabs - Cria um desdobramento (interno ou parceria) de um projeto-base.
+//
+// O desdobramento é uma marca ligada à base por `parentBrandId`: herda a identidade dela e guarda
+// só o que muda (`collab`). Não pede de novo nada que já exista na base. Quem pode editar a base
+// pode criar desdobramentos, e a equipe da base passa a enxergá-lo com os mesmos papéis.
+// Desdobramento de desdobramento não existe: a herança é de um nível só, para a regra de
+// "o que vale" continuar legível (global → base → desdobramento).
+brandsRouter.post('/:slug/collabs', requireBrandRole(EDITORS), async (req: BrandRequest, res: Response, next: NextFunction) => {
+  try {
+    const input = parseBody(createCollabSchema, req.body ?? {});
+    const parentRef = req.brand!;
+
+    const parent = await prisma.brand.findUnique({
+      where: { id: parentRef.id },
+      select: { id: true, slug: true, color: true, kind: true, members: { select: { userId: true, role: true } } },
+    });
+    if (!parent) throw createError(404, 'Marca não encontrada.');
+    if (parent.kind !== 'BASE') throw createError(400, 'Só um projeto-base pode ter desdobramentos.');
+
+    // Logo e guia visual do parceiro têm de estar na biblioteca da base: sem isto o cliente
+    // mandaria qualquer URL e o servidor iria buscá-la (SSRF) ou exporia arquivo de outra marca.
+    const arquivos = [input.details.partner?.logoUrl, input.details.partner?.visualManualUrl].filter(
+      (u): u is string => Boolean(u),
+    );
+    for (const url of arquivos) {
+      const asset = await prisma.asset.findFirst({ where: { brandId: parent.id, url }, select: { id: true } });
+      if (!asset) throw createError(400, 'O logo e o guia visual do parceiro precisam estar na biblioteca do projeto-base.');
+    }
+
+    const slug = collabSlug(parent.slug, input.name);
+    if (await prisma.brand.findUnique({ where: { slug }, select: { id: true } })) {
+      throw createError(409, 'Já existe um desdobramento com esse nome neste projeto.');
+    }
+
+    const collab = await prisma.brand.create({
+      data: {
+        name: input.name,
+        slug,
+        color: input.color ?? parent.color ?? '#171717',
+        kind: input.kind,
+        parentBrandId: parent.id,
+        collab: input.details as Prisma.InputJsonValue,
+        members: { create: parent.members.map((m) => ({ userId: m.userId, role: m.role })) },
+      },
+    });
+
+    ensureInternalTeamMemberships().catch(() => {});
+
+    res.status(201).json({ data: collab });
   } catch (error) {
     next(error);
   }
