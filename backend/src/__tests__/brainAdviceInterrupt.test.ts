@@ -317,6 +317,54 @@ describe('orientações consumidas pelo cérebro', () => {
       expect(h.session.photoRule).toBeUndefined();
     });
 
+    describe('[GENERATE_IMAGE] (Nano Banana pelo chat) e a regra de foto real', () => {
+      const pedido = (t: string) => texto(`${t} [GENERATE_IMAGE:{"prompt":"mulher sorrindo numa mesa de escritório","id":"img1"}]`);
+      const emitidos = () => wsOf('emit').map((c) => ({ evento: c.args[1], dados: c.args[2] }));
+
+      it('com a regra ativada no chat: NÃO gera, e explica no cartão da proposta (nada de pessoa sintética)', async () => {
+        const { generatePhotoBuffer } = await import('../lib/imageResolver.js');
+        vi.mocked(generatePhotoBuffer).mockClear();
+        h.session.photoRule = 'on';
+        h.streams.push(pedido('Vou mostrar uma imagem.'));
+        await send('gera uma imagem de uma mulher no escritório');
+        await new Promise((r) => setTimeout(r, 20));
+
+        expect(generatePhotoBuffer).not.toHaveBeenCalled();
+        const ev = emitidos();
+        expect(ev.map((e) => e.evento)).toEqual(expect.arrayContaining(['image:proposal:start', 'image:proposal:error']));
+        expect(ev.find((e) => e.evento === 'image:proposal:error')!.dados).toMatchObject({ id: 'img1' });
+        expect(String(ev.find((e) => e.evento === 'image:proposal:error')!.dados.message)).toContain('foto real');
+        expect(ev.some((e) => e.evento === 'image:proposal:done')).toBe(false);
+      });
+
+      it('projeto que já tem as regras do Designer: recusa mesmo antes de a pessoa confirmar a regra', async () => {
+        const { generatePhotoBuffer } = await import('../lib/imageResolver.js');
+        vi.mocked(generatePhotoBuffer).mockClear();
+        process.env.DESIGNER_BRAIN_BRANDS = 'marca';
+        h.streams.push(pedido('Segue.'));
+        await send('gera uma imagem');
+        await new Promise((r) => setTimeout(r, 20));
+        expect(generatePhotoBuffer).not.toHaveBeenCalled();
+        expect(emitidos().some((e) => e.evento === 'image:proposal:error')).toBe(true);
+      });
+
+      it('sem regra ativa e sem as regras do projeto: segue como antes (a ferramenta ainda gera)', async () => {
+        const { generatePhotoBuffer } = await import('../lib/imageResolver.js');
+        vi.mocked(generatePhotoBuffer).mockClear();
+        h.streams.push(pedido('Vou mostrar.'));
+        await send('gera uma imagem de um cachorro');
+        await new Promise((r) => setTimeout(r, 20));
+        expect(generatePhotoBuffer).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    it('a nota do chat manda não usar [GENERATE_IMAGE] com a regra ligada', async () => {
+      h.session.photoRule = 'on';
+      h.streams.push(texto('Ok!'));
+      await send('oi');
+      expect(h.streamCalls[0]!.systemInstruction).toContain('NÃO use [GENERATE_IMAGE]');
+    });
+
     it('com a regra ligada o chat deixa de oferecer IA/Remix/Unsplash (a nota de foto real vai ao modelo)', async () => {
       h.session.photoRule = 'on';
       h.streams.push(texto('Ok!'));

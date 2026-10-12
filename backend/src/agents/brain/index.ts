@@ -1101,11 +1101,19 @@ async function detectAndDispatch(
   // [GENERATE_IMAGE:{...}] — gera uma imagem avulsa no chat para aprovação.
   const genImageMatch = extractBracketedJson(response, 'GENERATE_IMAGE');
   if (genImageMatch) {
-    // Processa a imagem em background sem travar.
-    handleImageGeneration(sessionId, session, genImageMatch.json).catch(err => {
-      logger.error('Erro na geração de imagem avulsa', { error: err.message });
-      ws.emit(sessionId, 'image:proposal:error', { message: 'Falha ao gerar imagem' });
-    });
+    // Regra de foto real (Cérebro de IA §5): o Nano Banana não gera foto, pessoa nem cenário. A
+    // ferramenta pedia uma imagem "realista" sem olhar para a regra, então por aqui dava para
+    // gerar uma foto sintética mesmo com a regra ativa. Vale com a regra ativada no chat OU com o
+    // projeto já tendo as regras do Designer.
+    if (session.photoRule === 'on' || (await isBrainActiveForBrand(session.brandSlug))) {
+      refuseImageGeneration(sessionId, genImageMatch.json);
+    } else {
+      // Processa a imagem em background sem travar.
+      handleImageGeneration(sessionId, session, genImageMatch.json).catch(err => {
+        logger.error('Erro na geração de imagem avulsa', { error: err.message });
+        ws.emit(sessionId, 'image:proposal:error', { message: 'Falha ao gerar imagem' });
+      });
+    }
     // Continua executando (pode haver dispatch ou mais tags junto).
   }
 
@@ -1451,6 +1459,30 @@ async function applySlideEdits(
 }
 
 // ── Geração de Imagem Avulsa (Rascunho) ───────────────────────────────────────
+
+/**
+ * Recusa a imagem pedida pelo chat quando a regra de foto real vale. Mostra no mesmo cartão de
+ * proposta que a pessoa já conhece (a tela só atualiza um cartão que já começou), com o motivo e o
+ * caminho certo, em vez de gerar em silêncio ou sumir sem resposta.
+ */
+function refuseImageGeneration(sessionId: string, payload: string): void {
+  let id = randomUUID().slice(0, 8);
+  let prompt = '';
+  try {
+    const data = JSON.parse(payload);
+    if (typeof data.id === 'string' && data.id) id = data.id;
+    if (typeof data.prompt === 'string') prompt = data.prompt;
+  } catch {
+    // JSON inválido: ainda assim a pessoa merece a explicação.
+  }
+  ws.emit(sessionId, 'image:proposal:start', { id, prompt });
+  ws.emit(sessionId, 'image:proposal:error', {
+    id,
+    message:
+      'Com a regra de foto real ativa eu não gero imagens (nem foto, nem pessoa, nem cenário). ' +
+      'Envie a foto real pela biblioteca do projeto ou anexe aqui na conversa; onde faltar, a área fica reservada na arte.',
+  });
+}
 
 async function handleImageGeneration(
   sessionId: string,
