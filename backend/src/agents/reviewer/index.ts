@@ -5,6 +5,7 @@ import { extractJsonObject } from '../../lib/jsonHelper.js';
 import { renderHtmlToBase64 } from '../../lib/htmlRaster.js';
 import { buildSlideDocument, type HtmlDesignContent } from '../../lib/htmlDesign.js';
 import { logger } from '../../lib/logger.js';
+import { parseFontRefs, toDataUriFaces } from '../../lib/customFonts.js';
 
 const ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
 
@@ -121,11 +122,12 @@ export async function runHtmlReviewer(content: HtmlDesignContent, brandContext: 
   // Agora cada render falha por conta própria e sai da amostra; o reviewer
   // critica o que sobrou. Aprovar por segurança fica reservado ao caso em que
   // NADA renderizou, que é o único em que realmente não há o que julgar.
+  const ownFaces = await toDataUriFaces(parseFontRefs(content.fontFaces));
   const renderizados = await Promise.all(
     indexes.map(async (i) => {
       try {
         const img = await renderHtmlToBase64(
-          buildSlideDocument(content.slides[i]!, content.fonts, content.width, content.height),
+          buildSlideDocument(content.slides[i]!, content.fonts, content.width, content.height, ownFaces),
           { width: content.width, height: content.height, maxDim: 768 },
         );
         return { i, img };

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { googleFontHrefs, normalizeFontFamilies } from './fontFamilies';
+import { fontFaceCss, googleFontHrefs, normalizeFontFamilies, parseFontRefs, remoteFontHrefs } from './fontFamilies';
 
 describe('normalizeFontFamilies', () => {
   it('tira a especificação de pesos do nome da família', () => {
@@ -21,5 +21,26 @@ describe('googleFontHrefs', () => {
   });
   it('sem fonte válida, Inter', () => {
     expect(googleFontHrefs(['<x>'])[0]).toContain('family=Inter');
+  });
+});
+
+describe('fonte própria', () => {
+  const q = { family: 'Queens', assetId: 'asset-queens', format: 'opentype' as const };
+
+  it('parseFontRefs descarta lixo', () => {
+    expect(parseFontRefs([q, { family: 3 }, { ...q, format: 'exe' }, { ...q, assetId: '../x' }, null])).toEqual([q]);
+    expect(parseFontRefs(undefined)).toEqual([]);
+  });
+  it('fontFaceCss aponta para a rota pública da API e limpa o nome', () => {
+    const css = fontFaceCss([q, { ...q, family: 'A";}x' }], 'http://api/api');
+    expect(css).toContain('@font-face{font-family:"Queens";src:url("http://api/api/public/fonts/asset-queens") format("opentype")');
+    expect(css).toContain('font-family:"Ax"');
+  });
+  it('a família com arquivo próprio não vai ao Google; as outras continuam indo', () => {
+    const hrefs = remoteFontHrefs(['Queens', 'Inter'], [q]);
+    expect(hrefs).toHaveLength(1);
+    expect(hrefs[0]).toContain('family=Inter');
+    expect(remoteFontHrefs(['Queens'], [q])).toEqual([]);
+    expect(remoteFontHrefs(['Playfair Display'], [])[0]).toContain('Playfair+Display');
   });
 });

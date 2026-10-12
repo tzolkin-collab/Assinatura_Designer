@@ -109,6 +109,7 @@ Custo ~US$ 0,40 por deck (R$ 2 a R$ 3), 208 s. Muito abaixo da estimativa de R$ 
 - O revisor é do mesmo modelo que gera: nota 75 não é validação da Gabriela, que disse que o Designer ainda não foi validado.
 - 5 dos 7 slides saem com moldura vazia (não há fotos reais da Amanda): o visual final ainda não foi visto de verdade.
 - Queens e Aeonik não estão instaladas: a arte usa Playfair Display + Manrope, o que a Gabriela pode reprovar.
+  **Atualização 12/10:** o uso de fonte própria está construído (`backend/src/lib/customFonts.ts`, rota `/api/public/fonts/:assetId`, `fontFaces` no `content` do deck). Basta enviar o arquivo à biblioteca e marcar a fonte como "Arquivo oficial enviado" na ficha (com `fileUrl` ou nome de arquivo contendo a família). Sem arquivo, tudo segue como antes. Limites: o PPTX leva só o nome da fonte; `htmlRender` (cache) não embute a fonte, para não inflar o banco.
 - Os **8 testes de aceite do Checklist Operacional não foram rodados** (nem o de e-book A4, que não existe).
 - Marcas além da Amanda não foram exercitadas; desdobramento/collab só foi coberto por teste automatizado.
 

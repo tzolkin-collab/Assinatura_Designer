@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { googleFontHrefs } from '@/lib/fontFamilies';
+import { fontFaceCss, parseFontRefs, remoteFontHrefs } from '@/lib/fontFamilies';
+import { API_BASE } from '@/lib/api';
 
 export interface HtmlSlide {
   html: string;
@@ -13,6 +14,8 @@ export interface HtmlDesignContentLike {
   width: number;
   height: number;
   fonts: string[];
+  /** Fontes próprias da marca (referências à biblioteca). */
+  fontFaces?: unknown;
   slides: HtmlSlide[];
 }
 
@@ -40,9 +43,10 @@ function sanitize(s: string): string {
     .replace(/javascript:/gi, '');
 }
 
-function buildSlideDoc(slide: HtmlSlide, fonts: string[], width: number, height: number, inspectorMode?: boolean): string {
+function buildSlideDoc(slide: HtmlSlide, fonts: string[], width: number, height: number, inspectorMode?: boolean, fontFaces?: unknown): string {
   const css = sanitize(slide.css ?? '');
   const html = sanitize(slide.html ?? '');
+  const ownFaces = parseFontRefs(fontFaces);
   
   const inspectorScript = inspectorMode ? `
 <script>
@@ -113,8 +117,8 @@ function buildSlideDoc(slide: HtmlSlide, fonts: string[], width: number, height:
   return `<!doctype html><html><head><meta charset="utf-8">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-${googleFontHrefs(fonts).map((href) => `<link href="${href}" rel="stylesheet">`).join('\n')}
-<style>*{margin:0;padding:0;box-sizing:border-box;}html,body{width:${width}px;height:${height}px;overflow:hidden;}.slide-root{width:${width}px;height:${height}px;position:relative;overflow:hidden;}${css}</style>
+${remoteFontHrefs(fonts, ownFaces).map((href) => `<link href="${href}" rel="stylesheet">`).join('\n')}
+<style>${fontFaceCss(ownFaces, API_BASE)}*{margin:0;padding:0;box-sizing:border-box;}html,body{width:${width}px;height:${height}px;overflow:hidden;}.slide-root{width:${width}px;height:${height}px;position:relative;overflow:hidden;}${css}</style>
 </head><body><div class="slide-root">${html}</div>${inspectorScript}</body></html>`;
 }
 
@@ -156,7 +160,7 @@ export default function HtmlSlideRenderer({
 
   const srcDoc = useMemo(() => {
     if (!valid || !slides[activeIdx]) return '';
-    return buildSlideDoc(slides[activeIdx], content.fonts, width, height, inspectorMode);
+    return buildSlideDoc(slides[activeIdx], content.fonts, width, height, inspectorMode, content.fontFaces);
   }, [valid, slides, activeIdx, content, width, height, inspectorMode]);
 
   if (!valid) {

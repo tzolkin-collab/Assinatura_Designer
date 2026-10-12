@@ -43,7 +43,7 @@ const publishSchema = z.object({
   }).optional().default({}),
 });
 const chatToggleSchema = z.object({ enabled: z.boolean() });
-import { resolveRenderableDeck } from '../lib/renderableDeck.js';
+import { deckFontFaces, resolveRenderableDeckWithFonts } from '../lib/renderableDeck.js';
 
 const ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
 
@@ -52,7 +52,8 @@ export const postsRouter = Router();
 // POST /api/posts/render-batch - renderiza múltiplos slides HTML/CSS em paralelo e envia para o R2
 postsRouter.post('/render-batch', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { slides, fonts, width, height } = (req.body ?? {}) as {
+    const { slides, fonts, width, height, fontFaces } = (req.body ?? {}) as {
+      fontFaces?: unknown;
       slides?: Array<{ html: string; css?: string }>;
       fonts?: string[];
       width?: number;
@@ -66,11 +67,12 @@ postsRouter.post('/render-batch', async (req: AuthRequest, res: Response, next: 
     const slideWidth = Number(width) || 1080;
     const slideHeight = Number(height) || 1080;
     const slideFonts = Array.isArray(fonts) ? fonts : ['Inter'];
+    const ownFaces = await deckFontFaces({ fontFaces });
 
     // Compila cada slide para um documento HTML completo e agenda a renderização em paralelo
     const renderPromises = slides.map(async (slide, index) => {
       try {
-        const doc = buildSlideDocument(slide, slideFonts, slideWidth, slideHeight);
+        const doc = buildSlideDocument(slide, slideFonts, slideWidth, slideHeight, ownFaces);
         // maxDim: 0 significa resolução cheia (fiel ao viewport configurado)
         const buffer = await renderHtmlToPng(doc, { width: slideWidth, height: slideHeight, maxDim: 0 });
         const url = await uploadPngToR2(buffer);
@@ -429,7 +431,7 @@ postsRouter.get('/:id/export', async (req: AuthRequest, res: Response, next: Nex
     if (!post) throw createError(404, 'Post not found');
 
     const postWithSlides = mergeSlidesIntoPost(post);
-    const deck = resolveRenderableDeck(postWithSlides.content);
+    const deck = await resolveRenderableDeckWithFonts(postWithSlides.content);
     if (!deck) {
       throw createError(400, 'Export disponível apenas para designs html-design');
     }
@@ -821,7 +823,7 @@ postsRouter.post('/:id/export-file', async (req: AuthRequest, res: Response, nex
     });
     if (!post) throw createError(404, 'Post não encontrado');
 
-    const deck = resolveRenderableDeck(mergeSlidesIntoPost(post).content);
+    const deck = await resolveRenderableDeckWithFonts(mergeSlidesIntoPost(post).content);
     if (!deck) {
       throw createError(400, 'Export disponível apenas para designs html-design');
     }
@@ -948,7 +950,7 @@ postsRouter.post('/:id/export-canva', async (req: AuthRequest, res: Response, ne
       });
     }
 
-    const deck = resolveRenderableDeck(mergeSlidesIntoPost(post).content);
+    const deck = await resolveRenderableDeckWithFonts(mergeSlidesIntoPost(post).content);
     if (!deck) {
       throw createError(400, 'Export Canva disponível apenas para designs html-design');
     }

@@ -27,6 +27,7 @@ import { deriveDeckName } from '../lib/deckName.js';
 import { onlyProvidedAssets } from '../lib/designerBrain/index.js';
 import { normalizeEmptyPhotoSlots } from '../lib/photoSlot.js';
 import { autoFrameSlidePhotos } from '../lib/photoFraming.js';
+import { resolveFontRefs, toDataUriFaces } from '../lib/customFonts.js';
 import { syncPostSlides } from '../lib/postHelper.js';
 import { researchBrand, type VisualRef } from '../lib/fabricaLegacy.js';
 import { resolveSlideImages, resolveImageCandidateDecisions, type AmbiguousImageCandidate, type ResolvedSlideImage } from '../lib/imageResolver.js';
@@ -703,6 +704,11 @@ async function runPipelineInner(
         visualMoodboardCount: (params.attachmentImages ?? []).filter((image) => image.role === 'style-reference').length,
       });
 
+      // Fontes próprias da ficha (arquivo enviado à biblioteca): carregadas de verdade, e o artista as usa pelo nome.
+      const fontRefs = savedProfile ? await resolveFontRefs(savedProfile.typography ?? [], brand.libraryBrandIds) : [];
+      const ownFontFaces = await toDataUriFaces(fontRefs);
+      const ownFonts = fontRefs.map((r) => r.family);
+
       // O manual visual, o moodboard e a referência das fontes da ficha chegam ao artista como IMAGEM.
       const profileRefs = designerBrainOn ? await profileStyleReferences(savedProfile, brand.libraryBrandIds) : [];
       const moodboardParts = await loadStyleReferenceParts(
@@ -750,6 +756,7 @@ async function runPipelineInner(
             name: brand.name,
             colors: brand.colors,
             primaryFonts: brand.primaryFonts,
+            ownFonts,
             guidelines: brand.guidelines,
             agentPrompt: brand.agentPrompt,
             // Cérebro ligado: as camadas substituem diretrizes e instruções legadas no artista.
@@ -800,6 +807,7 @@ async function runPipelineInner(
             height: partial.height,
             format: partial.format,
             fonts: partial.fonts,
+            fontFaces: fontRefs,
             reasoning: partial.reasoning,
             slides: [] as unknown[],
           };
@@ -900,6 +908,7 @@ async function runPipelineInner(
                 name: brand.name,
                 colors: brand.colors,
                 primaryFonts: brand.primaryFonts,
+                ownFonts,
                 guidelines: brand.guidelines ?? undefined,
                 // Com o cérebro ligado as camadas já estão no contexto; ele é a memória do projeto.
                 agentPrompt: brandContext,
@@ -942,6 +951,7 @@ async function runPipelineInner(
         const enquadrado = await autoFrameSlidePhotos({
           slides: design.slides,
           fonts: design.fonts,
+          fontFaces: ownFontFaces,
           width: design.width,
           height: design.height,
           allowedUrls: permitidas,
@@ -962,6 +972,8 @@ async function runPipelineInner(
         height: design.height,
         format: design.format,
         fonts: design.fonts,
+        // Só as próprias que o deck realmente usa; os bytes ficam na biblioteca.
+        fontFaces: fontRefs.filter((r) => design.fonts.some((f) => f.toLowerCase() === r.family.toLowerCase())),
         slides: design.slides,
         reasoning: design.reasoning,
       };
@@ -1083,7 +1095,7 @@ async function runPipelineInner(
       // Fonte oficial do projeto que o sistema não consegue carregar: o artista usou uma substituta.
       // Antes isso passava em silêncio; agora o resultado diz qual faltou e qual entrou no lugar.
       if (designerBrainOn && design.slides.length > 0) {
-        const aviso = fontSubstitutionNotice({ official: officialFontsFor(brand.slug, savedProfile), used: design.fonts });
+        const aviso = fontSubstitutionNotice({ official: officialFontsFor(brand.slug, savedProfile), used: design.fonts, installed: ownFonts });
         if (aviso) {
           logger.warn('Fonte oficial do projeto indisponível, usando substituta', { brandSlug: brand.slug, usadas: design.fonts });
           ws.token(sessionId, `
