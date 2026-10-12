@@ -114,6 +114,33 @@ Custo ~US$ 0,40 por deck (R$ 2 a R$ 3), 208 s. Muito abaixo da estimativa de R$ 
 
 **Dívida de teste:** a geração real roda fora do app (script direto no pipeline, sem worker nem fila). Nada foi testado pelo caminho de uso real (chat → fila → worker → editor).
 
+## 5.3 Avaliação dos posts da Amanda: repetição versus progresso (12/10)
+
+Crítica do Gustavo: "muita coisa repetida ali ao invés de progresso real". Verificado nos posts do banco (renderizados e medidos), e **procede em grande parte**.
+
+**O que existe.** Conta da Amanda: 9 posts, **5 decks com o mesmo título e o mesmo texto** ("Estratégia para uma vida mais extraordinária", de 05/10 a 11/10), mais 2 "VAREJO+ PIUMHI", 1 que falhou e 1 sem nome. O banco todo tem 42 posts; os 30 de `assinatura` e `tzolkin` são antigos e sem nome, não avaliados.
+
+| deck | quando | fontes que renderizam | imagens geradas por IA | molduras vazias |
+|---|---|---|---|---|
+| ff862294 | 05/10 (base) | Queens/Aeonik **não instaladas: cai numa serifa padrão** | 0 | 6 |
+| 369acf21 | 11/10 18:27 | Playfair + Plus Jakarta | **3 (pessoa gerada)** | 0 |
+| 2a92a039 | 11/10 18:33 | Playfair + DM Sans | 0 | 5 |
+| 604108e4 | 11/10 22:41 | Playfair + Manrope | **4 (pessoa + cena de feira)** | 0 |
+| c813c011 | 11/10 22:49 | Playfair + Manrope | 0 | 5 |
+
+**Progresso real (mas invisível no slide):** a pessoa gerada por IA saiu (369acf21 e 604108e4 → 2a92a039 e c813c011); o texto sai literal; o aviso de fonte substituta aparece; a ficha da Amanda existe como dado; o cérebro liga sozinho. Das 4 gerações de 11/10, duas acharam defeitos reais (a pessoa gerada e o #74 fora da pilha) e duas confirmaram o conserto.
+
+**Repetição, sem progresso visual:** vistos lado a lado, os 5 decks têm **o mesmo esqueleto** (título escuro com moldura à direita, texto sobre creme com moldura, três colunas, bloco escuro com moldura). O visual de 05/10 e o de hoje são quase o mesmo. Corpo do texto está legível (28 a 34 px num slide de 1920×1080, medido), então o "texto pequeno" que parece nas miniaturas não procede.
+
+**O que a ficha da Amanda proíbe e o resultado ainda faz:**
+- Falta a **identidade**: nenhum slide tem o wordmark AMANDACOELHO nem o monograma A—C, e não há foto. O que sobra é título, texto e moldura cinza. Parece **template genérico**, o que a própria ficha diz para evitar.
+- Slides 3, 4 e 6 de hoje têm grandes áreas mortas (texto ocupa 35%, 39% e 63% da caixa, o resto é vazio sem intenção).
+- Quase tudo que aparece vazio é **dado que falta, não código**: logo e manual visual em imagem, fotos reais, arquivos das fontes.
+
+**Conclusão:** o trabalho deste ciclo foi infraestrutura e regras (ficha, desdobramento, status do texto, enquadramento): necessário, e testado. Mas a **qualidade visível do deck não mudou**, e gerar o mesmo texto de novo não prova mais nada. Repetir a geração só volta a fazer sentido com insumos novos (logo, manual visual, fotos reais, fontes) ou com **outro texto/outro projeto** (a Assinatura, para provar que generaliza).
+
+**Limpeza pendente (precisa de autorização):** 4 decks de teste na conta da Amanda (369acf21, 2a92a039, 604108e4, c813c011), todos com o mesmo texto. Manter só o de 05/10 como linha de base.
+
 ## 6. Decisões em aberto (do checklist com a Gabriela)
 
 - Regra de foto-real para a Assinatura (vale como na Amanda?).
