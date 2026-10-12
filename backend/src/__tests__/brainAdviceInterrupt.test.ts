@@ -105,7 +105,7 @@ const ferramenta = (name: string) => (async function* () {
 beforeEach(() => {
   h.session = {
     id: S, userId: 'u1', brandSlug: 'marca', phase: 'listening', workerStatus: 'idle', reviewMode: 'manual',
-    activeQuestion: null, currentDesign: [], progress: 0, progressLabel: '',
+    activeQuestion: null, currentDesign: [], progress: 0, progressLabel: '', photoRule: 'on',
     messages: [{ role: 'system', content: 'Contexto da marca:\nMarca X', timestamp: 1 }],
   };
   h.wsCalls.length = 0;
@@ -233,6 +233,97 @@ describe('orientações consumidas pelo cérebro', () => {
     expect(h.session.pendingPlan).toBeFalsy();
     expect(h.session.activeQuestion).toBeNull();
     expect(tokens()).toContain('aprovado automaticamente');
+  });
+
+  describe('regra de foto real: ativada ou confirmada no chat antes de gerar', () => {
+    const original = process.env.DESIGNER_BRAIN_BRANDS;
+    beforeEach(() => { delete h.session.photoRule; delete process.env.DESIGNER_BRAIN_BRANDS; });
+    afterEach(() => {
+      if (original === undefined) delete process.env.DESIGNER_BRAIN_BRANDS;
+      else process.env.DESIGNER_BRAIN_BRANDS = original;
+    });
+
+    it('projeto sem as regras do Designer: a primeira geração PARA e pergunta se ativa', async () => {
+      h.streams.push(texto('Vou criar [DISPATCH:presentation]'));
+      await send('cria uma apresentação');
+
+      expect(h.enqueued).toHaveLength(0);
+      expect(h.session.pendingPhotoRule).toMatchObject({ format: 'presentation', isProof: false });
+      const q = h.session.activeQuestion;
+      expect(q.question).toContain('ativo a regra de foto real');
+      expect(q.question).toContain('Fotos reais disponíveis agora');
+      expect(q.options.map((o: { label: string }) => o.label)).toEqual(['Ativar regra de foto real']);
+      expect(q.allowFreeform).toBe(false);
+    });
+
+    it('projeto que já tem as regras: a mesma pausa, mas para CONFIRMAR', async () => {
+      process.env.DESIGNER_BRAIN_BRANDS = 'marca';
+      h.streams.push(texto('Vou criar [DISPATCH:presentation]'));
+      await send('cria uma apresentação');
+
+      expect(h.enqueued).toHaveLength(0);
+      expect(h.session.activeQuestion.question).toContain('confirmo a regra de foto real');
+      expect(h.session.activeQuestion.options[0].label).toBe('Confirmar regra de foto real');
+    });
+
+    it('conta as fotos anexadas na conversa, sem inventar o que não tem', async () => {
+      h.session.messages.push({ role: 'user', content: 'segue a foto', timestamp: 2, attachments: [{ name: 'a.jpg', mimeType: 'image/jpeg', dataBase64: 'AA==' }] });
+      h.streams.push(texto('Vou criar [DISPATCH:presentation]'));
+      await send('cria uma apresentação');
+      expect(h.session.activeQuestion.question).toContain('1 foto(s) anexada(s) nesta conversa');
+    });
+
+    it('a resposta liga a regra para a conversa e retoma a MESMA geração, sem passar pelo modelo', async () => {
+      h.streams.push(texto('Vou criar [DISPATCH:carousel:9x16]'));
+      await send('cria um carrossel');
+      expect(h.enqueued).toHaveLength(0);
+      const chamadasAoModelo = h.streamCalls.length;
+
+      await send('Ativar regra de foto real');
+
+      expect(h.session.photoRule).toBe('on');
+      expect(h.session.pendingPhotoRule).toBeFalsy();
+      expect(h.enqueued).toHaveLength(1);
+      expect(h.enqueued[0]).toMatchObject({ format: 'carousel', aspectRatio: '9:16' });
+      expect(h.streamCalls).toHaveLength(chamadasAoModelo);
+      expect(tokens()).toContain('Regra de foto real ativa nesta conversa');
+      // O clique de controle não vira "pedido" dentro do briefing da geração.
+      expect(h.enqueued[0].brief).not.toContain('Ativar regra de foto real');
+      expect(h.enqueued[0].brief).toContain('cria um carrossel');
+    });
+
+    it('depois de ativada, as próximas gerações da conversa não perguntam de novo', async () => {
+      h.streams.push(texto('Vou criar [DISPATCH:presentation]'));
+      await send('cria uma apresentação');
+      await send('Ativar regra de foto real');
+      expect(h.enqueued).toHaveLength(1);
+
+      h.streams.push(texto('Refazendo [DISPATCH:presentation]'));
+      await send('refaz');
+      expect(h.enqueued).toHaveLength(2);
+      expect(h.session.activeQuestion).toBeFalsy();
+    });
+
+    it('qualquer outra resposta cancela a pausa: nada é gerado e a regra continua desligada', async () => {
+      h.streams.push(texto('Vou criar [DISPATCH:presentation]'));
+      await send('cria uma apresentação');
+      h.streams.push(texto('Sem problema, me diga o que mudar.'));
+
+      await send('espera, deixa eu pensar');
+
+      expect(h.enqueued).toHaveLength(0);
+      expect(h.session.pendingPhotoRule).toBeFalsy();
+      expect(h.session.photoRule).toBeUndefined();
+    });
+
+    it('com a regra ligada o chat deixa de oferecer IA/Remix/Unsplash (a nota de foto real vai ao modelo)', async () => {
+      h.session.photoRule = 'on';
+      h.streams.push(texto('Ok!'));
+      await send('oi');
+      const sys = h.streamCalls[0]!.systemInstruction;
+      expect(sys).toContain('Regra desta conversa: fotografia real');
+      expect(sys).not.toContain('NÃO dispare a geração sem o texto aprovado'); // isso é do cérebro completo, não da regra de foto
+    });
   });
 
   describe('status por bloco (marca com cérebro ligado)', () => {

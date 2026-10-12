@@ -301,6 +301,9 @@ async function runPipelineInner(
   const layers = await loadBrainLayers(session.brandSlug);
   const savedProfile = layers?.projectProfile ?? null;
   const designerBrainOn = layers !== null || isDesignerBrainEnabled(session.brandSlug);
+  // Regra de foto real (Cérebro de IA §5): estrutural, vale para todo projeto. Ligada pelo cérebro OU
+  // pela pessoa, que a ativa/confirma no chat antes de gerar; não depende de o projeto ter ficha.
+  const photoRuleOn = designerBrainOn || session.photoRule === 'on';
   // Status por bloco: só o aprovado (e o em revisão, como rascunho) vira texto de slide.
   const copy = designerBrainOn ? parseCopyBlocks(params.sourceCopy) : null;
   const sourceCopy = copy?.hasMarkers ? copy.copyForSlides : params.sourceCopy;
@@ -575,7 +578,7 @@ async function runPipelineInner(
       resolvedImages = await resolveImageCandidateDecisions(
         params.imageCandidateDecision.candidates,
         params.imageCandidateDecision.decision,
-        { brandName: brand.name, width, height, brandId: brand.id, postId, imagePreference: params.imagePreference, realPhotosOnly: designerBrainOn },
+        { brandName: brand.name, width, height, brandId: brand.id, postId, imagePreference: params.imagePreference, realPhotosOnly: photoRuleOn },
       ).catch((err) => {
         logger.error('Falha ao aplicar decisão do bundle de imagens; seguindo sem essas imagens', { error: (err as Error).message });
         return new Map<number, ResolvedSlideImage>();
@@ -592,8 +595,8 @@ async function runPipelineInner(
         postId,
         // Foto real é regra absoluta no cérebro: nada de pessoa gerada nem Unsplash. Só
         // reaproveita o que está na biblioteca ou deixa o slide sem imagem.
-        allowGeneratedGraphics: designerBrainOn ? false : brand.presentationConfig?.allowGeneratedGraphics,
-        onlyProvidedAssets: designerBrainOn,
+        allowGeneratedGraphics: photoRuleOn ? false : brand.presentationConfig?.allowGeneratedGraphics,
+        onlyProvidedAssets: photoRuleOn,
         imagePreference: params.imagePreference,
       }).catch((err) => {
         logger.error('Resolução de imagens dos slides falhou; seguindo sem imagens geradas', { error: (err as Error).message });
@@ -722,10 +725,12 @@ async function runPipelineInner(
             agentPrompt: brand.agentPrompt,
             // Cérebro ligado: as camadas substituem diretrizes e instruções legadas no artista.
             designerBrain: designerBrainOn ? brandContext : undefined,
+            // Sem o cérebro completo, a regra de foto real ativada no chat ainda chega ao artista.
+            photoRule: photoRuleOn && !designerBrainOn,
             logoUrl: brand.logoUrl,
             // Fotos anexadas pelo usuário no chat entram JUNTO com os assets da
             // marca — o artista as trata igual, prefere a inventar foto de banco.
-            assetUrls: [...contentAssets, ...(designerBrainOn ? onlyProvidedAssets(brand.assetUrls) : brand.assetUrls)],
+            assetUrls: [...contentAssets, ...(photoRuleOn ? onlyProvidedAssets(brand.assetUrls) : brand.assetUrls)],
             presentationConfig: brand.presentationConfig ?? undefined,
             references: brand.references,
             // Com o cérebro ligado a memória do projeto é a do cadastro: o que o chat

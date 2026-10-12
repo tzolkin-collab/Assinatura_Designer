@@ -4,6 +4,7 @@
 import createDOMPurify, { type WindowLike } from 'dompurify';
 import { JSDOM } from 'jsdom';
 import { pipelineAdviceBlock } from './adviceText.js';
+import { REAL_PHOTO_RULE_PROMPT } from './designerBrain/prompts.js';
 
 export interface HtmlDesignSlide {
   html: string;
@@ -39,6 +40,11 @@ export interface GenerateHtmlDesignInput {
      * diretrizes e as "instruções do agente" legadas: as duas versões juntas se contradiriam.
      */
     designerBrain?: string;
+    /**
+     * Regra de foto real ativada no chat para um projeto SEM o cérebro completo: o artista recebe a
+     * regra de fotografia e o contrato do espaço de foto, mas as diretrizes do projeto continuam as de antes.
+     */
+    photoRule?: boolean;
     logoUrl?: string | null;
     /** URLs reais do pool de assets da marca — o artista prefere estas a inventar fotos de banco. */
     assetUrls?: Array<{ url: string; name: string }>;
@@ -370,7 +376,15 @@ function buildBatchSystemInstruction(input: GenerateHtmlDesignInput, startIndex:
   // de formato (JSON, classes, tamanho) e não o contradiz.
   const brainBlock = input.brand.designerBrain
     ? `${input.brand.designerBrain}\n\n=== MECÂNICA DE SAÍDA (formato do JSON e do HTML; não altera as regras acima) ===\n\n${PHOTO_SLOT_RULE}\n\n${brainTextRule(Boolean(input.brand.logoUrl))}\n\n`
-    : '';
+    : input.brand.photoRule
+      ? `${REAL_PHOTO_RULE_PROMPT}
+
+=== MECÂNICA DE SAÍDA (formato do JSON e do HTML; não altera a regra acima) ===
+
+${PHOTO_SLOT_RULE}
+
+`
+      : '';
 
   return `${brainBlock}Você é um diretor de arte premiado especializado em social media premium. Você desenha em HTML e CSS, como um designer que codifica.
 

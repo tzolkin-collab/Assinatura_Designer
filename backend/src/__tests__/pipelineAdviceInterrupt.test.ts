@@ -430,6 +430,37 @@ describe('cérebro do Designer ligado por marca (DESIGNER_BRAIN_BRANDS)', () => 
     expect(resolver.allowGeneratedGraphics).toBeUndefined();
   });
 
+  it('regra de foto real ativada no chat, projeto SEM ficha: só foto real, o artista recebe a regra e as diretrizes do projeto continuam', async () => {
+    delete process.env.DESIGNER_BRAIN_BRANDS;
+    h.session.photoRule = 'on';
+    vi.mocked(runPlanner).mockResolvedValue(roteiro(() => '') as never);
+    await rodar();
+
+    const resolver = vi.mocked(resolveSlideImages).mock.calls[0]![0] as { allowGeneratedGraphics?: boolean; onlyProvidedAssets?: boolean };
+    expect(resolver.allowGeneratedGraphics).toBe(false);
+    expect(resolver.onlyProvidedAssets).toBe(true);
+    // O artista recebe a regra de fotografia e o contrato do espaço de foto (a foto entra depois, no editor)...
+    expect(h.prompts[0]!.sys).toContain('REGRA DE FOTOGRAFIA PARA ESTA PEÇA');
+    expect(h.prompts[0]!.sys).toContain('data-photo-slot');
+    // ...mas isto NÃO é o cérebro completo: as diretrizes do projeto seguem como eram e não há trava de texto.
+    expect(promptOf(1)).toContain('Diretrizes: DIRETRIZ-LEGADA');
+    expect(h.prompts[0]!.sys).not.toContain(GLOBAL);
+    const planner = vi.mocked(runPlanner).mock.calls[0]![0] as { brandContext: string };
+    expect(planner.brandContext).toBe('contexto da marca');
+    expect(wsOf('error')).toHaveLength(0);
+  });
+
+  it('sem a regra ativada (conversa antiga), nada muda: o resolver segue como antes', async () => {
+    delete process.env.DESIGNER_BRAIN_BRANDS;
+    delete h.session.photoRule;
+    vi.mocked(runPlanner).mockResolvedValue(roteiro(() => '') as never);
+    await rodar();
+    const resolver = vi.mocked(resolveSlideImages).mock.calls[0]![0] as { allowGeneratedGraphics?: boolean; onlyProvidedAssets?: boolean };
+    expect(resolver.allowGeneratedGraphics).toBeUndefined();
+    expect(resolver.onlyProvidedAssets).toBeFalsy();
+    expect(h.prompts[0]!.sys).not.toContain('REGRA DE FOTOGRAFIA PARA ESTA PEÇA');
+  });
+
   it('ligado: planner e artista recebem as camadas, e o legado sai de cena', async () => {
     process.env.DESIGNER_BRAIN_BRANDS = 'amanda-coelho';
     h.session.brandSlug = 'amanda-coelho'; // tem seed de memória

@@ -151,6 +151,23 @@ export interface FabricaSession {
     sourceCopy?: string;
   } | null;
   /**
+   * Regra de foto real (Cérebro de IA §5, "comportamento estrutural do sistema"): a pessoa a
+   * ativa ou confirma NO CHAT antes da primeira geração da conversa. Com `'on'` só entram fotos
+   * reais fornecidas, nunca pessoa gerada nem banco de imagem, e a área sem foto fica reservada.
+   * Vale para a conversa inteira, em qualquer projeto: não depende de a marca ter ficha.
+   */
+  photoRule?: 'on';
+  /**
+   * Geração parada esperando a pessoa ativar/confirmar a regra de foto real. Guarda o que foi
+   * pedido para retomar exatamente igual quando ela responder (sem passar pelo LLM).
+   */
+  pendingPhotoRule?: {
+    format: 'presentation' | 'carousel';
+    isProof: boolean;
+    aspectRatio?: string;
+    imagePreference?: 'force-ai' | 'unsplash' | 'unsplash-remix';
+  } | null;
+  /**
    * Resultado do último review automático, guardado pelo pipeline para o
    * `review:decline` virar um [EDIT] cirúrgico (só os slides com deviation) em vez
    * de regenerar o deck inteiro. Limpo pelo brain no approve/decline.
@@ -237,6 +254,7 @@ export async function createSession(
     pendingPlan: null,
     pendingStyleProof: null,
     pendingImageCandidates: null,
+    pendingPhotoRule: null,
     messages: [],
     currentDesign: [],
     workerStatus: 'idle',
