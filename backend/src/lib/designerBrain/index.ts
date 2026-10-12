@@ -15,6 +15,8 @@ export { designerBrainBrands, isDesignerBrainEnabled } from './enabled.js';
 export { isBrainActiveForBrand, loadBrainLayers, loadSavedProfileBySlug } from './savedProfile.js';
 export type { BrainLayers } from './savedProfile.js';
 export { parseCopyBlocks } from './copyBlocks.js';
+export { profileStyleReferences, type StyleReference } from './styleReferences.js';
+export { REFERENCE_ASSET_TAGS } from './referenceTags.js';
 export {
   DesignerBrainSetupError,
   buildPipelineBrainContext,

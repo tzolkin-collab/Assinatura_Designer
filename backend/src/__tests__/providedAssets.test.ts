@@ -48,6 +48,8 @@ describe('resolveSlideImages com o cérebro ligado', () => {
     const where = (prismaMock.asset.findMany.mock.calls[0]![0] as any).where;
     expect(where.source).toEqual({ not: 'ai-generated' });
     expect(where.brandId).toEqual({ in: ['brand-1'] });
+    // Material de referência (manual visual, moodboard...) nunca é candidato a foto de slide.
+    expect(where.NOT).toEqual({ tags: { hasSome: ['visual-manual', 'moodboard', 'font-reference', 'palette-reference'] } });
   });
 
   it('sem o cérebro, a biblioteca continua inteira (comportamento antigo)', async () => {
