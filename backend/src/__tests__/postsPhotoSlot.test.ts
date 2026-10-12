@@ -14,6 +14,17 @@ vi.mock('jsonwebtoken', () => ({
 }));
 vi.mock('../lib/postVersions', () => ({ snapshotPost: vi.fn(), restorePostVersion: vi.fn() }));
 
+// O enquadramento automático baixa a foto, chama o Gemini e abre o Chromium: nos testes, nada disso.
+const framing = vi.hoisted(() => ({ analysis: null as unknown, aspect: null as number | null }));
+vi.mock('../lib/photoFraming', async () => {
+  const real = await vi.importActual<typeof import('../lib/photoFraming')>('../lib/photoFraming');
+  return {
+    ...real,
+    analyzePhoto: vi.fn(async () => framing.analysis),
+    measureSlotAspect: vi.fn(async () => framing.aspect),
+  };
+});
+
 const auth = (r: request.Test) => r.set('Authorization', 'Bearer token');
 
 const HTML = `<h1>Título</h1><div data-photo-slot="1" style="width:300px;height:400px"></div>`;
@@ -33,6 +44,8 @@ describe('rotas de espaço de foto', () => {
     vi.clearAllMocks();
     mockedVerify.mockReturnValue({ userId: 'u1' });
     prismaMock.post.findFirst.mockResolvedValue(post());
+    framing.analysis = null;
+    framing.aspect = null;
     prismaMock.asset.findFirst.mockResolvedValue({ name: 'amanda-01.jpg' });
     prismaMock.slide.update.mockResolvedValue({});
     prismaMock.post.update.mockResolvedValue({});
@@ -70,6 +83,59 @@ describe('rotas de espaço de foto', () => {
       expect(prismaMock.slide.update).toHaveBeenCalledTimes(1);
       const dados = prismaMock.slide.update.mock.calls[0]![0] as { data: { htmlRender: string } };
       expect(dados.data.htmlRender).toContain(FOTO);
+    });
+
+    describe('enquadramento pelo assunto', () => {
+      // Retrato 3:4 com o rosto no terço de cima, num espaço paisagem 16:9: o centro cortaria a cabeça.
+      const retrato = { focus: { subject: { x0: 0.2, y0: 0.05, x1: 0.8, y1: 1 }, face: { x0: 0.35, y0: 0.08, x1: 0.65, y1: 0.28 } }, aspect: 3 / 4 };
+
+      it('foto nova: posiciona pelo rosto em vez do centro e avisa que foi automático', async () => {
+        framing.analysis = retrato;
+        framing.aspect = 16 / 9;
+        const res = await auth(request(app).put('/api/posts/post-1/slides/0/photo').send({ slot: '1', assetUrl: FOTO }));
+        expect(res.status).toBe(200);
+        const pos = res.body.data.slots[0].position;
+        expect(pos.x).toBe(50);
+        expect(pos.y).toBeLessThan(35); // sobe a janela: o rosto está no alto da foto
+        expect(res.body.data.framing).toMatchObject({ mode: 'auto', faceVisible: 1 });
+      });
+
+      it('detecção falhou: volta ao centro (como antes), sem erro', async () => {
+        framing.analysis = null;
+        framing.aspect = 16 / 9;
+        const res = await auth(request(app).put('/api/posts/post-1/slides/0/photo').send({ slot: '1', assetUrl: FOTO }));
+        expect(res.status).toBe(200);
+        expect(res.body.data.slots[0].position).toEqual({ x: 50, y: 50 });
+        expect(res.body.data.framing).toEqual({ mode: 'center' });
+      });
+
+      it('não conseguiu medir o espaço: centro, sem erro', async () => {
+        framing.analysis = retrato;
+        framing.aspect = null;
+        const res = await auth(request(app).put('/api/posts/post-1/slides/0/photo').send({ slot: '1', assetUrl: FOTO }));
+        expect(res.body.data.slots[0].position).toEqual({ x: 50, y: 50 });
+        expect(res.body.data.framing.mode).toBe('center');
+      });
+
+      it('posição escolhida pela pessoa sempre vence o automático', async () => {
+        framing.analysis = retrato;
+        framing.aspect = 16 / 9;
+        const res = await auth(request(app).put('/api/posts/post-1/slides/0/photo').send({ slot: '1', assetUrl: FOTO, position: { x: 10, y: 90 } }));
+        expect(res.body.data.slots[0].position).toEqual({ x: 10, y: 90 });
+        expect(res.body.data.framing).toEqual({ mode: 'manual' });
+      });
+
+      it('a mesma foto reenviada mantém o ajuste que a pessoa já fez', async () => {
+        framing.analysis = retrato;
+        framing.aspect = 16 / 9;
+        prismaMock.post.findFirst.mockResolvedValue({
+          ...post(),
+          slides: [{ id: 'row-0', position: 0, contentJson: { html: `<div data-photo-slot="1"><img src="${FOTO}" style="object-position:20% 30%"></div>` } }],
+        });
+        const res = await auth(request(app).put('/api/posts/post-1/slides/0/photo').send({ slot: '1', assetUrl: FOTO }));
+        expect(res.body.data.slots[0].position).toEqual({ x: 20, y: 30 });
+        expect(res.body.data.framing).toEqual({ mode: 'kept' });
+      });
     });
 
     it('o snapshot é tirado ANTES de qualquer escrita (dá para desfazer)', async () => {

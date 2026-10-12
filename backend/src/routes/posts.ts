@@ -18,6 +18,7 @@ import { uploadPngToR2 } from '../lib/r2.js';
 import { mergeSlidesIntoPost, syncPostSlides } from '../lib/postHelper.js';
 import { snapshotPost, restorePostVersion } from '../lib/postVersions.js';
 import { listPhotoSlots, setPhotoInSlot, PhotoSlotNotFoundError } from '../lib/photoSlot.js';
+import { analyzePhoto, frameFromAnalysis, measureSlotAspect } from '../lib/photoFraming.js';
 import { enrichAiContext } from '../lib/aiContext.js';
 import { enqueueCanvaExport, canvaExportQueue, enqueueDeckExport, deckExportQueue } from '../lib/queue.js';
 import { publishPost, unpublishPost, type HostingConfig } from '../lib/presentationHosting.js';
@@ -332,6 +333,8 @@ postsRouter.put('/:id/slides/:index/photo', async (req: AuthRequest, res: Respon
     const atual = listPhotoSlots(current.html).find((s) => s.slot === body.slot);
 
     let placement: Parameters<typeof setPhotoInSlot>[2];
+    // Como o enquadramento foi decidido: a tela usa para avisar a pessoa.
+    let framing: { mode: 'manual' | 'kept' | 'auto' | 'center'; faceVisible?: number | null } = { mode: 'manual' };
     if (body.assetUrl === null) {
       placement = null;
     } else if (typeof body.assetUrl === 'string') {
@@ -342,11 +345,28 @@ postsRouter.put('/:id/slides/:index/photo', async (req: AuthRequest, res: Respon
         select: { name: true },
       });
       if (!asset) throw createError(400, 'Essa foto não está na biblioteca da marca');
-      // Foto nova começa centralizada; a mesma foto reenviada mantém o enquadramento que já tinha.
+      // A mesma foto reenviada mantém o enquadramento que já tinha; a pessoa que escolhe a posição
+      // manda. Foto NOVA é enquadrada pelo assunto (rosto/pessoa/objeto) em vez de pelo centro:
+      // o centro cortava a cabeça em retratos com o rosto no terço de cima. Se não der para
+      // detectar ou medir, volta ao centro, como antes.
       const mesmaFoto = atual?.src === body.assetUrl;
+      let position = body.position ?? (mesmaFoto ? atual!.position : { x: 50, y: 50 });
+      framing = body.position ? { mode: 'manual' } : mesmaFoto ? { mode: 'kept' } : { mode: 'center' };
+      if (!body.position && !mesmaFoto) {
+        const doc = buildSlideDocument(current, content.fonts ?? ['Inter'], content.width ?? 1080, content.height ?? 1080);
+        const [analysis, aspect] = await Promise.all([
+          analyzePhoto(body.assetUrl),
+          measureSlotAspect(doc, { width: content.width ?? 1080, height: content.height ?? 1080 }, body.slot),
+        ]);
+        const auto = frameFromAnalysis(analysis, aspect);
+        if (auto) {
+          position = auto.position;
+          framing = { mode: 'auto', faceVisible: auto.faceVisible };
+        }
+      }
       placement = {
         url: body.assetUrl,
-        position: body.position ?? (mesmaFoto ? atual!.position : { x: 50, y: 50 }),
+        position,
         fit: body.fit ?? atual?.fit,
         alt: asset.name,
       };
@@ -387,7 +407,7 @@ postsRouter.put('/:id/slides/:index/photo', async (req: AuthRequest, res: Respon
     });
     await prisma.post.update({ where: { id: post.id }, data: { updatedAt: new Date() } });
 
-    res.json({ data: { slideIndex: idx, slide: clean, slots: listPhotoSlots(clean.html) } });
+    res.json({ data: { slideIndex: idx, slide: clean, slots: listPhotoSlots(clean.html), framing } });
   } catch (error) {
     next(error);
   }
