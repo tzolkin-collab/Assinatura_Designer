@@ -249,6 +249,8 @@ describe('orientações consumidas pelo cérebro', () => {
 
       expect(h.enqueued).toHaveLength(0);
       expect(h.session.pendingPhotoRule).toMatchObject({ format: 'presentation', isProof: false });
+      // O assistente já pode ter dito "a geração foi iniciada": o card corrige, no lugar que a pessoa lê.
+      expect(h.session.activeQuestion.helperText).toContain('Ainda não comecei a gerar');
       const q = h.session.activeQuestion;
       expect(q.question).toContain('ativo a regra de foto real');
       expect(q.question).toContain('Fotos reais disponíveis agora');
@@ -286,7 +288,6 @@ describe('orientações consumidas pelo cérebro', () => {
       expect(h.enqueued).toHaveLength(1);
       expect(h.enqueued[0]).toMatchObject({ format: 'carousel', aspectRatio: '9:16' });
       expect(h.streamCalls).toHaveLength(chamadasAoModelo);
-      expect(tokens()).toContain('Regra de foto real ativa nesta conversa');
       // O clique de controle não vira "pedido" dentro do briefing da geração.
       expect(h.enqueued[0].brief).not.toContain('Ativar regra de foto real');
       expect(h.enqueued[0].brief).toContain('cria um carrossel');

@@ -23,6 +23,7 @@ const h = vi.hoisted(() => {
     slideCount: 12,
     savedProfile: null as Record<string, unknown> | null,
     profileLookupFails: false,
+    withEmptySlot: false,
     brandRow: null as Record<string, unknown> | null,
   };
   return state;
@@ -117,7 +118,7 @@ vi.mock('../lib/geminiRetry.js', () => ({
     return {
       text: JSON.stringify({
         reasoning: 'direção', fonts: ['Inter'],
-        slides: Array.from({ length: end - start + 1 }, (_, i) => ({ html: `<div>Slide ${start + i}</div>`, css: '' })),
+        slides: Array.from({ length: end - start + 1 }, (_, i) => ({ html: `<div>Slide ${start + i}</div>${h.withEmptySlot ? '<div data-photo-slot="1" style="background:linear-gradient(red,blue)"></div>' : ''}`, css: '' })),
       }),
       candidates: [{ finishReason: 'STOP' }],
     };
@@ -158,6 +159,7 @@ async function rodar() {
 beforeEach(() => {
   h.savedProfile = null;
   h.profileLookupFails = false;
+  h.withEmptySlot = false;
   h.brandRow = null;
   h.wsCalls.length = 0;
   h.prompts.length = 0;
@@ -445,9 +447,35 @@ describe('cérebro do Designer ligado por marca (DESIGNER_BRAIN_BRANDS)', () => 
     // ...mas isto NÃO é o cérebro completo: as diretrizes do projeto seguem como eram e não há trava de texto.
     expect(promptOf(1)).toContain('Diretrizes: DIRETRIZ-LEGADA');
     expect(h.prompts[0]!.sys).not.toContain(GLOBAL);
+    // O contexto do planner e do revisor segue o do projeto, MAIS a regra e a nota de que a área de foto vazia é intencional.
     const planner = vi.mocked(runPlanner).mock.calls[0]![0] as { brandContext: string };
-    expect(planner.brandContext).toBe('contexto da marca');
+    expect(planner.brandContext).toContain('contexto da marca');
+    expect(planner.brandContext).toContain('REGRA DE FOTOGRAFIA PARA ESTA PEÇA');
+    expect(planner.brandContext).toContain('INTENCIONAIS');
     expect(wsOf('error')).toHaveLength(0);
+  });
+
+  it('regra ativada no chat: o espaço de foto vazio ganha a moldura PADRÃO, igual em todos os slides', async () => {
+    delete process.env.DESIGNER_BRAIN_BRANDS;
+    h.session.photoRule = 'on';
+    h.withEmptySlot = true;
+    vi.mocked(runPlanner).mockResolvedValue(roteiro(() => '') as never);
+    await rodar();
+    const slides = h.synced[0].content.slides as Array<{ html: string }>;
+    expect(slides.length).toBeGreaterThan(0);
+    for (const sl of slides) {
+      expect(sl.html).toContain('data-photo-empty'); // moldura do sistema, não o quadro que o artista inventou
+      expect(sl.html).toContain('rgba(128,128,128,.42)'); // as diagonais da moldura padrão, que vêm depois e prevalecem sobre o estilo do artista
+    }
+  });
+
+  it('sem a regra ativada, o espaço de foto fica como o artista desenhou (nada muda)', async () => {
+    delete process.env.DESIGNER_BRAIN_BRANDS;
+    delete h.session.photoRule;
+    h.withEmptySlot = true;
+    vi.mocked(runPlanner).mockResolvedValue(roteiro(() => '') as never);
+    await rodar();
+    for (const sl of h.synced[0].content.slides as Array<{ html: string }>) expect(sl.html).not.toContain('data-photo-empty');
   });
 
   it('sem a regra ativada (conversa antiga), nada muda: o resolver segue como antes', async () => {

@@ -12,6 +12,7 @@ import {
   isDesignerBrainEnabled,
   loadBrainLayers,
   parseCopyBlocks,
+  REAL_PHOTO_RULE_PROMPT,
   officialFontsFor,
   textIssuesToDeviations,
 } from '../lib/designerBrain/index.js';
@@ -343,7 +344,16 @@ async function runPipelineInner(
       return;
     }
   } else {
-    brandContext = [buildBrandContextSummary(brand), learnedPreferencesText].filter(Boolean).join('\n\n');
+    brandContext = [
+      buildBrandContextSummary(brand),
+      learnedPreferencesText,
+      // Regra de foto real ativada no chat (sem o cérebro completo): o planner e o revisor também a
+      // recebem. Sem isto o revisor reprovava a área de foto reservada como "placeholder vazio",
+      // contradizendo a própria regra (visto no teste real na Assinatura).
+      photoRuleOn
+        ? `${REAL_PHOTO_RULE_PROMPT}\n\nÁreas de foto reservadas e vazias (elementos com data-photo-slot) são INTENCIONAIS: a foto entra depois, no editor. Não as trate como "placeholder" nem como peça incompleta, e não reprove por causa delas.`
+        : '',
+    ].filter(Boolean).join('\n\n');
   }
 
   await updateSession(sessionId, { phase: 'running', workerStatus: 'running' });
@@ -896,7 +906,9 @@ async function runPipelineInner(
       }
 
       // Moldura padrão nos espaços de foto vazios: a mesma em todos os slides, desenhada pelo sistema.
-      if (designerBrainOn) {
+      // Vale com a regra de foto real ligada (cérebro completo OU ativada no chat): sem isto o artista
+      // desenhava um quadro diferente em cada slide, e a pessoa não reconhecia onde a foto entra.
+      if (photoRuleOn) {
         design.slides = design.slides.map((slide) => ({ ...slide, html: normalizeEmptyPhotoSlots(slide.html) }));
       }
 

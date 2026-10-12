@@ -735,10 +735,6 @@ async function handleUserMessageInner(
     const msg = userMessage.trim().toLowerCase();
     if (msg === PHOTO_RULE_CONFIRM_LABEL.toLowerCase() || msg === PHOTO_RULE_ACTIVATE_LABEL.toLowerCase()) {
       await updateSession(sessionId, { photoRule: 'on', pendingPhotoRule: null, activeQuestion: null });
-      ws.token(
-        sessionId,
-        '\nRegra de foto real ativa nesta conversa: só uso fotos reais fornecidas e, onde faltar foto, deixo a área reservada.\n',
-      );
       ws.end(sessionId);
       const retomada = await getSession(sessionId);
       if (retomada) await executeDispatch(sessionId, retomada, pedido);
@@ -1138,7 +1134,12 @@ async function detectAndDispatch(
 const PHOTO_RULE_CONFIRM_LABEL = 'Confirmar regra de foto real';
 const PHOTO_RULE_ACTIVATE_LABEL = 'Ativar regra de foto real';
 
-/** Arquivos de imagem na biblioteca (da marca e, num desdobramento, da base) que não são gerados por IA. */
+/**
+ * Arquivos de imagem que podem ser foto real: enviados pela pessoa (upload, Drive, Asana). Fora da
+ * conta ficam o que o sistema gerou, as exportações de slide do Canva, o logo e o material do
+ * brandbook: contar isso como "foto" enganava a pessoa (a Assinatura tinha 13 e nenhuma era foto).
+ * Vale a biblioteca da marca e, num desdobramento, a da base.
+ */
 async function countLibraryImages(brandSlug: string): Promise<number | null> {
   try {
     const brand = await prisma.brand.findUnique({ where: { slug: brandSlug }, select: { id: true, parentBrandId: true } });
@@ -1147,8 +1148,8 @@ async function countLibraryImages(brandSlug: string): Promise<number | null> {
       where: {
         brandId: { in: [brand.id, ...(brand.parentBrandId ? [brand.parentBrandId] : [])] },
         fileType: { in: ['image/jpeg', 'image/png', 'image/webp'] },
-        source: { not: 'ai-generated' },
-        NOT: { tags: { hasSome: ['LOGOTYPE', 'GRAPHIC_ELEMENT', 'ILLUSTRATION', 'brandbook'] } },
+        source: { in: ['upload', 'drive', 'asana'] },
+        NOT: { tags: { hasSome: ['LOGOTYPE', 'GRAPHIC_ELEMENT', 'ILLUSTRATION', 'brandbook', 'logo'] } },
       },
     });
   } catch {
@@ -1173,7 +1174,7 @@ async function askPhotoRule(
     session.messages.filter((m) => m.role === 'user').flatMap((m) => m.attachments ?? []).filter((a) => a.mimeType.startsWith('image/')).length,
   ];
   const fotos = [
-    biblioteca === null ? '' : `${biblioteca} arquivo(s) de imagem na biblioteca (não gerados por IA)`,
+    biblioteca === null ? '' : biblioteca === 0 ? 'nenhuma foto enviada para a biblioteca' : `${biblioteca} foto(s) enviada(s) para a biblioteca`,
     `${anexadas} foto(s) anexada(s) nesta conversa`,
   ].filter(Boolean).join(' e ');
 
@@ -1198,6 +1199,9 @@ async function askPhotoRule(
       allowFreeform: false,
       allowSkip: false,
       mode: session.reviewMode,
+      // O assistente já pode ter dito "a geração foi iniciada" (visto no teste real). O card é o que a
+      // pessoa lê agora, e a tela descarta tokens que chegam depois do fim da resposta.
+      helperText: 'Ainda não comecei a gerar: só começo depois da sua resposta.',
     },
   });
   const atual = await getSession(sessionId);
