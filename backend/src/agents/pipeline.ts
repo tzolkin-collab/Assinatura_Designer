@@ -26,6 +26,7 @@ import { editHtmlSlide, generateHtmlDesignBatched, type HtmlDesignSlide } from '
 import { deriveDeckName } from '../lib/deckName.js';
 import { onlyProvidedAssets } from '../lib/designerBrain/index.js';
 import { normalizeEmptyPhotoSlots } from '../lib/photoSlot.js';
+import { autoFrameSlidePhotos } from '../lib/photoFraming.js';
 import { syncPostSlides } from '../lib/postHelper.js';
 import { researchBrand, type VisualRef } from '../lib/fabricaLegacy.js';
 import { resolveSlideImages, resolveImageCandidateDecisions, type AmbiguousImageCandidate, type ResolvedSlideImage } from '../lib/imageResolver.js';
@@ -932,6 +933,23 @@ async function runPipelineInner(
       // desenhava um quadro diferente em cada slide, e a pessoa não reconhecia onde a foto entra.
       if (photoRuleOn) {
         design.slides = design.slides.map((slide) => ({ ...slide, html: normalizeEmptyPhotoSlots(slide.html) }));
+
+        // Foto fornecida que o artista colocou no slide: enquadra pelo rosto/assunto em vez do centro.
+        const permitidas = new Set([
+          ...brand.assetUrls.map((a) => a.url),
+          ...(params.attachmentImages ?? []).map((a) => a.url),
+        ]);
+        const enquadrado = await autoFrameSlidePhotos({
+          slides: design.slides,
+          fonts: design.fonts,
+          width: design.width,
+          height: design.height,
+          allowedUrls: permitidas,
+        });
+        design.slides = enquadrado.slides;
+        if (enquadrado.framed > 0) {
+          logger.info('Fotos enquadradas pelo assunto', { brandSlug: brand.slug, fotos: enquadrado.framed });
+        }
       }
 
       // Envelope de conteúdo (preview no front + persistência). kind html-design.

@@ -216,3 +216,17 @@ export function setPhotoInSlot(html: string, slot: string, placement: PhotoPlace
   withStyle(slotEl, { overflow: 'hidden' });
   return body.innerHTML;
 }
+
+/**
+ * Muda SÓ o enquadramento (`object-position`) da foto que já está num espaço. Não toca na foto, no `alt`,
+ * no tamanho nem no resto do slide: é o que o enquadramento automático precisa depois que o artista
+ * desenhou a arte. Devolve o HTML igual se o espaço não existe ou não tem foto.
+ */
+export function setPhotoPosition(html: string, slot: string, position: PhotoPosition): string {
+  const { body } = parseBody(html);
+  const slotEl = findSlot(body, slot);
+  const img = slotEl ? photoOf(slotEl) : null;
+  if (!img) return html;
+  withStyle(img, { 'object-position': `${clampPct(position.x, 50)}% ${clampPct(position.y, 50)}%` });
+  return body.innerHTML;
+}
