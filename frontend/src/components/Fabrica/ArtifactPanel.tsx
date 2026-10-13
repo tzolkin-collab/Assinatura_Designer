@@ -1,5 +1,6 @@
 'use client';
 
+import styles from './ArtifactPanel.module.css';
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { Check, ChevronDown, Code2, Copy, Download, Eye, Loader2, ExternalLink, Globe } from 'lucide-react';
@@ -273,39 +274,22 @@ export function ArtifactPanel({
   );
 
   const itemMenu = (label: string, hint: string, onClick: () => void, disabled = false) => (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      style={{
-        display: 'block', width: '100%', textAlign: 'left',
-        padding: '8px 12px', border: 'none', background: 'transparent',
-        cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.45 : 1,
-        fontSize: 13, color: 'var(--color-text, #111827)',
-      }}
-      onMouseEnter={(e) => { if (!disabled) e.currentTarget.style.background = 'rgba(0,0,0,0.04)'; }}
-      onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-    >
-      <span style={{ display: 'block', fontWeight: 500 }}>{label}</span>
-      <span style={{ display: 'block', fontSize: 11, color: 'var(--color-text-muted, #6b7280)' }}>{hint}</span>
+    <button type="button" role="menuitem" onClick={onClick} disabled={disabled} className={styles.menuItem}>
+      {label}
+      <small>{hint}</small>
     </button>
   );
 
   const botaoAba = (id: Aba, label: string, Icone: typeof Eye) => (
     <button
       type="button"
+      role="tab"
+      aria-selected={aba === id}
       onClick={() => setAba(id)}
       disabled={id === 'fonte' && !temArtefato}
-      style={{
-        display: 'flex', alignItems: 'center', gap: 5,
-        padding: '4px 10px', borderRadius: 999, fontSize: 12, fontWeight: 500,
-        border: '1px solid transparent',
-        background: aba === id ? 'rgba(0,0,0,0.06)' : 'transparent',
-        color: aba === id ? 'var(--color-text, #111827)' : 'var(--color-text-muted, #6b7280)',
-        cursor: id === 'fonte' && !temArtefato ? 'not-allowed' : 'pointer',
-      }}
+      className={[styles.tab, aba === id ? styles.tabActive : ''].join(' ')}
     >
-      <Icone size={13} /> {label}
+      <Icone size={14} /> {label}
     </button>
   );
 
@@ -313,31 +297,15 @@ export function ArtifactPanel({
     // absolute+inset em vez de height:100% — dentro de um item flex (.previewPanel na
     // Fábrica) percentage-height não resolvia de forma confiável, encolhendo o corpo
     // do preview a uma fração da altura real e empurrando a navegação de slides.
-    <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+    <div className={styles.root}>
       {/* ── Barra do artefato ────────────────────────────────────────────────── */}
-      <div
-        style={{
-          display: 'flex', alignItems: 'center', gap: 8,
-          // Telas estreitas (Fábrica empilhada no mobile): a barra quebra linha
-          // em vez de estourar horizontalmente.
-          flexWrap: 'wrap',
-          padding: '8px 12px',
-          borderBottom: '1px solid var(--color-border, rgba(0,0,0,0.08))',
-          background: 'var(--color-surface, rgba(255,255,255,0.7))',
-          backdropFilter: 'blur(8px)',
-          flexShrink: 0,
-          // O backdrop-filter cria um stacking context: sem z-index explícito a
-          // barra (e o dropdown de download DENTRO dela) pintava ABAIXO do corpo
-          // do preview, que vem depois no documento. z-30 põe a barra inteira
-          // (menu incluído) acima do preview.
-          position: 'relative',
-          zIndex: 30,
-        }}
-      >
-        {botaoAba('preview', 'Preview', Eye)}
-        {botaoAba('fonte', 'Fonte', Code2)}
+      <div className={styles.toolbar}>
+        <div className={styles.tabs} role="tablist">
+          {botaoAba('preview', 'Preview', Eye)}
+          {botaoAba('fonte', 'Fonte', Code2)}
+        </div>
 
-        <span style={{ fontSize: 11, color: 'var(--color-text-muted, #6b7280)', marginLeft: 4 }}>
+        <span className={styles.meta}>
           {temArtefato
             ? `${slideCount} slide${slideCount > 1 ? 's' : ''}${gerando ? ' · gerando…' : ''}`
             : gerando ? 'gerando…' : ''}
@@ -348,193 +316,111 @@ export function ArtifactPanel({
             a geração sem polling. Ancorado à esquerda: aqui o chip está longe da borda direita. */}
         <GenerationCostChip postId={postId} refreshKey={`${gerando ? 'g' : 'i'}:${slideCount}`} align="start" />
 
-        <div ref={boxRef} style={{ position: 'relative', marginLeft: 'auto' }}>
-          <button
-            type="button"
-            onClick={() => setMenuAberto((v) => !v)}
-            disabled={!podeBaixar || job !== null}
-            title={podeBaixar ? 'Baixar o design' : 'Disponível assim que o primeiro slide sair'}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 6,
-              border: '1px solid var(--color-border, rgba(0,0,0,0.12))',
-              borderRadius: 999, padding: '4px 10px', fontSize: 12, fontWeight: 500,
-              background: 'transparent',
-              cursor: !podeBaixar || job ? 'not-allowed' : 'pointer',
-              opacity: !podeBaixar || job ? 0.5 : 1,
-            }}
-          >
-            {job ? <Loader2 size={13} style={{ animation: 'spin 1s linear infinite' }} /> : <Download size={13} />}
-            {job ? `${job.formato.toUpperCase()} ${job.done}/${job.total}` : 'Baixar'}
-            {!job && <ChevronDown size={12} />}
-          </button>
-
-          {menuAberto && (
-            <div
-              style={{
-                position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 20,
-                width: 'min(260px, calc(100vw - 24px))', padding: '4px 0',
-                background: 'var(--color-surface, #fff)',
-                border: '1px solid var(--color-border, rgba(0,0,0,0.12))',
-                borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
-              }}
+        <div className={styles.toolbarEnd}>
+          <div ref={boxRef} className={styles.menuWrap}>
+            <button
+              type="button"
+              onClick={() => setMenuAberto((v) => !v)}
+              disabled={!podeBaixar || job !== null}
+              title={podeBaixar ? 'Baixar o design' : 'Disponível assim que o primeiro slide sair'}
+              aria-haspopup="menu"
+              aria-expanded={menuAberto}
+              className={styles.btn}
             >
-              {itemMenu('PPTX editável', 'Texto, formas e imagens editáveis (PowerPoint/Canva)', () => void baixarDeck('pptx'))}
-              {itemMenu('PDF do deck', 'Uma página por slide, texto de verdade', () => void baixarDeck('pdf'))}
-              {itemMenu('ZIP com os PNGs', `${slideCount} imagem${slideCount > 1 ? 'ns' : ''} em alta`, () => void baixarDeck('zip'))}
-              <div style={{ height: 1, background: 'var(--color-border, rgba(0,0,0,0.08))', margin: '4px 0' }} />
-              {itemMenu('PNG deste slide', `Slide ${slideIndex + 1}`, () =>
-                void comErro(() => baixarSlide(postId!, slideIndex, 'png')),
-              )}
-              {itemMenu('HTML deste slide', 'O documento que vira a arte', () =>
-                void comErro(() => baixarSlide(postId!, slideIndex, 'html')),
-              )}
-              {itemMenu('JSON do design', 'A fonte do deck inteiro', () =>
-                void comErro(async () => baixarIrJson(design, postId)),
-              )}
-            </div>
-          )}
-        </div>
+              {job ? <Loader2 size={14} className={styles.spin} /> : <Download size={14} />}
+              {job ? `${job.formato.toUpperCase()} ${job.done}/${job.total}` : 'Baixar'}
+              {!job && <ChevronDown size={13} />}
+            </button>
 
-        {/* Hospedar apresentação — recurso qualitativamente diferente de um
-            download: cria uma página pública persistente, não um arquivo de
-            uma vez só. Por isso fica no próprio botão, fora do menu de Baixar. */}
-        <button
-          type="button"
-          onClick={() => setHostModalOpen(true)}
-          disabled={!podeBaixar}
-          title={podeBaixar ? 'Hospedar como apresentação pública navegável' : 'Disponível assim que o primeiro slide sair'}
-          style={{
-            display: 'flex', alignItems: 'center', gap: 6,
-            border: '1px solid var(--color-border, rgba(0,0,0,0.12))',
-            borderRadius: 999, padding: '4px 10px', fontSize: 12, fontWeight: 500,
-            background: publicSlug ? 'rgba(16, 185, 129, 0.08)' : 'transparent',
-            color: publicSlug ? '#10b981' : undefined,
-            cursor: !podeBaixar ? 'not-allowed' : 'pointer',
-            opacity: !podeBaixar ? 0.5 : 1,
-          }}
-        >
-          <Globe size={13} />
-          {publicSlug ? 'Hospedado' : 'Hospedar'}
-        </button>
-      </div>
-
-      {/* Canva Sync Widget */}
-      {postId && (
-        <div style={{
-          padding: '8px 12px',
-          background: 'linear-gradient(135deg, rgba(139, 92, 246, 0.04), rgba(139, 92, 246, 0.01))',
-          borderBottom: '1px solid rgba(139, 92, 246, 0.1)',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '6px',
-          fontSize: '11px',
-          color: 'var(--color-text-muted, #6b7280)',
-          flexShrink: 0,
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span style={{
-                width: '6px',
-                height: '6px',
-                borderRadius: '50%',
-                background: canvaDesignId ? '#10b981' : '#9ca3af',
-              }} />
-              <span style={{ fontWeight: 600, color: 'var(--color-text, #111827)' }}>
-                {canvaDesignId ? `Canva: ${canvaDesignName || 'Conectado'}` : 'Não exportado para o Canva'}
-              </span>
-            </div>
-            
-            {canvaDesignId && canvaExportUrl && (
-              <a
-                href={canvaExportUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '4px',
-                  color: '#c2410c',
-                  textDecoration: 'none',
-                  fontWeight: 500,
-                }}
-              >
-                Abrir no Canva <ExternalLink size={11} />
-              </a>
+            {menuAberto && (
+              <div className={styles.menu} role="menu">
+                {itemMenu('PPTX editável', 'Texto, formas e imagens editáveis (PowerPoint/Canva)', () => void baixarDeck('pptx'))}
+                {itemMenu('PDF do deck', 'Uma página por slide, texto de verdade', () => void baixarDeck('pdf'))}
+                {itemMenu('ZIP com os PNGs', `${slideCount} imagem${slideCount > 1 ? 'ns' : ''} em alta`, () => void baixarDeck('zip'))}
+                <div className={styles.menuRule} />
+                {itemMenu('PNG deste slide', `Slide ${slideIndex + 1}`, () =>
+                  void comErro(() => baixarSlide(postId!, slideIndex, 'png')),
+                )}
+                {itemMenu('HTML deste slide', 'O documento que vira a arte', () =>
+                  void comErro(() => baixarSlide(postId!, slideIndex, 'html')),
+                )}
+                {itemMenu('JSON do design', 'A fonte do deck inteiro', () =>
+                  void comErro(async () => baixarIrJson(design, postId)),
+                )}
+              </div>
             )}
           </div>
 
+          {/* Hospedar apresentação — recurso qualitativamente diferente de um
+              download: cria uma página pública persistente, não um arquivo de
+              uma vez só. Por isso fica no próprio botão, fora do menu de Baixar. */}
+          <button
+            type="button"
+            onClick={() => setHostModalOpen(true)}
+            disabled={!podeBaixar}
+            title={podeBaixar ? 'Hospedar como apresentação pública navegável' : 'Disponível assim que o primeiro slide sair'}
+            className={[styles.btn, publicSlug ? styles.btnOn : ''].join(' ')}
+          >
+            <Globe size={14} />
+            {publicSlug ? 'Hospedado' : 'Hospedar'}
+          </button>
+        </div>
+      </div>
+
+      {/* Canva: uma linha só. Detalhe e ações de sincronização aparecem quando já há vínculo. */}
+      {postId && (
+        <div className={styles.canva}>
+          <span className={[styles.canvaDot, canvaDesignId ? styles.canvaDotOn : ''].join(' ')} />
+          <span className={styles.canvaTitle}>
+            {canvaDesignId ? `Canva: ${canvaDesignName || 'Conectado'}` : 'Não exportado para o Canva'}
+          </span>
+
           {canvaDesignId ? (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
-              <div style={{ color: '#9ca3af', fontSize: '10px' }}>
+            <>
+              <span className={styles.canvaMeta}>
                 {canvaLastSyncedAt ? `Última sincronização: ${new Date(canvaLastSyncedAt).toLocaleString('pt-BR')}` : 'Nunca sincronizado'}
-              </div>
-              
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', fontSize: '11px' }}>
+              </span>
+              <div className={styles.canvaActions}>
+                <label className={styles.canvaCheck}>
                   <input
                     type="checkbox"
                     checked={canvaSyncEnabled}
                     disabled={togglingSync}
                     onChange={(e) => handleToggleSync(e.target.checked)}
-                    style={{ accentColor: '#c2410c' }}
                   />
-                  <span>Sincronizar Auto (Cron)</span>
+                  <span>Sincronizar Auto</span>
                 </label>
-
-                <button
-                  onClick={handleManualFetch}
-                  disabled={fetchingSync}
-                  style={{
-                    border: 'none', background: 'transparent', color: '#c2410c', cursor: 'pointer',
-                    fontWeight: 500, padding: '2px 6px', borderRadius: '4px', fontSize: '11px',
-                  }}
-                >
+                <button type="button" className={styles.linkBtn} onClick={handleManualFetch} disabled={fetchingSync}>
                   {fetchingSync ? 'Buscando...' : 'Puxar Info'}
                 </button>
-
-                <button
-                  onClick={handleExportCanva}
-                  disabled={exportandoCanva}
-                  style={{
-                    border: 'none', background: 'transparent', color: '#c2410c', cursor: 'pointer',
-                    fontWeight: 500, padding: '2px 6px', borderRadius: '4px', fontSize: '11px',
-                  }}
-                >
+                <button type="button" className={styles.linkBtn} onClick={handleExportCanva} disabled={exportandoCanva}>
                   {exportandoCanva ? `Enviando (${exportProgress.done}/${exportProgress.total})...` : 'Atualizar Arte'}
                 </button>
+                {canvaExportUrl && (
+                  <a href={canvaExportUrl} target="_blank" rel="noopener noreferrer" className={styles.linkBtn}>
+                    Abrir no Canva <ExternalLink size={12} />
+                  </a>
+                )}
               </div>
-            </div>
+            </>
           ) : (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-              <span style={{ fontSize: '11px', color: '#9ca3af' }}>Exporte o design para iniciar o vínculo bidirecional.</span>
-              <button
-                onClick={handleExportCanva}
-                disabled={exportandoCanva}
-                style={{
-                  background: '#c2410c', color: '#fff', border: 'none', borderRadius: '6px',
-                  padding: '4px 10px', fontSize: '11px', fontWeight: 500, cursor: 'pointer',
-                  boxShadow: '0 2px 4px rgba(139, 92, 246, 0.15)',
-                }}
-              >
-                {exportandoCanva ? `Exportando (${exportProgress.done}/${exportProgress.total})...` : 'Exportar para Canva'}
+            <div className={styles.canvaActions}>
+              <button type="button" className={styles.linkBtn} onClick={handleExportCanva} disabled={exportandoCanva}>
+                {exportandoCanva ? `Exportando (${exportProgress.done}/${exportProgress.total})...` : 'Exportar para o Canva'}
               </button>
             </div>
           )}
         </div>
       )}
 
-
       {erro && (
-        <div style={{ padding: '6px 12px', fontSize: 12, color: '#b91c1c', background: '#fef2f2', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+        <div className={styles.alert} role="alert">
           <span>{erro}</span>
           {(erro.includes('CANVA_SESSION_EXPIRED') || erro.includes('Sessão do Canva')) && (
             <button
               type="button"
               onClick={() => router.push('/configuracoes/integracoes?canva_error=session_expired')}
-              style={{
-                border: '1px solid #b91c1c', background: '#fff', color: '#b91c1c',
-                borderRadius: '4px', padding: '2px 8px', fontSize: '11px', fontWeight: 500, cursor: 'pointer',
-              }}
+              className={styles.btn}
             >
               Reconectar Canva
             </button>
@@ -597,93 +483,62 @@ export function ArtifactPanel({
       </div>
 
       {hostModalOpen && (
-        <div
-          style={{
-            position: 'fixed', inset: 0, zIndex: 1000,
-            background: 'rgba(0,0,0,0.4)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            padding: 16,
-          }}
-          onClick={() => setHostModalOpen(false)}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              background: 'var(--color-surface, #fff)', borderRadius: 14, padding: 20,
-              width: 'min(420px, 100%)', boxShadow: '0 20px 50px rgba(0,0,0,0.25)',
-            }}
-          >
-            <h3 style={{ margin: '0 0 4px', fontSize: 15, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div className={styles.scrim} onClick={() => setHostModalOpen(false)}>
+          <div className={styles.dialog} role="dialog" aria-modal="true" aria-labelledby="host-title" onClick={(e) => e.stopPropagation()}>
+            <h3 id="host-title" className={styles.dialogTitle}>
               <Globe size={16} /> Hospedar apresentação
             </h3>
-            <p style={{ margin: '0 0 14px', fontSize: 12.5, color: 'var(--color-text-muted, #6b7280)', lineHeight: 1.5 }}>
+            <p className={styles.dialogText}>
               Publica uma página pública navegável (sem login) do design atual — botões de avançar/voltar, teclado e tela cheia.
             </p>
 
             {publicSlug ? (
               <>
-                <div style={{
-                  display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px',
-                  border: '1px solid var(--color-border, rgba(0,0,0,0.1))', borderRadius: 8,
-                  fontSize: 12, marginBottom: 12, overflow: 'hidden',
-                }}>
-                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{publicUrl}</span>
-                  <button type="button" onClick={handleCopyPublicUrl} style={{ border: 0, background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, color: 'var(--color-text, #111827)' }}>
-                    {hostCopiado ? <Check size={13} /> : <Copy size={13} />}
+                <div className={styles.urlRow}>
+                  <span className={styles.url}>{publicUrl}</span>
+                  <button type="button" onClick={handleCopyPublicUrl} className={styles.iconBtn} aria-label="Copiar link">
+                    {hostCopiado ? <Check size={14} /> : <Copy size={14} />}
                   </button>
-                  <a href={publicUrl} target="_blank" rel="noopener noreferrer" style={{ display: 'flex', color: 'var(--color-text, #111827)' }}>
-                    <ExternalLink size={13} />
+                  <a href={publicUrl} target="_blank" rel="noopener noreferrer" className={styles.iconBtn} aria-label="Abrir link">
+                    <ExternalLink size={14} />
                   </a>
                 </div>
                 {hostQrDataUrl && (
-                  <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
+                  <div className={styles.qr}>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={hostQrDataUrl} alt="QR code do link público" width={132} height={132} style={{ borderRadius: 8, border: '1px solid var(--color-border, rgba(0,0,0,0.1))' }} />
+                    <img src={hostQrDataUrl} alt="QR code do link público" width={132} height={132} />
                   </div>
                 )}
-                <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <div className={styles.dialogActions}>
                   <button
                     type="button"
                     onClick={() => void handleUnpublish()}
                     disabled={publishing}
-                    style={{ border: '1px solid rgba(220,38,38,0.3)', color: '#dc2626', background: 'transparent', borderRadius: 8, padding: '6px 12px', fontSize: 12.5, cursor: publishing ? 'not-allowed' : 'pointer' }}
+                    className={[styles.btn, styles.btnDanger].join(' ')}
                   >
                     {publishing ? 'Despublicando…' : 'Despublicar'}
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setHostModalOpen(false)}
-                    style={{ border: 0, background: 'var(--color-text, #111827)', color: '#fff', borderRadius: 8, padding: '6px 14px', fontSize: 12.5, cursor: 'pointer' }}
-                  >
+                  <button type="button" onClick={() => setHostModalOpen(false)} className={[styles.btn, styles.btnPrimary].join(' ')}>
                     Fechar
                   </button>
                 </div>
               </>
             ) : (
               <>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, marginBottom: 8, cursor: 'pointer' }}>
+                <label className={styles.check}>
                   <input type="checkbox" checked={hostShowCounter} onChange={(e) => setHostShowCounter(e.target.checked)} />
                   Mostrar contador de slides (ex.: &quot;2 / 6&quot;)
                 </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, marginBottom: 16, cursor: 'pointer' }}>
+                <label className={styles.check}>
                   <input type="checkbox" checked={hostAutoplay} onChange={(e) => setHostAutoplay(e.target.checked)} />
                   Avançar automaticamente (autoplay)
                 </label>
-                {hostErro && <p style={{ color: '#dc2626', fontSize: 12, marginBottom: 10 }}>{hostErro}</p>}
-                <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                  <button
-                    type="button"
-                    onClick={() => setHostModalOpen(false)}
-                    style={{ border: '1px solid var(--color-border, rgba(0,0,0,0.12))', background: 'transparent', borderRadius: 8, padding: '6px 12px', fontSize: 12.5, cursor: 'pointer' }}
-                  >
+                {hostErro && <p className={styles.dialogError}>{hostErro}</p>}
+                <div className={styles.dialogActions}>
+                  <button type="button" onClick={() => setHostModalOpen(false)} className={styles.btn}>
                     Cancelar
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => void handlePublish()}
-                    disabled={publishing}
-                    style={{ border: 0, background: 'var(--color-text, #111827)', color: '#fff', borderRadius: 8, padding: '6px 14px', fontSize: 12.5, cursor: publishing ? 'not-allowed' : 'pointer' }}
-                  >
+                  <button type="button" onClick={() => void handlePublish()} disabled={publishing} className={[styles.btn, styles.btnPrimary].join(' ')}>
                     {publishing ? 'Publicando…' : 'Publicar'}
                   </button>
                 </div>
