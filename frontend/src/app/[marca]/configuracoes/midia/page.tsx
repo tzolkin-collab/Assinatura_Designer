@@ -335,8 +335,10 @@ export default function MidiaPage() {
 
   const fetchAssets = async () => {
     try {
-      const res = await api.get<{ data: Asset[] }>(`/brands/${slug}/assets`);
-      setAssets(Array.isArray(res?.data) ? res.data : []);
+      // O cliente já devolve o conteúdo de `data`; aceita as duas formas para não esvaziar a biblioteca.
+      const res = await api.get<Asset[] | { data: Asset[] }>(`/brands/${slug}/assets`);
+      const lista = Array.isArray(res) ? res : res?.data;
+      setAssets(Array.isArray(lista) ? lista : []);
     } catch (e) {
       console.error(e);
       setAssets([]);
@@ -494,9 +496,10 @@ export default function MidiaPage() {
             ref={fileInputRef}
             style={{ display: 'none' }}
             onChange={handleFileUpload}
-            accept="image/*,font/*,.svg"
+            accept="image/*,font/*,.svg,.ttf,.otf,.woff,.woff2"
           />
           <Button
+            variant="secondary"
             onClick={() => setIsBrandbookModalOpen(true)}
             disabled={busy || !canManageAssets}
           >
