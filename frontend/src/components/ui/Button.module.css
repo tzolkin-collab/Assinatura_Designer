@@ -4,9 +4,9 @@
   justify-content: center;
   gap: var(--space-2);
   border-radius: var(--radius-md);
-  font-weight: 500;
+  font-weight: 600;
   white-space: nowrap;
-  transition: all var(--transition-fast);
+  transition: background-color var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
   cursor: pointer;
   user-select: none;
   position: relative;
@@ -21,29 +21,27 @@
 .primary {
   background-color: var(--color-accent);
   color: #ffffff;
-  border: none;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  border: 1px solid var(--color-accent);
 }
 
 .primary:hover:not(:disabled) {
   background-color: var(--color-accent-hover);
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.15);
+  border-color: var(--color-accent-hover);
 }
 
 .primary:active:not(:disabled) {
-  transform: scale(0.98);
+  background-color: #000000;
 }
 
 .secondary {
   background-color: var(--color-surface);
   color: var(--color-text);
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
+  border: 1px solid var(--color-border-hover);
 }
 
 .secondary:hover:not(:disabled) {
   background-color: var(--color-bg-secondary);
-  border-color: rgba(0, 0, 0, 0.12);
+  border-color: var(--color-text-tertiary);
 }
 
 .ghost {
@@ -53,7 +51,7 @@
 }
 
 .ghost:hover:not(:disabled) {
-  background-color: var(--color-surface);
+  background-color: var(--color-bg-secondary);
   color: var(--color-text);
 }
 
@@ -65,7 +63,7 @@
 }
 
 .md {
-  height: 40px;
+  height: 38px;
   padding: 0 var(--space-4);
   font-size: var(--text-base);
 }

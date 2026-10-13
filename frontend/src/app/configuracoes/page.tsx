@@ -118,7 +118,7 @@ export default function GlobalSettingsPage() {
             href={section.href}
             style={{ textDecoration: 'none' }}
           >
-            <Card hover padding="md" style={{ height: '100%' }}>
+            <Card variant="section" hover padding="md" style={{ height: '100%' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '16px', height: '100%', position: 'relative', paddingRight: '20px' }}>
                 <div style={{ color: 'var(--color-brand)', backgroundColor: 'var(--color-brand-light)', padding: '12px', borderRadius: 'var(--radius-lg)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   {section.icon}

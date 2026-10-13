@@ -1,38 +1,42 @@
 @import '../styles/tokens.css';
 
 :root {
-  /* ── Colors ── */
-  --color-bg: #f3f2ef;
-  --color-bg-secondary: #eae8e3;
+  /* ── Colors ──
+     Preto e branco clássico, hierarquia por linha fina e tipografia. Um único acento (laranja) para o que
+     precisa de destaque: item ativo, progresso, link, foco. Trocar o acento = mudar só --color-brand*. */
+  --color-bg: #ffffff;
+  --color-bg-secondary: #f6f6f5;
   --color-surface: #ffffff;
-  --color-border: rgba(0, 0, 0, 0.04);
-  --color-border-hover: rgba(0, 0, 0, 0.08);
-  --color-text: #1d1c1a;
-  --color-text-secondary: #63615c;
-  --color-text-tertiary: #96948f;
-  --color-accent: #23221f;
-  --color-accent-hover: #3a3834;
-  --color-brand: #d97757;
-  --color-brand-light: #fdf2ef;
-  --color-error: #e00;
-  --color-error-light: #fff0f0;
-  --color-success: #10f300;
-  --color-success-light: #f0f7ff;
+  --color-surface-hover: #f6f6f5;
+  --color-border: #e7e7e5;
+  --color-border-hover: #cfcfcc;
+  --color-text: #0a0a0a;
+  --color-text-secondary: #52524f;
+  --color-text-tertiary: #727270;
+  --color-accent: #0a0a0a;
+  --color-accent-hover: #2a2a28;
+  --color-brand: #c2410c;
+  --color-brand-fill: #ea580c;
+  --color-brand-light: #fff4ed;
+  --color-error: #c62828;
+  --color-error-light: #fdf0ef;
+  --color-success: #15803d;
+  --color-success-light: #ecf8f0;
 
   /* ── Typography ── */
-  --font-sans: var(--font-inter), -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  --font-serif: var(--font-newsreader), 'Georgia', serif;
+  --font-sans: var(--font-source-sans), -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-serif: var(--font-sans);
   --font-mono: 'SF Mono', 'Fira Code', 'Fira Mono', 'Roboto Mono', monospace;
 
-  --text-xs: 0.75rem;
-  --text-sm: 0.8125rem;
-  --text-base: 0.875rem;
-  --text-lg: 1rem;
-  --text-xl: 1.125rem;
-  --text-2xl: 1.5rem;
+  --text-xs: 0.8125rem;
+  --text-sm: 0.875rem;
+  --text-base: 0.9375rem;
+  --text-lg: 1.0625rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.625rem;
   --text-3xl: 2rem;
 
-  --leading-tight: 1.25;
+  --leading-tight: 1.2;
   --leading-normal: 1.5;
   --leading-relaxed: 1.625;
 
@@ -52,25 +56,25 @@
   --radius-sm: 4px;
   --radius-md: 6px;
   --radius-lg: 8px;
-  --radius-xl: 12px;
-  --radius-2xl: 16px;
-  --radius-3xl: 24px;
+  --radius-xl: 8px;
+  --radius-2xl: 12px;
+  --radius-3xl: 16px;
   --radius-full: 9999px;
 
-  /* ── Shadows ── */
-  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.02);
-  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.03);
-  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.04);
-  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.06);
-  --shadow-xl: 0 24px 64px rgba(0, 0, 0, 0.08);
+  /* ── Shadows (só elevação de verdade: menu, modal, popover) ── */
+  --shadow-xs: none;
+  --shadow-sm: 0 1px 2px rgba(10, 10, 10, 0.05);
+  --shadow-md: 0 4px 12px rgba(10, 10, 10, 0.06);
+  --shadow-lg: 0 12px 28px rgba(10, 10, 10, 0.08);
+  --shadow-xl: 0 24px 56px rgba(10, 10, 10, 0.12);
 
   /* ── Transitions ── */
-  --transition-fast: 150ms cubic-bezier(0.16, 1, 0.3, 1);
+  --transition-fast: 120ms cubic-bezier(0.2, 0, 0, 1);
   --transition-base: 300ms cubic-bezier(0.16, 1, 0.3, 1);
   --transition-slow: 500ms cubic-bezier(0.16, 1, 0.3, 1);
 
   /* ── Layout ── */
-  --sidebar-width: 260px;
+  --sidebar-width: 232px;
   --sidebar-collapsed: 68px;
   --header-height: 56px;
 }
@@ -146,12 +150,11 @@ textarea {
   font-size: var(--text-sm);
   color: var(--color-text);
   background-color: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border-hover);
+  border-radius: var(--radius-md);
   padding: 8px 12px;
   outline: none;
-  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+  transition: border-color var(--transition-fast);
   width: 100%;
 }
 
@@ -169,8 +172,9 @@ input[type="number"]:focus,
 input[type="email"]:focus,
 input[type="password"]:focus,
 textarea:focus {
-  border-color: var(--color-brand);
-  box-shadow: 0 0 0 2px var(--color-brand-light), 0 1px 2px rgba(0, 0, 0, 0.02);
+  border-color: var(--color-text);
+  outline: 1px solid var(--color-text);
+  outline-offset: 0;
 }
 
 select:disabled,
@@ -202,7 +206,7 @@ textarea:disabled {
 
 /* ── Focus Ring ── */
 :focus-visible {
-  outline: 2px solid var(--color-accent);
+  outline: 2px solid var(--color-brand-fill);
   outline-offset: 2px;
 }
 

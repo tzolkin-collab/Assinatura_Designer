@@ -68,7 +68,7 @@ export default function GlobalAgentSettingsPage() {
       {errorMsg && <div className={styles.msgError}>{errorMsg}</div>}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '24px', marginTop: '24px' }}>
-        <Card padding="md">
+        <Card variant="section" padding="md">
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px' }}>
             <div style={{ backgroundColor: 'var(--color-brand-light)', color: 'var(--color-brand)', padding: '8px', borderRadius: '8px' }}>
               <Bot size={20} />
@@ -92,7 +92,7 @@ export default function GlobalAgentSettingsPage() {
           </div>
         </Card>
 
-        <Card padding="md">
+        <Card variant="section" padding="md">
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px' }}>
             <div style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#ef4444', padding: '8px', borderRadius: '8px' }}>
               <ShieldAlert size={20} />

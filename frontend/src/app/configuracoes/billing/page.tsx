@@ -118,7 +118,7 @@ export default function GlobalBillingPage() {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '24px', marginTop: '24px' }}>
         {/* KPI Row */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
-          <Card padding="md">
+          <Card variant="section" padding="md">
             <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>Gasto Total Consolidado</span>
             <p style={{ margin: '4px 0 0 0', fontSize: '24px', fontWeight: 800, color: 'var(--color-brand)' }}>
               {symbol} {report?.totals.cost.total.toFixed(2) || '0.00'}
@@ -126,7 +126,7 @@ export default function GlobalBillingPage() {
             <span style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>Inclui tributação sobre tokens</span>
           </Card>
 
-          <Card padding="md">
+          <Card variant="section" padding="md">
             <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>Consumo de Tokens</span>
             <p style={{ margin: '4px 0 0 0', fontSize: '24px', fontWeight: 800 }}>
               {report?.totals.totalTokens.toLocaleString('pt-BR') || '0'}
@@ -134,7 +134,7 @@ export default function GlobalBillingPage() {
             <span style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>Prompt + Output + Raciocínio</span>
           </Card>
 
-          <Card padding="md">
+          <Card variant="section" padding="md">
             <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>Total de Chamadas</span>
             <p style={{ margin: '4px 0 0 0', fontSize: '24px', fontWeight: 800 }}>
               {report?.totals.calls.toLocaleString('pt-BR') || '0'}
@@ -144,7 +144,7 @@ export default function GlobalBillingPage() {
         </div>
 
         {/* Cost Breakdown Table */}
-        <Card padding="md">
+        <Card variant="section" padding="md">
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
             <TrendingUp size={16} style={{ color: 'var(--color-brand)' }} />
             <h3 style={{ fontSize: '15px', fontWeight: 700, margin: 0 }}>Gasto por Modelo de Linguagem</h3>

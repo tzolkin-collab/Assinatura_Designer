@@ -666,7 +666,7 @@ export default function MidiaPage() {
                 }}
                 style={{ cursor: canManageAssets ? 'grab' : 'default' }}
               >
-                <Card 
+                <Card variant="section" 
                   padding="none" 
                   className={styles.card}
                 >

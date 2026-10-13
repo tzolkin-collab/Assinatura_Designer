@@ -1,17 +1,11 @@
 import type { Metadata, Viewport } from 'next';
-import { Inter, Newsreader } from 'next/font/google';
+import { Source_Sans_3 } from 'next/font/google';
 import './globals.css';
 import AppShell from '@/components/AppShell/AppShell';
 
-const inter = Inter({
-  subsets: ['latin'],
-  variable: '--font-inter',
-  display: 'swap',
-});
-
-const newsreader = Newsreader({
-  subsets: ['latin'],
-  variable: '--font-newsreader',
+const sourceSans = Source_Sans_3({
+  subsets: ['latin', 'latin-ext'],
+  variable: '--font-source-sans',
   display: 'swap',
 });
 
@@ -41,7 +35,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="pt-BR" data-scroll-behavior="smooth" className={`${inter.variable} ${newsreader.variable}`}>
+    <html lang="pt-BR" data-scroll-behavior="smooth" className={sourceSans.variable}>
       <body suppressHydrationWarning>
         <AppShell>{children}</AppShell>
       </body>

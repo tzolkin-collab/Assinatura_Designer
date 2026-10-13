@@ -6,10 +6,10 @@
 .main {
   flex: 1;
   padding: var(--space-8);
-  background-color: var(--color-bg-secondary);
+  background-color: var(--color-bg);
   min-height: 100vh;
+  min-width: 0;
   animation: fadeIn var(--transition-base);
-  transition: padding var(--transition-base);
 }
 
 .mainFull {

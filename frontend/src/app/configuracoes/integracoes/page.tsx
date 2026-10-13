@@ -135,7 +135,7 @@ function IntegracoesContent() {
       {errorMsg && <div className={styles.msgError}>{errorMsg}</div>}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '24px', marginTop: '24px' }}>
-        <Card padding="md">
+        <Card variant="section" padding="md">
           <div className={styles.integrationList}>
             {/* Asana Integration */}
             <div className={styles.integrationRow}>

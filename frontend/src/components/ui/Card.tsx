@@ -7,6 +7,8 @@ interface CardProps {
   children: React.ReactNode;
   hover?: boolean;
   padding?: 'none' | 'sm' | 'md' | 'lg';
+  /** `box`: unidade com contorno (item que se lê junto). `section`: bloco da página, só uma linha fina em cima. */
+  variant?: 'box' | 'section';
   config?: boolean;
   className?: string;
   onClick?: () => void;
@@ -17,6 +19,7 @@ export default function Card({
   children,
   hover = false,
   padding = 'md',
+  variant = 'box',
   config = false,
   className,
   onClick,
@@ -26,6 +29,7 @@ export default function Card({
     <div
       className={[
         styles.card,
+        variant === 'section' ? styles.section : '',
         hover ? styles.hover : '',
         config ? styles.config : '',
         styles[`padding-${padding}`],
