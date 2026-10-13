@@ -165,7 +165,6 @@ code.infoValue {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.4);
-  backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -175,7 +174,7 @@ code.infoValue {
 
 .modal {
   background: var(--color-surface);
-  border: 1px solid rgba(0, 0, 0, 0.04);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-2xl);
   padding: var(--space-6);
   width: 100%;

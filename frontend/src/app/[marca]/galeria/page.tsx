@@ -1291,7 +1291,7 @@ export default function BrandGaleriaPage() {
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '16px', flexWrap: 'wrap' }}>
         <PageHeader
-          title={marca}
+          title={brand?.name ?? marca}
           description="Histórico de artes e criativos gerados para esta marca."
         />
 

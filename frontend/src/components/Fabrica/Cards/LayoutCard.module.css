@@ -2,25 +2,25 @@
   text-align: left;
   padding: var(--space-4);
   border-radius: var(--radius-xl);
-  border: 1px solid rgba(0, 0, 0, 0.04);
+  border: 1px solid var(--color-border);
   background-color: var(--color-surface);
   cursor: pointer;
   transition: all var(--transition-fast);
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.02);
+  box-shadow: none;
 }
 
 .card:hover {
   border-color: rgba(0, 0, 0, 0.08);
   transform: translateY(-1px);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
+  box-shadow: none;
 }
 
 .active {
   border-color: rgba(0, 0, 0, 0.08);
-  box-shadow: 0 0 0 2px rgba(217, 119, 87, 0.12), 0 4px 16px rgba(0, 0, 0, 0.04);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-brand-fill) 12%, transparent), 0 4px 16px rgba(0, 0, 0, 0.04);
 }
 
 .top {

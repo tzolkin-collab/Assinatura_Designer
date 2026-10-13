@@ -233,7 +233,7 @@ export default function FolderPicker({ marca, sessionId, disabled }: FolderPicke
                   onClick={() => void criarPasta()}
                   disabled={!nomeNovo.trim() || salvando}
                   style={{
-                    background: '#4f46e5', color: '#fff', border: 'none',
+                    background: '#c2410c', color: '#fff', border: 'none',
                     borderRadius: 6, padding: '4px 10px', fontSize: 12,
                     cursor: nomeNovo.trim() ? 'pointer' : 'not-allowed',
                   }}
@@ -243,7 +243,7 @@ export default function FolderPicker({ marca, sessionId, disabled }: FolderPicke
               </div>
             ) : (
               <button type="button" onClick={() => setCriando(true)} style={itemStyle(false, 0)}>
-                <span style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#4f46e5' }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#c2410c' }}>
                   <FolderPlus size={13} />
                   Nova pasta
                 </span>

@@ -26,7 +26,7 @@ function CallbackHandler() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100vh', fontFamily: 'sans-serif', color: '#4b5563' }}>
-      <div style={{ border: '4px solid #f3f3f3', borderTop: '4px solid #3b82f6', borderRadius: '50%', width: '40px', height: '40px', animation: 'spin 1s linear infinite' }} />
+      <div style={{ border: '4px solid #f3f3f3', borderTop: '4px solid #c2410c', borderRadius: '50%', width: '40px', height: '40px', animation: 'spin 1s linear infinite' }} />
       <p style={{ marginTop: '16px' }}>Conectando com o Google Drive...</p>
       <style>{`
         @keyframes spin {

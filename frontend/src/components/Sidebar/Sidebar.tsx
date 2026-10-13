@@ -26,7 +26,7 @@ import {
 } from 'lucide-react';
 import styles from './Sidebar.module.css';
 import NotificationBell from '../Notification/NotificationBell';
-import { useAuth } from '@/lib/hooks';
+import { useAuth, useBrand } from '@/lib/hooks';
 
 interface NavItem {
   label: string;
@@ -151,6 +151,8 @@ export default function Sidebar() {
   }, [urlMarca]);
 
   const marca = urlMarca ?? lastBrand;
+  const { brand: currentBrand } = useBrand(marca ?? "");
+  const brandName = currentBrand?.name;
 
   return (
     <>
@@ -192,7 +194,7 @@ export default function Sidebar() {
           {/* Brand context navigation */}
           {marca && (
             <div className={styles.navSection}>
-              <span className={styles.navSectionLabel}>{decodeURIComponent(marca)}</span>
+              <span className={styles.navSectionLabel}>{brandName ?? decodeURIComponent(marca)}</span>
               {getBrandNav(marca).map((item) => (
                 <NavLink key={item.href} item={item} pathname={pathname} />
               ))}

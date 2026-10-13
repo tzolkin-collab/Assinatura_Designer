@@ -161,7 +161,6 @@
   position: fixed;
   inset: 0;
   background-color: rgba(0, 0, 0, 0.4);
-  backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -171,7 +170,7 @@
 
 .modal {
   background: var(--color-surface);
-  border: 1px solid rgba(0, 0, 0, 0.04);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-2xl);
   padding: var(--space-6);
   width: 100%;
@@ -193,7 +192,7 @@
 
 .drawer {
   background: var(--color-surface);
-  border: 1px solid rgba(0, 0, 0, 0.04);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-2xl);
   padding: var(--space-8);
   width: 100%;
@@ -221,7 +220,7 @@
   align-items: flex-start;
   justify-content: space-between;
   margin-bottom: var(--space-5);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+  border-bottom: 1px solid var(--color-border);
   padding-bottom: var(--space-4);
 }
 
@@ -252,7 +251,7 @@
 
 .syncCard {
   background: rgba(0, 0, 0, 0.02);
-  border: 1px solid rgba(0, 0, 0, 0.04);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-xl);
   padding: var(--space-4);
   margin-bottom: var(--space-6);
@@ -277,7 +276,7 @@
   top: 0; left: 0; right: 0; bottom: 0;
   background-color: var(--color-border);
   transition: .2s;
-  border-radius: 20px;
+  border-radius: 10px;
 }
 
 .slider:before {
@@ -398,7 +397,7 @@ input:checked + .slider:before {
   color: var(--color-brand);
   padding: 4px 8px;
   border-radius: var(--radius-md);
-  border: 1px solid rgba(0, 0, 0, 0.04);
+  border: 1px solid var(--color-border);
 }
 
 .sectionTitle {
@@ -423,7 +422,7 @@ input:checked + .slider:before {
 
 .propertyCard {
   background-color: var(--color-bg-secondary);
-  border: 1px solid rgba(0, 0, 0, 0.04);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-xl);
   padding: var(--space-4);
   display: flex;
@@ -454,8 +453,8 @@ input:checked + .slider:before {
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  border: 1px solid rgba(0, 0, 0, 0.1);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+  border: 1px solid var(--color-border);
+  box-shadow: none;
 }
 
 .imagePreviewSection {
@@ -468,7 +467,7 @@ input:checked + .slider:before {
   width: 100%;
   border-radius: var(--radius-xl);
   overflow: hidden;
-  border: 1px solid rgba(0, 0, 0, 0.04);
+  border: 1px solid var(--color-border);
   background-color: var(--color-bg-secondary);
 }
 
@@ -507,7 +506,7 @@ input:checked + .slider:before {
   color: #fff;
   font-size: 12px;
   font-weight: 700;
-  box-shadow: 0 0 0 4px rgba(217, 119, 87, 0.2);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-brand-fill) 20%, transparent);
   transition: transform var(--transition-fast);
 }
 
@@ -529,7 +528,7 @@ input:checked + .slider:before {
   opacity: 0;
   pointer-events: none;
   transition: all var(--transition-fast);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  box-shadow: none;
 }
 
 .marker:hover .markerTooltip {
@@ -574,7 +573,7 @@ input:checked + .slider:before {
 /* Ferramentas globais */
 .toolsPanel {
   background: rgba(0, 0, 0, 0.02);
-  border: 1px solid rgba(0, 0, 0, 0.04);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-xl);
   padding: var(--space-4);
   display: flex;
@@ -648,7 +647,7 @@ input:checked + .slider:before {
   background-color: var(--color-surface);
   color: var(--color-brand);
   border-color: var(--color-border);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+  box-shadow: none;
   font-weight: 600;
 }
 
@@ -664,7 +663,7 @@ input:checked + .slider:before {
   aspect-ratio: 1;
   border-radius: var(--radius-lg);
   overflow: hidden;
-  border: 1px solid rgba(0, 0, 0, 0.04);
+  border: 1px solid var(--color-border);
   background-color: var(--color-bg-secondary);
 }
 
@@ -677,7 +676,7 @@ input:checked + .slider:before {
 
 .questionCard {
   background-color: var(--color-bg-secondary);
-  border: 1px solid rgba(0, 0, 0, 0.04);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-xl);
   padding: var(--space-4);
   display: flex;

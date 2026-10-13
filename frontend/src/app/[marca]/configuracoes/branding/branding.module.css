@@ -112,7 +112,8 @@
 
 .textInput:focus {
   border-color: var(--color-accent);
-  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15);
+  box-shadow: none;
+  outline: 1px solid var(--color-text);
 }
 
 .swatchLabel {
@@ -234,7 +235,8 @@
 
 .textarea:focus {
   border-color: var(--color-accent);
-  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15);
+  box-shadow: none;
+  outline: 1px solid var(--color-text);
 }
 
 @keyframes spin {
@@ -342,7 +344,6 @@
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.4);
-  backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -352,7 +353,7 @@
 
 .modal {
   background: var(--color-surface);
-  border: 1px solid rgba(0, 0, 0, 0.04);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-2xl);
   padding: var(--space-6);
   width: 100%;

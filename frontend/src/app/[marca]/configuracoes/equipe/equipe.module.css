@@ -78,14 +78,14 @@
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  background: linear-gradient(135deg, var(--color-accent), #a855f7);
+  background: var(--color-accent);
   color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
   font-weight: 600;
   font-size: var(--text-sm);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  box-shadow: none;
 }
 
 .userDetails {
@@ -117,8 +117,8 @@
 }
 
 .roleBadge.admin {
-  background: rgba(99, 102, 241, 0.1);
-  border-color: rgba(99, 102, 241, 0.2);
+  background: var(--color-brand-light);
+  border-color: var(--color-brand-fill);
   color: #818cf8;
 }
 
@@ -150,7 +150,6 @@
   position: fixed;
   inset: 0;
   background-color: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -229,7 +228,8 @@
 
 .inputField:focus {
   border-color: var(--color-accent);
-  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15);
+  box-shadow: none;
+  outline: 1px solid var(--color-text);
 }
 
 /* Radio Group (Stripe-like) */
@@ -244,7 +244,7 @@
   align-items: flex-start;
   gap: var(--space-3);
   padding: var(--space-4);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--color-border);
   border-radius: 12px;
   background-color: rgba(0, 0, 0, 0.2);
   cursor: pointer;
@@ -257,14 +257,14 @@
 }
 
 .roleOption.selected {
-  border-color: #3b82f6;
+  border-color: var(--color-brand);
   background-color: rgba(59, 130, 246, 0.15);
-  box-shadow: 0 0 0 1px #3b82f6;
+  box-shadow: none;
 }
 
 .roleRadio {
   margin-top: 4px;
-  accent-color: #3b82f6;
+  accent-color: var(--color-brand);
   width: 16px;
   height: 16px;
 }

@@ -162,7 +162,7 @@
   flex-direction: column;
   gap: 10px;
   padding: 18px;
-  border-radius: 14px;
+  border-radius: 10px;
   background: #fff;
   border: 1px solid var(--color-border, rgba(0, 0, 0, 0.08));
   text-decoration: none;
@@ -171,7 +171,7 @@
 }
 
 .configCard:hover {
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.07);
+  box-shadow: none;
   transform: translateY(-1px);
 }
 
@@ -279,7 +279,7 @@
 .logicBox {
   background: #fff;
   border: 1px solid var(--color-border, rgba(0, 0, 0, 0.08));
-  border-radius: 14px;
+  border-radius: 10px;
   padding: 16px;
   display: flex;
   flex-direction: column;
@@ -311,7 +311,7 @@
 
 .summary {
   background: #f7efe6;
-  border-radius: 14px;
+  border-radius: 10px;
   padding: 16px;
   font-size: 13px;
   line-height: 1.5;
@@ -374,7 +374,7 @@
   flex-direction: column;
   gap: 8px;
   padding: 18px;
-  border-radius: 14px;
+  border-radius: 10px;
   background: #fff;
   border: 1px solid var(--color-border, rgba(0, 0, 0, 0.08));
   text-decoration: none;
@@ -382,7 +382,7 @@
 }
 
 .collabCard:hover {
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.07);
+  box-shadow: none;
 }
 
 .collabName {
@@ -399,7 +399,7 @@
 .empty {
   padding: 22px;
   border: 1px dashed var(--color-border, rgba(0, 0, 0, 0.18));
-  border-radius: 14px;
+  border-radius: 10px;
   font-size: 14px;
   color: var(--color-text-secondary, #666);
   display: flex;

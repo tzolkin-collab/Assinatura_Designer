@@ -453,7 +453,7 @@ export function ArtifactPanel({
                   display: 'flex',
                   alignItems: 'center',
                   gap: '4px',
-                  color: '#8b5cf6',
+                  color: '#c2410c',
                   textDecoration: 'none',
                   fontWeight: 500,
                 }}
@@ -476,7 +476,7 @@ export function ArtifactPanel({
                     checked={canvaSyncEnabled}
                     disabled={togglingSync}
                     onChange={(e) => handleToggleSync(e.target.checked)}
-                    style={{ accentColor: '#8b5cf6' }}
+                    style={{ accentColor: '#c2410c' }}
                   />
                   <span>Sincronizar Auto (Cron)</span>
                 </label>
@@ -485,7 +485,7 @@ export function ArtifactPanel({
                   onClick={handleManualFetch}
                   disabled={fetchingSync}
                   style={{
-                    border: 'none', background: 'transparent', color: '#8b5cf6', cursor: 'pointer',
+                    border: 'none', background: 'transparent', color: '#c2410c', cursor: 'pointer',
                     fontWeight: 500, padding: '2px 6px', borderRadius: '4px', fontSize: '11px',
                   }}
                 >
@@ -496,7 +496,7 @@ export function ArtifactPanel({
                   onClick={handleExportCanva}
                   disabled={exportandoCanva}
                   style={{
-                    border: 'none', background: 'transparent', color: '#8b5cf6', cursor: 'pointer',
+                    border: 'none', background: 'transparent', color: '#c2410c', cursor: 'pointer',
                     fontWeight: 500, padding: '2px 6px', borderRadius: '4px', fontSize: '11px',
                   }}
                 >
@@ -511,7 +511,7 @@ export function ArtifactPanel({
                 onClick={handleExportCanva}
                 disabled={exportandoCanva}
                 style={{
-                  background: '#8b5cf6', color: '#fff', border: 'none', borderRadius: '6px',
+                  background: '#c2410c', color: '#fff', border: 'none', borderRadius: '6px',
                   padding: '4px 10px', fontSize: '11px', fontWeight: 500, cursor: 'pointer',
                   boxShadow: '0 2px 4px rgba(139, 92, 246, 0.15)',
                 }}

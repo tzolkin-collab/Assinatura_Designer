@@ -780,7 +780,7 @@ export default function FabricaPage() {
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '8px' }}>
               {asanaAttachments.map((att, idx) => (
                 <div key={idx} className={s.attachStrip}>
-                  <Paperclip size={11} style={{ color: '#8b5cf6' }} />
+                  <Paperclip size={11} style={{ color: '#c2410c' }} />
                   <span>{att.name}</span>
                   <button className={s.attachRemove} onClick={() => setAsanaAttachments(prev => prev.filter((_, i) => i !== idx))}><X size={11} /></button>
                 </div>
