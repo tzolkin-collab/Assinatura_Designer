@@ -97,9 +97,8 @@
 }
 
 .listTitle {
-  font-family: var(--font-serif);
   font-size: var(--text-base);
-  font-weight: 500;
+  font-weight: 600;
   color: var(--color-text);
 }
 
@@ -253,14 +252,14 @@
   aspect-ratio: 1 / 1;
   width: 100%;
   background-color: var(--color-bg-secondary);
-  border-radius: var(--radius-xl);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
   display: flex;
   align-items: center;
   justify-content: center;
   position: relative;
   overflow: hidden;
-  box-shadow: none;
-  transition: box-shadow var(--transition-base);
+  transition: border-color var(--transition-fast);
 }
 
 .postThumbPresentation {
@@ -340,13 +339,10 @@
   overflow: visible;
 }
 
-.postCard:hover {
-  transform: translateY(-4px);
+.postCard:hover .postThumb {
+  border-color: var(--color-text-tertiary);
 }
 
-.postCard:hover .postThumb {
-  box-shadow: none;
-}
 
 .postCardDragging {
   opacity: 0.5;
@@ -354,13 +350,6 @@
   cursor: grabbing;
 }
 
-.postCard:hover .thumbImage {
-  transform: scale(1.03);
-}
-
-.postCard:hover .thumbDesign {
-  transform: scale(1.03);
-}
 
 .postCard:hover .thumbOverlay {
   opacity: 1;
@@ -857,7 +846,7 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 16px;
+  padding: var(--space-3) 0 0;
 }
 
 .postMetaGroup {
