@@ -1,4 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
+import { GoogleGenAI } from '@google/genai';
+import { config } from '../config.js';
 import prisma from '../lib/prisma.js';
 import { ensureInternalTeamMemberships } from '../lib/internalTeam.js';
 import { createError } from '../middleware/errorHandler.js';
@@ -12,6 +14,8 @@ import { rateLimit } from '../middleware/rateLimit.js';
 import { parseBody } from '../lib/validate.js';
 import { createCollabSchema, collabSlug } from '../lib/brandCollab.js';
 import { brandProfileSchema, profileCompleteness, profileFromLegacy, type BrandProfileData } from '../lib/brandProfile.js';
+import { extractProfileFromManual, plainTextFromHtml, PROFILE_IMPORT_RATE_LIMIT } from '../lib/profileExtraction.js';
+import type { BrandbookExtractionInputPart } from '../lib/brandbookExtraction.js';
 import type { Prisma } from '@prisma/client';
 import { SVG_SANITIZE_RATE_LIMIT } from '../lib/svgSanitizeRateLimit.js';
 
@@ -21,6 +25,7 @@ import { getValidAccessToken, exportDesign, waitForExport } from '../lib/canvaCl
 
 export const brandsRouter = Router();
 const brandbookUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
+const profileImportUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024, files: 6 } });
 
 // POST /api/brands/:slug/brandbook/ingest - Upload e processamento do Brandbook
 // Requer papel EDITOR+ para evitar que um usuário autenticado processe o brandbook de outra marca
@@ -430,6 +435,48 @@ brandsRouter.put('/:slug/profile', requireBrandRole(EDITORS), async (req: BrandR
     });
 
     res.json({ data: { profile, derived: false, completeness: profileCompleteness(profile) } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/brands/:slug/profile/import - Lê um manual de marca e PROPÕE um rascunho da ficha.
+//
+// Não grava nada: devolve o rascunho, o trecho do manual que sustenta cada item e o que o manual
+// não traz. Quem decide é a pessoa, na tela, e só então a ficha é salva pelo PUT. Aceita PDF,
+// imagens (png, jpeg, webp) e texto (md, txt, html). Quando há texto, os trechos são conferidos
+// contra ele em código; em PDF e imagem a conferência é da pessoa que revisa.
+//
+// Limite de taxa ANTES do upload: cada PDF vira uma chamada de IA paga.
+brandsRouter.post('/:slug/profile/import', rateLimit(PROFILE_IMPORT_RATE_LIMIT), requireBrandRole(EDITORS), profileImportUpload.array('files', 6), async (req: BrandRequest, res: Response, next: NextFunction) => {
+  try {
+    const files = (req.files as Express.Multer.File[] | undefined) ?? [];
+    if (files.length === 0) throw createError(400, 'Envie ao menos um arquivo do manual.');
+
+    const parts: BrandbookExtractionInputPart[] = [];
+    const texts: string[] = [];
+    for (const f of files) {
+      const name = f.originalname.toLowerCase();
+      if (f.mimetype === 'application/pdf') {
+        parts.push({ kind: 'pdf', buffer: f.buffer, fileName: f.originalname });
+      } else if (['image/png', 'image/jpeg', 'image/webp'].includes(f.mimetype)) {
+        parts.push({ kind: 'image', mimeType: f.mimetype, data: f.buffer.toString('base64'), fileName: f.originalname });
+      } else if (f.mimetype === 'text/html' || /\.html?$/.test(name)) {
+        texts.push(plainTextFromHtml(f.buffer.toString('utf-8')));
+      } else if (f.mimetype.startsWith('text/') || /\.(md|txt)$/.test(name)) {
+        texts.push(f.buffer.toString('utf-8'));
+      } else {
+        throw createError(400, `Tipo de arquivo não aceito: ${f.originalname}. Use PDF, imagem (png, jpeg, webp) ou texto (md, txt, html).`);
+      }
+    }
+
+    const result = await extractProfileFromManual({
+      client: new GoogleGenAI({ apiKey: config.geminiApiKey }),
+      brandName: req.brand!.name,
+      parts,
+      sourceText: texts.length ? texts.join('\n\n') : undefined,
+    });
+    res.json({ data: result });
   } catch (error) {
     next(error);
   }
