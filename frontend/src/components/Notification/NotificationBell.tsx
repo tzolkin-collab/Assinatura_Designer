@@ -75,7 +75,14 @@ export default function NotificationBell() {
 
   return (
     <div className={styles.container} ref={containerRef}>
-      <button className={styles.bellBtn} onClick={() => setOpen(!open)}>
+      <button
+        type="button"
+        className={styles.bellBtn}
+        onClick={() => setOpen(!open)}
+        aria-label={unreadCount > 0 ? `Notificações, ${unreadCount} não lida${unreadCount > 1 ? 's' : ''}` : 'Notificações'}
+        aria-expanded={open}
+        title="Notificações"
+      >
         <Bell size={18} />
         {unreadCount > 0 && <span className={styles.badge}>{unreadCount}</span>}
       </button>

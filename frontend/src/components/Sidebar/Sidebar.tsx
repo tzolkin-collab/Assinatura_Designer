@@ -31,19 +31,31 @@ import { useAuth, useBrand } from '@/lib/hooks';
 interface NavItem {
   label: string;
   href: string;
-  icon: React.ReactNode;
+  icon: LucideIcon;
   children?: NavItem[];
 }
 
-const mainNav: NavItem[] = [
-  { label: 'Minhas Marcas', href: '/galeria', icon: <LayoutGrid size={18} /> },
-  { label: 'Projetos da Equipe', href: '/projetos', icon: <Globe size={18} /> },
-  { label: 'Configurações Gerais', href: '/configuracoes', icon: <Settings size={18} /> },
-];
+/** Configurações da marca: um grupo que abre, com a visão geral e cada seção. */
+function brandSettingsGroup(marca: string): NavItem {
+  const base = `/${marca}/configuracoes`;
+  return {
+    label: BRAND_SETTINGS_GROUP.label,
+    icon: BRAND_SETTINGS_GROUP.icon,
+    href: base,
+    children: [
+      { label: BRAND_SETTINGS_OVERVIEW.label, icon: BRAND_SETTINGS_OVERVIEW.icon, href: base },
+      ...BRAND_SETTINGS.map((section) => ({
+        label: section.label,
+        icon: section.icon,
+        href: `${base}/${section.key}`,
+      })),
+    ],
+  };
+}
 
-const extrasNav: NavItem[] = [
-  { label: 'Documentação', href: '/extras/docs', icon: <FileText size={18} /> },
-];
+// O título da seção da marca mostrava o slug ("assinatura"). O nome vem da própria marca;
+// guardado em memória para não buscar de novo a cada navegação.
+const brandNameCache = new Map<string, string>();
 
 function getBrandNav(marca: string): NavItem[] {
   return [
@@ -72,22 +84,27 @@ function getBrandNav(marca: string): NavItem[] {
 }
 
 function NavLink({ item, pathname }: { item: NavItem; pathname: string }) {
+  const hasChildren = !!item.children && item.children.length > 0;
+  // O grupo fica "ativo" quando a página aberta é uma das filhas, e não só aberto.
+  const childActive = hasChildren && item.children!.some((c) => isActivePath(pathname, c.href, c.href === item.href));
   const [open, setOpen] = useState(pathname.startsWith(item.href));
-  const isActive = pathname === item.href;
-  const hasChildren = item.children && item.children.length > 0;
+  const Icon = item.icon;
 
   if (hasChildren) {
     return (
       <div className={styles.navGroup}>
         <button
-          className={[styles.navLink, open ? styles.navLinkOpen : ''].join(' ')}
+          type="button"
+          className={[styles.navLink, open ? styles.navLinkOpen : '', childActive ? styles.navLinkActive : ''].join(' ')}
           onClick={() => setOpen(!open)}
+          aria-expanded={open}
         >
-          <span className={styles.navIcon}>{item.icon}</span>
+          <span className={styles.navIcon}><Icon size={18} /></span>
           <span className={styles.navLabel}>{item.label}</span>
           <ChevronDown
             size={14}
             className={[styles.chevron, open ? styles.chevronOpen : ''].join(' ')}
+            aria-hidden="true"
           />
         </button>
         {open && (
@@ -101,12 +118,15 @@ function NavLink({ item, pathname }: { item: NavItem; pathname: string }) {
     );
   }
 
+  // A "Visão geral" tem o mesmo endereço do grupo: só é ativa na igualdade exata.
+  const isActive = isActivePath(pathname, item.href, item.href.endsWith('/configuracoes'));
   return (
     <Link
       href={item.href}
       className={[styles.navLink, isActive ? styles.navLinkActive : ''].join(' ')}
+      aria-current={isActive ? 'page' : undefined}
     >
-      <span className={styles.navIcon}>{item.icon}</span>
+      <span className={styles.navIcon}><Icon size={item.href.split('/').length > 3 ? 16 : 18} /></span>
       <span className={styles.navLabel}>{item.label}</span>
     </Link>
   );
@@ -160,7 +180,8 @@ export default function Sidebar() {
       <button
         className={styles.mobileToggle}
         onClick={() => setMobileOpen(!mobileOpen)}
-        aria-label="Toggle menu"
+        aria-label={mobileOpen ? 'Fechar menu' : 'Abrir menu'}
+        aria-expanded={mobileOpen}
       >
         {mobileOpen ? <X size={20} /> : <Menu size={20} />}
       </button>
@@ -183,10 +204,10 @@ export default function Sidebar() {
         <div className={styles.divider} />
 
         {/* Main navigation */}
-        <nav className={styles.nav}>
+        <nav className={styles.nav} aria-label="Navegação principal">
           <div className={styles.navSection}>
-            <span className={styles.navSectionLabel}>Principal</span>
-            {mainNav.map((item) => (
+            <span className={styles.navSectionLabel}>Geral</span>
+            {GLOBAL_NAV.map((item) => (
               <NavLink key={item.href} item={item} pathname={pathname} />
             ))}
           </div>
@@ -203,7 +224,7 @@ export default function Sidebar() {
 
           <div className={styles.navSection}>
             <span className={styles.navSectionLabel}>Extras</span>
-            {extrasNav.map((item) => (
+            {EXTRAS_NAV.map((item) => (
               <NavLink key={item.href} item={item} pathname={pathname} />
             ))}
           </div>
@@ -222,6 +243,7 @@ export default function Sidebar() {
             <button
               className={styles.logoutBtn}
               title="Sair"
+              aria-label="Sair da conta"
               onClick={() => {
                 localStorage.removeItem('auth_token');
                 document.cookie = 'auth_token=; path=/; max-age=0';
