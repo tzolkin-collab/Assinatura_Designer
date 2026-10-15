@@ -32,15 +32,21 @@ import type { McpToolDefinition } from './tools/types.js';
  */
 
 const SERVER_INSTRUCTIONS =
-  'Designer IA: acesso às marcas e ao kit visual do estúdio. ' +
-  'Comece sempre por list_brands para descobrir o slug das marcas liberadas, ' +
-  'depois use get_brand_kit para respeitar cores, fontes e diretrizes antes de propor qualquer peça.';
+  'Designer IA: estúdio de design de apresentações e carrosséis, onde VOCÊ é o diretor de arte e o artista. ' +
+  'Fluxo: (1) list_brands para descobrir o slug da marca; (2) get_designer_brief com o slug: devolve as regras ' +
+  'da marca, o contrato do HTML, fontes, paleta, logo e os arquivos de imagem reais que você pode usar; ' +
+  '(3) escreva cada slide em HTML/CSS seguindo o brief e envie com save_presentation, junto do texto aprovado ' +
+  'de cada slide; (4) leia as verificações devolvidas (texto, estrutura) e, se houver problema, corrija e envie ' +
+  'de novo com o postId. O texto aprovado vale literalmente: nunca invente, troque nem resuma palavras. ' +
+  'Nunca gere pessoas nem fotos: onde faltar foto real, deixe a área reservada. ' +
+  'list_designs e get_design leem o que já existe. O usuário acompanha o resultado no link do editor.';
 
 type AnyTool = McpToolDefinition<never, never> | McpToolDefinition;
 
 export function createMcpServer(deps: {
   callLog: McpCallLog;
   resourceMetadataUrl: string;
+  frontendOrigin?: string;
   tools?: readonly AnyTool[];
 }): McpServer {
   const server = new McpServer(
@@ -55,6 +61,7 @@ export function createMcpServer(deps: {
   registerTools(server, deps.tools ?? MCP_TOOLS, {
     callLog: deps.callLog,
     resourceMetadataUrl: deps.resourceMetadataUrl,
+    frontendOrigin: deps.frontendOrigin,
   });
   return server;
 }
@@ -154,7 +161,12 @@ export function createMcpEndpointRouter(deps: {
   };
 
   const handle: RequestHandler = async (req, res) => {
-    const mcp = createMcpServer({ callLog, resourceMetadataUrl: config.resourceMetadataUrl, tools });
+    const mcp = createMcpServer({
+      callLog,
+      resourceMetadataUrl: config.resourceMetadataUrl,
+      frontendOrigin: config.frontendUrl.origin,
+      tools,
+    });
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
     res.on('close', () => {
       void transport.close();

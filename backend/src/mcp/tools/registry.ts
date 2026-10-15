@@ -33,6 +33,8 @@ type AnyTool = McpToolDefinition<never, never> | McpToolDefinition;
 export interface RegistryDeps {
   callLog: McpCallLog;
   resourceMetadataUrl: string;
+  /** Origem do frontend (para montar o link do preview/editor devolvido ao agente). */
+  frontendOrigin?: string;
   now?: () => number;
 }
 
@@ -83,7 +85,7 @@ async function runTool(tool: AnyTool, args: Record<string, unknown>, extra: Extr
     }
 
     const grants = await resolveBrandGrants({ userId, brandIds, scope: tool.scope });
-    const ctx: McpCallContext = { userId, clientId: auth.clientId, familyId, grants };
+    const ctx: McpCallContext = { userId, clientId: auth.clientId, familyId, grants, frontendOrigin: deps.frontendOrigin };
 
     if (tool.brandArg) {
       brandSlug = String((args as Record<string, unknown>)[tool.brandArg] ?? '');

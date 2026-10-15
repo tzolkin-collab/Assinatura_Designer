@@ -1,3 +1,4 @@
+import { logger } from '../../lib/logger.js';
 import { randomUUID } from 'node:crypto';
 import type { OAuthRegisteredClientsStore } from '@modelcontextprotocol/sdk/server/auth/clients.js';
 import {
@@ -51,6 +52,15 @@ export class DesignerClientsStore implements OAuthRegisteredClientsStore {
     }
     for (const uri of redirectUris) {
       if (!this.redirectPolicy.isAllowed(String(uri))) {
+        // Para o operador liberar um agente novo: o HOST de retorno (nunca a URI inteira nem o nome
+        // cru, que são de um cliente não confiável) vai para o log, não para a resposta.
+        let redirectHost = 'inválido';
+        try {
+          redirectHost = new URL(String(uri)).host.slice(0, 120);
+        } catch {
+          /* mantém "inválido" */
+        }
+        logger.warn('mcp.register_refused', { reason: 'redirect_uri_fora_da_allowlist', redirectHost });
         // Não ecoa a URI: ela é do atacante e o erro vai para um cliente não confiável.
         throw new CustomOAuthError('invalid_redirect_uri', 'redirect_uri fora da lista de redirecionamentos permitidos.');
       }

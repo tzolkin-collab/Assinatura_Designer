@@ -28,6 +28,8 @@ export interface McpCallContext {
   grants: BrandGrant[];
   /** Presente quando a ferramenta declara `brandArg`: a marca já autorizada. */
   brand?: BrandGrant;
+  /** Origem do frontend, para links de preview/editor. */
+  frontendOrigin?: string;
 }
 
 /** Anotações que o ChatGPT usa para decidir quando pedir confirmação ao usuário. */

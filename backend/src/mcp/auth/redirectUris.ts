@@ -66,7 +66,23 @@ function isLoopbackUri(candidate: URL): boolean {
   );
 }
 
-export function compileRedirectPolicy(patterns: string[], allowLocalhost: boolean): RedirectPolicy {
+export interface RedirectPolicyOptions {
+  /**
+   * MODO ABERTO: aceita qualquer redirect https (forma canônica, sem query, sem userinfo, nunca
+   * loopback nem IP literal). Existe para agentes cujo redirect ainda não é conhecido (ex.: Gemini
+   * Spark). Troca a allowlist por confiança na tela de consentimento: o usuário vê o nome do
+   * cliente e o host de retorno antes de aprovar. Desligado por padrão.
+   */
+  allowAnyHttps?: boolean;
+}
+
+const IP_LITERAL = /^(\d{1,3}\.){3}\d{1,3}$|^\[.*\]$/;
+
+export function compileRedirectPolicy(
+  patterns: string[],
+  allowLocalhost: boolean,
+  options: RedirectPolicyOptions = {},
+): RedirectPolicy {
   const compiled = patterns.map(compilePattern);
 
   return {
@@ -84,7 +100,12 @@ export function compileRedirectPolicy(patterns: string[], allowLocalhost: boolea
 
       if (allowLocalhost && isLoopbackUri(candidate)) return true;
       if (candidate.protocol !== 'https:' || candidate.search) return false;
-      return compiled.some((pattern) => matchesPattern(candidate, pattern));
+      if (compiled.some((pattern) => matchesPattern(candidate, pattern))) return true;
+      if (options.allowAnyHttps) {
+        const host = candidate.hostname;
+        return !LOOPBACK_HOSTS.has(host) && !IP_LITERAL.test(host) && host.includes('.');
+      }
+      return false;
     },
   };
 }

@@ -1,5 +1,6 @@
 import type { BrandRole } from '@prisma/client';
 import { compileRedirectPolicy, type RedirectPolicy } from './auth/redirectUris.js';
+import { DEFAULT_CLIENT_PRESETS, resolveClientPresets } from './clients.js';
 
 /**
  * Configuração do módulo MCP (conector do ChatGPT).
@@ -47,7 +48,7 @@ export function normalizeScopes(scopes: Iterable<McpScope>): McpScope[] {
   return MCP_SCOPES.filter((s) => set.has(s));
 }
 
-/** Os dois redirects que o ChatGPT usa (doc "Authentication" do Apps SDK). */
+/** Os dois redirects que o ChatGPT usa (doc "Authentication" do Apps SDK). Ver também `clients.ts`. */
 export const DEFAULT_ALLOWED_REDIRECT_URIS = [
   // Com issuer identification (RFC 9207) — o modo preferido.
   'https://chatgpt.com/connector_platform_oauth_redirect',
@@ -65,7 +66,11 @@ export interface McpConfig {
   /** Origem do frontend onde fica a tela de consentimento (`/mcp/consent`). */
   frontendUrl: URL;
   redirectPolicy: RedirectPolicy;
-  /** Libera redirect/Origin de loopback (MCP Inspector em dev). */
+  /** Presets de agente ligados (ex.: chatgpt, claude). Vazio quando MCP_ALLOWED_REDIRECT_URIS assume o controle. */
+  clientPresets: string[];
+  /** Modo aberto: qualquer redirect https (agentes ainda sem redirect conhecido). Risco documentado. */
+  allowAnyHttpsRedirect: boolean;
+  /** Libera redirect/Origin de loopback (MCP Inspector em dev e CLIs de agente). */
   allowLocalhost: boolean;
   /** Origens exatas aceitas no header Origin de /mcp (anti DNS-rebinding). */
   allowedOrigins: string[];
@@ -134,12 +139,21 @@ export function loadMcpConfig(env: NodeJS.ProcessEnv, opts: McpConfigOptions = {
     return fail(`FRONTEND_URL inválida: "${frontendRaw}"`);
   }
 
+  // Redirects aceitos: MCP_ALLOWED_REDIRECT_URIS (lista explícita) SUBSTITUI os presets; sem ela valem
+  // os presets de agente (MCP_CLIENT_PRESETS, padrão chatgpt,claude).
   const redirectPatterns = splitList(env.MCP_ALLOWED_REDIRECT_URIS);
+  const requestedPresets = splitList(env.MCP_CLIENT_PRESETS);
+  const presets = resolveClientPresets(requestedPresets.length > 0 ? requestedPresets : DEFAULT_CLIENT_PRESETS);
+  if (presets.unknown.length > 0) {
+    return fail(`MCP_CLIENT_PRESETS: preset desconhecido (${presets.unknown.join(', ')}). Válidos: chatgpt, claude.`);
+  }
+  const allowAnyHttpsRedirect = env.MCP_ALLOW_ANY_HTTPS_REDIRECT === 'true';
   let redirectPolicy: RedirectPolicy;
   try {
     redirectPolicy = compileRedirectPolicy(
-      redirectPatterns.length > 0 ? redirectPatterns : DEFAULT_ALLOWED_REDIRECT_URIS,
+      redirectPatterns.length > 0 ? redirectPatterns : presets.patterns,
       allowLocalhost,
+      { allowAnyHttps: allowAnyHttpsRedirect },
     );
   } catch (err) {
     return fail((err as Error).message);
@@ -160,6 +174,8 @@ export function loadMcpConfig(env: NodeJS.ProcessEnv, opts: McpConfigOptions = {
       resourceMetadataUrl: new URL('/.well-known/oauth-protected-resource/mcp', issuer).href,
       frontendUrl: new URL(frontendUrl.origin),
       redirectPolicy,
+      clientPresets: redirectPatterns.length > 0 ? [] : presets.names,
+      allowAnyHttpsRedirect,
       allowLocalhost,
       allowedOrigins: [...origins],
       maxClients: Number.isFinite(maxClients) && maxClients > 0 ? maxClients : 500,
