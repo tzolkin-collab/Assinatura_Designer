@@ -122,11 +122,11 @@ describe('CSS e documento', () => {
 });
 
 describe('parseFontRefs (o conteúdo vem do banco e do modelo)', () => {
-  it('descarta lixo e limita a 4', () => {
+  it('descarta lixo e limita a 16', () => {
     const ok = { family: 'Queens', assetId: 'asset-queens', format: 'woff2' };
     expect(parseFontRefs([ok, { family: 1 }, null, { ...ok, format: 'exe' }, { ...ok, assetId: '../x' }])).toEqual([ok]);
     expect(parseFontRefs('x')).toEqual([]);
-    expect(parseFontRefs(Array(9).fill(ok))).toHaveLength(4);
+    expect(parseFontRefs(Array(20).fill(ok))).toHaveLength(16);
   });
 });
 
