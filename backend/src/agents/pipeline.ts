@@ -10,6 +10,7 @@ import {
   fontSubstitutionNotice,
   hasApprovedText,
   isDesignerBrainEnabled,
+  loadSavedProfileBySlug,
   officialFontsFor,
   textIssuesToDeviations,
 } from '../lib/designerBrain/index.js';
@@ -291,10 +292,12 @@ async function runPipelineInner(
     ? `Regras aprendidas sobre esta marca em conversas anteriores (respeite):\n${Object.entries(learnedPreferences).map(([k, v]) => `- ${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`).join('\n')}`
     : '';
 
-  // Cérebro do Designer em camadas: ligado só nas marcas listadas em DESIGNER_BRAIN_BRANDS.
+  // Cérebro do Designer em camadas: ligado nas marcas com ficha salva (e, por retaguarda, nas de DESIGNER_BRAIN_BRANDS).
   // Ligado, o contexto legado (resumo + regras aprendidas no chat) dá lugar às camadas
   // global → projeto → modo: a memória do projeto é a do cadastro, e o chat não a reescreve.
-  const designerBrainOn = isDesignerBrainEnabled(session.brandSlug);
+  // A ficha salva do projeto liga o cérebro e é de onde ele lê as regras da marca.
+  const savedProfile = await loadSavedProfileBySlug(session.brandSlug);
+  const designerBrainOn = savedProfile !== null || isDesignerBrainEnabled(session.brandSlug);
   // Sem texto aprovado o cérebro não tem o que reproduzir literalmente, e o modelo preenche o
   // vazio com texto inventado (visto em geração real: biografia, tópicos e botões que ninguém
   // escreveu). Melhor parar e pedir o texto do que entregar texto que a marca nunca aprovou.
@@ -311,6 +314,7 @@ async function runPipelineInner(
     try {
       const brain = buildPipelineBrainContext({
         brand,
+        profile: savedProfile,
         format,
         aspectRatio: params.aspectRatio,
         pageCount: parseRequestedSlideCount(brief),
@@ -998,7 +1002,7 @@ async function runPipelineInner(
       // Fonte oficial do projeto que o sistema não consegue carregar: o artista usou uma substituta.
       // Antes isso passava em silêncio; agora o resultado diz qual faltou e qual entrou no lugar.
       if (designerBrainOn && design.slides.length > 0) {
-        const aviso = fontSubstitutionNotice({ official: officialFontsFor(brand.slug), used: design.fonts });
+        const aviso = fontSubstitutionNotice({ official: officialFontsFor(brand.slug, savedProfile), used: design.fonts });
         if (aviso) {
           logger.warn('Fonte oficial do projeto indisponível, usando substituta', { brandSlug: brand.slug, usadas: design.fonts });
           ws.token(sessionId, `

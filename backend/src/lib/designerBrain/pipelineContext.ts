@@ -1,3 +1,4 @@
+import { renderProjectMemory, type BrandProfileData } from '../brandProfile.js';
 import { assembleDesignerBrain } from './assemble.js';
 import { PROJECT_MEMORY_SEEDS } from './seeds/index.js';
 import type { SectionId } from './types.js';
@@ -19,8 +20,21 @@ export class DesignerBrainSetupError extends Error {
   }
 }
 
-/** Cadastro da marca primeiro; o seed do repositório só entra se o cadastro estiver vazio. */
-export function resolveProjectMemory(brandSlug: string, agentPrompt: string | null | undefined): string | null {
+/**
+ * De onde vem a memória do projeto, em ordem: a ficha salva (Cérebro da IA); o texto antigo de
+ * "Instruções do agente"; o seed do repositório. A ficha vence tudo: quem a salvou decidiu.
+ */
+export function resolveProjectMemory(
+  brandSlug: string,
+  agentPrompt: string | null | undefined,
+  profile?: BrandProfileData | null,
+  brandName?: string,
+): string | null {
+  if (profile) {
+    const rendered = renderProjectMemory(brandName ?? brandSlug, profile);
+    // Ficha sem nenhuma seção preenchida rende só o cabeçalho "PROJETO: …": não é memória.
+    if (rendered.includes('\n')) return rendered;
+  }
   const own = agentPrompt?.trim();
   if (own) return own;
   return PROJECT_MEMORY_SEEDS[brandSlug.trim().toLowerCase()] ?? null;
@@ -38,6 +52,8 @@ const SECTIONS_FOR_BRAND_CONTEXT: ReadonlySet<SectionId> = new Set<SectionId>([
 
 export interface PipelineBrainInput {
   brand: { slug: string; name: string; agentPrompt: string | null | undefined };
+  /** Ficha salva do projeto, quando existe. */
+  profile?: BrandProfileData | null;
   format: 'presentation' | 'carousel';
   aspectRatio?: string;
   /** Quantidade pedida no briefing, quando houver. */
@@ -51,7 +67,7 @@ export interface PipelineBrainContext {
 }
 
 export function buildPipelineBrainContext(input: PipelineBrainInput): PipelineBrainContext {
-  const memory = resolveProjectMemory(input.brand.slug, input.brand.agentPrompt);
+  const memory = resolveProjectMemory(input.brand.slug, input.brand.agentPrompt, input.profile, input.brand.name);
   if (!memory) throw new DesignerBrainSetupError(input.brand.slug);
 
   // O documento tem 3 modos (apresentação, imagem avulsa, e-book A4); carrossel não tem

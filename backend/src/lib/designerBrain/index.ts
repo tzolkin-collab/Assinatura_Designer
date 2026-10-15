@@ -12,6 +12,7 @@ export {
 export { AMANDA_COELHO_MEMORY } from './seeds/amandaCoelho.js';
 export { PROJECT_MEMORY_SEEDS } from './seeds/index.js';
 export { designerBrainBrands, isDesignerBrainEnabled } from './enabled.js';
+export { isBrainActiveForBrand, loadSavedProfileBySlug } from './savedProfile.js';
 export {
   DesignerBrainSetupError,
   buildPipelineBrainContext,

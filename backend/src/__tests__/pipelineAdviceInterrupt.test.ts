@@ -21,6 +21,8 @@ const h = vi.hoisted(() => {
     postCreates: [] as any[],
     synced: [] as any[],
     slideCount: 12,
+    savedProfile: null as Record<string, unknown> | null,
+    profileLookupFails: false,
   };
   return state;
 });
@@ -33,6 +35,7 @@ vi.mock('../lib/prisma.js', () => ({
     },
     slide: { findFirst: vi.fn(async () => ({ id: 'slide-row' })), update: vi.fn(async () => ({})) },
     asset: { findMany: vi.fn(async () => []) },
+    brandProfile: { findFirst: vi.fn(async () => { if (h.profileLookupFails) throw new Error('relation "BrandProfile" does not exist'); return h.savedProfile ? { data: h.savedProfile } : null; }) },
   },
 }));
 
@@ -146,6 +149,8 @@ async function rodar() {
 }
 
 beforeEach(() => {
+  h.savedProfile = null;
+  h.profileLookupFails = false;
   h.wsCalls.length = 0;
   h.prompts.length = 0;
   h.reviewerBriefs.length = 0;
@@ -435,6 +440,56 @@ describe('cérebro do Designer ligado por marca (DESIGNER_BRAIN_BRANDS)', () => 
     expect(promptOf(1)).not.toContain('DIRETRIZ-LEGADA');
     // E o contrato do espaço de foto, que o editor usa para trocar a foto depois.
     expect(sys).toContain('data-photo-slot');
+  });
+
+  it('ficha salva liga o cérebro sem a flag, e as regras vêm da ficha (não do seed nem das diretrizes antigas)', async () => {
+    delete process.env.DESIGNER_BRAIN_BRANDS;
+    h.session.brandSlug = 'marca-com-ficha';
+    h.savedProfile = {
+      essence: 'ESSENCIA-DA-FICHA',
+      palette: [{ hex: '#123456', name: 'Azul ficha' }],
+      neverDo: ['NUNCA-DA-FICHA'],
+    };
+    await rodarComCopia();
+
+    const planner = vi.mocked(runPlanner).mock.calls[0]![0] as { brandContext: string };
+    expect(planner.brandContext).toContain(GLOBAL);
+    expect(planner.brandContext).toContain('ESSENCIA-DA-FICHA');
+    expect(planner.brandContext).toContain('#123456');
+    expect(planner.brandContext).toContain('NUNCA-DA-FICHA');
+    expect(planner.brandContext).not.toContain('DIRETRIZ-LEGADA');
+    expect(h.prompts[0]!.sys.startsWith(GLOBAL)).toBe(true);
+    const resolver = vi.mocked(resolveSlideImages).mock.calls[0]![0] as { allowGeneratedGraphics?: boolean };
+    expect(resolver.allowGeneratedGraphics).toBe(false);
+  });
+
+  it('ficha salva e SEM texto aprovado: para e pede o texto, como nas marcas piloto', async () => {
+    delete process.env.DESIGNER_BRAIN_BRANDS;
+    h.session.brandSlug = 'marca-com-ficha';
+    h.savedProfile = { essence: 'X' };
+    await rodar();
+    expect(String(wsOf('error')[0]!.args[1])).toContain('só gera com texto aprovado');
+    expect(vi.mocked(runPlanner)).not.toHaveBeenCalled();
+  });
+
+  it('banco sem a tabela da ficha: a geração não cai, segue no caminho legado', async () => {
+    delete process.env.DESIGNER_BRAIN_BRANDS;
+    h.profileLookupFails = true;
+    vi.mocked(runPlanner).mockResolvedValue(roteiro(() => '') as never);
+    await rodar();
+    const planner = vi.mocked(runPlanner).mock.calls[0]![0] as { brandContext: string };
+    expect(planner.brandContext).toBe('contexto da marca');
+    expect(wsOf('error')).toHaveLength(0);
+  });
+
+  it('ficha inválida no banco é ignorada: a marca segue no caminho legado, sem derrubar a geração', async () => {
+    delete process.env.DESIGNER_BRAIN_BRANDS;
+    h.session.brandSlug = 'marca-com-ficha';
+    h.savedProfile = { palette: 'isto não é uma paleta' };
+    vi.mocked(runPlanner).mockResolvedValue(roteiro(() => '') as never);
+    await rodar();
+    const planner = vi.mocked(runPlanner).mock.calls[0]![0] as { brandContext: string };
+    expect(planner.brandContext).toBe('contexto da marca');
   });
 
   it('ligado: o resolver de imagens não pode gerar foto nem buscar no Unsplash', async () => {
