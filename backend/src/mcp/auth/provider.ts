@@ -16,7 +16,7 @@ import type {
   OAuthTokens,
 } from '@modelcontextprotocol/sdk/shared/auth.js';
 import { logger } from '../../lib/logger.js';
-import { isMcpScope, normalizeScopes, READ_SCOPE, type McpConfig, type McpScope } from '../config.js';
+import { isMcpScope, MCP_SCOPES, normalizeScopes, type McpConfig, type McpScope } from '../config.js';
 import type { GrantFamily, McpOAuthStore } from '../store.js';
 import { TTL } from './constants.js';
 import {
@@ -112,8 +112,11 @@ export class DesignerOAuthProvider implements OAuthServerProvider {
     if (unknown.length > 0) {
       throw new InvalidScopeError(`Escopo(s) desconhecido(s): ${unknown.slice(0, 5).join(', ')}`);
     }
-    // Sem escopo pedido, o menor privilégio útil: leitura. Quem quer escrever precisa pedir.
-    const scopes = normalizeScopes(requested.length > 0 ? (requested as McpScope[]) : [READ_SCOPE]);
+    // Sem escopo pedido, o pedido cobre TUDO o que o servidor suporta (é o que a spec MCP manda
+    // fazer sem `scope`). Não amplia nada por si: o consentimento só deixa o usuário REDUZIR, e a
+    // tela começa em "só ver". Antes o padrão era só leitura, e clientes que não mandam `scope`
+    // (o Claude, ao conectar por URL) nunca davam ao usuário a chance de liberar escrita.
+    const scopes = normalizeScopes(requested.length > 0 ? (requested as McpScope[]) : [...MCP_SCOPES]);
 
     const requestId = randomSecret(32);
     await this.store.savePendingRequest(sha256Hex(requestId), {
