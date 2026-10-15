@@ -9,16 +9,74 @@ import prisma from './prisma.js';
 
 export type FontFormat = 'truetype' | 'opentype' | 'woff' | 'woff2';
 
+export type FontStyleName = 'normal' | 'italic';
+
 export interface FontFaceRef {
   family: string;
   assetId: string;
   format: FontFormat;
+  /** Peso do arquivo (`"400"`) ou faixa de uma variável (`"300 800"`). Sem ele vale 100 900, como antes. */
+  weight?: string;
+  style?: FontStyleName;
 }
 
 export interface FontFaceCss {
   family: string;
   /** Valor do `src` (ex.: `url(data:font/ttf;base64,...) format("truetype")`). */
   src: string;
+  weight?: string;
+  style?: FontStyleName;
+}
+
+/** Quantos arquivos da mesma família entram no deck (cada um vira um @font-face embutido). */
+export const MAX_FACES_PER_FAMILY = 4;
+/** Teto de referências guardadas no deck. */
+export const MAX_FONT_REFS = 16;
+
+const WEIGHT_RE = /^\d{1,4}( \d{1,4})?$/;
+
+/**
+ * Peso e estilo lidos do PRÓPRIO arquivo (tabelas OS/2 e fvar), nunca do nome: "Aeonik-Light" tem
+ * usWeightClass 250 e "Aeonik-Air" 100, e só o arquivo diz isso. Variável: a faixa do eixo `wght`.
+ * Devolve `null` quando não é um sfnt legível; o chamador então cai no comportamento antigo (100 900).
+ */
+export function readFontMeta(buf: Buffer): { weight: string; style: FontStyleName; variable: boolean } | null {
+  try {
+    if (buf.length < 12) return null;
+    const count = buf.readUInt16BE(4);
+    if (count < 1 || count > 64 || 12 + count * 16 > buf.length) return null;
+    const tables = new Map<string, { off: number; len: number }>();
+    for (let i = 0; i < count; i++) {
+      const o = 12 + i * 16;
+      tables.set(buf.toString('latin1', o, o + 4), { off: buf.readUInt32BE(o + 8), len: buf.readUInt32BE(o + 12) });
+    }
+    let weight = 400;
+    let italic = false;
+    const os2 = tables.get('OS/2');
+    if (os2 && os2.off + 64 <= buf.length) {
+      weight = buf.readUInt16BE(os2.off + 4);
+      italic = (buf.readUInt16BE(os2.off + 62) & 1) === 1;
+    }
+    const fvar = tables.get('fvar');
+    if (fvar && fvar.off + 16 <= buf.length) {
+      const axesOffset = buf.readUInt16BE(fvar.off + 4);
+      const axisCount = buf.readUInt16BE(fvar.off + 8);
+      const axisSize = buf.readUInt16BE(fvar.off + 10);
+      for (let i = 0; i < Math.min(axisCount, 16); i++) {
+        const a = fvar.off + axesOffset + i * axisSize;
+        if (a + 16 > buf.length) break;
+        if (buf.toString('latin1', a, a + 4) === 'wght') {
+          const min = Math.round(buf.readInt32BE(a + 4) / 65536);
+          const max = Math.round(buf.readInt32BE(a + 12) / 65536);
+          if (min >= 1 && max >= min && max <= 1000) return { weight: min === max ? String(min) : `${min} ${max}`, style: italic ? 'italic' : 'normal', variable: true };
+        }
+      }
+    }
+    const w = Math.min(1000, Math.max(1, Math.round(weight)));
+    return { weight: String(w), style: italic ? 'italic' : 'normal', variable: false };
+  } catch {
+    return null;
+  }
 }
 
 export const MAX_FONT_BYTES = 8 * 1024 * 1024;
@@ -118,7 +176,79 @@ export function matchCustomFonts(typography: TypographyRow[], library: LibraryFo
   return out;
 }
 
-/** Referências (família + assetId + formato) já conferidas pelo conteúdo do arquivo. */
+/**
+ * Todos os arquivos de fonte da biblioteca que pertencem a uma família com `source:'custom'`: o apontado em
+ * `fileUrl` primeiro e depois os de nome que contém a família (Aeonik-Light, Aeonik-Bold, QueensVar...).
+ */
+export function matchCustomFontFiles(typography: TypographyRow[], library: LibraryFont[]): Array<{ family: string; assets: LibraryFont[] }> {
+  const fonts = library.filter(looksLikeFontAsset);
+  const out: Array<{ family: string; assets: LibraryFont[] }> = [];
+  const seen = new Set<string>();
+  for (const t of typography) {
+    if (t.source !== 'custom' || !t.family.trim() || seen.has(slug(t.family))) continue;
+    const explicit = t.fileUrl ? fonts.filter((f) => f.url === t.fileUrl) : [];
+    const byName = fonts.filter((f) => slug(f.name).includes(slug(t.family)));
+    const assets = [...explicit, ...byName.filter((f) => !explicit.some((e) => e.id === f.id))];
+    if (assets.length === 0) continue;
+    seen.add(slug(t.family));
+    out.push({ family: t.family.trim(), assets });
+  }
+  return out;
+}
+
+const WEIGHT_PREFERENCE = [400, 700, 500, 300, 600, 800, 200, 900, 100];
+
+interface FaceCandidate extends FontFaceRef {
+  variable: boolean;
+}
+
+/** Faixa [min, max] de um peso declarado ("400" ou "300 800"). */
+function weightRange(weight: string | undefined): [number, number] {
+  const [a, b] = (weight ?? '400').split(' ').map(Number);
+  return [a ?? 400, b ?? a ?? 400];
+}
+
+/**
+ * Escolhe até MAX_FACES_PER_FAMILY arquivos por família, um por (peso, estilo):
+ *  - estático cujo peso cai dentro da faixa de uma variável do mesmo estilo é descartado (a variável
+ *    já o cobre, e cada arquivo embutido pesa centenas de KB em todo slide renderizado);
+ *  - pesos de texto primeiro (400, 700, 500, 300...) e itálico depois; um peso fora da grade (Light 250)
+ *    conta como o alvo mais próximo;
+ *  - a variável vai PRIMEIRO no CSS, os estáticos depois, por peso.
+ */
+export function pickFaces(candidates: FaceCandidate[], max = MAX_FACES_PER_FAMILY): FontFaceRef[] {
+  const vars = candidates.filter((c) => c.variable);
+  const covered = (c: FaceCandidate): boolean =>
+    vars.some((v) => (v.style ?? 'normal') === (c.style ?? 'normal') && Number(c.weight) >= weightRange(v.weight)[0] && Number(c.weight) <= weightRange(v.weight)[1]);
+  const rank = (c: FaceCandidate): number => {
+    if (c.variable) return -1;
+    const w = Number(c.weight ?? '400');
+    let best = 0;
+    let bestDist = Infinity;
+    WEIGHT_PREFERENCE.forEach((target, i) => {
+      const d = Math.abs(w - target);
+      if (d < bestDist) {
+        bestDist = d;
+        best = i;
+      }
+    });
+    return (c.style === 'italic' ? 100 : 0) + best;
+  };
+  const seen = new Set<string>();
+  const unique = candidates.filter((c) => {
+    if (!c.variable && covered(c)) return false;
+    const key = `${c.weight}|${c.style}|${c.variable}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  const chosen = [...unique].sort((a, b) => rank(a) - rank(b)).slice(0, max);
+  const chosenVars = chosen.filter((c) => c.variable);
+  const statics = chosen.filter((c) => !c.variable).sort((a, b) => Number(a.weight) - Number(b.weight));
+  return [...chosenVars, ...statics].map(({ variable: _variable, ...ref }) => ref);
+}
+
+/** Referências (família + assetId + formato + peso/estilo) já conferidas pelo conteúdo dos arquivos. */
 export async function resolveFontRefs(
   typography: TypographyRow[],
   brandIds: string[],
@@ -128,11 +258,23 @@ export async function resolveFontRefs(
   const library = await (deps.library ?? ((ids) => prisma.asset.findMany({ where: { brandId: { in: ids } }, select: { id: true, name: true, url: true, fileType: true } })))(brandIds);
   const load = deps.load ?? loadFontAsset;
   const refs: FontFaceRef[] = [];
-  for (const m of matchCustomFonts(typography, library)) {
-    const f = await load(m.asset.id);
-    if (f) refs.push({ family: m.family, assetId: m.asset.id, format: f.format });
+  for (const m of matchCustomFontFiles(typography, library)) {
+    const candidates: FaceCandidate[] = [];
+    for (const asset of m.assets) {
+      const f = await load(asset.id);
+      if (!f) continue;
+      const meta = readFontMeta(f.buf);
+      candidates.push({
+        family: m.family,
+        assetId: asset.id,
+        format: f.format,
+        ...(meta ? { weight: meta.weight, style: meta.style } : {}),
+        variable: meta?.variable ?? false,
+      });
+    }
+    refs.push(...pickFaces(candidates));
   }
-  return refs;
+  return refs.slice(0, MAX_FONT_REFS);
 }
 
 // ── CSS ──────────────────────────────────────────────────────────────────────────────────────────
@@ -142,7 +284,11 @@ const cssFamily = (f: string): string => f.replace(/[^\w ]/g, '');
 export function fontFaceCss(faces: FontFaceCss[]): string {
   return faces
     .filter((f) => cssFamily(f.family).trim())
-    .map((f) => `@font-face{font-family:"${cssFamily(f.family)}";src:${f.src};font-weight:100 900;font-style:normal;font-display:block;}`)
+    .map((f) => {
+      const weight = f.weight && WEIGHT_RE.test(f.weight) ? f.weight : '100 900';
+      const style = f.style === 'italic' ? 'italic' : 'normal';
+      return `@font-face{font-family:"${cssFamily(f.family)}";src:${f.src};font-weight:${weight};font-style:${style};font-display:block;}`;
+    })
     .join('\n');
 }
 
@@ -151,7 +297,14 @@ export async function toDataUriFaces(refs: FontFaceRef[] | undefined, load: type
   const out: FontFaceCss[] = [];
   for (const r of refs ?? []) {
     const f = await load(r.assetId);
-    if (f) out.push({ family: r.family, src: `url(data:${fontMime(f.format)};base64,${f.buf.toString('base64')}) format("${f.format}")` });
+    if (f) {
+      out.push({
+        family: r.family,
+        src: `url(data:${fontMime(f.format)};base64,${f.buf.toString('base64')}) format("${f.format}")`,
+        ...(r.weight ? { weight: r.weight } : {}),
+        ...(r.style ? { style: r.style } : {}),
+      });
+    }
   }
   return out;
 }
@@ -162,10 +315,16 @@ export function parseFontRefs(raw: unknown): FontFaceRef[] {
   const out: FontFaceRef[] = [];
   for (const r of raw) {
     if (typeof r !== 'object' || r === null) continue;
-    const { family, assetId, format } = r as Record<string, unknown>;
+    const { family, assetId, format, weight, style } = r as Record<string, unknown>;
     if (typeof family !== 'string' || typeof assetId !== 'string' || !/^[\w-]{8,64}$/.test(assetId)) continue;
     if (format !== 'truetype' && format !== 'opentype' && format !== 'woff' && format !== 'woff2') continue;
-    out.push({ family, assetId, format });
+    out.push({
+      family,
+      assetId,
+      format,
+      ...(typeof weight === 'string' && WEIGHT_RE.test(weight) ? { weight } : {}),
+      ...(style === 'italic' || style === 'normal' ? { style } : {}),
+    });
   }
-  return out.slice(0, 4);
+  return out.slice(0, MAX_FONT_REFS);
 }

@@ -693,7 +693,8 @@ async function runPipelineInner(
       // Fontes próprias da ficha (arquivo enviado à biblioteca): carregadas de verdade, e o artista as usa pelo nome.
       const fontRefs = savedProfile ? await resolveFontRefs(savedProfile.typography ?? [], brand.libraryBrandIds) : [];
       const ownFontFaces = await toDataUriFaces(fontRefs);
-      const ownFonts = fontRefs.map((r) => r.family);
+      // Uma família pode ter vários arquivos (pesos e itálico): o artista a recebe uma vez só.
+      const ownFonts = [...new Set(fontRefs.map((r) => r.family))];
 
       // O manual visual, o moodboard e a referência das fontes da ficha chegam ao artista como IMAGEM.
       const profileRefs = designerBrainOn ? await profileStyleReferences(savedProfile, brand.libraryBrandIds) : [];
