@@ -9,7 +9,8 @@ import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import Card from '@/components/ui/Card';
 import styles from './galeria.module.css';
-import { api, ApiError } from '@/lib/api';
+import { api } from '@/lib/api';
+import NewCollabModal from '@/components/Collab/NewCollabModal';
 
 interface Brand {
   id: string;
@@ -69,15 +70,8 @@ export default function GaleriaPage() {
   const [editColor, setEditColor] = useState('#171717');
   const [savingEdit, setSavingEdit] = useState(false);
 
-  // Novo desdobramento (interno ou parceria) a partir de um projeto-base
+  // Novo desdobramento a partir de um projeto-base (o formulário é o NewCollabModal)
   const [collabParent, setCollabParent] = useState<Brand | null>(null);
-  const [collabName, setCollabName] = useState('');
-  const [collabKind, setCollabKind] = useState<'INTERNAL' | 'PARTNERSHIP'>('INTERNAL');
-  const [collabContext, setCollabContext] = useState('');
-  const [collabPartner, setCollabPartner] = useState('');
-  const [collabProtagonism, setCollabProtagonism] = useState(70);
-  const [savingCollab, setSavingCollab] = useState(false);
-  const [collabError, setCollabError] = useState('');
 
   const loadBrands = () => {
     setLoading(true);
@@ -160,41 +154,7 @@ export default function GaleriaPage() {
     }
   };
 
-  const openCollabModal = (brand: Brand) => {
-    setCollabParent(brand);
-    setCollabName('');
-    setCollabKind('INTERNAL');
-    setCollabContext('');
-    setCollabPartner('');
-    setCollabProtagonism(70);
-    setCollabError('');
-  };
-
-  const closeCollabModal = () => {
-    if (savingCollab) return;
-    setCollabParent(null);
-  };
-
-  const handleCreateCollab = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!collabParent || !collabName.trim()) return;
-    setSavingCollab(true);
-    setCollabError('');
-    try {
-      const context = collabContext.trim() ? { context: collabContext.trim() } : {};
-      const details =
-        collabKind === 'PARTNERSHIP'
-          ? { ...context, partner: { name: collabPartner.trim() }, baseProtagonism: collabProtagonism }
-          : context;
-      await api.post(`/brands/${collabParent.slug}/collabs`, { name: collabName.trim(), kind: collabKind, details });
-      setCollabParent(null);
-      loadBrands();
-    } catch (err) {
-      setCollabError(err instanceof ApiError ? err.message : 'Não foi possível criar o desdobramento.');
-    } finally {
-      setSavingCollab(false);
-    }
-  };
+  const openCollabModal = (brand: Brand) => setCollabParent(brand);
 
   const openEditModal = (brand: Brand) => {
     setEditTarget(brand);
@@ -308,7 +268,7 @@ export default function GaleriaPage() {
                 {ownerBrands.map((brand) => (
                   <div key={brand.slug} className={styles.cardWrapper}>
                     {filterMode === 'my' ? (
-                      <Link href={`/${brand.slug}/galeria`} className={styles.cardLink}>
+                      <Link href={`/${brand.slug}`} className={styles.cardLink}>
                         <Card hover padding="none">
                           <div className={styles.cardBanner} style={{ backgroundColor: brand.color || '#171717', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', position: 'relative' }}>
                             {brand.logoUrl ? (
@@ -427,110 +387,16 @@ export default function GaleriaPage() {
         </>
       )}
 
-      {/* Novo desdobramento Modal */}
+      {/* Novo desdobramento */}
       {collabParent && (
-        <div className={styles.modalOverlay} onClick={closeCollabModal}>
-          <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
-            <div className={styles.modalHeader}>
-              <h2 className={styles.modalTitle}>Novo desdobramento de {collabParent.name}</h2>
-              <button className={styles.modalClose} onClick={closeCollabModal}>
-                <X size={18} />
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateCollab} className={styles.modalForm}>
-              <p style={{ fontSize: '13px', color: 'var(--color-text-secondary, #666)', margin: '0 0 12px' }}>
-                O desdobramento herda a identidade do projeto-base. Aqui você informa só o que muda.
-              </p>
-
-              <div className={styles.formGroup}>
-                <label className={styles.formLabel}>Nome</label>
-                <input
-                  className={styles.formInput}
-                  value={collabName}
-                  onChange={(e) => setCollabName(e.target.value)}
-                  placeholder="Ex: Mentoria, Amanda + Estadão"
-                  required
-                  autoFocus
-                />
-              </div>
-
-              <div className={styles.formGroup}>
-                <label className={styles.formLabel}>Tipo</label>
-                <div style={{ display: 'flex', gap: '16px', fontSize: '14px' }}>
-                  <label style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                    <input type="radio" name="collab-kind" checked={collabKind === 'INTERNAL'} onChange={() => setCollabKind('INTERNAL')} />
-                    Interno
-                  </label>
-                  <label style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                    <input type="radio" name="collab-kind" checked={collabKind === 'PARTNERSHIP'} onChange={() => setCollabKind('PARTNERSHIP')} />
-                    Parceria com outra marca
-                  </label>
-                </div>
-              </div>
-
-              <div className={styles.formGroup}>
-                <label className={styles.formLabel}>Contexto e objetivo</label>
-                <textarea
-                  className={styles.formInput}
-                  value={collabContext}
-                  onChange={(e) => setCollabContext(e.target.value)}
-                  rows={3}
-                  maxLength={2000}
-                  placeholder="Para que serve este desdobramento"
-                />
-              </div>
-
-              {collabKind === 'PARTNERSHIP' && (
-                <>
-                  <div className={styles.formGroup}>
-                    <label className={styles.formLabel}>Marca parceira</label>
-                    <input
-                      className={styles.formInput}
-                      value={collabPartner}
-                      onChange={(e) => setCollabPartner(e.target.value)}
-                      placeholder="Nome do parceiro"
-                      required
-                    />
-                  </div>
-                  <div className={styles.formGroup}>
-                    <label className={styles.formLabel}>
-                      Protagonismo de {collabParent.name}: {collabProtagonism}%
-                    </label>
-                    <input
-                      type="range"
-                      min={0}
-                      max={100}
-                      step={5}
-                      value={collabProtagonism}
-                      onChange={(e) => setCollabProtagonism(Number(e.target.value))}
-                    />
-                    <span style={{ fontSize: '12px', color: 'var(--color-text-secondary, #666)' }}>
-                      É a força da narrativa e da identidade, não uma divisão exata de área. Logo e guia visual do parceiro entram depois, pela biblioteca do projeto.
-                    </span>
-                  </div>
-                </>
-              )}
-
-              {collabError && (
-                <p role="alert" style={{ color: '#b91c1c', fontSize: '13px', margin: '0 0 8px' }}>{collabError}</p>
-              )}
-
-              <div className={styles.modalActions}>
-                <Button type="button" variant="secondary" size="sm" onClick={closeCollabModal} disabled={savingCollab}>
-                  Cancelar
-                </Button>
-                <Button
-                  type="submit"
-                  size="sm"
-                  disabled={savingCollab || !collabName.trim() || (collabKind === 'PARTNERSHIP' && !collabPartner.trim())}
-                >
-                  {savingCollab ? 'Criando...' : 'Criar desdobramento'}
-                </Button>
-              </div>
-            </form>
-          </div>
-        </div>
+        <NewCollabModal
+          parent={collabParent}
+          onClose={() => setCollabParent(null)}
+          onCreated={() => {
+            setCollabParent(null);
+            loadBrands();
+          }}
+        />
       )}
 
       {/* Apagar Marca Modal */}

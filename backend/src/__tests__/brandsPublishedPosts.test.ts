@@ -50,6 +50,28 @@ describe('GET /api/brands/:slug/posts?published=true', () => {
     expect(call.include).toBeUndefined();
   });
 
+  it('?recent=N devolve só os N mais recentes, sem slides e com teto de 24', async () => {
+    prismaMock.post.findMany.mockResolvedValue([] as any);
+
+    await auth(request(app).get('/api/brands/minha-marca/posts?recent=6'));
+    await auth(request(app).get('/api/brands/minha-marca/posts?recent=500'));
+
+    const [primeira, segunda] = prismaMock.post.findMany.mock.calls.map((c) => c[0] as any);
+    expect(primeira).toMatchObject({ where: { brandId: 'brand-1' }, orderBy: { updatedAt: 'desc' }, take: 6 });
+    expect(primeira.select).toMatchObject({ id: true, name: true, updatedAt: true });
+    expect(primeira.select.slides).toBeUndefined();
+    expect(primeira.include).toBeUndefined();
+    expect(segunda.take).toBe(24);
+  });
+
+  it('?recent inválido cai no comportamento antigo', async () => {
+    prismaMock.post.findMany.mockResolvedValue([] as any);
+
+    await auth(request(app).get('/api/brands/minha-marca/posts?recent=abc'));
+
+    expect(prismaMock.post.findMany).toHaveBeenCalledWith(expect.objectContaining({ include: expect.anything() }));
+  });
+
   it('sem ?published=true, mantém o comportamento antigo (todos os posts, com slides)', async () => {
     prismaMock.post.findMany.mockResolvedValue([]);
 
