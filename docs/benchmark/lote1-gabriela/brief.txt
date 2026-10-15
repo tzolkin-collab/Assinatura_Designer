@@ -1,0 +1,107 @@
+Gere uma apresentação de cinco slides 16:9, na ordem abaixo, um arquétipo de composição diferente por slide, com o texto exato indicado. Siga a direção de arte de cada slide.
+
+REGRAS GERAIS DO LOTE
+
+Utilize exclusivamente a paleta da marca: vinho profundo #410C1C; vermelho institucional #8E242E; azul-claro #D8E9F3; marfim #FCF9EB.
+
+Utilize Queens nas frases de impacto, títulos, perguntas e palavras dominantes. Utilize Aeonik nos textos funcionais, listas e informações de apoio. Preserve o espaçamento natural das letras, a legibilidade e as características editoriais das duas fontes.
+
+Mantenha a identidade sofisticada e coerente, mas utilize um arquétipo de composição realmente diferente em cada slide. Não repita a mesma divisão, o mesmo posicionamento de título ou o mesmo recurso gráfico em slides consecutivos.
+
+Não acrescente palavras, dados, explicações, legendas, marcas, ícones ou qualquer texto que não esteja especificado. Não exiba números de slides.
+
+Os números 01, 02, 03, 04 e 05 poderão aparecer somente como identificadores visuais dos padrões deste lote. Eles não representam a numeração dos slides.
+
+Não utilize círculos decorativos, várias caixas coloridas, formas arredondadas genéricas, linhas sem função, sombras, degradês, brilho, 3D, interfaces simuladas ou estética de template.
+
+Quando uma fotografia real estiver anexada, utilize somente o arquivo fornecido. Quando não estiver anexada, não gere pessoas ou imagens de banco: reserve a área planejada para inserção posterior.
+
+SLIDE 01 — PADRÃO 01: CONFIANÇA
+
+Função: conteúdo.
+
+Conceito de design: demonstrar que a confiança é construída antes da oferta por meio da qualidade percebida em cada detalhe da experiência.
+
+Composição e hierarquia: utilizar fundo marfim. Criar uma divisão editorial assimétrica: fotografia real ocupando aproximadamente 45% do slide e texto em uma área independente, com amplo respiro.
+
+O número “01” deve aparecer em escala muito grande, em azul-claro ou vinho profundo com baixa interferência, funcionando como estrutura do padrão. A frase principal deve ser composta em Queens. “O CLIENTE COMPRA CONFIANÇA” deve receber maior peso e escala.
+
+Posicionar “Recepção • Ambiente • Comunicação • Segurança” em Aeonik na região inferior, com leitura contínua e sem transformar os quatro elementos em botões ou cartões.
+
+Elemento editorial: número 01 ampliado.
+
+Fotografia ou arquivo: reservar a área lateral para aplicação posterior de uma fotografia real de atendimento. Não escrever sobre o rosto.
+
+Restrições específicas: não gerar profissional ou cliente por inteligência artificial. Não utilizar imagem de aperto de mãos. Não adicionar a palavra “Padrão”, “Confiança” ou qualquer legenda além do texto especificado.
+
+SLIDE 02 — PADRÃO 02: SOLUÇÃO
+
+Função: provocação.
+
+Conceito de design: deslocar o foco visual do produto oferecido para o problema real que o negócio consegue compreender e resolver.
+
+Composição e hierarquia: utilizar fundo vinho profundo. Fazer “RESOLVEM PROBLEMAS” dominar a composição em Queens, com escala ampla e presença em marfim. Posicionar “GRANDES NEGÓCIOS NÃO OFERECEM PRODUTOS” acima, em escala menor, mantendo a leitura da frase completa.
+
+A pergunta “O que você resolve além do serviço?” deve aparecer em uma área de pausa, em Aeonik, preferencialmente sobre azul-claro ou marfim, sem ocupar uma caixa convencional.
+
+Integrar um recorte fotográfico estreito e vertical de conversa ou diagnóstico em uma das laterais, como área limpa de inserção posterior. A fotografia deve apoiar o sentido da escuta, sem competir com o manifesto tipográfico.
+
+O número “02” pode aparecer parcialmente recortado no fundo, em vermelho institucional, como identificador discreto.
+
+Elemento editorial: palavra “RESOLVEM” ampliada e dominante.
+
+Restrições específicas: não utilizar fotografias de produtos isolados nem resultados de antes e depois. Não acrescentar exemplos de problemas. Não transformar a pergunta em balão de conversa. Não gerar pessoas.
+
+SLIDE 03 — PADRÃO 03: RELACIONAMENTO
+
+Função: conteúdo.
+
+Conceito de design: mostrar o relacionamento como uma presença contínua que ultrapassa o momento físico do atendimento.
+
+Composição e hierarquia: utilizar fundo azul-claro. Construir uma jornada horizontal contínua, com a frase principal atravessando a composição em Queens, sem ser colocada dentro de uma caixa.
+
+Destacar visualmente “NÃO TERMINA” por escala ou contraste em vinho profundo. Organizar “Pós-venda • WhatsApp • Manutenção • Acompanhamento” em Aeonik como uma sequência com ritmo progressivo, sem setas e sem ícones.
+
+O número “03” deve aparecer em uma posição inesperada, preferencialmente na margem superior direita, em grande escala e parcialmente recortado. Utilizar um pequeno campo marfim para criar pausa entre o manifesto e a sequência funcional.
+
+Elemento editorial: continuidade tipográfica horizontal.
+
+Fotografia ou arquivo: não utilizar fotografia. Resolver o slide com tipografia, ritmo e campos de cor.
+
+Restrições específicas: não simular tela de WhatsApp, mensagens, celular ou interface de aplicativo. Não utilizar linha do tempo com círculos. Não acrescentar ações, datas ou etapas.
+
+SLIDE 04 — PADRÃO 04: PRESENÇA
+
+Função: conteúdo.
+
+Conceito de design: apresentar presença como construção de repertório, autoridade e memória, sem reduzir comunicação a uma sequência de resultados estéticos.
+
+Composição e hierarquia: utilizar fundo marfim. Criar uma grade editorial irregular inspirada no ritmo de uma publicação contemporânea, sem reproduzir uma interface de rede social.
+
+Posicionar a frase principal em Queens ocupando uma área ampla. “DIFICILMENTE SERÁ LEMBRADO” deve ter maior peso visual. Utilizar Aeonik para “Conteúdo não é apenas antes e depois”, em uma posição de contraponto.
+
+O número “04” deve aparecer em vinho profundo como elemento de orientação, sem dominar mais do que a frase principal.
+
+Integrar de três a quatro recortes visuais com proporções diferentes. Se imagens reais não forem anexadas, manter os campos visuais vazios com cores da paleta, sem gerar cenas, objetos ou pessoas.
+
+Elemento editorial: grade de recortes fotográficos com proporções diferentes.
+
+Restrições específicas: não simular feed do Instagram. Não criar publicações fictícias. Não utilizar ícones de curtida, comentário ou compartilhamento. Não acrescentar as palavras “conhecimento”, “personalidade”, “bastidores” ou “resultado” na tela.
+
+SLIDE 05 — PADRÃO 05: MENTALIDADE
+
+Função: reflexão.
+
+Conceito de design: construir uma sensação visual de limite que começa a se romper à medida que o olhar avança pelo slide.
+
+Composição e hierarquia: utilizar fundo vinho profundo. Compor a frase principal em Queens, começando em uma coluna mais estreita e ganhando progressivamente mais espaço, sem deformar, esticar ou alterar o espaçamento das letras.
+
+A palavra “ALÉM” pode romper o alinhamento principal e avançar para uma área ampla em azul-claro ou marfim, criando a sensação de expansão. A pergunta deve aparecer em Aeonik, isolada em uma área com grande respiro.
+
+O número “05” deve ser grande, mas tratado em baixa opacidade ou parcialmente recortado, como uma camada estrutural atrás da tipografia.
+
+Elemento editorial: expansão controlada da largura da composição tipográfica.
+
+Fotografia ou arquivo: não utilizar fotografia.
+
+Restrições específicas: não desenhar teto, parede, escada, porta, gaiola ou qualquer metáfora literal. Não comprimir ou alongar palavras. Não utilizar frases motivacionais, setas de crescimento ou gráficos.

@@ -264,6 +264,13 @@ O checklist preenchido, na formatação original, está em `docs/CHECKLIST OPERA
 5. Rodar os testes 5 (continuidade) e 8 (collab real) e fechar o checklist.
 6. Só depois: #88 (redesign) e o aviso à Gabriela de que pode testar.
 
-### 11.9 Arquivos locais não commitados (não subir)
+### 11.9 Arquivos locais e limpeza (atualizado em 15/10, à noite)
 
-`.claude/launch.json` (alterado), `backend/scripts/tmp*.ts` e `tmpVariety.cjs`, `handoff.md` (proposta de design em lote, de 06/10), `docs/benchmark/BASELINE-2026-10-15.md`, `insumos-amanda/` (**fontes comerciais: nunca commitar**), `testes-aceite-2026-10-15/` (PNGs de teste).
+- Em `main`: `backend/scripts/aceiteCerebro.ts` (testes de aceite), `renderizarDeck.ts`, `medirVariedade.cjs`,
+  `docs/benchmark/` (baselines, insumo do lote 1 da Gabriela) e o checklist preenchido em `.docx`.
+- **Fora do git, de propósito**: `insumos-amanda/` (fontes comerciais da Amanda, e `scripts-temporarios/` com os
+  `tmp*.ts` antigos) e `testes-aceite-*/`. Nunca commitar as fontes.
+- `handoff.md` (raiz) segue só local: proposta de Design em lote, de 06/10, anterior a tudo isto.
+- Branch `docs/acabamentos-designer` (plano de acabamento de 21/09) foi para o GitHub, sem PR.
+- Há um `git stash` com o teto de clientes DCR "não utilizados" do MCP, incompleto (3 testes quebram). É melhoria de
+  segurança a terminar, não um descarte.

@@ -85,3 +85,26 @@ anterior nunca é sobrescrito por um vazio.
 
 Revise o arquivo gerado e commite `docs/benchmark/BASELINE-DESIGNER.md`. Ele é um retrato de uma
 data: reexecute o script quando quiser comparar (por exemplo, depois de trocar o modelo do artista).
+
+## Variedade de composição (`backend/scripts/medirVariedade.cjs`)
+
+Mede o quanto os slides de um deck diferem entre si: mapa de ocupação 16×9 de cada slide e distância média entre
+pares (0 = slides iguais, 1 = totalmente diferentes). **É uma métrica grosseira**: vê onde há conteúdo contra o fundo,
+não tipografia, cor nem ilustração, e um deck com direção de arte por slide pode marcar baixo mesmo variando à vista.
+Use para comparar versões do Designer entre si; para decidir qualidade, mostre à Gabriela.
+
+```bash
+node scripts/medirVariedade.cjs <pasta com *-slide1.png, *-slide2.png ...>
+```
+
+Medição de 15/10/2026: lotes do GPT dela 0,12 a 0,47; decks da Amanda no Designer 0,05 a 0,18.
+
+## Insumo do teste justo (`lote1-gabriela/`)
+
+`brief.txt` e `copy.txt` são o lote 1 do prompt da Gabriela (direção de arte por slide e o texto exato), no formato que
+`backend/scripts/aceiteCerebro.ts gpt1` consome. Originais em `chatgpt.com/share/6ac41d50-5488-83e9-84b7-1bc6dd2878ec`.
+
+## Teste de aceite do cérebro (`backend/scripts/aceiteCerebro.ts`)
+
+Roda os cenários t1, t3, t4, t4b, t6 e gpt1 direto no pipeline. Grava um deck de verdade e custa cerca de US$ 0,40.
+
