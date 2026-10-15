@@ -207,7 +207,7 @@ describe('OAuth completo conduzido pelo cliente oficial do SDK', () => {
     // O que o SDK mandou no /authorize prova S256 + resource + escopo vindos do nosso metadata.
     expect(provider.authorizeUrl?.searchParams.get('code_challenge_method')).toBe('S256');
     expect(provider.authorizeUrl?.searchParams.get('resource')).toBe(`${baseUrl}/mcp`);
-    expect(provider.authorizeUrl?.searchParams.get('scope')).toBe('designer.read');
+    expect(provider.authorizeUrl?.searchParams.get('scope')).toBe('designer.read designer.write designer.edit_all');
     expect(provider.clientInfo?.client_id).toBeTruthy();
     expect((provider.clientInfo as { client_secret?: string }).client_secret).toBeUndefined();
     // iss e state voltam na resposta de autorização.
@@ -219,7 +219,7 @@ describe('OAuth completo conduzido pelo cliente oficial do SDK', () => {
     await transport.finishAuth(provider.authorizationCode!);
     expect(provider.savedTokens?.access_token).toMatch(/^dsg_at_/);
     expect(provider.savedTokens?.refresh_token).toMatch(/^dsg_rt_/);
-    expect(provider.savedTokens?.scope).toBe('designer.read');
+    expect(provider.savedTokens?.scope).toBe('designer.read designer.write designer.edit_all');
 
     // Nova conexão, agora autenticada.
     const client = newClient();

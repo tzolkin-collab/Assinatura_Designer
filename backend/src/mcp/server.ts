@@ -8,7 +8,7 @@ import { logger } from '../lib/logger.js';
 import { enrichAiContext } from '../lib/aiContext.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import type { AuthRequest } from '../middleware/auth.js';
-import { READ_SCOPE, type McpConfig } from './config.js';
+import { MCP_SCOPES, READ_SCOPE, type McpConfig } from './config.js';
 import { createOriginGuard, isAllowedOrigin } from './auth/origin.js';
 import type { DesignerOAuthProvider } from './auth/provider.js';
 import type { McpLimits } from './limits.js';
@@ -114,7 +114,13 @@ export function createMcpEndpointRouter(deps: {
    */
   const challengeWithoutCredentials: RequestHandler = (req, res, next) => {
     if (req.headers.authorization) return next();
-    res.setHeader('WWW-Authenticate', `Bearer resource_metadata="${config.resourceMetadataUrl}", scope="${READ_SCOPE}"`);
+    // Anuncia TODOS os escopos: o cliente pede o que o desafio diz, e anunciar só a leitura
+    // deixava a escrita e o designer.edit_all fora do consentimento. Quem decide é o usuário na
+    // tela de consentimento, que começa em "só ver" e só amplia por escolha dele.
+    res.setHeader(
+      'WWW-Authenticate',
+      `Bearer resource_metadata="${config.resourceMetadataUrl}", scope="${MCP_SCOPES.join(' ')}"`,
+    );
     res.status(401).json({ error: 'invalid_token', error_description: 'Missing Authorization header' });
   };
 
