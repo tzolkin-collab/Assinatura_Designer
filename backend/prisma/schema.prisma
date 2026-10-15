@@ -147,7 +147,23 @@ model Brand {
   // Só no desdobramento: contexto, parceiro e protagonismo. Shape em lib/brandCollab.ts.
   collab        Json?
 
+  // Ficha do projeto (Cérebro de IA, §10): a memória estruturada que o cérebro lê.
+  profile       BrandProfile?
+
   @@index([parentBrandId])
+}
+
+// Ficha-padrão de memória de um projeto (Cérebro de IA, §10): essência, tom, paleta, tipografia,
+// logo, direção de arte, foto real, elementos gráficos, o que nunca fazer, ativos e critério de
+// aprovação. Os dados vivem em `data` (validados em lib/brandProfile.ts), um bloco só por projeto,
+// para a estrutura poder crescer sem uma migration por campo.
+model BrandProfile {
+  id        String   @id @default(uuid())
+  brandId   String   @unique
+  brand     Brand    @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  data      Json
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
 }
 
 enum BrandKind {

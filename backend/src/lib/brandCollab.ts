@@ -17,7 +17,7 @@ const text = (max: number) => z.string().trim().min(1).max(max);
 
 // Só https: o servidor carrega estas imagens (raster do slide), então `javascript:`, `file:` e
 // afins nem chegam à rota. A rota ainda exige que o arquivo esteja na biblioteca da base.
-const httpsUrl = z
+export const httpsUrl = z
   .string()
   .max(2048)
   .refine((v) => {
