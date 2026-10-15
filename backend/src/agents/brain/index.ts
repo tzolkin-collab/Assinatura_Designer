@@ -24,7 +24,7 @@ import { enqueuePipeline } from '../../lib/queue.js';
 import { uploadFileToR2 } from '../../lib/r2.js';
 import { buildMessageParts } from '../../lib/chatMessageParts.js';
 import { uploadChatAttachments } from '../../lib/chatAttachments.js';
-import { BRAIN_SYSTEM_PROMPT, DESIGNER_BRAIN_CHAT_NOTE } from './prompts.js';
+import { BRAIN_SYSTEM_PROMPT, DESIGNER_BRAIN_CHAT_NOTE, PHOTO_RULE_CHAT_NOTE } from './prompts.js';
 import { COPY_MIN_CHARS, dropStrayTagFragments, isPastedCopy } from './entradaChat.js';
 import { isBrainActiveForBrand, parseCopyBlocks } from '../../lib/designerBrain/index.js';
 import prisma from '../../lib/prisma.js';
@@ -36,7 +36,7 @@ import { logger } from '../../lib/logger.js';
 import { runPlanner, type SlideSkeletonItem } from '../planner/index.js';
 import { parseRequestedSlideCount } from '../pipeline.js';
 import { extractBracketedJson, stripBracketedJson, mapDeviationsToEdits } from '../../lib/tagExtract.js';
-import { parseDispatchTag, stripDispatchTag } from '../../lib/dispatchTag.js';
+import { parseDispatchTag, stripDispatchTag, type ParsedDispatchTag } from '../../lib/dispatchTag.js';
 import { brainTools, executeSkill } from './skills.js';
 import { generatePhotoBuffer } from '../../lib/imageResolver.js';
 
@@ -722,6 +722,23 @@ async function handleUserMessageInner(
     await updateSession(sessionId, { activeQuestion: null });
   }
 
+  // ── Regra de foto real: a resposta é um dos botões, sem passar pelo LLM ──────
+  // Confirmou/ativou → a regra vale para a conversa inteira e a geração pedida segue exatamente
+  // como foi pedida. Qualquer outra resposta cancela a pausa e a conversa continua; o próximo
+  // pedido de geração pergunta de novo.
+  if (session.pendingPhotoRule) {
+    const pedido = session.pendingPhotoRule;
+    const msg = userMessage.trim().toLowerCase();
+    if (msg === PHOTO_RULE_CONFIRM_LABEL.toLowerCase() || msg === PHOTO_RULE_ACTIVATE_LABEL.toLowerCase()) {
+      await updateSession(sessionId, { photoRule: 'on', pendingPhotoRule: null, activeQuestion: null });
+      ws.end(sessionId);
+      const retomada = await getSession(sessionId);
+      if (retomada) await executeDispatch(sessionId, retomada, pedido);
+      return;
+    }
+    await updateSession(sessionId, { pendingPhotoRule: null });
+  }
+
   // ── Pausa do fluxo copy-first: a aprovação do roteiro é DETERMINÍSTICA ───────
   // O roteiro pendente foi mostrado no chat; a resposta não passa pelo LLM (que
   // poderia "decidir" replanejar). Aprovou → gera com o roteiro exato aprovado.
@@ -874,7 +891,7 @@ async function handleUserMessageInner(
             systemInstruction: [
               BRAIN_SYSTEM_PROMPT,
               brandContextSummary ? `## Contexto atual da marca\n${brandContextSummary}` : '',
-              brainActive ? DESIGNER_BRAIN_CHAT_NOTE : '',
+              brainActive ? DESIGNER_BRAIN_CHAT_NOTE : latestSession.photoRule === 'on' ? PHOTO_RULE_CHAT_NOTE : '',
               brainAdviceBlock(adviceTexts),
             ].filter(Boolean).join('\n\n'),
             temperature: 0.7,
@@ -1107,45 +1124,104 @@ async function detectAndDispatch(
     return;
   }
 
+  await executeDispatch(sessionId, session, dispatch);
+}
+
+const PHOTO_RULE_CONFIRM_LABEL = 'Confirmar regra de foto real';
+const PHOTO_RULE_ACTIVATE_LABEL = 'Ativar regra de foto real';
+
+/**
+ * Arquivos de imagem que podem ser foto real: enviados pela pessoa (upload, Drive, Asana). Fora da
+ * conta ficam o que o sistema gerou, as exportações de slide do Canva, o logo e o material do
+ * brandbook: contar isso como "foto" enganava a pessoa (a Assinatura tinha 13 e nenhuma era foto).
+ * Vale a biblioteca da marca e, num desdobramento, a da base.
+ */
+async function countLibraryImages(brandSlug: string): Promise<number | null> {
+  try {
+    const brand = await prisma.brand.findUnique({ where: { slug: brandSlug }, select: { id: true, parentBrandId: true } });
+    if (!brand) return null;
+    return await prisma.asset.count({
+      where: {
+        brandId: { in: [brand.id, ...(brand.parentBrandId ? [brand.parentBrandId] : [])] },
+        fileType: { in: ['image/jpeg', 'image/png', 'image/webp'] },
+        source: { in: ['upload', 'drive', 'asana'] },
+        NOT: { tags: { hasSome: ['LOGOTYPE', 'GRAPHIC_ELEMENT', 'ILLUSTRATION', 'brandbook', 'logo'] } },
+      },
+    });
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Antes da primeira geração da conversa, a regra de foto real é ativada (projeto sem as regras do
+ * Designer) ou confirmada (projeto que já as tem) NO CHAT, junto do que o briefing pergunta: quais
+ * fotos reais existem (Cérebro de IA §5 e §12). A geração pedida fica guardada e segue sozinha
+ * quando a pessoa responde.
+ */
+async function askPhotoRule(
+  sessionId: string,
+  session: NonNullable<Awaited<ReturnType<typeof getSession>>>,
+  pedido: NonNullable<FabricaSession['pendingPhotoRule']>,
+): Promise<void> {
+  const jaTemRegras = await isBrainActiveForBrand(session.brandSlug);
+  const [biblioteca, anexadas] = [
+    await countLibraryImages(session.brandSlug),
+    session.messages.filter((m) => m.role === 'user').flatMap((m) => m.attachments ?? []).filter((a) => a.mimeType.startsWith('image/')).length,
+  ];
+  const fotos = [
+    biblioteca === null ? '' : biblioteca === 0 ? 'nenhuma foto enviada para a biblioteca' : `${biblioteca} foto(s) enviada(s) para a biblioteca`,
+    `${anexadas} foto(s) anexada(s) nesta conversa`,
+  ].filter(Boolean).join(' e ');
+
+  await updateSession(sessionId, {
+    phase: 'listening',
+    workerStatus: 'idle',
+    pendingPhotoRule: pedido,
+    activeQuestion: {
+      id: randomUUID(),
+      kind: 'generic',
+      question: [
+        jaTemRegras ? 'Antes de começar: confirmo a regra de foto real para este projeto?' : 'Antes de começar: ativo a regra de foto real para este projeto?',
+        'Uso somente as fotografias reais fornecidas (da biblioteca do projeto ou anexadas aqui). Nunca gero pessoa, rosto, banco de imagem nem cenário fotográfico artificial.',
+        'Onde faltar foto, deixo uma área reservada e limpa para ela entrar depois, no editor.',
+        `Fotos reais disponíveis agora: ${fotos}.`,
+      ].join('\n\n'),
+      options: [
+        jaTemRegras
+          ? { id: 'photo-rule-confirm', label: PHOTO_RULE_CONFIRM_LABEL, description: 'Segue com a geração com essa regra' }
+          : { id: 'photo-rule-activate', label: PHOTO_RULE_ACTIVATE_LABEL, description: 'Liga a regra nesta conversa e segue com a geração' },
+      ],
+      allowFreeform: false,
+      allowSkip: false,
+      mode: session.reviewMode,
+      // O assistente já pode ter dito "a geração foi iniciada" (visto no teste real). O card é o que a
+      // pessoa lê agora, e a tela descarta tokens que chegam depois do fim da resposta.
+      helperText: 'Ainda não comecei a gerar: só começo depois da sua resposta.',
+    },
+  });
+  const atual = await getSession(sessionId);
+  if (atual) emitSessionState(sessionId, atual);
+}
+
+async function executeDispatch(
+  sessionId: string,
+  session: NonNullable<Awaited<ReturnType<typeof getSession>>>,
+  dispatch: ParsedDispatchTag | NonNullable<FabricaSession['pendingPhotoRule']>,
+): Promise<void> {
   const { format, isProof, aspectRatio, imagePreference } = dispatch;
 
-  // Intercepta geração se o limite de IA estiver alto e o usuário ainda não decidiu.
-  // Com o cérebro ligado a marca só usa foto real fornecida: não há "IA vs Unsplash" a perguntar.
-  if (!imagePreference && !(await isBrainActiveForBrand(session.brandSlug))) {
-    const { shouldPreferUnsplashForCost } = await import('../../lib/imageResolver.js');
-    if (await shouldPreferUnsplashForCost(session.brandSlug)) {
-      await updateSession(sessionId, {
-        phase: 'listening',
-        workerStatus: 'idle',
-        activeQuestion: {
-          id: randomUUID(),
-          kind: 'generic',
-          question: 'O limite mensal de imagens por IA desta marca está alto. Deseja usar imagens reais gratuitas (Unsplash) para economizar, ou forçar a geração de imagens por IA?',
-          options: [
-            { id: 'unsplash', label: 'Usar imagens do Unsplash (Econômico)', description: 'Usa imagens de banco de imagens gratuitas' },
-            { id: 'force-ai', label: 'Forçar geração por IA', description: 'Consome a cota mensal mesmo assim' },
-            { id: 'unsplash-remix', label: 'Remix IA (Baseado no Unsplash)', description: 'Extrai o prompt perfeito de uma foto real e recria' },
-          ],
-          allowFreeform: false,
-          allowSkip: false,
-          mode: session.reviewMode,
-        }
-      });
-      const atual = await getSession(sessionId);
-      if (atual) emitSessionState(sessionId, atual);
-      // Injeta uma instrução interna no histórico para que a IA saiba como re-despachar após a resposta
-      await appendMessage(sessionId, {
-        role: 'system',
-        content: `A geração foi pausada por controle de custos. Após o usuário responder a pergunta sobre IA vs Unsplash, re-emita a tag de geração incluindo o modificador escolhido (ex: [DISPATCH:${format}:force-ai], [DISPATCH:${format}:unsplash] ou [DISPATCH:${format}:unsplash-remix]).`,
-        timestamp: Date.now(),
-      });
-      return;
-    }
+  // Regra de foto real (Cérebro de IA §5): estrutural, vale para todo projeto, e é ativada ou
+  // confirmada pela pessoa no chat antes de gerar.
+  if (session.photoRule !== 'on') {
+    await askPhotoRule(sessionId, session, { format, isProof, aspectRatio, imagePreference });
+    return;
   }
 
   // Concatena as intenções do usuário para formar o brief completo (essencial para edições)
   const fullBrief = session.messages
-    .filter(m => m.role === 'user')
+    // O clique na pergunta da regra de foto real é uma resposta de controle, não um pedido de design.
+    .filter(m => m.role === 'user' && ![PHOTO_RULE_CONFIRM_LABEL, PHOTO_RULE_ACTIVATE_LABEL].includes(m.content.trim()))
     .map(m => m.content)
     .join('\n\n[Nova solicitação de edição]:\n');
 

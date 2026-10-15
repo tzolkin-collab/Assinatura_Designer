@@ -30,16 +30,20 @@ nos projetos, e a identidade de um projeto nunca contamina outro.
 
 ## A. Antes de começar (bloqueios)
 
-| ☐ | Item | Objetivo | Pedido | Quem |
-|---|---|---|---|---|
-| ☐ | Regra de foto real | Saber se a proibição de foto gerada/stock vale para todos os projetos | Responder se vale também para a Assinatura | Gustavo |
-| ☐ | Quem gera a peça ❓ | Decidir entre HTML + Nano Banana só nas imagens, ou Nano Banana gerando o slide inteiro | Escolher (recomendação: manter HTML) | Gustavo / Gabriela |
-| ☐ | Ativos da Amanda em arquivo | Ter logo, fontes, paleta e moodboards de verdade | Compartilhar a subpasta Fontes e os arquivos, ou enviar ZIP | Gabriela |
-| ☐ | Fotos reais da Amanda | Rodar o Teste 2 | Enviar as fotos | Gabriela |
-| ☑ | Branches pendentes | Ter a base limpa antes de construir | Feito em 05/10: 4 branches mergeadas (PRs #53 a #56). Ver seção D | Gustavo |
-| ☐ | Checagem final por IA | Cumprir "revisar antes de marcar final" | Aprovar o custo extra de uma 2ª passada de IA | Gustavo |
-| ☐ | Status do texto | Separar texto visível de fala, contexto e interno | Confirmar que o usuário marca o status bloco a bloco | Gustavo |
-| ☐ | Quais são as 5 alterações pendentes | A ata de 02/10 cita ~15 alterações, ~10 subidas e ~5 faltando | Confirmar se eram as 4 branches da seção D, já mergeadas 🟡 | Gustavo |
+> **12/10:** a maior parte destes itens já estava respondida pela própria Gabriela, no documento dela e na reunião de 06/10.
+> Eles não eram decisões em aberto. Cada linha traz a fonte; só o último item ainda depende de confirmação.
+
+| ☐ | Item | Resposta (e de onde vem) | Quem |
+|---|---|---|---|
+| ☑ | Regra de foto real | **Vale para TODOS os projetos**, inclusive a Assinatura. Documento da Gabi, §3.1 item 5 ("regra absoluta") e §5 ("comportamento estrutural do sistema, não preferência de um projeto"). **Como liga:** ativada ou confirmada **no chat**, antes da primeira geração da conversa (Gustavo, 12/10). **Feito:** pergunta no chat com as fotos reais disponíveis (§12), retomada da mesma geração ao responder, e a regra vale no pipeline mesmo sem ficha do projeto | feito |
+| ☑ | Quem gera a peça | **Manter HTML**, com o Nano Banana nas imagens. Reunião de 06/10 (Core): continuar "sem refazer a arquitetura base"; o Cérebro serve para alimentar a IA com instruções e prompts, não para mudar a arquitetura | decidido |
+| ☐ | Ativos da Amanda em arquivo | **Depende da Gabriela.** Chegaram o PDF de logos e as imagens de fonte e paleta; faltam os arquivos de fonte (Queens, Aeonik) | Gabriela |
+| ☐ | Fotos reais da Amanda | **Depende da Gabriela.** Só existem no WhatsApp; necessárias para o Teste 2 | Gabriela |
+| ☑ | Branches pendentes | Feito em 05/10: 4 branches mergeadas (PRs #53 a #56). Ver seção D | feito |
+| ☑ | Checagem final por IA | **Não precisa de aprovação extra.** Documento §3.1 item 9 e §13 passo 7 tornam a revisão obrigatória; o custo por apresentação (R$ 20 a R$ 50) já foi autorizado (reunião 06/10) e o medido é de R$ 2 a R$ 3. O teto de R$ 200/mês de API continua valendo | decidido |
+| ☑ | Status do texto | **A pessoa marca, bloco a bloco.** Documento §4 ("Status do texto: obrigatório, Sim") e §13 passo 3. **Feito** por marcas no texto (`[APROVADO]`, `[FALA]`...). **Falta** o campo na tela | feito (tela pendente) |
+| ❓ | Quais são as 5 alterações pendentes | **Única ainda sem resposta:** a ata de 02/10 cita ~15 alterações, ~10 subidas e ~5 faltando. Confirmar com a Gabriela se eram as 4 branches da seção D, já mergeadas 🟡 | Gustavo / Gabriela |
+
 
 ---
 
@@ -53,7 +57,7 @@ nos projetos, e a identidade de um projeto nunca contamina outro.
 | ◐ | Seleção de modo | Cada tipo de peça ter regras próprias | Escolher entre apresentação 16:9, imagem avulsa e e-book A4. **Feito:** regras dos 3 modos no módulo. **Falta:** seletor na UI e tipo de post do e-book A4 |
 | ◐ | Galeria de fotos reais | A IA só usar foto fornecida | Biblioteca por projeto + anexos por demanda. **Feito:** a biblioteca da marca já é a fonte, e o editor ganhou a aba **Fotos** (colocar, trocar, enquadrar, remover; só foto da biblioteca; cada troca vira versão). **Falta:** biblioteca por projeto (hoje é por marca) e o artista "ver" a foto |
 | ◐ | Editor: trocar foto depois | A foto entrar depois sem refazer a arte | **Feito (com o cérebro ligado):** o artista reserva a área como `data-photo-slot`; o editor troca a foto sem IA. Validado com geração real e uma foto de teste. **Falta:** editar texto direto, mover/redimensionar, reordenar slides |
-| ◐ | Sem foto, sem pessoa gerada | Nunca fabricar rosto nem stock | Reservar área limpa na arte, sem texto técnico dentro dela. **Feito:** regra §5.1 anexada quando há foto ou área fotográfica. **Feito (só com o flag ligado):** o resolver não gera foto nem busca Unsplash, "regenerar" não faz nada, e o chat deixa de oferecer IA/Remix/Unsplash. Marcas sem o flag seguem como antes |
+| ◐ | Sem foto, sem pessoa gerada | Nunca fabricar rosto nem stock | Reservar área limpa na arte, sem texto técnico dentro dela. **Feito:** regra §5.1 anexada quando há foto ou área fotográfica. **Feito (só com o flag ligado):** o resolver não gera foto nem busca Unsplash, "regenerar" não faz nada, e o chat deixa de oferecer IA/Remix/Unsplash. **12/10:** a regra agora é **ativada ou confirmada no chat** antes da primeira geração da conversa e vale em qualquer projeto, com ou sem ficha: só foto real fornecida, sem Unsplash nem "Remix IA", área reservada quando falta foto. **Falta:** exercitar com geração real num projeto sem ficha (a Assinatura) |
 | ◐ | Status do texto | Texto visível ≠ fala, contexto ou interno | Campo por bloco: aprovado, em revisão, apoio, fala, contexto, interno, não exibir. **Feito:** regra em código (`interno` e `não exibir` nunca chegam ao modelo). **Falta:** campo no briefing e na UI |
 | ◐ | Amanda como piloto | Validar o sistema com um projeto completo | Carregar a memória do §11. **Feito:** memória em `seeds/amandaCoelho.ts`. **Falta:** projeto-base no banco, ativos e fotos |
 | ◐ | Montagem do prompt | Camadas na ordem certa | global → projeto → collab → modo → foto → ativos → briefing → checklist. **Feito:** `assembleDesignerBrain` (função pura, 21 testes) e chamado no pipeline para marcas com o flag. **Falta:** briefing e ativos entrarem pelo montador (hoje o pipeline os entrega por caminho próprio) |
