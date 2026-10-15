@@ -26,7 +26,7 @@ export type ResolvedBrandContext = DesignDocumentBrandContext & {
   /** Imagens do pool de assets da marca (upload/Drive/Asana) — o artista as usa em
    *  vez de inventar fotos de banco quando fizer sentido para o layout. Nome junto
    *  (antes era só URL crua — o artista escolhia sem nenhuma pista do conteúdo). */
-  assetUrls: Array<{ url: string; name: string }>;
+  assetUrls: Array<{ url: string; name: string; /** upload | drive | asana | canva | ai-generated */ source?: string }>;
 };
 
 function normalizePresentationConfig(value: unknown): PresentationConfig | undefined {
@@ -62,7 +62,7 @@ export async function resolveBrandContext(slug: string): Promise<ResolvedBrandCo
         },
         orderBy: { createdAt: 'desc' },
         take: 20,
-        select: { url: true, name: true, tags: true },
+        select: { url: true, name: true, tags: true, source: true },
       },
     },
   });
@@ -87,7 +87,7 @@ export async function resolveBrandContext(slug: string): Promise<ResolvedBrandCo
       palette: ref.palette,
       insightsText: ref.insightsText,
     })),
-    assetUrls: brand.assets.map((a) => ({ url: a.url, name: `${a.name}${a.tags.length ? ` [${a.tags.join(',')}]` : ''}` })),
+    assetUrls: brand.assets.map((a) => ({ url: a.url, name: `${a.name}${a.tags.length ? ` [${a.tags.join(',')}]` : ''}`, source: a.source })),
   };
 }
 
