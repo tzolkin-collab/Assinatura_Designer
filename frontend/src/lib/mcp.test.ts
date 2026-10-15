@@ -40,6 +40,8 @@ describe('acesso em palavras', () => {
     expect(canWrite(['designer.write', 'designer.read'])).toBe(true);
     expect(describeAccess(['designer.read'])).toBe('Só ver');
     expect(describeAccess(['designer.write'])).toBe('Ver e salvar peças');
+    expect(describeAccess(['designer.read', 'designer.write', 'designer.edit_all'])).toBe('Ver e editar todas as peças');
+    expect(canWrite(['designer.edit_all'])).toBe(true);
   });
 
   it('papel e tempo restante', () => {

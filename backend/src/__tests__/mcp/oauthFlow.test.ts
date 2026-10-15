@@ -45,7 +45,7 @@ describe('metadados', () => {
     expect(res.body.token_endpoint).toBe(`${ISSUER}/token`);
     expect(res.body.registration_endpoint).toBe(`${ISSUER}/register`);
     expect(res.body.revocation_endpoint).toBe(`${ISSUER}/revoke`);
-    expect(res.body.scopes_supported).toEqual(['designer.read', 'designer.write']);
+    expect(res.body.scopes_supported).toEqual(['designer.read', 'designer.write', 'designer.edit_all']);
     // CIMD não é implementado: não pode ser anunciado.
     expect(res.body.client_id_metadata_document_supported).toBeUndefined();
   });
@@ -57,7 +57,7 @@ describe('metadados', () => {
       expect(res.status).toBe(200);
       expect(res.body.resource).toBe(RESOURCE);
       expect(res.body.authorization_servers).toEqual([ISSUER]);
-      expect(res.body.scopes_supported).toEqual(['designer.read', 'designer.write']);
+      expect(res.body.scopes_supported).toEqual(['designer.read', 'designer.write', 'designer.edit_all']);
     },
   );
 

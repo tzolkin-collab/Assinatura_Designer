@@ -1,5 +1,5 @@
 import type { OAuthClientInformationFull } from '@modelcontextprotocol/sdk/shared/auth.js';
-import type { McpScope } from './config.js';
+import type { BrandMode, McpScope } from './config.js';
 import { CALL_LOG_MAX_ENTRIES, TTL } from './auth/constants.js';
 
 /**
@@ -48,6 +48,8 @@ export interface AuthCodeRecord {
   scopes: McpScope[];
   userId: string;
   brandIds: string[];
+  /** Ausente em registros antigos = 'selected'. Em 'all', `brandIds` é ignorado. */
+  brandMode?: BrandMode;
   createdAt: number;
 }
 
@@ -65,6 +67,8 @@ export interface GrantFamily {
   scopes: McpScope[];
   /** Marcas aprovadas no consentimento. A cada chamada cruzamos com a associação ATUAL. */
   brandIds: string[];
+  /** Ausente em famílias antigas = 'selected'. Em 'all', `brandIds` é ignorado e vale a associação atual. */
+  brandMode?: BrandMode;
   resource: string;
   createdAt: number;
 }

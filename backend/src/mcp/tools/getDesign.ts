@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { visibleText } from '../../lib/designerBrain/textCheck.js';
 import prisma from '../../lib/prisma.js';
-import { READ_SCOPE } from '../config.js';
+import { READ_SCOPE, ROLES_FOR_SCOPE, WRITE_SCOPE } from '../config.js';
 import { editorUrl } from './designs.js';
 import { ToolUserError, type McpToolDefinition } from './types.js';
 
@@ -44,7 +44,8 @@ export const getDesignTool: McpToolDefinition<typeof inputSchema, typeof outputS
   description:
     'Lê uma apresentação ou carrossel da marca: tamanho, fontes e, por slide, o texto visível (e o HTML/CSS com includeSource). ' +
     'Use para continuar ou ajustar uma peça: leia, altere o que for pedido e salve de novo com save_presentation e o mesmo postId ' +
-    '(só peças que você mesmo criou por esta conexão podem ser atualizadas).',
+    '(por padrão só peças que você mesmo criou por esta conexão; com o escopo designer.edit_all, qualquer apresentação ou carrossel ' +
+    'da marca — `editableViaAgent` informa).',
   scope: READ_SCOPE,
   annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   inputSchema,
@@ -86,13 +87,23 @@ export const getDesignTool: McpToolDefinition<typeof inputSchema, typeof outputS
       height: typeof content.height === 'number' ? content.height : null,
       fonts: Array.isArray(content.fonts) ? content.fonts.filter((f): f is string => typeof f === 'string') : [],
       editorUrl: editorUrl(ctx.frontendOrigin, brand.slug, post.id),
-      editableViaAgent: content.mcp?.userId === ctx.userId,
+      // Mesma regra do save_presentation: criou por esta via, ou tem designer.edit_all e é deck/carrossel.
+      // O papel na marca (EDITOR+) segue sendo o teto, como no save_presentation.
+      editableViaAgent:
+        content.mcp?.userId === ctx.userId ||
+        (ctx.canEditAll &&
+          ROLES_FOR_SCOPE[WRITE_SCOPE].includes(brand.role) &&
+          (post.type === 'PRESENTATION' || post.type === 'CAROUSEL')),
       slides,
     };
     const text = [
       `${post.name ?? '(sem nome)'} — ${structured.type}, ${structured.status}, ${slides.length} slides` +
         (structured.width ? ` (${structured.width}x${structured.height})` : ''),
-      structured.editableViaAgent ? 'Você pode atualizar esta peça com save_presentation (postId).' : 'Somente leitura para esta conexão.',
+      structured.editableViaAgent
+        ? 'Você pode atualizar esta peça com save_presentation (postId).'
+        : ctx.canEditAll
+          ? 'Somente leitura: não é apresentação/carrossel, ou o papel do usuário nesta marca não permite editar.'
+          : 'Somente leitura para esta conexão (ela só atualiza peças que criou).',
       ...slides.map((s) => `Slide ${s.index}: ${s.text || '(vazio)'}`),
     ].join('\n');
     return { text, structured };

@@ -9,6 +9,8 @@ export interface McpConnection {
   clientName: string;
   scopes: string[];
   createdAt: string;
+  /** Conexão em modo "todas as minhas marcas": `brands` é o conjunto de agora, não uma lista fixa. */
+  allBrands?: boolean;
   brands: Array<{ slug: string; name: string }>;
 }
 
@@ -31,6 +33,7 @@ export interface ConsentRequest {
 
 export const READ_SCOPE = 'designer.read';
 export const WRITE_SCOPE = 'designer.write';
+export const EDIT_ALL_SCOPE = 'designer.edit_all';
 
 const ENTITIES: Record<string, string> = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'", '&#x27;': "'" };
 
@@ -63,11 +66,16 @@ export function isLocalServerUrl(url: string): boolean {
 }
 
 export function canWrite(scopes: readonly string[]): boolean {
-  return scopes.includes(WRITE_SCOPE);
+  return scopes.includes(WRITE_SCOPE) || scopes.includes(EDIT_ALL_SCOPE);
 }
 
-/** "Ver" ou "Ver e salvar peças": o que o agente pode fazer com a conexão, em palavras. */
+export function canEditAll(scopes: readonly string[]): boolean {
+  return scopes.includes(EDIT_ALL_SCOPE);
+}
+
+/** "Ver", "Ver e salvar peças" ou "Ver e editar todas as peças": o que o agente pode fazer, em palavras. */
 export function describeAccess(scopes: readonly string[]): string {
+  if (canEditAll(scopes)) return 'Ver e editar todas as peças';
   return canWrite(scopes) ? 'Ver e salvar peças' : 'Só ver';
 }
 
@@ -91,7 +99,7 @@ export const mcpApi = {
 
   decideConsent: (
     requestId: string,
-    body: { decision: 'approve' | 'deny'; brandSlugs?: string[]; scopes?: string[] },
+    body: { decision: 'approve' | 'deny'; brandSlugs?: string[]; allBrands?: boolean; scopes?: string[] },
   ) => api.post<{ redirectUrl: string }>(`/mcp/consent/${encodeURIComponent(requestId)}`, body),
 
   listConnections: () => api.get<McpConnection[]>('/mcp/connections'),

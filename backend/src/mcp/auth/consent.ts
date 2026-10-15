@@ -44,6 +44,8 @@ const REQUEST_ID_PATTERN = /^[A-Za-z0-9_-]{16,128}$/;
 const decisionSchema = z.object({
   decision: z.enum(['approve', 'deny']),
   brandSlugs: z.array(z.string().trim().min(1).max(100)).max(50).optional(),
+  /** "Todas as minhas marcas": o token guarda o modo e o conjunto vale a cada chamada. */
+  allBrands: z.boolean().optional(),
   scopes: z.array(z.string().max(40)).max(10).optional(),
 });
 
@@ -170,28 +172,39 @@ export function createConsentRouter(deps: ConsentDeps): Router {
           granted = normalizeScopes(wanted);
         }
 
+        const allBrands = body.allBrands === true;
         const slugs = [...new Set(body.brandSlugs ?? [])];
-        if (slugs.length === 0) throw createError(400, 'Selecione ao menos uma marca.', 'MCP_NO_BRAND');
+        if (allBrands && slugs.length > 0) {
+          throw createError(400, 'Use "todas as marcas" ou uma lista de marcas, não os dois.', 'MCP_BAD_BRANDS');
+        }
+        if (!allBrands && slugs.length === 0) throw createError(400, 'Selecione ao menos uma marca.', 'MCP_NO_BRAND');
 
         const memberships = await prisma.brandMember.findMany({
-          where: { userId, brand: { slug: { in: slugs } } },
+          where: { userId, ...(allBrands ? {} : { brand: { slug: { in: slugs } } }) },
           select: { role: true, brand: { select: { id: true, slug: true, name: true } } },
         });
         // Marca inexistente e marca da qual o usuário não é membro respondem igual (403):
         // não confirmamos a existência de marcas alheias.
-        if (memberships.length !== slugs.length) {
+        if (!allBrands && memberships.length !== slugs.length) {
           throw createError(403, 'Você não tem acesso a uma das marcas selecionadas.', 'MCP_BRAND_FORBIDDEN');
         }
         // Vale para escrita (EDITOR+) e leitura (qualquer membro): o conector nunca
         // concede mais do que o papel do usuário na marca já concede no app.
         const needed = granted.includes(WRITE_SCOPE) ? ROLES_FOR_SCOPE[WRITE_SCOPE] : ROLES_FOR_SCOPE['designer.read'];
-        const insufficient = memberships.find((m) => !needed.includes(m.role));
-        if (insufficient) {
-          throw createError(
-            403,
-            `Seu papel em "${insufficient.brand.name}" não permite o escopo de escrita. Escolha só leitura ou outra marca.`,
-            'MCP_ROLE_INSUFFICIENT',
-          );
+        if (allBrands) {
+          // No modo "todas" cada chamada filtra pelo papel de agora; aqui só exigimos que sirva para algo.
+          if (!memberships.some((m) => needed.includes(m.role))) {
+            throw createError(403, 'Seu papel nas suas marcas não permite este acesso.', 'MCP_ROLE_INSUFFICIENT');
+          }
+        } else {
+          const insufficient = memberships.find((m) => !needed.includes(m.role));
+          if (insufficient) {
+            throw createError(
+              403,
+              `Seu papel em "${insufficient.brand.name}" não permite o escopo de escrita. Escolha só leitura ou outra marca.`,
+              'MCP_ROLE_INSUFFICIENT',
+            );
+          }
         }
 
         // Consumo atômico do pedido: de dois POSTs simultâneos, só um emite código.
@@ -206,13 +219,16 @@ export function createConsentRouter(deps: ConsentDeps): Router {
           resource: consumed.resource,
           scopes: granted,
           userId,
-          brandIds: memberships.map((m) => m.brand.id),
+          // No modo "todas" a lista não é guardada: o conjunto sai da associação a cada chamada.
+          brandIds: allBrands ? [] : memberships.map((m) => m.brand.id),
+          brandMode: allBrands ? 'all' : 'selected',
           createdAt: now(),
         });
         logger.info('mcp.consent.approved', {
           userId,
           clientId: consumed.clientId,
           scopes: granted,
+          brandMode: allBrands ? 'all' : 'selected',
           brandCount: memberships.length,
         });
 
@@ -233,13 +249,16 @@ export function createConsentRouter(deps: ConsentDeps): Router {
       const userId = req.user!.userId;
       const families = await store.listFamiliesByUser(userId);
       const allBrandIds = [...new Set(families.flatMap((f) => f.brandIds))];
+      const hasAllMode = families.some((f) => f.brandMode === 'all');
       // Só marcas que o usuário AINDA integra: não vazamos nome de marca de que ele saiu.
-      const memberships = allBrandIds.length
-        ? await prisma.brandMember.findMany({
-            where: { userId, brandId: { in: allBrandIds } },
-            select: { brand: { select: { id: true, slug: true, name: true } } },
-          })
-        : [];
+      const memberships =
+        allBrandIds.length > 0 || hasAllMode
+          ? await prisma.brandMember.findMany({
+              where: { userId, ...(hasAllMode ? {} : { brandId: { in: allBrandIds } }) },
+              select: { brand: { select: { id: true, slug: true, name: true } } },
+              orderBy: { brand: { name: 'asc' } },
+            })
+          : [];
       const brandById = new Map(memberships.map((m) => [m.brand.id, m.brand]));
 
       res.json({
@@ -248,10 +267,14 @@ export function createConsentRouter(deps: ConsentDeps): Router {
           clientName: escapeHtml(f.clientName),
           scopes: f.scopes,
           createdAt: new Date(f.createdAt).toISOString(),
-          brands: f.brandIds.flatMap((id) => {
-            const brand = brandById.get(id);
-            return brand ? [{ slug: brand.slug, name: brand.name }] : [];
-          }),
+          allBrands: f.brandMode === 'all',
+          brands:
+            f.brandMode === 'all'
+              ? memberships.map((m) => ({ slug: m.brand.slug, name: m.brand.name }))
+              : f.brandIds.flatMap((id) => {
+                  const brand = brandById.get(id);
+                  return brand ? [{ slug: brand.slug, name: brand.name }] : [];
+                }),
         })),
       });
     } catch (error) {

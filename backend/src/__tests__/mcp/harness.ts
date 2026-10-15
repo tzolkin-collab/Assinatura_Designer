@@ -289,6 +289,8 @@ export async function connect(
     scope?: string;
     scopes?: string[];
     clientName?: string;
+    /** Modo "todas as minhas marcas": ignora `brandSlugs`. */
+    allBrands?: boolean;
   } = {},
 ) {
   const userId = opts.userId ?? 'user-1';
@@ -301,7 +303,7 @@ export async function connect(
 
   const approve = await decide(h, requestId, userId, {
     decision: 'approve',
-    brandSlugs: opts.brandSlugs ?? ['marca-a'],
+    ...(opts.allBrands ? { allBrands: true } : { brandSlugs: opts.brandSlugs ?? ['marca-a'] }),
     ...(opts.scopes ? { scopes: opts.scopes } : {}),
   });
   const redirect = new URL(approve.body.data.redirectUrl);

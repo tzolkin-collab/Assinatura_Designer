@@ -16,11 +16,20 @@ import { DEFAULT_CLIENT_PRESETS, resolveClientPresets } from './clients.js';
  */
 
 /** Escopos OAuth do Designer. `designer.write` INCLUI leitura (ver `normalizeScopes`). */
-export const MCP_SCOPES = ['designer.read', 'designer.write'] as const;
+export const MCP_SCOPES = ['designer.read', 'designer.write', 'designer.edit_all'] as const;
 export type McpScope = (typeof MCP_SCOPES)[number];
 
 export const READ_SCOPE: McpScope = 'designer.read';
 export const WRITE_SCOPE: McpScope = 'designer.write';
+/**
+ * Atualizar QUALQUER peça das marcas autorizadas (e não só as criadas pela própria conexão).
+ * Implica `designer.write`. Nenhuma ferramenta o exige: é uma extensão do `save_presentation`,
+ * checada no handler.
+ */
+export const EDIT_ALL_SCOPE: McpScope = 'designer.edit_all';
+
+/** Quais marcas a conexão enxerga: as escolhidas no consentimento ou todas as do usuário, a cada chamada. */
+export type BrandMode = 'selected' | 'all';
 
 /**
  * Papéis da marca que satisfazem cada escopo: leitura = qualquer membro, escrita =
@@ -31,6 +40,7 @@ export const WRITE_SCOPE: McpScope = 'designer.write';
 export const ROLES_FOR_SCOPE: Record<McpScope, BrandRole[]> = {
   'designer.read': ['OWNER', 'ADMIN', 'EDITOR', 'VIEWER'],
   'designer.write': ['OWNER', 'ADMIN', 'EDITOR'],
+  'designer.edit_all': ['OWNER', 'ADMIN', 'EDITOR'],
 };
 
 export function isMcpScope(value: string): value is McpScope {
@@ -38,12 +48,13 @@ export function isMcpScope(value: string): value is McpScope {
 }
 
 /**
- * `designer.write` implica `designer.read`: uma ferramenta de leitura nunca deveria
- * falhar para quem tem escrita. Normalizar na EMISSÃO (e não na checagem) mantém o
+ * `designer.write` implica `designer.read` e `designer.edit_all` implica `designer.write`:
+ * uma ferramenta de leitura nunca deveria falhar para quem tem escrita. Normalizar na EMISSÃO (e não na checagem) mantém o
  * token autoexplicativo — o que está no escopo dele é o que ele pode.
  */
 export function normalizeScopes(scopes: Iterable<McpScope>): McpScope[] {
   const set = new Set<McpScope>(scopes);
+  if (set.has(EDIT_ALL_SCOPE)) set.add(WRITE_SCOPE);
   if (set.has(WRITE_SCOPE)) set.add(READ_SCOPE);
   return MCP_SCOPES.filter((s) => set.has(s));
 }

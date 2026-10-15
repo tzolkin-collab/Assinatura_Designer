@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { getApiErrorMessage } from '@/lib/api';
 import {
+  EDIT_ALL_SCOPE,
   READ_SCOPE,
   WRITE_SCOPE,
   formatRemaining,
@@ -16,7 +17,7 @@ import {
 import Button from '@/components/ui/Button';
 import styles from './consent.module.css';
 
-type Access = 'read' | 'write';
+type Access = 'read' | 'write' | 'edit_all';
 
 function ConsentContent() {
   const requestId = useSearchParams().get('request');
@@ -26,6 +27,7 @@ function ConsentContent() {
   const [error, setError] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [access, setAccess] = useState<Access>('read');
+  const [allBrands, setAllBrands] = useState(false);
   const [sending, setSending] = useState<'approve' | 'deny' | null>(null);
   const [leaving, setLeaving] = useState(false);
 
@@ -61,25 +63,27 @@ function ConsentContent() {
     };
   }, [requestId]);
 
-  const wantsWrite = Boolean(data?.scopes.includes(WRITE_SCOPE));
+  const wantsEditAll = Boolean(data?.scopes.includes(EDIT_ALL_SCOPE));
+  const wantsWrite = Boolean(data?.scopes.includes(WRITE_SCOPE)) || wantsEditAll;
+  const writing = access !== 'read';
   const clientName = data ? plainText(data.client.name) : '';
 
   const brandRows = useMemo(() => {
     if (!data) return [];
     return data.brands.map((b) => {
-      const writeBlocked = access === 'write' && !b.canWrite;
+      const writeBlocked = writing && !b.canWrite;
       return { ...b, disabled: !b.selectable || writeBlocked, writeBlocked };
     });
-  }, [data, access]);
+  }, [data, writing]);
 
   // Trocar para "ver e salvar" desmarca as marcas em que a pessoa não pode escrever.
   useEffect(() => {
-    if (access !== 'write' || !data) return;
+    if (!writing || !data) return;
     setSelected((prev) => {
       const next = new Set([...prev].filter((slug) => data.brands.find((b) => b.slug === slug)?.canWrite));
       return next.size === prev.size ? prev : next;
     });
-  }, [access, data]);
+  }, [writing, data]);
 
   const toggle = (slug: string) =>
     setSelected((prev) => {
@@ -94,10 +98,21 @@ function ConsentContent() {
     setError('');
     setSending(decision);
     try {
-      const scopes = decision === 'approve' ? (access === 'write' && wantsWrite ? [WRITE_SCOPE] : [READ_SCOPE]) : undefined;
+      const scopes =
+        decision === 'approve'
+          ? access === 'edit_all' && wantsEditAll
+            ? [EDIT_ALL_SCOPE]
+            : access !== 'read' && wantsWrite
+              ? [WRITE_SCOPE]
+              : [READ_SCOPE]
+          : undefined;
       const { redirectUrl } = await mcpApi.decideConsent(requestId, {
         decision,
-        ...(decision === 'approve' ? { brandSlugs: [...selected], scopes } : {}),
+        ...(decision === 'approve'
+          ? allBrands
+            ? { allBrands: true, scopes }
+            : { brandSlugs: [...selected], scopes }
+          : {}),
       });
       setLeaving(true);
       window.location.href = redirectUrl;
@@ -133,7 +148,8 @@ function ConsentContent() {
     );
   }
 
-  const canApprove = selected.size > 0 && !sending && !leaving;
+  const hasAnyBrand = allBrands ? data.brands.some((b) => !writing || b.canWrite) : selected.size > 0;
+  const canApprove = hasAnyBrand && !sending && !leaving;
 
   return (
     <main className={styles.page}>
@@ -164,7 +180,37 @@ function ConsentContent() {
 
         <fieldset className={styles.group}>
           <legend>Marcas</legend>
-          {brandRows.length === 0 ? (
+          {brandRows.length > 1 && (
+            <>
+              <label className={styles.option}>
+                <input type="radio" name="brandMode" checked={!allBrands} onChange={() => setAllBrands(false)} />
+                <span className={styles.optionText}>
+                  <span>Só as marcas que eu escolher</span>
+                  <span className={styles.optionHint}>A conexão enxerga apenas as marcas marcadas abaixo.</span>
+                </span>
+              </label>
+              <label className={styles.option}>
+                <input type="radio" name="brandMode" checked={allBrands} onChange={() => setAllBrands(true)} />
+                <span className={styles.optionText}>
+                  <span>Todas as minhas marcas</span>
+                  <span className={styles.optionHint}>
+                    Vale também para marcas em que você entrar depois, e deixa de valer para as que você perder. O que o
+                    agente pode fazer em cada uma segue o seu papel nela.
+                  </span>
+                </span>
+              </label>
+            </>
+          )}
+          {allBrands ? (
+            <p className={styles.muted}>
+              {brandRows.filter((b) => !b.writeBlocked).length} marca(s) hoje:{' '}
+              {brandRows
+                .filter((b) => !b.writeBlocked)
+                .map((b) => b.name)
+                .join(', ')}
+              .
+            </p>
+          ) : brandRows.length === 0 ? (
             <p className={styles.muted}>Você não participa de nenhuma marca.</p>
           ) : (
             brandRows.map((b) => (
@@ -203,6 +249,19 @@ function ConsentContent() {
                 <span className={styles.optionHint}>
                   Cria apresentações e carrosséis nas marcas marcadas e atualiza as que ele mesmo criou. Não apaga nada
                   e não mexe em peças feitas por você.
+                </span>
+              </span>
+            </label>
+          )}
+          {wantsEditAll && (
+            <label className={styles.option}>
+              <input type="radio" name="access" checked={access === 'edit_all'} onChange={() => setAccess('edit_all')} />
+              <span className={styles.optionText}>
+                <span>Ver e editar todas as peças</span>
+                <span className={styles.optionHint}>
+                  Além de criar, o agente pode SOBRESCREVER qualquer apresentação ou carrossel das marcas liberadas, mesmo
+                  os feitos por você ou pela equipe. A versão anterior fica no histórico da peça e dá para restaurar. Só
+                  vale onde você é editor, administrador ou dono. Não apaga nada.
                 </span>
               </span>
             </label>
