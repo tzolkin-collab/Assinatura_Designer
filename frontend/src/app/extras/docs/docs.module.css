@@ -23,7 +23,7 @@
 .cardTitle {
   font-family: var(--font-serif);
   font-size: var(--text-xl);
-  font-weight: 500;
+  font-weight: var(--weight-title);
   color: var(--color-text);
   margin: 0 0 var(--space-3) 0;
   line-height: 1.3;
