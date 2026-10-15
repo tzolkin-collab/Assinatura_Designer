@@ -17,6 +17,7 @@ import { resolveBrandContext } from '../lib/brandContext.js';
 import { uploadPngToR2 } from '../lib/r2.js';
 import { mergeSlidesIntoPost, syncPostSlides } from '../lib/postHelper.js';
 import { snapshotPost, restorePostVersion } from '../lib/postVersions.js';
+import { withServerOwnedMcp } from '../lib/mcpOwnership.js';
 import { listPhotoSlots, setPhotoInSlot, PhotoSlotNotFoundError } from '../lib/photoSlot.js';
 import { analyzePhoto, frameFromAnalysis, measureSlotAspect } from '../lib/photoFraming.js';
 import { enrichAiContext } from '../lib/aiContext.js';
@@ -555,17 +556,21 @@ postsRouter.get('/:id/cost', async (req: AuthRequest, res: Response, next: NextF
 postsRouter.put('/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const id = req.params.id as string;
-    const { content, status, folderId, name } = req.body;
+    const { status, folderId, name } = req.body;
+    let { content } = req.body;
 
     const post = await prisma.post.findFirst({
       where: {
         id,
         brand: brandMemberFilter(req.user?.userId, EDITORS)
       },
-      select: { id: true, brandId: true }
+      select: { id: true, brandId: true, content: true }
     });
 
     if (!post) throw createError(404, 'Post not found');
+
+    // A procedência de peça de agente (content.mcp) é do servidor: o corpo nunca a altera.
+    if (content !== undefined) content = withServerOwnedMcp(content, post.content);
 
     const dataToUpdate: Prisma.PostUncheckedUpdateInput = {};
     if (name !== undefined) {

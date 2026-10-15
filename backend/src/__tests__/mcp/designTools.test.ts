@@ -13,6 +13,13 @@ vi.mock('../../lib/postHelper', async (importOriginal) => {
 });
 import { syncPostSlides } from '../../lib/postHelper';
 
+// O histórico de versões tem teste próprio; aqui interessa QUANDO a ferramenta o aciona.
+vi.mock('../../lib/postVersions', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../lib/postVersions')>();
+  return { ...actual, snapshotPost: vi.fn(async () => ({ id: 'versao-1' })) };
+});
+import { snapshotPost } from '../../lib/postVersions';
+
 let h: Harness;
 
 const result = (res: request.Response) =>
@@ -31,6 +38,7 @@ beforeEach(() => {
   h.addMember('user-1', 'brand-a', 'EDITOR');
   h.addMember('user-1', 'brand-b', 'EDITOR');
   vi.mocked(syncPostSlides).mockClear();
+  vi.mocked(snapshotPost).mockClear();
   prismaMock.post.create.mockResolvedValue({} as never);
   prismaMock.post.update.mockResolvedValue({} as never);
 });
@@ -163,6 +171,58 @@ describe('save_presentation', () => {
     expect(ok.structuredContent!.created).toBe(false);
     expect(ok.structuredContent!.postId).toBe(postId);
     expect(prismaMock.post.update).toHaveBeenCalled();
+  });
+
+  it('B3: congela a versão anterior ANTES de sobrescrever a peça', async () => {
+    const flow = await writer();
+    const postId = '11111111-1111-4111-8111-111111111111';
+    prismaMock.post.findFirst.mockResolvedValueOnce({ id: postId, content: { mcp: { userId: 'user-1' } } } as never);
+
+    const r = result(
+      await mcpPost(h.app, flow.accessToken, callTool('save_presentation', { brandSlug: 'marca-a', postId, slides: [slide('Oi')] })),
+    );
+
+    expect(snapshotPost).toHaveBeenCalledWith(postId, expect.objectContaining({ source: 'AI', userId: 'user-1' }));
+    const snapshotOrder = vi.mocked(snapshotPost).mock.invocationCallOrder[0]!;
+    const updateOrder = prismaMock.post.update.mock.invocationCallOrder[0]!;
+    const syncOrder = vi.mocked(syncPostSlides).mock.invocationCallOrder[0]!;
+    expect(snapshotOrder).toBeLessThan(updateOrder);
+    expect(snapshotOrder).toBeLessThan(syncOrder);
+    expect(r.structuredContent!.versionId).toBe('versao-1');
+  });
+
+  it('B3: peça nova não gera versão', async () => {
+    const flow = await writer();
+    const r = result(await mcpPost(h.app, flow.accessToken, callTool('save_presentation', { brandSlug: 'marca-a', slides: [slide('Oi')] })));
+    expect(snapshotPost).not.toHaveBeenCalled();
+    expect(r.structuredContent!.versionId).toBeNull();
+  });
+
+  it('B4: texto divergente grava RASCUNHO, não pronta', async () => {
+    const flow = await writer();
+    const res = await mcpPost(
+      h.app,
+      flow.accessToken,
+      callTool('save_presentation', {
+        brandSlug: 'marca-a',
+        slides: [{ html: '<h1>Estratégia vida</h1>', approvedText: 'Estratégia para uma vida extraordinária' }],
+      }),
+    );
+    const s = result(res).structuredContent!;
+    expect(s.ok).toBe(false);
+    expect(s.status).toBe('DRAFT');
+    expect((prismaMock.post.create.mock.calls[0]![0] as any).data.status).toBe('DRAFT');
+  });
+
+  it('B4: a atualização limpa volta a pronta', async () => {
+    const flow = await writer();
+    const postId = '11111111-1111-4111-8111-111111111111';
+    prismaMock.post.findFirst.mockResolvedValueOnce({ id: postId, content: { mcp: { userId: 'user-1' } } } as never);
+    const r = result(
+      await mcpPost(h.app, flow.accessToken, callTool('save_presentation', { brandSlug: 'marca-a', postId, slides: [slide('Oi')] })),
+    );
+    expect(r.structuredContent!.status).toBe('READY');
+    expect((prismaMock.post.update.mock.calls[0]![0] as any).data.status).toBe('READY');
   });
 
   it('conexão só de leitura não consegue salvar', async () => {
