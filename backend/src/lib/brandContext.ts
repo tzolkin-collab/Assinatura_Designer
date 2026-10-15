@@ -1,6 +1,7 @@
 import { createError } from '../middleware/errorHandler.js';
 import type { PresentationConfig } from './fabricaSession.js';
 import prisma from './prisma.js';
+import { REFERENCE_ASSET_TAGS } from './designerBrain/referenceTags.js';
 
 export type DesignDocumentBrandContext = {
   name: string;
@@ -15,6 +16,11 @@ export type DesignDocumentBrandContext = {
 
 export type ResolvedBrandContext = DesignDocumentBrandContext & {
   id: string;
+  /**
+   * Bibliotecas de onde a marca pode usar arquivos: a dela e, num desdobramento, a da base (ele
+   * herda a identidade da base: logo, fotos, manual). A própria marca vem primeiro.
+   */
+  libraryBrandIds: string[];
   references: Array<{
     name: string;
     archetype: string | null;
@@ -26,7 +32,7 @@ export type ResolvedBrandContext = DesignDocumentBrandContext & {
   /** Imagens do pool de assets da marca (upload/Drive/Asana) — o artista as usa em
    *  vez de inventar fotos de banco quando fizer sentido para o layout. Nome junto
    *  (antes era só URL crua — o artista escolhia sem nenhuma pista do conteúdo). */
-  assetUrls: Array<{ url: string; name: string }>;
+  assetUrls: Array<{ url: string; name: string; /** upload | drive | asana | canva | ai-generated */ source?: string }>;
 };
 
 function normalizePresentationConfig(value: unknown): PresentationConfig | undefined {
@@ -54,6 +60,8 @@ export async function resolveBrandContext(slug: string): Promise<ResolvedBrandCo
       },
       assets: {
         where: {
+          // Material de referência (manual visual, moodboard, fonte, paleta) é para o modelo VER, não para entrar num slide.
+          NOT: { tags: { hasSome: [...REFERENCE_ASSET_TAGS] } },
           OR: [
             { fileType: { startsWith: 'image/' } },
             { fileType: 'image/svg+xml' },
@@ -62,15 +70,39 @@ export async function resolveBrandContext(slug: string): Promise<ResolvedBrandCo
         },
         orderBy: { createdAt: 'desc' },
         take: 20,
-        select: { url: true, name: true, tags: true },
+        select: { url: true, name: true, tags: true, source: true },
       },
     },
   });
 
   if (!brand) throw createError(404, 'Brand not found');
 
+  let assets = brand.assets;
+  const libraryBrandIds = [brand.id];
+  if (brand.parentBrandId) {
+    libraryBrandIds.push(brand.parentBrandId);
+    const parentAssets = await prisma.asset.findMany({
+      where: {
+        brandId: brand.parentBrandId,
+        NOT: { tags: { hasSome: [...REFERENCE_ASSET_TAGS] } },
+        OR: [
+          { fileType: { startsWith: 'image/' } },
+          { fileType: 'image/svg+xml' },
+          { tags: { hasSome: ['LOGOTYPE', 'GRAPHIC_ELEMENT', 'ILLUSTRATION', 'brandbook'] } },
+        ],
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+      select: { url: true, name: true, tags: true, source: true },
+    });
+    const seen = new Set(assets.map((a) => a.url));
+    // Os da própria marca primeiro; a base completa o que sobrar do teto de 20.
+    assets = [...assets, ...parentAssets.filter((a) => !seen.has(a.url))].slice(0, 20);
+  }
+
   return {
     id: brand.id,
+    libraryBrandIds,
     name: brand.name,
     slug: brand.slug,
     guidelines: brand.config?.guidelines ?? '',
@@ -87,7 +119,7 @@ export async function resolveBrandContext(slug: string): Promise<ResolvedBrandCo
       palette: ref.palette,
       insightsText: ref.insightsText,
     })),
-    assetUrls: brand.assets.map((a) => ({ url: a.url, name: `${a.name}${a.tags.length ? ` [${a.tags.join(',')}]` : ''}` })),
+    assetUrls: assets.map((a) => ({ url: a.url, name: `${a.name}${a.tags.length ? ` [${a.tags.join(',')}]` : ''}`, source: a.source })),
   };
 }
 

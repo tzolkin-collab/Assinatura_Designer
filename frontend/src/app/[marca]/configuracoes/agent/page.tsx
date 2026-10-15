@@ -47,6 +47,7 @@ export default function AgentPage() {
   // Agent State
   const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
   const [savingAgent, setSavingAgent] = useState(false);
+  const [promptLoaded, setPromptLoaded] = useState(false);
   
   // Memory State
   const [memory, setMemory] = useState<BrandMemory | null>(null);
@@ -60,8 +61,11 @@ export default function AgentPage() {
   useEffect(() => {
     // Load Agent Config
     api.get<BrandConfig>(`/settings/${slug}/config`)
-      .then((cfg) => { if (cfg?.agentPrompt) setPrompt(cfg.agentPrompt); })
-      .catch(() => {});
+      .then((cfg) => { if (cfg?.agentPrompt) setPrompt(cfg.agentPrompt); setPromptLoaded(true); })
+      // Sem o prompt real não dá para editar: salvar o padrão por cima apagaria o que a marca tinha.
+      .catch(() => {
+        setToast({ message: 'Não foi possível carregar o prompt do agente. A edição está bloqueada para não sobrescrever o prompt salvo.', type: 'error' });
+      });
 
     // Load Memory
     api.get<BrandMemory>(`/brands/${slug}/memory`)
@@ -71,6 +75,7 @@ export default function AgentPage() {
   }, [slug]);
 
   const handleSaveAgent = async () => {
+    if (!promptLoaded) return;
     setSavingAgent(true);
     setToast(null);
     try {
@@ -168,6 +173,7 @@ export default function AgentPage() {
                 <textarea
                   className={styles.textarea}
                   value={prompt}
+                  disabled={!promptLoaded}
                   onChange={(e) => setPrompt(e.target.value)}
                   placeholder="Defina o comportamento do agente..."
                 />
@@ -178,7 +184,7 @@ export default function AgentPage() {
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 'auto' }}>
-                <Button size="sm" onClick={handleSaveAgent} disabled={savingAgent}>
+                <Button size="sm" onClick={handleSaveAgent} disabled={savingAgent || !promptLoaded}>
                   <Save size={14} />
                   {savingAgent ? 'Salvando...' : 'Salvar Prompt'}
                 </Button>

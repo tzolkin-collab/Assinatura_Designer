@@ -17,6 +17,8 @@ import { resolveBrandContext } from '../lib/brandContext.js';
 import { uploadPngToR2 } from '../lib/r2.js';
 import { mergeSlidesIntoPost, syncPostSlides } from '../lib/postHelper.js';
 import { snapshotPost, restorePostVersion } from '../lib/postVersions.js';
+import { listPhotoSlots, setPhotoInSlot, PhotoSlotNotFoundError } from '../lib/photoSlot.js';
+import { analyzePhoto, frameFromAnalysis, measureSlotAspect } from '../lib/photoFraming.js';
 import { enrichAiContext } from '../lib/aiContext.js';
 import { enqueueCanvaExport, canvaExportQueue, enqueueDeckExport, deckExportQueue } from '../lib/queue.js';
 import { publishPost, unpublishPost, type HostingConfig } from '../lib/presentationHosting.js';
@@ -41,7 +43,7 @@ const publishSchema = z.object({
   }).optional().default({}),
 });
 const chatToggleSchema = z.object({ enabled: z.boolean() });
-import { resolveRenderableDeck } from '../lib/renderableDeck.js';
+import { deckFontFaces, resolveRenderableDeckWithFonts } from '../lib/renderableDeck.js';
 
 const ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
 
@@ -50,7 +52,8 @@ export const postsRouter = Router();
 // POST /api/posts/render-batch - renderiza múltiplos slides HTML/CSS em paralelo e envia para o R2
 postsRouter.post('/render-batch', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const { slides, fonts, width, height } = (req.body ?? {}) as {
+    const { slides, fonts, width, height, fontFaces } = (req.body ?? {}) as {
+      fontFaces?: unknown;
       slides?: Array<{ html: string; css?: string }>;
       fonts?: string[];
       width?: number;
@@ -64,11 +67,12 @@ postsRouter.post('/render-batch', async (req: AuthRequest, res: Response, next: 
     const slideWidth = Number(width) || 1080;
     const slideHeight = Number(height) || 1080;
     const slideFonts = Array.isArray(fonts) ? fonts : ['Inter'];
+    const ownFaces = await deckFontFaces({ fontFaces });
 
     // Compila cada slide para um documento HTML completo e agenda a renderização em paralelo
     const renderPromises = slides.map(async (slide, index) => {
       try {
-        const doc = buildSlideDocument(slide, slideFonts, slideWidth, slideHeight);
+        const doc = buildSlideDocument(slide, slideFonts, slideWidth, slideHeight, ownFaces);
         // maxDim: 0 significa resolução cheia (fiel ao viewport configurado)
         const buffer = await renderHtmlToPng(doc, { width: slideWidth, height: slideHeight, maxDim: 0 });
         const url = await uploadPngToR2(buffer);
@@ -268,6 +272,149 @@ postsRouter.put('/:id/slides/:index/code', async (req: AuthRequest, res: Respons
   }
 });
 
+// ── Espaço de foto ─────────────────────────────────────────────────────────────
+// O artista reserva a área da foto como <div data-photo-slot="N"> (ver lib/photoSlot.ts).
+// Estas duas rotas são o que deixa a pessoa colocar, trocar e enquadrar a foto depois,
+// sem refazer a arte e sem a IA no meio: nenhuma chamada de modelo, nenhuma geração.
+
+const photoSlotSchema = z.object({
+  slot: z.string().min(1).max(40),
+  // string = coloca/troca; null = esvazia o espaço; ausente = só muda o enquadramento da foto atual.
+  assetUrl: z.string().url().max(2048).nullable().optional(),
+  position: z.object({ x: z.number().finite(), y: z.number().finite() }).optional(),
+  fit: z.enum(['cover', 'contain']).optional(),
+});
+
+type HtmlSlideContent = {
+  kind?: string;
+  width?: number;
+  height?: number;
+  fonts?: string[];
+  slides?: Array<{ html: string; css?: string }>;
+};
+
+postsRouter.get('/:id/slides/:index/photo-slots', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const id = req.params.id as string;
+    const idx = Math.max(0, parseInt(req.params.index as string, 10) || 0);
+    const post = await prisma.post.findFirst({
+      where: { id, brand: brandMemberFilter(req.user?.userId, ANY_MEMBER) },
+      include: { slides: { orderBy: { position: 'asc' } } },
+    });
+    if (!post) throw createError(404, 'Post não encontrado');
+
+    const content = mergeSlidesIntoPost(post).content as unknown as HtmlSlideContent;
+    const slide = content?.kind === 'html-design' ? content.slides?.[idx] : undefined;
+    if (!slide) throw createError(404, 'Slide não encontrado');
+
+    res.json({ data: { slideIndex: idx, slots: listPhotoSlots(slide.html) } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+postsRouter.put('/:id/slides/:index/photo', async (req: AuthRequest, res: Response, next: NextFunction) => {
+  try {
+    const id = req.params.id as string;
+    const idx = Math.max(0, parseInt(req.params.index as string, 10) || 0);
+    const body = parseBody(photoSlotSchema, req.body ?? {});
+
+    const post = await prisma.post.findFirst({
+      where: { id, brand: brandMemberFilter(req.user?.userId, EDITORS) },
+      include: { slides: { orderBy: { position: 'asc' } } },
+    });
+    if (!post) throw createError(404, 'Post não encontrado');
+
+    const content = mergeSlidesIntoPost(post).content as unknown as HtmlSlideContent;
+    if (content?.kind !== 'html-design' || !Array.isArray(content.slides)) {
+      throw createError(400, 'Troca de foto disponível apenas para designs html-design');
+    }
+    const current = content.slides[idx];
+    if (!current) throw createError(400, 'slide fora do limite');
+
+    const atual = listPhotoSlots(current.html).find((s) => s.slot === body.slot);
+
+    let placement: Parameters<typeof setPhotoInSlot>[2];
+    // Como o enquadramento foi decidido: a tela usa para avisar a pessoa.
+    let framing: { mode: 'manual' | 'kept' | 'auto' | 'center'; faceVisible?: number | null } = { mode: 'manual' };
+    if (body.assetUrl === null) {
+      placement = null;
+    } else if (typeof body.assetUrl === 'string') {
+      // Só foto da biblioteca DESTA marca. Sem isto, o cliente poderia mandar qualquer URL
+      // e o chromium do raster iria buscá-la (SSRF), além de poder expor foto de outra marca.
+      const asset = await prisma.asset.findFirst({
+        where: { brandId: post.brandId, url: body.assetUrl, fileType: { startsWith: 'image/' } },
+        select: { name: true },
+      });
+      if (!asset) throw createError(400, 'Essa foto não está na biblioteca da marca');
+      // A mesma foto reenviada mantém o enquadramento que já tinha; a pessoa que escolhe a posição
+      // manda. Foto NOVA é enquadrada pelo assunto (rosto/pessoa/objeto) em vez de pelo centro:
+      // o centro cortava a cabeça em retratos com o rosto no terço de cima. Se não der para
+      // detectar ou medir, volta ao centro, como antes.
+      const mesmaFoto = atual?.src === body.assetUrl;
+      let position = body.position ?? (mesmaFoto ? atual!.position : { x: 50, y: 50 });
+      framing = body.position ? { mode: 'manual' } : mesmaFoto ? { mode: 'kept' } : { mode: 'center' };
+      if (!body.position && !mesmaFoto) {
+        const doc = buildSlideDocument(current, content.fonts ?? ['Inter'], content.width ?? 1080, content.height ?? 1080);
+        const [analysis, aspect] = await Promise.all([
+          analyzePhoto(body.assetUrl),
+          measureSlotAspect(doc, { width: content.width ?? 1080, height: content.height ?? 1080 }, body.slot),
+        ]);
+        const auto = frameFromAnalysis(analysis, aspect);
+        if (auto) {
+          position = auto.position;
+          framing = { mode: 'auto', faceVisible: auto.faceVisible };
+        }
+      }
+      placement = {
+        url: body.assetUrl,
+        position,
+        fit: body.fit ?? atual?.fit,
+        alt: asset.name,
+      };
+    } else {
+      // Só enquadramento: mantém a foto e o ajuste que já estão no espaço.
+      if (!atual?.src) throw createError(400, 'Não há foto neste espaço para reenquadrar');
+      placement = { url: atual.src, position: body.position ?? atual.position, fit: body.fit ?? atual.fit };
+    }
+
+    let novoHtml: string;
+    try {
+      novoHtml = setPhotoInSlot(current.html, body.slot, placement);
+    } catch (e) {
+      if (e instanceof PhotoSlotNotFoundError) throw createError(404, e.message);
+      throw e;
+    }
+
+    // Mesma porta de escrita da edição de código: sanitiza no servidor e snapshota antes.
+    const clean = { html: sanitizeSlideHtml(novoHtml), css: current.css ? sanitizeSlideCss(current.css) : undefined };
+    if (!clean.html.trim()) throw createError(400, 'html ficou vazio após a sanitização');
+
+    const row = post.slides.find((s) => s.position === idx);
+    if (!row) throw createError(404, 'Slide não encontrado na tabela relacional');
+
+    await snapshotPost(post.id, {
+      source: 'EDITOR',
+      label: body.assetUrl === null
+        ? `Antes de remover a foto do slide ${idx + 1}`
+        : `Antes de trocar a foto do slide ${idx + 1}`,
+      userId: req.user?.userId,
+    });
+    await prisma.slide.update({
+      where: { id: row.id },
+      data: {
+        contentJson: clean as unknown as Prisma.InputJsonValue,
+        htmlRender: buildSlideDocument(clean, content.fonts ?? ['Inter'], content.width ?? 1080, content.height ?? 1080),
+      },
+    });
+    await prisma.post.update({ where: { id: post.id }, data: { updatedAt: new Date() } });
+
+    res.json({ data: { slideIndex: idx, slide: clean, slots: listPhotoSlots(clean.html), framing } });
+  } catch (error) {
+    next(error);
+  }
+});
+
 // GET /api/posts/:id/export?slide=N&format=png|html - baixa UM slide.
 //
 // `html` é o "ver a fonte" do slide: o mesmo documento que vai para o chromium,
@@ -284,7 +431,7 @@ postsRouter.get('/:id/export', async (req: AuthRequest, res: Response, next: Nex
     if (!post) throw createError(404, 'Post not found');
 
     const postWithSlides = mergeSlidesIntoPost(post);
-    const deck = resolveRenderableDeck(postWithSlides.content);
+    const deck = await resolveRenderableDeckWithFonts(postWithSlides.content);
     if (!deck) {
       throw createError(400, 'Export disponível apenas para designs html-design');
     }
@@ -676,7 +823,7 @@ postsRouter.post('/:id/export-file', async (req: AuthRequest, res: Response, nex
     });
     if (!post) throw createError(404, 'Post não encontrado');
 
-    const deck = resolveRenderableDeck(mergeSlidesIntoPost(post).content);
+    const deck = await resolveRenderableDeckWithFonts(mergeSlidesIntoPost(post).content);
     if (!deck) {
       throw createError(400, 'Export disponível apenas para designs html-design');
     }
@@ -803,7 +950,7 @@ postsRouter.post('/:id/export-canva', async (req: AuthRequest, res: Response, ne
       });
     }
 
-    const deck = resolveRenderableDeck(mergeSlidesIntoPost(post).content);
+    const deck = await resolveRenderableDeckWithFonts(mergeSlidesIntoPost(post).content);
     if (!deck) {
       throw createError(400, 'Export Canva disponível apenas para designs html-design');
     }

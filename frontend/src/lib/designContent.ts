@@ -59,6 +59,8 @@ export type HtmlDesignPostContent = {
   height: number;
   format?: string;
   fonts: string[];
+  /** Fontes próprias da marca (referências à biblioteca; ver lib/fontFamilies). */
+  fontFaces?: unknown;
   slides: Array<{ html: string; css?: string }>;
   sessionId?: string;
   chatHistory?: FabricaChatHistoryMessage[];

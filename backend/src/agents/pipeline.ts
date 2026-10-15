@@ -4,11 +4,30 @@ import prisma from '../lib/prisma.js';
 import { getSession, updateSession, updateBrandMemory, getBrandMemory } from '../lib/redis.js';
 import { ws } from '../lib/websocket.js';
 import { buildBrandContextSummary, resolveBrandContext } from '../lib/brandContext.js';
+import {
+  buildPipelineBrainContext,
+  correctTextDivergences,
+  fontSubstitutionNotice,
+  hasApprovedText,
+  isDesignerBrainEnabled,
+  loadBrainLayers,
+  parseCopyBlocks,
+  profileStyleReferences,
+  REAL_PHOTO_RULE_PROMPT,
+  officialFontsFor,
+  textIssuesToDeviations,
+} from '../lib/designerBrain/index.js';
+import type { TextIssue } from '../lib/designerBrain/index.js';
 import { executeTool } from './tools/index.js';
 import { runPlanner, MAX_SLIDES, type SlideSkeletonItem } from './planner/index.js';
 import { runHtmlReviewer } from './reviewer/index.js';
 import type { ReviewResult } from './reviewer/index.js';
-import { generateHtmlDesignBatched, type HtmlDesignSlide } from '../lib/htmlDesign.js';
+import { editHtmlSlide, generateHtmlDesignBatched, type HtmlDesignSlide } from '../lib/htmlDesign.js';
+import { deriveDeckName } from '../lib/deckName.js';
+import { onlyProvidedAssets } from '../lib/designerBrain/index.js';
+import { normalizeEmptyPhotoSlots } from '../lib/photoSlot.js';
+import { autoFrameSlidePhotos } from '../lib/photoFraming.js';
+import { resolveFontRefs, toDataUriFaces } from '../lib/customFonts.js';
 import { syncPostSlides } from '../lib/postHelper.js';
 import { researchBrand, type VisualRef } from '../lib/fabricaLegacy.js';
 import { resolveSlideImages, resolveImageCandidateDecisions, type AmbiguousImageCandidate, type ResolvedSlideImage } from '../lib/imageResolver.js';
@@ -32,6 +51,36 @@ import {
 import { isInterruptRequested, markInterruptStopped } from '../lib/interrupt.js';
 
 const ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
+
+async function loadStyleReferenceParts(
+  images: Array<{ url: string; name: string; role?: 'style-reference' | 'content-asset' }> | undefined,
+  brandSlug: string,
+  /** URLs já conferidas contra a biblioteca do projeto (manual visual e moodboard da ficha). */
+  trustedUrls: ReadonlySet<string> = new Set(),
+) {
+  const base = config.r2PublicUrl.replace(/\/$/, '');
+  if (!base) return [] as Array<{ text?: string; inlineData?: { mimeType: string; data: string } }>;
+  const refs = (images ?? []).filter((image) => image.role === 'style-reference').slice(0, 5);
+  const parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [];
+  for (const ref of refs) {
+    // Somente anexos de chat deste bucket/marca, ou arquivos da biblioteca do projeto já conferidos
+    // (ficha); URLs arbitrárias não viram fetch do servidor.
+    if (!trustedUrls.has(ref.url) && !ref.url.startsWith(`${base}/brands/${encodeURIComponent(brandSlug)}/chat-attachments/`)) continue;
+    try {
+      const response = await fetch(ref.url, { signal: AbortSignal.timeout(8000) });
+      if (!response.ok) continue;
+      const mimeType = response.headers.get('content-type')?.split(';')[0]?.trim() ?? '';
+      if (!['image/jpeg', 'image/png', 'image/webp'].includes(mimeType)) continue;
+      const bytes = Buffer.from(await response.arrayBuffer());
+      if (bytes.length > 8 * 1024 * 1024) continue;
+      parts.push({ text: `Moodboard de referência visual: ${ref.name}. Use somente para direção de arte, paleta, composição e tipografia; nunca insira esta imagem no slide.` });
+      parts.push({ inlineData: { mimeType, data: bytes.toString('base64') } });
+    } catch (error) {
+      logger.warn('Não foi possível carregar moodboard para referência multimodal', { name: ref.name, error: (error as Error).message });
+    }
+  }
+  return parts;
+}
 // Extrai uma contagem de slides pedida no brief ("de 200 slides", "50 lâminas",
 // "30 páginas"). Clampa ao teto de sanidade. Retorna undefined se não citada.
 export function parseRequestedSlideCount(brief: string): number | undefined {
@@ -126,7 +175,7 @@ export interface PipelineParams {
   resumeFromStyleProof?: boolean;
   /** Fotos que o usuário anexou no chat desta sessão (já com URL do R2) — o
    *  artista as recebe igual a um asset da marca, podendo embutir de verdade. */
-  attachmentImages?: Array<{ url: string; name: string }>;
+  attachmentImages?: Array<{ url: string; name: string; role?: 'style-reference' | 'content-asset' }>;
   /** Proporção do Design (1:1 default) — "16:9"/"1:1"/"4:5"/"3:4"/"9:16". Ignorado
    *  para apresentação (sempre 16:9). */
   aspectRatio?: string;
@@ -254,7 +303,67 @@ async function runPipelineInner(
     ? `Regras aprendidas sobre esta marca em conversas anteriores (respeite):\n${Object.entries(learnedPreferences).map(([k, v]) => `- ${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`).join('\n')}`
     : '';
 
-  const brandContext = [buildBrandContextSummary(brand), learnedPreferencesText].filter(Boolean).join('\n\n');
+  // Cérebro do Designer em camadas: ligado nas marcas com ficha salva (e, por retaguarda, nas de DESIGNER_BRAIN_BRANDS).
+  // Ligado, o contexto legado (resumo + regras aprendidas no chat) dá lugar às camadas
+  // global → projeto → modo: a memória do projeto é a do cadastro, e o chat não a reescreve.
+  // A ficha salva do projeto liga o cérebro e é de onde ele lê as regras da marca.
+  // Num desdobramento a ficha é a da base, e o que muda vem como camada de collab.
+  const layers = await loadBrainLayers(session.brandSlug);
+  const savedProfile = layers?.projectProfile ?? null;
+  const designerBrainOn = layers !== null || isDesignerBrainEnabled(session.brandSlug);
+  // Regra de foto real (Cérebro de IA §5): estrutural, vale para todo projeto. Ligada pelo cérebro OU
+  // pela pessoa, que a ativa/confirma no chat antes de gerar; não depende de o projeto ter ficha.
+  const photoRuleOn = designerBrainOn || session.photoRule === 'on';
+  // Status por bloco: só o aprovado (e o em revisão, como rascunho) vira texto de slide.
+  const copy = designerBrainOn ? parseCopyBlocks(params.sourceCopy) : null;
+  const sourceCopy = copy?.hasMarkers ? copy.copyForSlides : params.sourceCopy;
+  // Sem texto aprovado o cérebro não tem o que reproduzir literalmente, e o modelo preenche o
+  // vazio com texto inventado (visto em geração real: biografia, tópicos e botões que ninguém
+  // escreveu). Melhor parar e pedir o texto do que entregar texto que a marca nunca aprovou.
+  if (designerBrainOn && !hasApprovedText({ sourceCopy, approvedSkeleton: params.approvedSkeleton })) {
+    ws.error(
+      sessionId,
+      'Esta marca só gera com texto aprovado. Envie o texto de cada slide (a copy) e eu o distribuo sem alterar nenhuma palavra.',
+    );
+    await updateSession(sessionId, { phase: 'listening', workerStatus: 'idle' });
+    return;
+  }
+  let brandContext: string;
+  if (designerBrainOn) {
+    try {
+      const brain = buildPipelineBrainContext({
+        brand,
+        profile: savedProfile,
+        projectName: layers?.projectName,
+        collab: layers?.collab,
+        textBlocks: copy?.blocks,
+        format,
+        aspectRatio: params.aspectRatio,
+        pageCount: parseRequestedSlideCount(brief),
+      });
+      brandContext = brain.brandContext;
+      if (brain.pending.length > 0) {
+        logger.info('Cérebro do Designer: informações ainda não definidas', { brandSlug: brand.slug, pending: brain.pending });
+      }
+    } catch (error) {
+      // Configuração incompleta tem de aparecer: cair no contexto legado em silêncio
+      // geraria a peça com as regras erradas sem ninguém saber.
+      ws.error(sessionId, error instanceof Error ? error.message : 'Cérebro do Designer mal configurado');
+      await updateSession(sessionId, { phase: 'error', workerStatus: 'error' });
+      return;
+    }
+  } else {
+    brandContext = [
+      buildBrandContextSummary(brand),
+      learnedPreferencesText,
+      // Regra de foto real ativada no chat (sem o cérebro completo): o planner e o revisor também a
+      // recebem. Sem isto o revisor reprovava a área de foto reservada como "placeholder vazio",
+      // contradizendo a própria regra (visto no teste real na Assinatura).
+      photoRuleOn
+        ? `${REAL_PHOTO_RULE_PROMPT}\n\nÁreas de foto reservadas e vazias (elementos com data-photo-slot) são INTENCIONAIS: a foto entra depois, no editor. Não as trate como "placeholder" nem como peça incompleta, e não reprove por causa delas.`
+        : '',
+    ].filter(Boolean).join('\n\n');
+  }
 
   await updateSession(sessionId, { phase: 'running', workerStatus: 'running' });
   const runningSession = await getSession(sessionId);
@@ -373,14 +482,14 @@ async function runPipelineInner(
     ws.progress(sessionId, 20, 'Planejando estrutura lógica...');
     // Roteiro pré-aprovado (fluxo copy-first): o usuário JÁ viu e confirmou esta
     // estrutura no chat — replanejar aqui jogaria fora a aprovação.
-    const skeleton = params.approvedSkeleton?.length
+    const skeleton: SlideSkeletonItem[] = params.approvedSkeleton?.length
       ? params.approvedSkeleton
       : await runPlanner({
           brief: planBrief,
           brandContext: plannerBrandContext,
           format,
           targetSlideCount: requestedCount,
-          sourceCopy: params.sourceCopy,
+          sourceCopy,
         }).catch((err) => {
           logger.error('Planner falhou; caindo na contagem de slides de fallback', { error: (err as Error).message });
           const count = requestedCount ?? (format === 'presentation' ? 6 : 4);
@@ -406,6 +515,7 @@ async function runPipelineInner(
         data: {
           id: postId,
           brandId: brand.id,
+          name: deriveDeckName(skeleton),
           // O deck nasce JÁ dentro da pasta escolhida na fábrica. Antes nascia solto e
           // o usuário tinha de ir arrastá-lo na galeria — na prática, deck gerado era
           // deck perdido. `null` = raiz, que segue sendo o default.
@@ -487,7 +597,7 @@ async function runPipelineInner(
       resolvedImages = await resolveImageCandidateDecisions(
         params.imageCandidateDecision.candidates,
         params.imageCandidateDecision.decision,
-        { brandName: brand.name, width, height, brandId: brand.id, postId, imagePreference: params.imagePreference },
+        { brandName: brand.name, width, height, brandId: brand.id, postId, imagePreference: params.imagePreference, realPhotosOnly: photoRuleOn },
       ).catch((err) => {
         logger.error('Falha ao aplicar decisão do bundle de imagens; seguindo sem essas imagens', { error: (err as Error).message });
         return new Map<number, ResolvedSlideImage>();
@@ -495,13 +605,17 @@ async function runPipelineInner(
     } else {
       const { resolved, pendingCandidates } = await resolveSlideImages({
         brandId: brand.id,
+        libraryBrandIds: brand.libraryBrandIds,
         brandName: brand.name,
         brandColors: brand.colors,
         width,
         height,
         skeleton,
         postId,
-        allowGeneratedGraphics: brand.presentationConfig?.allowGeneratedGraphics,
+        // Foto real é regra absoluta no cérebro: nada de pessoa gerada nem Unsplash. Só
+        // reaproveita o que está na biblioteca ou deixa o slide sem imagem.
+        allowGeneratedGraphics: photoRuleOn ? false : brand.presentationConfig?.allowGeneratedGraphics,
+        onlyProvidedAssets: photoRuleOn,
         imagePreference: params.imagePreference,
       }).catch((err) => {
         logger.error('Resolução de imagens dos slides falhou; seguindo sem imagens geradas', { error: (err as Error).message });
@@ -523,7 +637,7 @@ async function runPipelineInner(
             enrichedSkeleton: enrichedSoFar,
             candidates: pendingCandidates,
             brief,
-            sourceCopy: params.sourceCopy,
+            sourceCopy,
           },
           activeQuestion: {
             id: randomUUID(),
@@ -587,14 +701,36 @@ async function runPipelineInner(
         agentPromptLength: brand?.agentPrompt?.length,
         logoUrlLength: brand?.logoUrl?.length,
         referencesCount: brand?.references?.length,
+        visualMoodboardCount: (params.attachmentImages ?? []).filter((image) => image.role === 'style-reference').length,
       });
+
+      // Fontes próprias da ficha (arquivo enviado à biblioteca): carregadas de verdade, e o artista as usa pelo nome.
+      const fontRefs = savedProfile ? await resolveFontRefs(savedProfile.typography ?? [], brand.libraryBrandIds) : [];
+      const ownFontFaces = await toDataUriFaces(fontRefs);
+      const ownFonts = fontRefs.map((r) => r.family);
+
+      // O manual visual, o moodboard e a referência das fontes da ficha chegam ao artista como IMAGEM.
+      const profileRefs = designerBrainOn ? await profileStyleReferences(savedProfile, brand.libraryBrandIds) : [];
+      const moodboardParts = await loadStyleReferenceParts(
+        [...profileRefs, ...(params.attachmentImages ?? [])],
+        brand.slug,
+        new Set(profileRefs.map((r) => r.url)),
+      );
+      logger.info('Referências visuais enviadas ao artista', {
+        brandSlug: brand.slug,
+        daFicha: profileRefs.map((r) => r.name),
+        imagensCarregadas: moodboardParts.filter((p) => p.inlineData).length,
+      });
+      const contentAssets = (params.attachmentImages ?? []).filter((image) => image.role !== 'style-reference');
 
       const design = await generateHtmlDesignBatched(
         async (systemInstruction, userPrompt) => {
           await checkCancelled();
           const response = await generateWithRetry(ai, {
             model: preferredModel,
-            contents: userPrompt,
+            contents: moodboardParts.length
+              ? [{ role: 'user', parts: [{ text: userPrompt }, ...moodboardParts] }]
+              : userPrompt,
             config: {
               systemInstruction,
               responseMimeType: 'application/json',
@@ -620,15 +756,26 @@ async function runPipelineInner(
             name: brand.name,
             colors: brand.colors,
             primaryFonts: brand.primaryFonts,
+            ownFonts,
             guidelines: brand.guidelines,
             agentPrompt: brand.agentPrompt,
+            // Cérebro ligado: as camadas substituem diretrizes e instruções legadas no artista.
+            designerBrain: designerBrainOn ? brandContext : undefined,
+            // Sem o cérebro completo, a regra de foto real ativada no chat ainda chega ao artista.
+            photoRule: photoRuleOn && !designerBrainOn,
+            // Variantes oficiais do logo da ficha: o artista escolhe pela cor do fundo do slide.
+            logoVariants: designerBrainOn && savedProfile?.logo?.files?.length
+              ? savedProfile.logo.files.map((f) => ({ url: f.url, label: f.label ?? 'Logo' }))
+              : undefined,
             logoUrl: brand.logoUrl,
             // Fotos anexadas pelo usuário no chat entram JUNTO com os assets da
             // marca — o artista as trata igual, prefere a inventar foto de banco.
-            assetUrls: [...(params.attachmentImages ?? []), ...brand.assetUrls],
+            assetUrls: [...contentAssets, ...(photoRuleOn ? onlyProvidedAssets(brand.assetUrls) : brand.assetUrls)],
             presentationConfig: brand.presentationConfig ?? undefined,
             references: brand.references,
-            learnedPreferences,
+            // Com o cérebro ligado a memória do projeto é a do cadastro: o que o chat
+            // "aprendeu" não a reescreve (isolamento entre projetos).
+            learnedPreferences: designerBrainOn ? undefined : learnedPreferences,
           },
           skeleton: params.generateStyleProofOnly
             ? enrichedSkeleton.slice(0, 1)
@@ -660,6 +807,7 @@ async function runPipelineInner(
             height: partial.height,
             format: partial.format,
             fonts: partial.fonts,
+            fontFaces: fontRefs,
             reasoning: partial.reasoning,
             slides: [] as unknown[],
           };
@@ -729,6 +877,91 @@ async function runPipelineInner(
         },
       );
 
+      // Texto aprovado × texto do slide, ANTES do envelope e do revisor: o slide que diverge volta
+      // ao artista (no máximo 2 rodadas) e o revisor e o usuário já veem o deck corrigido. É código,
+      // não prompt: o reviewer visual olha uma amostra e não confere palavras.
+      const geradosDaCopia = params.resumeFromStyleProof ? enrichedSkeleton.slice(1) : enrichedSkeleton;
+      const textoSemCopiaPorSlide = designerBrainOn && !geradosDaCopia.some((item) => item.copy?.trim());
+      let textIssuesLeft: TextIssue[] = [];
+      let textSlidesFixed = 0;
+      if (textoSemCopiaPorSlide) {
+        // Sem a copy distribuída por slide (o planner falhou e caiu no esqueleto genérico) não
+        // há como conferir slide a slide: pular com aviso é melhor que acusar o deck inteiro.
+        logger.warn('Cérebro ligado, mas o roteiro não distribuiu a copy por slide: checagem de texto pulada', { brandSlug: brand.slug });
+      } else if (designerBrainOn && !stop.interruption) {
+        ws.progress(sessionId, 83, 'Conferindo o texto com o aprovado...');
+        const corrigir = async (slide: { html: string; css?: string }, instruction: string): Promise<{ html: string; css?: string }> => {
+          await checkCancelled();
+          return editHtmlSlide(
+            async (systemInstruction, userPrompt) => {
+              const response = await generateWithRetry(ai, {
+                model: preferredModel,
+                contents: userPrompt,
+                config: { systemInstruction, responseMimeType: 'application/json', maxOutputTokens: 16384 },
+              }, preferredModel);
+              return response.text ?? '{}';
+            },
+            {
+              slide,
+              instruction,
+              brand: {
+                name: brand.name,
+                colors: brand.colors,
+                primaryFonts: brand.primaryFonts,
+                ownFonts,
+                guidelines: brand.guidelines ?? undefined,
+                // Com o cérebro ligado as camadas já estão no contexto; ele é a memória do projeto.
+                agentPrompt: brandContext,
+              },
+              width: design.width,
+              height: design.height,
+              isolate: true,
+            },
+            extractJsonObject,
+          );
+        };
+        const resultado = await correctTextDivergences({
+          approved: geradosDaCopia.map((item) => item.copy),
+          slides: design.slides,
+          editSlide: corrigir,
+          indexOffset: params.resumeFromStyleProof ? 1 : 0,
+        });
+        design.slides = resultado.slides;
+        textIssuesLeft = resultado.remaining;
+        textSlidesFixed = resultado.corrected.length;
+        logger.info('Conferência do texto aprovado', {
+          brandSlug: brand.slug,
+          rodadas: resultado.attempts,
+          corrigidos: textSlidesFixed,
+          restantes: textIssuesLeft.map((i) => i.slideIndex + 1),
+        });
+      }
+
+      // Moldura padrão nos espaços de foto vazios: a mesma em todos os slides, desenhada pelo sistema.
+      // Vale com a regra de foto real ligada (cérebro completo OU ativada no chat): sem isto o artista
+      // desenhava um quadro diferente em cada slide, e a pessoa não reconhecia onde a foto entra.
+      if (photoRuleOn) {
+        design.slides = design.slides.map((slide) => ({ ...slide, html: normalizeEmptyPhotoSlots(slide.html) }));
+
+        // Foto fornecida que o artista colocou no slide: enquadra pelo rosto/assunto em vez do centro.
+        const permitidas = new Set([
+          ...brand.assetUrls.map((a) => a.url),
+          ...(params.attachmentImages ?? []).map((a) => a.url),
+        ]);
+        const enquadrado = await autoFrameSlidePhotos({
+          slides: design.slides,
+          fonts: design.fonts,
+          fontFaces: ownFontFaces,
+          width: design.width,
+          height: design.height,
+          allowedUrls: permitidas,
+        });
+        design.slides = enquadrado.slides;
+        if (enquadrado.framed > 0) {
+          logger.info('Fotos enquadradas pelo assunto', { brandSlug: brand.slug, fotos: enquadrado.framed });
+        }
+      }
+
       // Envelope de conteúdo (preview no front + persistência). kind html-design.
       const content = {
         kind: 'html-design' as const,
@@ -739,6 +972,8 @@ async function runPipelineInner(
         height: design.height,
         format: design.format,
         fonts: design.fonts,
+        // Só as próprias que o deck realmente usa; os bytes ficam na biblioteca.
+        fontFaces: fontRefs.filter((r) => design.fonts.some((f) => f.toLowerCase() === r.family.toLowerCase())),
         slides: design.slides,
         reasoning: design.reasoning,
       };
@@ -791,6 +1026,32 @@ async function runPipelineInner(
           reviewResult = { approved: true, score: 75, deviations: [], feedback: 'Revisão automática indisponível', correctionInstructions: undefined };
         }
 
+        // O que o laço de correção não conseguiu resolver vira desvio do mesmo formato do reviewer:
+        // aparece na análise do chat, deixa o deck como "precisa de revisão" e alimenta o ajuste
+        // cirúrgico quando a pessoa recusa. Um veredito só: se o texto reprova, o "peça aprovada"
+        // do revisor visual não vai junto (a mensagem se contradizia).
+        if (textIssuesLeft.length > 0) {
+          logger.warn('Texto dos slides difere do texto aprovado', {
+            slides: textIssuesLeft.map((i) => i.slideIndex + 1),
+            brandSlug: brand.slug,
+          });
+          const feedback = textSlidesFixed > 0
+            ? `Corrigi o texto de ${textSlidesFixed} slide(s) sozinho, mas o de ${textIssuesLeft.length} slide(s) ainda não confere com o texto aprovado.`
+            : `O texto de ${textIssuesLeft.length} slide(s) não confere com o texto aprovado.`;
+          reviewResult = {
+            ...reviewResult,
+            approved: false,
+            deviations: [...(reviewResult.deviations ?? []), ...textIssuesToDeviations(textIssuesLeft)],
+            // O texto manda no veredito: só mantém a crítica visual se ela já apontava problemas.
+            feedback: reviewResult.approved ? feedback : `${feedback} ${reviewResult.feedback ?? ''}`.trim(),
+          };
+        } else if (textSlidesFixed > 0) {
+          reviewResult = {
+            ...reviewResult,
+            feedback: `Corrigi o texto de ${textSlidesFixed} slide(s) para ficar igual ao aprovado. ${reviewResult.feedback ?? ''}`.trim(),
+          };
+        }
+
         // Guarda o review na sessão MESMO quando aprovado: se o usuário recusar
         // (review:decline), o brain usa estas deviations para montar um [EDIT]
         // cirúrgico — sem isto a recusa só tinha o texto solto do chat e a única
@@ -814,6 +1075,34 @@ async function runPipelineInner(
           sessionId,
           `\n\n**Análise do revisor (score ${reviewResult.score}/100):** ${reviewResult.feedback}\n${deviationsText ? `\n${deviationsText}\n` : ''}\n*Mantive este design como está. Me diga se quer que eu ajuste algo específico ou refaça do zero.*\n`,
         );
+      }
+
+
+      // Status por bloco (§4.1): o resultado diz o que ficou de fora da arte e se a peça pode ser final.
+      if (designerBrainOn && copy?.hasMarkers && design.slides.length > 0) {
+        const { guidance, withheld } = copy.excluded;
+        const fora = [
+          guidance > 0 ? `${guidance} bloco${guidance > 1 ? 's' : ''} de fala/contexto/apoio ${guidance > 1 ? 'serviram' : 'serviu'} só de orientação` : '',
+          withheld > 0 ? `${withheld} bloco${withheld > 1 ? 's' : ''} interno${withheld > 1 ? 's' : ''}/não exibir ${withheld > 1 ? 'não foram enviados' : 'não foi enviado'} à IA` : '',
+        ].filter(Boolean);
+        const linhas = [
+          fora.length > 0 ? `**Texto da peça:** ${fora.join('; ')} e não ${guidance + withheld > 1 ? 'aparecem' : 'aparece'} na arte.` : '',
+          copy.hasInReview ? '**Texto em revisão:** há texto marcado como "em revisão" na peça. Ela está diagramada como rascunho e não deve ser tratada como final até a aprovação.' : '',
+        ].filter(Boolean);
+        if (linhas.length > 0) ws.token(sessionId, `\n\n${linhas.join('\n\n')}\n`);
+      }
+
+      // Fonte oficial do projeto que o sistema não consegue carregar: o artista usou uma substituta.
+      // Antes isso passava em silêncio; agora o resultado diz qual faltou e qual entrou no lugar.
+      if (designerBrainOn && design.slides.length > 0) {
+        const aviso = fontSubstitutionNotice({ official: officialFontsFor(brand.slug, savedProfile), used: design.fonts, installed: ownFonts });
+        if (aviso) {
+          logger.warn('Fonte oficial do projeto indisponível, usando substituta', { brandSlug: brand.slug, usadas: design.fonts });
+          ws.token(sessionId, `
+
+${aviso}
+`);
+        }
       }
 
     } catch (err) {
@@ -888,7 +1177,7 @@ async function runPipelineInner(
 
       if (usedAssetUrls.length > 0) {
         const usedAssets = await prisma.asset.findMany({
-          where: { brandId: brand.id, url: { in: usedAssetUrls } },
+          where: { brandId: { in: brand.libraryBrandIds }, url: { in: usedAssetUrls } },
           select: { id: true, url: true, name: true },
         });
         contentToSave.usedAssets = usedAssets;
@@ -947,7 +1236,7 @@ async function runPipelineInner(
         postId,
         skeleton,
         brief,
-        sourceCopy: params.sourceCopy,
+        sourceCopy,
       },
       activeQuestion: {
         id: randomUUID(),

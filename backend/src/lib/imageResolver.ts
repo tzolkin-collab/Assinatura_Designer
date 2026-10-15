@@ -21,6 +21,7 @@ import { searchUnsplashPhoto } from './unsplash.js';
 import { uploadFileToR2 } from './r2.js';
 import prisma from './prisma.js';
 import { logger } from './logger.js';
+import { NON_PHOTO_ASSET_TAGS } from './designerBrain/referenceTags.js';
 import type { SlideSkeletonItem } from '../agents/planner/index.js';
 
 const ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
@@ -468,6 +469,8 @@ async function resolvePhoto(
 // ── Passo 2b: gera SVG (ícone/ilustração vetorial) via texto — inline no HTML ───
 export interface ResolveSlideImagesParams {
   brandId: string;
+  /** Bibliotecas de onde as fotos podem sair (a da marca e, num desdobramento, a da base). Padrão: só a da marca. */
+  libraryBrandIds?: string[];
   brandName: string;
   brandColors: string[];
   width: number;
@@ -477,6 +480,8 @@ export interface ResolveSlideImagesParams {
   postId?: string;
   /** Configurável em Presentation Config da marca. Default true — desligar é opt-out. */
   allowGeneratedGraphics?: boolean;
+  /** Cérebro ligado: só reaproveita o que alguém forneceu, nunca o que o sistema gerou (source ai-generated). */
+  onlyProvidedAssets?: boolean;
   imagePreference?: 'force-ai' | 'unsplash' | 'unsplash-remix';
 }
 
@@ -510,7 +515,14 @@ export async function resolveSlideImages(params: ResolveSlideImagesParams): Prom
   // verdade na decisão (ver decideImagePlan) — 24 imagens num call estouraria
   // custo/latência à toa. 8 casa com o teto que o artista já usa (assetsBlock).
   const existingAssets = await prisma.asset.findMany({
-    where: { brandId: params.brandId, fileType: { startsWith: 'image/' } },
+    where: {
+      brandId: { in: params.libraryBrandIds?.length ? params.libraryBrandIds : [params.brandId] },
+      fileType: { startsWith: 'image/' },
+      // Manual visual, moodboard, referência de fonte e de paleta são para o modelo VER (reaproveitá-los
+      // colava o manual inteiro na capa, visto na geração real da Amanda), e logo não é foto.
+      NOT: { tags: { hasSome: [...NON_PHOTO_ASSET_TAGS] } },
+      ...(params.onlyProvidedAssets ? { source: { not: 'ai-generated' } } : {}),
+    },
     orderBy: { createdAt: 'desc' },
     take: 8,
     select: { url: true, name: true, tags: true },
@@ -627,12 +639,25 @@ export async function resolveSlideImages(params: ResolveSlideImagesParams): Prom
 export async function resolveImageCandidateDecisions(
   candidates: AmbiguousImageCandidate[],
   decision: 'accept' | 'regenerate',
-  params: Pick<ResolveSlideImagesParams, 'brandName' | 'width' | 'height' | 'brandId' | 'createdById' | 'postId' | 'imagePreference'>,
+  params: Pick<ResolveSlideImagesParams, 'brandName' | 'width' | 'height' | 'brandId' | 'createdById' | 'postId' | 'imagePreference'> & {
+    /** Cérebro do Designer ligado: só foto real fornecida. "Regenerar" não gera nada. */
+    realPhotosOnly?: boolean;
+  },
 ): Promise<Map<number, ResolvedSlideImage>> {
   const results = new Map<number, ResolvedSlideImage>();
 
   if (decision === 'accept') {
     for (const c of candidates) results.set(c.slideIndex, { imageUrl: c.assetUrl });
+    return results;
+  }
+
+  // Regra de foto real: nem IA nem Unsplash. O slide segue sem imagem e a área fica
+  // reservada para a foto real entrar depois. Não é falha: é o comportamento pedido.
+  if (params.realPhotosOnly) {
+    logger.warn('Regenerar imagem ignorado: esta marca usa só fotos reais fornecidas', {
+      brandId: params.brandId,
+      slides: candidates.map((c) => c.slideIndex),
+    });
     return results;
   }
 

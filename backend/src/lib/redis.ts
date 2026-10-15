@@ -117,6 +117,7 @@ export interface FabricaSession {
     skeleton: Array<{ title: string; goal: string; layout_type: string; order: number; copy?: string }>;
     sourceCopy?: string;
     brief: string;
+    attachmentImages?: Array<{ url: string; name: string; role?: 'style-reference' | 'content-asset' }>;
   } | null;
   /**
    * Pausa estratégica (Amostra de Estilo): o pipeline gera apenas o slide 0 e
@@ -148,6 +149,23 @@ export interface FabricaSession {
     candidates: Array<{ slideIndex: number; hint: string; assetUrl: string; assetName: string }>;
     brief: string;
     sourceCopy?: string;
+  } | null;
+  /**
+   * Regra de foto real (Cérebro de IA §5, "comportamento estrutural do sistema"): a pessoa a
+   * ativa ou confirma NO CHAT antes da primeira geração da conversa. Com `'on'` só entram fotos
+   * reais fornecidas, nunca pessoa gerada nem banco de imagem, e a área sem foto fica reservada.
+   * Vale para a conversa inteira, em qualquer projeto: não depende de a marca ter ficha.
+   */
+  photoRule?: 'on';
+  /**
+   * Geração parada esperando a pessoa ativar/confirmar a regra de foto real. Guarda o que foi
+   * pedido para retomar exatamente igual quando ela responder (sem passar pelo LLM).
+   */
+  pendingPhotoRule?: {
+    format: 'presentation' | 'carousel';
+    isProof: boolean;
+    aspectRatio?: string;
+    imagePreference?: 'force-ai' | 'unsplash' | 'unsplash-remix';
   } | null;
   /**
    * Resultado do último review automático, guardado pelo pipeline para o
@@ -236,6 +254,7 @@ export async function createSession(
     pendingPlan: null,
     pendingStyleProof: null,
     pendingImageCandidates: null,
+    pendingPhotoRule: null,
     messages: [],
     currentDesign: [],
     workerStatus: 'idle',

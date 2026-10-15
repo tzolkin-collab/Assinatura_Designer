@@ -432,7 +432,7 @@ async function extractFromGroup(
  * um PDF de dezenas de MB virando base64). O cleanup apaga o arquivo remoto — nunca
  * deixamos lixo na conta do Gemini.
  */
-async function buildPdfPart(
+export async function buildPdfPart(
   client: GeminiExtractionClient,
   pdf: BrandbookExtractionPdfPart,
 ): Promise<{ part: Part; cleanup: () => Promise<string | undefined> }> {

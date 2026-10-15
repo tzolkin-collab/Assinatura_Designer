@@ -33,8 +33,10 @@ export default function BillingPage() {
 
       {error ? (
         <p className={styles.error}>Erro ao carregar: {error}</p>
-      ) : loading || !billing ? (
+      ) : loading ? (
         <p>Carregando…</p>
+      ) : !billing || !Array.isArray(billing.models) ? (
+        <p>Sem dados de gasto para este projeto.</p>
       ) : (
         <>
           <div className={styles.toolbar}>

@@ -1,0 +1,117 @@
+import { renderProjectMemory, type BrandProfileData } from '../brandProfile.js';
+import { assembleDesignerBrain } from './assemble.js';
+import { renderTextBlocks } from './textStatus.js';
+import { PROJECT_MEMORY_SEEDS } from './seeds/index.js';
+import type { CollabLayer, SectionId, TextBlock } from './types.js';
+
+/**
+ * Ponte entre o pipeline e o cérebro em camadas. Devolve o texto que ocupa o lugar do
+ * `brandContext` legado (resumo de cores/fontes/diretrizes) para as marcas em que o
+ * cérebro está ligado.
+ */
+
+/** Marca ligada ao cérebro mas sem memória de projeto: configuração incompleta. */
+export class DesignerBrainSetupError extends Error {
+  constructor(brandSlug: string) {
+    super(
+      `O cérebro do Designer está ligado para "${brandSlug}", mas a marca não tem memória de projeto. ` +
+        'Cadastre a memória em "Instruções do agente" da marca ou desligue o cérebro para ela.',
+    );
+    this.name = 'DesignerBrainSetupError';
+  }
+}
+
+/**
+ * De onde vem a memória do projeto, em ordem: a ficha salva (Cérebro da IA); o texto antigo de
+ * "Instruções do agente"; o seed do repositório. A ficha vence tudo: quem a salvou decidiu.
+ */
+export function resolveProjectMemory(
+  brandSlug: string,
+  agentPrompt: string | null | undefined,
+  profile?: BrandProfileData | null,
+  brandName?: string,
+): string | null {
+  if (profile) {
+    const rendered = renderProjectMemory(brandName ?? brandSlug, profile);
+    // Ficha sem nenhuma seção preenchida rende só o cabeçalho "PROJETO: …": não é memória.
+    if (rendered.includes('\n')) return rendered;
+  }
+  const own = agentPrompt?.trim();
+  if (own) return own;
+  return PROJECT_MEMORY_SEEDS[brandSlug.trim().toLowerCase()] ?? null;
+}
+
+// O briefing e os ativos NÃO entram aqui: o pipeline já entrega o briefing ao planner e
+// os ativos da biblioteca ao artista por caminhos próprios. Repetir geraria duas versões.
+const SECTIONS_FOR_BRAND_CONTEXT: ReadonlySet<SectionId> = new Set<SectionId>([
+  'global',
+  'project',
+  'collab',
+  'assets', // só os do desdobramento (logo e guia do parceiro): os da biblioteca seguem pelo caminho próprio
+  'mode',
+  'photo-rule',
+  'review',
+]);
+
+export interface PipelineBrainInput {
+  brand: { slug: string; name: string; agentPrompt: string | null | undefined };
+  /** Ficha salva do projeto-base, quando existe. */
+  profile?: BrandProfileData | null;
+  /** Nome do projeto-base, quando a marca é um desdobramento (o nome da marca é o do desdobramento). */
+  projectName?: string;
+  /** Camada do desdobramento/collab: só o que muda em relação à base. */
+  collab?: CollabLayer | null;
+  /** Blocos de texto com status. Só os de orientação (apoio, fala, contexto) entram aqui; o texto aprovado segue pelo planner. */
+  textBlocks?: TextBlock[];
+  format: 'presentation' | 'carousel';
+  aspectRatio?: string;
+  /** Quantidade pedida no briefing, quando houver. */
+  pageCount?: number;
+}
+
+export interface PipelineBrainContext {
+  brandContext: string;
+  /** §13 — o que falta saber. O pipeline registra; não bloqueia nem inventa. */
+  pending: string[];
+}
+
+export function buildPipelineBrainContext(input: PipelineBrainInput): PipelineBrainContext {
+  const memory = resolveProjectMemory(
+    input.brand.slug,
+    input.brand.agentPrompt,
+    input.profile,
+    input.projectName ?? input.brand.name,
+  );
+  if (!memory) throw new DesignerBrainSetupError(input.brand.slug);
+
+  // O documento tem 3 modos (apresentação, imagem avulsa, e-book A4); carrossel não tem
+  // modo próprio. Cada lâmina do carrossel é uma imagem avulsa com proporção definida.
+  const assembled = assembleDesignerBrain({
+    project: { name: input.projectName ?? input.brand.name, memory },
+    collab: input.collab ?? null,
+    creation: {
+      mode: input.format === 'presentation' ? 'presentation' : 'single-image',
+      blocks: [],
+      pageCount: input.pageCount,
+      aspectRatio: input.format === 'presentation' ? '16:9' : (input.aspectRatio ?? '1:1'),
+      // Conservador: a regra de foto real é de segurança, então vale sempre que há dúvida.
+      hasPhotoOrPhotoArea: true,
+    },
+  });
+
+  // O briefing não entra (o planner já o recebe), mas a ORIENTAÇÃO sim: fala, apoio e contexto
+  // explicam o que a peça é, sem poder virar texto visível. O renderizador já diz isso ao modelo.
+  const guidance = renderTextBlocks(
+    (input.textBlocks ?? []).filter((x) => x.status === 'support' || x.status === 'speech' || x.status === 'context'),
+  );
+
+  return {
+    brandContext: [
+      ...assembled.sections.filter((s) => SECTIONS_FOR_BRAND_CONTEXT.has(s.id)).map((s) => s.text),
+      guidance,
+    ]
+      .filter(Boolean)
+      .join('\n\n'),
+    pending: assembled.pending,
+  };
+}

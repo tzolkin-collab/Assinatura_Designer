@@ -30,16 +30,20 @@ nos projetos, e a identidade de um projeto nunca contamina outro.
 
 ## A. Antes de começar (bloqueios)
 
-| ☐ | Item | Objetivo | Pedido | Quem |
-|---|---|---|---|---|
-| ☐ | Regra de foto real | Saber se a proibição de foto gerada/stock vale para todos os projetos | Responder se vale também para a Assinatura | Gustavo |
-| ☐ | Quem gera a peça ❓ | Decidir entre HTML + Nano Banana só nas imagens, ou Nano Banana gerando o slide inteiro | Escolher (recomendação: manter HTML) | Gustavo / Gabriela |
-| ☐ | Ativos da Amanda em arquivo | Ter logo, fontes, paleta e moodboards de verdade | Compartilhar a subpasta Fontes e os arquivos, ou enviar ZIP | Gabriela |
-| ☐ | Fotos reais da Amanda | Rodar o Teste 2 | Enviar as fotos | Gabriela |
-| ☑ | Branches pendentes | Ter a base limpa antes de construir | Feito em 05/10: 4 branches mergeadas (PRs #53 a #56). Ver seção D | Gustavo |
-| ☐ | Checagem final por IA | Cumprir "revisar antes de marcar final" | Aprovar o custo extra de uma 2ª passada de IA | Gustavo |
-| ☐ | Status do texto | Separar texto visível de fala, contexto e interno | Confirmar que o usuário marca o status bloco a bloco | Gustavo |
-| ☐ | Quais são as 5 alterações pendentes | A ata de 02/10 cita ~15 alterações, ~10 subidas e ~5 faltando | Confirmar se eram as 4 branches da seção D, já mergeadas 🟡 | Gustavo |
+> **12/10:** a maior parte destes itens já estava respondida pela própria Gabriela, no documento dela e na reunião de 06/10.
+> Eles não eram decisões em aberto. Cada linha traz a fonte; só o último item ainda depende de confirmação.
+
+| ☐ | Item | Resposta (e de onde vem) | Quem |
+|---|---|---|---|
+| ☑ | Regra de foto real | **Vale para TODOS os projetos**, inclusive a Assinatura. Documento da Gabi, §3.1 item 5 ("regra absoluta") e §5 ("comportamento estrutural do sistema, não preferência de um projeto"). **Como liga:** ativada ou confirmada **no chat**, antes da primeira geração da conversa (Gustavo, 12/10). **Feito:** pergunta no chat com as fotos reais disponíveis (§12), retomada da mesma geração ao responder, e a regra vale no pipeline mesmo sem ficha do projeto | feito |
+| ☑ | Quem gera a peça | **Manter HTML**, com o Nano Banana nas imagens. Reunião de 06/10 (Core): continuar "sem refazer a arquitetura base"; o Cérebro serve para alimentar a IA com instruções e prompts, não para mudar a arquitetura. **Conferido (12/10):** o pipeline não gera foto com a regra ligada (travas no resolvedor); a brecha era a ferramenta `[GENERATE_IMAGE]` do chat, que chamava o Nano Banana sem olhar a regra. **Corrigido**: recusa quando a regra vale, e o assistente passou a pedir a foto real. **Falta:** o prompt-base do Nano Banana (§6.1 do documento) ainda não é usado, porque hoje o Nano Banana só entra para imagens e a regra proíbe gerá-las | feito |
+| ◐ | Ativos da Amanda em arquivo | **Carregados (12/10)** o que a Gabriela já tinha mandado: 14 variantes de logo (7 wordmarks e 7 monogramas, uma por tinta e fundo da paleta), manual visual (Moodboard Editorial), moodboard de apresentações e imagem das fontes. O logo entra em todos os slides e o artista passa a VER o manual, o moodboard e a referência de fonte como imagem. **Falta da Gabriela:** os **arquivos de fonte** (Queens, Aeonik): sem eles a arte usa Playfair e Manrope e o aviso de fonte substituta continua | Gabriela (fontes) |
+| ☐ | Fotos reais da Amanda | **Depende de quem tem o álbum.** Não estão no Drive, e a exportação do WhatsApp veio sem mídia. O Core registra um álbum de cerca de 8 fotos e 3 vídeos enviado em 05/10 pelo WhatsApp. **Preparado (12/10):** `scripts/loadAmandaPhotos.ts` sobe a pasta (simula por padrão) e `scripts/teste2FotoReal.ts` roda o Teste 2 e dá PASSA/FALHA por critério. Achados e corrigidos: logos tomavam as vagas de candidatas a foto; foto colocada pelo artista ficava sempre centralizada | Gustavo / Gabriela |
+| ☑ | Branches pendentes | Feito em 05/10: 4 branches mergeadas (PRs #53 a #56). Ver seção D | feito |
+| ☑ | Checagem final por IA | **Não precisa de aprovação extra.** Documento §3.1 item 9 e §13 passo 7 tornam a revisão obrigatória; o custo por apresentação (R$ 20 a R$ 50) já foi autorizado (reunião 06/10) e o medido é de R$ 2 a R$ 3. O teto de R$ 200/mês de API continua valendo | decidido |
+| ☑ | Status do texto | **A pessoa marca, bloco a bloco.** Documento §4 ("Status do texto: obrigatório, Sim") e §13 passo 3. **Feito** por marcas no texto (`[APROVADO]`, `[FALA]`...). **Falta** o campo na tela | feito (tela pendente) |
+| ❓ | Quais são as 5 alterações pendentes | **Única ainda sem resposta:** a ata de 02/10 cita ~15 alterações, ~10 subidas e ~5 faltando. Confirmar com a Gabriela se eram as 4 branches da seção D, já mergeadas 🟡 | Gustavo / Gabriela |
+
 
 ---
 
@@ -47,16 +51,17 @@ nos projetos, e a identidade de um projeto nunca contamina outro.
 
 | ☐ | Item | Objetivo | Pedido |
 |---|---|---|---|
-| ◐ | Prompt global persistente | Regras fixas que valem para todos os projetos, sem repetir em cada um | Guardar o §3.1 como instrução fixa, separada dos projetos. **Feito:** texto literal em `lib/designerBrain/prompts.ts`. **Falta:** ligar ao planner/artista/reviewer |
+| ◐ | Prompt global persistente | Regras fixas que valem para todos os projetos, sem repetir em cada um | Guardar o §3.1 como instrução fixa, separada dos projetos. **Feito:** texto literal em `lib/designerBrain/prompts.ts`, ligado ao planner, ao artista e ao reviewer **atrás do flag por marca** (ver "Como ligar"). **Falta:** edição de slide e ferramentas de edição do chat |
 | ☐ | Projeto-base | Cada marca ter sua memória isolada | Campos independentes: plataforma de marca, manual visual, logo, fonte, paleta, fotos, elementos |
 | ☐ | Collab / desdobramento | Herdar a base e guardar só o que muda | Tipo (interno/parceria), contexto, logo e manual do parceiro, % de protagonismo |
 | ◐ | Seleção de modo | Cada tipo de peça ter regras próprias | Escolher entre apresentação 16:9, imagem avulsa e e-book A4. **Feito:** regras dos 3 modos no módulo. **Falta:** seletor na UI e tipo de post do e-book A4 |
-| ☐ | Galeria de fotos reais | A IA só usar foto fornecida | Biblioteca por projeto + anexos por demanda |
-| ◐ | Sem foto, sem pessoa gerada | Nunca fabricar rosto nem stock | Reservar área limpa na arte, sem texto técnico dentro dela. **Feito:** regra §5.1 anexada quando há foto ou área fotográfica. **Falta:** tirar `generate-photo`, Unsplash e Remix do `imageResolver` |
+| ◐ | Galeria de fotos reais | A IA só usar foto fornecida | Biblioteca por projeto + anexos por demanda. **Feito:** a biblioteca da marca já é a fonte, e o editor ganhou a aba **Fotos** (colocar, trocar, enquadrar, remover; só foto da biblioteca; cada troca vira versão). **Falta:** biblioteca por projeto (hoje é por marca) e o artista "ver" a foto |
+| ◐ | Editor: trocar foto depois | A foto entrar depois sem refazer a arte | **Feito (com o cérebro ligado):** o artista reserva a área como `data-photo-slot`; o editor troca a foto sem IA. Validado com geração real e uma foto de teste. **Falta:** editar texto direto, mover/redimensionar, reordenar slides |
+| ◐ | Sem foto, sem pessoa gerada | Nunca fabricar rosto nem stock | Reservar área limpa na arte, sem texto técnico dentro dela. **Feito:** regra §5.1 anexada quando há foto ou área fotográfica. **Feito (só com o flag ligado):** o resolver não gera foto nem busca Unsplash, "regenerar" não faz nada, e o chat deixa de oferecer IA/Remix/Unsplash. **12/10:** a regra agora é **ativada ou confirmada no chat** antes da primeira geração da conversa e vale em qualquer projeto, com ou sem ficha: só foto real fornecida, sem Unsplash nem "Remix IA", área reservada quando falta foto. **Falta:** exercitar com geração real num projeto sem ficha (a Assinatura) |
 | ◐ | Status do texto | Texto visível ≠ fala, contexto ou interno | Campo por bloco: aprovado, em revisão, apoio, fala, contexto, interno, não exibir. **Feito:** regra em código (`interno` e `não exibir` nunca chegam ao modelo). **Falta:** campo no briefing e na UI |
 | ◐ | Amanda como piloto | Validar o sistema com um projeto completo | Carregar a memória do §11. **Feito:** memória em `seeds/amandaCoelho.ts`. **Falta:** projeto-base no banco, ativos e fotos |
-| ◐ | Montagem do prompt | Camadas na ordem certa | global → projeto → collab → modo → foto → ativos → briefing → checklist. **Feito:** `assembleDesignerBrain` (função pura, 21 testes). **Falta:** chamar no pipeline |
-| ☐ | Revisão antes de "final" | Não entregar peça com erro ou invenção | Checar texto, quantidade, acentos, logo, cores, margens, fotos |
+| ◐ | Montagem do prompt | Camadas na ordem certa | global → projeto → collab → modo → foto → ativos → briefing → checklist. **Feito:** `assembleDesignerBrain` (função pura, 21 testes) e chamado no pipeline para marcas com o flag. **Falta:** briefing e ativos entrarem pelo montador (hoje o pipeline os entrega por caminho próprio) |
+| ◐ | Revisão antes de "final" | Não entregar peça com erro ou invenção | Checar texto, quantidade, acentos, logo, cores, margens, fotos. **Feito (com o cérebro ligado):** checagem em código do texto aprovado contra cada slide (palavras faltando ou a mais, com acento), que reprova o deck e alimenta o ajuste; e a geração **para** quando não há texto aprovado. **Falta:** quantidade fechada, logo, cores, margens e foto |
 | ☐ | Galeria de projetos | Trocar "galeria de marcas" por projetos | Nova home e página interna do projeto, conforme os mockups do documento |
 
 **Observação sobre os mockups:** os dados mostrados neles (92% configurado, 38 fotos, Belong, Governo de Minas)
@@ -113,13 +118,33 @@ Origem: `docs/ACABAMENTOS-DESIGNER.md` (21/09) e `docs/PLANO-CONSOLIDACAO.md` (2
 
 | ☐ | Item | Objetivo | Pedido |
 |---|---|---|---|
-| ☐ | Remover geração de pessoa e stock | Alinhar à regra de foto real | `imageResolver` hoje gera foto de pessoa, usa Unsplash e "Remix IA". Depende da seção A |
+| ◐ | Remover geração de pessoa e stock | Alinhar à regra de foto real | Bloqueado nas marcas com o flag (seção D.1). Nas demais o `imageResolver` ainda gera foto, usa Unsplash e "Remix IA": só mudam se a regra passar a valer para todos |
 | ☐ | Planner pedindo imagem de pessoa | Não pedir o que não pode ser gerado | `imageHint` inclui "pessoa, equipe, depoimento" |
 | ☐ | Checklist pré-geração do chat | Não perguntar "IA / Remix / Unsplash" | Substituir pelos templates de briefing do §12 |
-| ☐ | Upload de fonte `.otf/.ttf` | Usar Queens e Aeonik de verdade | Hoje só entram Google Fonts. Já estava no plano de 21/09 |
+| ◐ | Uso de fonte própria (`.ttf/.otf/.woff/.woff2`) | Usar Queens e Aeonik de verdade | **Construído (12/10):** a fonte marcada como "Arquivo oficial enviado" na ficha vira `@font-face` no preview (rota pública com CORS), no revisor e nas exportações; o artista usa o nome exato e o aviso de substituição some para ela. Conferido com render real: com o arquivo sai a fonte, sem ele cai na genérica. **Falta:** os arquivos da Gabriela (licença comercial) e o PPTX só leva o nome da fonte |
 | ☐ | Gravação da memória pelo chat | Impedir que o bot altere o projeto sem pedir | `updateBrandMemory` grava "sem pedir permissão"; exigir aprovação |
 | ☐ | Slides de fallback silenciosos | Não entregar deck "pronto" com slide genérico | Avisar e sinalizar em vez de preencher o lote |
 | ☐ | Revisão ver todo o deck | Checar quantidade, texto e acentos, não só uma amostra | O reviewer visual amostra ~8 slides |
+
+---
+
+## D.1 Como ligar o cérebro para um caso específico
+
+O cérebro é opt-in por marca. **Padrão: desligado em todas**, e a geração segue exatamente como antes.
+
+1. Defina a variável de ambiente no backend (e no worker): `DESIGNER_BRAIN_BRANDS=amanda-coelho` (slugs separados por vírgula).
+2. A marca precisa existir com esse slug, com **cores e fontes** cadastradas (elas continuam vindo da configuração da marca, inclusive o carregamento de fonte).
+3. A memória do projeto vem de **"Instruções do agente"** da marca. Se estiver vazia, usa o seed do repositório (`seeds/index.ts`, hoje só `amanda-coelho`). Sem nenhuma das duas, a geração **falha com mensagem clara**, em vez de seguir com as regras erradas.
+4. Para desligar: tirar o slug da lista.
+
+**O que muda quando ligado:** o artista, o planner e o reviewer recebem global + memória + modo + regra de foto + revisão no lugar das diretrizes legadas; o resolver não gera foto nem usa Unsplash; o chat não oferece IA/Remix/Unsplash; o que o chat "aprendeu" não reescreve a memória.
+
+**Ainda NÃO coberto quando ligado:**
+- editar um slide depois de gerado (`editHtmlSlide` e a ferramenta de edição do chat) usa o contexto legado;
+- carrossel usa o modo "imagem avulsa" (o documento não define modo de carrossel);
+- e-book A4 não existe como tipo de peça;
+- status do texto por bloco ainda não tem campo no briefing (hoje o texto vem do briefing como antes);
+- nada disso foi exercitado com geração real, só com testes automatizados.
 
 ---
 

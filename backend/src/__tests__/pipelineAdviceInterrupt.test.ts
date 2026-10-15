@@ -4,13 +4,13 @@
 // (htmlDesign), o serviço de orientações e o de interrupção — sobre stores em memória
 // com a mesma semântica atômica do Redis.
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const h = vi.hoisted(() => {
   const state = {
     session: {} as Record<string, any>,
     wsCalls: [] as Array<{ fn: string; args: any[] }>,
-    prompts: [] as Array<{ start: number; user: string }>,
+    prompts: [] as Array<{ start: number; user: string; sys: string }>,
     modelCalls: 0,
     onModelCall: null as null | ((n: number) => Promise<void> | void),
     reviewerBriefs: [] as string[],
@@ -21,6 +21,10 @@ const h = vi.hoisted(() => {
     postCreates: [] as any[],
     synced: [] as any[],
     slideCount: 12,
+    savedProfile: null as Record<string, unknown> | null,
+    profileLookupFails: false,
+    withEmptySlot: false,
+    brandRow: null as Record<string, unknown> | null,
   };
   return state;
 });
@@ -33,6 +37,13 @@ vi.mock('../lib/prisma.js', () => ({
     },
     slide: { findFirst: vi.fn(async () => ({ id: 'slide-row' })), update: vi.fn(async () => ({})) },
     asset: { findMany: vi.fn(async () => []) },
+    brand: {
+      findUnique: vi.fn(async () => {
+        if (h.profileLookupFails) throw new Error('relation "BrandProfile" does not exist');
+        if (h.brandRow) return h.brandRow;
+        return h.savedProfile ? { name: 'Marca X', kind: 'BASE', collab: null, profile: { data: h.savedProfile }, parent: null } : null;
+      }),
+    },
   },
 }));
 
@@ -56,7 +67,7 @@ vi.mock('../lib/websocket.js', () => {
 
 vi.mock('../lib/brandContext.js', () => ({
   resolveBrandContext: vi.fn(async () => ({
-    id: 'brand-1', name: 'Marca X', colors: ['#111111'], primaryFonts: ['Inter'], assetUrls: [], references: [],
+    id: 'brand-1', name: 'Marca X', slug: h.session.brandSlug, agentPrompt: '', guidelines: 'DIRETRIZ-LEGADA', colors: ['#111111'], primaryFonts: ['Inter'], assetUrls: [], libraryBrandIds: ['brand-1'], references: [],
   })),
   buildBrandContextSummary: vi.fn(() => 'contexto da marca'),
 }));
@@ -96,18 +107,18 @@ vi.mock('../lib/imageResolver.js', () => ({
 
 vi.mock('../lib/geminiRetry.js', () => ({
   humanizeGeminiError: (e: unknown) => String(e),
-  generateWithRetry: vi.fn(async (_ai: unknown, opts: { contents: string }) => {
+  generateWithRetry: vi.fn(async (_ai: unknown, opts: { contents: string; config?: { systemInstruction?: string } }) => {
     const user = opts.contents;
     const m = user.match(/Gere os slides de (\d+) a (\d+)/);
     const start = m ? parseInt(m[1]!, 10) : 1;
     const end = m ? parseInt(m[2]!, 10) : 1;
-    h.prompts.push({ start, user });
+    h.prompts.push({ start, user, sys: String(opts.config?.systemInstruction ?? '') });
     h.modelCalls++;
     await h.onModelCall?.(h.modelCalls);
     return {
       text: JSON.stringify({
         reasoning: 'direção', fonts: ['Inter'],
-        slides: Array.from({ length: end - start + 1 }, (_, i) => ({ html: `<div>Slide ${start + i}</div>`, css: '' })),
+        slides: Array.from({ length: end - start + 1 }, (_, i) => ({ html: `<div>Slide ${start + i}</div>${h.withEmptySlot ? '<div data-photo-slot="1" style="background:linear-gradient(red,blue)"></div>' : ''}`, css: '' })),
       }),
       candidates: [{ finishReason: 'STOP' }],
     };
@@ -126,6 +137,8 @@ import { setAdviceStore, submitAdvice, listAdvice, type AdviceItem } from '../li
 import { setInterruptStore, requestInterrupt, getInterruptState } from '../lib/interrupt';
 import { createMemoryAdviceStore, createMemoryInterruptStore } from './helpers/memoryLiveControl';
 import { config } from '../config';
+import { runPlanner } from '../agents/planner/index.js';
+import { resolveSlideImages } from '../lib/imageResolver.js';
 
 const S = 'sessao-e2e';
 const POST = 'post-e2e-1';
@@ -144,6 +157,10 @@ async function rodar() {
 }
 
 beforeEach(() => {
+  h.savedProfile = null;
+  h.profileLookupFails = false;
+  h.withEmptySlot = false;
+  h.brandRow = null;
   h.wsCalls.length = 0;
   h.prompts.length = 0;
   h.reviewerBriefs.length = 0;
@@ -372,5 +389,350 @@ describe('cancelamento cooperativo (Pausar e enviar)', () => {
     expect(wsOf('done')).toHaveLength(1);
     expect(h.closedRuns[0]!.params).toEqual({ status: 'COMPLETED' });
     expect(interruptStore.raw.size).toBe(0);
+  });
+});
+
+describe('cérebro do Designer ligado por marca (DESIGNER_BRAIN_BRANDS)', () => {
+  const original = process.env.DESIGNER_BRAIN_BRANDS;
+  const GLOBAL = 'Você é a inteligência de direção de arte do sistema Designer';
+
+  beforeEach(() => {
+    vi.mocked(runPlanner).mockReset();
+    vi.mocked(resolveSlideImages).mockClear();
+    h.slideCount = 3; // um lote só
+  });
+
+  // O planner distribui a copy aprovada pelos slides (modo roteirista). O artista do harness
+  // escreve "Slide N" em cada um, então copy "Slide N" confere e qualquer outra não.
+  const roteiro = (copy: (i: number) => string) =>
+    Array.from({ length: 3 }, (_, i) => ({
+      title: `Slide ${i + 1}`, goal: 'Objetivo', layout_type: 'content-split', order: i + 1, copy: copy(i),
+    }));
+  async function rodarComCopia(copy: (i: number) => string = (i) => `Slide ${i + 1}`) {
+    vi.mocked(runPlanner).mockResolvedValue(roteiro(copy) as never);
+    await runPipeline({ sessionId: S, brief: 'Apresentação de teste', format: 'presentation', postId: POST, sourceCopy: 'texto aprovado' });
+  }
+
+  afterEach(() => {
+    if (original === undefined) delete process.env.DESIGNER_BRAIN_BRANDS;
+    else process.env.DESIGNER_BRAIN_BRANDS = original;
+  });
+
+  it('desligado (padrão): nada muda — diretrizes legadas, sem cérebro, geração de foto como antes', async () => {
+    delete process.env.DESIGNER_BRAIN_BRANDS;
+    vi.mocked(runPlanner).mockResolvedValue(roteiro(() => '') as never);
+    await rodar();
+
+    const planner = vi.mocked(runPlanner).mock.calls[0]![0] as { brandContext: string };
+    expect(planner.brandContext).toBe('contexto da marca');
+    expect(h.prompts[0]!.sys).not.toContain(GLOBAL);
+    expect(h.prompts[0]!.sys).not.toContain('data-photo-slot'); // marcas sem o cérebro não mudam
+    expect(promptOf(1)).toContain('Diretrizes: DIRETRIZ-LEGADA');
+    const resolver = vi.mocked(resolveSlideImages).mock.calls[0]![0] as { allowGeneratedGraphics?: boolean };
+    expect(resolver.allowGeneratedGraphics).toBeUndefined();
+  });
+
+  it('regra de foto real ativada no chat, projeto SEM ficha: só foto real, o artista recebe a regra e as diretrizes do projeto continuam', async () => {
+    delete process.env.DESIGNER_BRAIN_BRANDS;
+    h.session.photoRule = 'on';
+    vi.mocked(runPlanner).mockResolvedValue(roteiro(() => '') as never);
+    await rodar();
+
+    const resolver = vi.mocked(resolveSlideImages).mock.calls[0]![0] as { allowGeneratedGraphics?: boolean; onlyProvidedAssets?: boolean };
+    expect(resolver.allowGeneratedGraphics).toBe(false);
+    expect(resolver.onlyProvidedAssets).toBe(true);
+    // O artista recebe a regra de fotografia e o contrato do espaço de foto (a foto entra depois, no editor)...
+    expect(h.prompts[0]!.sys).toContain('REGRA DE FOTOGRAFIA PARA ESTA PEÇA');
+    expect(h.prompts[0]!.sys).toContain('data-photo-slot');
+    // ...mas isto NÃO é o cérebro completo: as diretrizes do projeto seguem como eram e não há trava de texto.
+    expect(promptOf(1)).toContain('Diretrizes: DIRETRIZ-LEGADA');
+    expect(h.prompts[0]!.sys).not.toContain(GLOBAL);
+    // O contexto do planner e do revisor segue o do projeto, MAIS a regra e a nota de que a área de foto vazia é intencional.
+    const planner = vi.mocked(runPlanner).mock.calls[0]![0] as { brandContext: string };
+    expect(planner.brandContext).toContain('contexto da marca');
+    expect(planner.brandContext).toContain('REGRA DE FOTOGRAFIA PARA ESTA PEÇA');
+    expect(planner.brandContext).toContain('INTENCIONAIS');
+    expect(wsOf('error')).toHaveLength(0);
+  });
+
+  it('regra ativada no chat: o espaço de foto vazio ganha a moldura PADRÃO, igual em todos os slides', async () => {
+    delete process.env.DESIGNER_BRAIN_BRANDS;
+    h.session.photoRule = 'on';
+    h.withEmptySlot = true;
+    vi.mocked(runPlanner).mockResolvedValue(roteiro(() => '') as never);
+    await rodar();
+    const slides = h.synced[0].content.slides as Array<{ html: string }>;
+    expect(slides.length).toBeGreaterThan(0);
+    for (const sl of slides) {
+      expect(sl.html).toContain('data-photo-empty'); // moldura do sistema, não o quadro que o artista inventou
+      expect(sl.html).toContain('rgba(128,128,128,.42)'); // as diagonais da moldura padrão, que vêm depois e prevalecem sobre o estilo do artista
+    }
+  });
+
+  it('sem a regra ativada, o espaço de foto fica como o artista desenhou (nada muda)', async () => {
+    delete process.env.DESIGNER_BRAIN_BRANDS;
+    delete h.session.photoRule;
+    h.withEmptySlot = true;
+    vi.mocked(runPlanner).mockResolvedValue(roteiro(() => '') as never);
+    await rodar();
+    for (const sl of h.synced[0].content.slides as Array<{ html: string }>) expect(sl.html).not.toContain('data-photo-empty');
+  });
+
+  it('sem a regra ativada (conversa antiga), nada muda: o resolver segue como antes', async () => {
+    delete process.env.DESIGNER_BRAIN_BRANDS;
+    delete h.session.photoRule;
+    vi.mocked(runPlanner).mockResolvedValue(roteiro(() => '') as never);
+    await rodar();
+    const resolver = vi.mocked(resolveSlideImages).mock.calls[0]![0] as { allowGeneratedGraphics?: boolean; onlyProvidedAssets?: boolean };
+    expect(resolver.allowGeneratedGraphics).toBeUndefined();
+    expect(resolver.onlyProvidedAssets).toBeFalsy();
+    expect(h.prompts[0]!.sys).not.toContain('REGRA DE FOTOGRAFIA PARA ESTA PEÇA');
+  });
+
+  it('ligado: planner e artista recebem as camadas, e o legado sai de cena', async () => {
+    process.env.DESIGNER_BRAIN_BRANDS = 'amanda-coelho';
+    h.session.brandSlug = 'amanda-coelho'; // tem seed de memória
+    await rodarComCopia();
+
+    const planner = vi.mocked(runPlanner).mock.calls[0]![0] as { brandContext: string };
+    expect(planner.brandContext).toContain(GLOBAL);
+    expect(planner.brandContext).toContain('#410C1C'); // memória da Amanda
+    expect(planner.brandContext).toContain('MODO: APRESENTAÇÃO');
+
+    // O artista é quem escreve o HTML: o cérebro tem de chegar nele, antes da mecânica de saída.
+    const sys = h.prompts[0]!.sys;
+    expect(sys.startsWith(GLOBAL)).toBe(true);
+    expect(sys).toContain('REGRA DE FOTOGRAFIA PARA ESTA PEÇA');
+    expect(sys).toContain('MECÂNICA DE SAÍDA');
+    expect(promptOf(1)).not.toContain('DIRETRIZ-LEGADA');
+    // E o contrato do espaço de foto, que o editor usa para trocar a foto depois.
+    expect(sys).toContain('data-photo-slot');
+  });
+
+  it('ficha salva liga o cérebro sem a flag, e as regras vêm da ficha (não do seed nem das diretrizes antigas)', async () => {
+    delete process.env.DESIGNER_BRAIN_BRANDS;
+    h.session.brandSlug = 'marca-com-ficha';
+    h.savedProfile = {
+      essence: 'ESSENCIA-DA-FICHA',
+      palette: [{ hex: '#123456', name: 'Azul ficha' }],
+      neverDo: ['NUNCA-DA-FICHA'],
+    };
+    await rodarComCopia();
+
+    const planner = vi.mocked(runPlanner).mock.calls[0]![0] as { brandContext: string };
+    expect(planner.brandContext).toContain(GLOBAL);
+    expect(planner.brandContext).toContain('ESSENCIA-DA-FICHA');
+    expect(planner.brandContext).toContain('#123456');
+    expect(planner.brandContext).toContain('NUNCA-DA-FICHA');
+    expect(planner.brandContext).not.toContain('DIRETRIZ-LEGADA');
+    expect(h.prompts[0]!.sys.startsWith(GLOBAL)).toBe(true);
+    const resolver = vi.mocked(resolveSlideImages).mock.calls[0]![0] as { allowGeneratedGraphics?: boolean };
+    expect(resolver.allowGeneratedGraphics).toBe(false);
+  });
+
+  it('desdobramento: a ficha é a da base, a camada de collab traz só o que muda, e o parceiro entra nos ativos', async () => {
+    delete process.env.DESIGNER_BRAIN_BRANDS;
+    h.session.brandSlug = 'base-collab-parceiro';
+    h.brandRow = {
+      name: 'Base + Parceiro',
+      kind: 'PARTNERSHIP',
+      collab: {
+        context: 'CONTEXTO-DO-COLLAB',
+        partner: { name: 'Estadão', logoUrl: 'https://cdn.example/estadao.png' },
+        baseProtagonism: 70,
+      },
+      profile: { data: { essence: 'ESSENCIA-DO-DESDOBRAMENTO' } },
+      parent: { name: 'Base', slug: 'base', profile: { data: { essence: 'ESSENCIA-DA-BASE', collabRules: 'REGRA-DE-COLLAB-DA-BASE' } } },
+    };
+    await rodarComCopia();
+
+    const ctx = (vi.mocked(runPlanner).mock.calls[0]![0] as { brandContext: string }).brandContext;
+    expect(ctx).toContain('PROJETO: Base');
+    expect(ctx).toContain('ESSENCIA-DA-BASE');
+    expect(ctx).toContain('REGRA-DE-COLLAB-DA-BASE');
+    expect(ctx).toContain('DESDOBRAMENTO ATIVO: Base + Parceiro');
+    expect(ctx).toContain('PROTAGONISMO: a marca-mãe lidera com 70%');
+    expect(ctx).toContain('CONTEXTO-DO-COLLAB');
+    expect(ctx).toContain('Logo do parceiro Estadão');
+    // O que é só do desdobramento entra como ajuste, nunca no lugar da base.
+    expect(ctx).toContain('AJUSTES PRÓPRIOS DESTE DESDOBRAMENTO');
+  });
+
+  it('desdobramento cuja base não tem ficha usa a do próprio desdobramento como projeto', async () => {
+    delete process.env.DESIGNER_BRAIN_BRANDS;
+    h.session.brandSlug = 'so-o-desdobramento';
+    h.brandRow = {
+      name: 'Interno',
+      kind: 'INTERNAL',
+      collab: { context: 'CTX' },
+      profile: { data: { essence: 'ESSENCIA-PROPRIA' } },
+      parent: { name: 'Base', slug: 'base', profile: null },
+    };
+    await rodarComCopia();
+    const ctx = (vi.mocked(runPlanner).mock.calls[0]![0] as { brandContext: string }).brandContext;
+    expect(ctx).toContain('ESSENCIA-PROPRIA');
+    expect(ctx).not.toContain('AJUSTES PRÓPRIOS');
+  });
+
+  it('status por bloco: só o aprovado vira slide; fala e contexto orientam; interno nunca chega ao modelo', async () => {
+    delete process.env.DESIGNER_BRAIN_BRANDS;
+    h.session.brandSlug = 'marca-com-ficha';
+    h.savedProfile = { essence: 'X' };
+    vi.mocked(runPlanner).mockResolvedValue(roteiro(() => 'copy') as never);
+    await runPipeline({
+      sessionId: S,
+      brief: 'Apresentação de teste',
+      format: 'presentation',
+      postId: POST,
+      sourceCopy: ['[APROVADO]', 'TITULO-APROVADO', '[FALA]', 'FALA-DO-PALESTRANTE', '[CONTEXTO]', 'CONTEXTO-DA-REUNIAO', '[INTERNO]', 'VALOR-DO-CONTRATO'].join('\n'),
+    });
+    const call = vi.mocked(runPlanner).mock.calls[0]![0] as { brandContext: string; sourceCopy?: string };
+    expect(call.sourceCopy).toBe('TITULO-APROVADO');
+    expect(call.brandContext).toContain('FALA-DO-PALESTRANTE');
+    expect(call.brandContext).toContain('CONTEXTO-DA-REUNIAO');
+    expect(call.brandContext).toContain('NÃO é texto da peça');
+    const tudo = JSON.stringify([call, h.prompts]);
+    expect(tudo).not.toContain('VALOR-DO-CONTRATO');
+    // E o resultado diz o que ficou de fora da arte, sem repetir o conteúdo.
+    const avisos = wsOf('token').map((c) => String(c.args[1])).join('');
+    expect(avisos).toContain('2 blocos de fala/contexto/apoio serviram só de orientação');
+    expect(avisos).toContain('1 bloco interno/não exibir não foi enviado à IA');
+    expect(avisos).not.toContain('VALOR-DO-CONTRATO');
+  });
+
+  it('status por bloco: texto em revisão é diagramado, mas o resultado avisa que a peça não é final', async () => {
+    delete process.env.DESIGNER_BRAIN_BRANDS;
+    h.session.brandSlug = 'marca-com-ficha';
+    h.savedProfile = { essence: 'X' };
+    vi.mocked(runPlanner).mockResolvedValue(roteiro(() => 'copy') as never);
+    await runPipeline({
+      sessionId: S,
+      brief: 'Apresentação de teste',
+      format: 'presentation',
+      postId: POST,
+      sourceCopy: '[APROVADO] FECHADO\n[EM REVISÃO] TALVEZ-MUDE',
+    });
+    const call = vi.mocked(runPlanner).mock.calls[0]![0] as { sourceCopy?: string };
+    expect(call.sourceCopy).toBe('FECHADO\n\nTALVEZ-MUDE');
+    expect(wsOf('token').map((c) => String(c.args[1])).join('')).toContain('não deve ser tratada como final');
+  });
+
+  it('status por bloco: sem nenhum texto aprovado (só fala/contexto), para e pede o texto', async () => {
+    delete process.env.DESIGNER_BRAIN_BRANDS;
+    h.session.brandSlug = 'marca-com-ficha';
+    h.savedProfile = { essence: 'X' };
+    await runPipeline({ sessionId: S, brief: 'Apresentação de teste', format: 'presentation', postId: POST, sourceCopy: '[FALA] só falado\n[CONTEXTO] só contexto' });
+    expect(String(wsOf('error')[0]!.args[1])).toContain('só gera com texto aprovado');
+    expect(vi.mocked(runPlanner)).not.toHaveBeenCalled();
+  });
+
+  it('ficha salva e SEM texto aprovado: para e pede o texto, como nas marcas piloto', async () => {
+    delete process.env.DESIGNER_BRAIN_BRANDS;
+    h.session.brandSlug = 'marca-com-ficha';
+    h.savedProfile = { essence: 'X' };
+    await rodar();
+    expect(String(wsOf('error')[0]!.args[1])).toContain('só gera com texto aprovado');
+    expect(vi.mocked(runPlanner)).not.toHaveBeenCalled();
+  });
+
+  it('banco sem a tabela da ficha: a geração não cai, segue no caminho legado', async () => {
+    delete process.env.DESIGNER_BRAIN_BRANDS;
+    h.profileLookupFails = true;
+    vi.mocked(runPlanner).mockResolvedValue(roteiro(() => '') as never);
+    await rodar();
+    const planner = vi.mocked(runPlanner).mock.calls[0]![0] as { brandContext: string };
+    expect(planner.brandContext).toBe('contexto da marca');
+    expect(wsOf('error')).toHaveLength(0);
+  });
+
+  it('ficha inválida no banco é ignorada: a marca segue no caminho legado, sem derrubar a geração', async () => {
+    delete process.env.DESIGNER_BRAIN_BRANDS;
+    h.session.brandSlug = 'marca-com-ficha';
+    h.savedProfile = { palette: 'isto não é uma paleta' };
+    vi.mocked(runPlanner).mockResolvedValue(roteiro(() => '') as never);
+    await rodar();
+    const planner = vi.mocked(runPlanner).mock.calls[0]![0] as { brandContext: string };
+    expect(planner.brandContext).toBe('contexto da marca');
+  });
+
+  it('ligado: o resolver de imagens não pode gerar foto nem buscar no Unsplash', async () => {
+    process.env.DESIGNER_BRAIN_BRANDS = 'amanda-coelho';
+    h.session.brandSlug = 'amanda-coelho';
+    await rodarComCopia();
+
+    const resolver = vi.mocked(resolveSlideImages).mock.calls[0]![0] as { allowGeneratedGraphics?: boolean };
+    expect(resolver.allowGeneratedGraphics).toBe(false);
+  });
+
+  it('ligado sem memória de projeto: erro visível, e a geração não segue com as regras erradas', async () => {
+    process.env.DESIGNER_BRAIN_BRANDS = 'marca-sem-memoria';
+    h.session.brandSlug = 'marca-sem-memoria';
+    await rodarComCopia();
+
+    const erro = wsOf('error');
+    expect(erro).toHaveLength(1);
+    expect(String(erro[0]!.args[1])).toContain('não tem memória de projeto');
+    expect(h.modelCalls).toBe(0);
+    expect(vi.mocked(runPlanner)).not.toHaveBeenCalled();
+  });
+
+  it('ligado e SEM texto aprovado: para e pede o texto, em vez de deixar o modelo inventar', async () => {
+    process.env.DESIGNER_BRAIN_BRANDS = 'amanda-coelho';
+    h.session.brandSlug = 'amanda-coelho';
+    await rodar(); // sem sourceCopy nem roteiro aprovado
+
+    const erro = wsOf('error');
+    expect(erro).toHaveLength(1);
+    expect(String(erro[0]!.args[1])).toContain('só gera com texto aprovado');
+    expect(h.modelCalls).toBe(0);
+    expect(vi.mocked(runPlanner)).not.toHaveBeenCalled();
+    expect(h.session.phase).toBe('listening'); // a pessoa pode mandar o texto e seguir na mesma conversa
+  });
+
+  it('marca SEM o cérebro continua gerando sem texto aprovado, como antes', async () => {
+    delete process.env.DESIGNER_BRAIN_BRANDS;
+    vi.mocked(runPlanner).mockResolvedValue(roteiro(() => '') as never);
+    await rodar();
+    expect(wsOf('error')).toHaveLength(0);
+    expect(h.modelCalls).toBeGreaterThan(0);
+  });
+
+  it('texto dos slides igual ao aprovado: nenhum desvio de texto, deck aprovado', async () => {
+    process.env.DESIGNER_BRAIN_BRANDS = 'amanda-coelho';
+    h.session.brandSlug = 'amanda-coelho';
+    await rodarComCopia(); // "Slide N" é exatamente o que o artista do harness escreve
+
+    expect(h.session.pendingReview.deviations).toEqual([]);
+    expect(wsOf('notify')[0]!.args[1]).toMatchObject({ kind: 'done' });
+  });
+
+  it('texto dos slides diferente do aprovado: vira desvio crítico, o deck fica "precisa de revisão" e a análise chega ao chat', async () => {
+    process.env.DESIGNER_BRAIN_BRANDS = 'amanda-coelho';
+    h.session.brandSlug = 'amanda-coelho';
+    await rodarComCopia((i) => `Decisões conscientes constroem negócios sólidos ${i + 1}`);
+
+    const devs = h.session.pendingReview.deviations as Array<{ severity: string; slideIndex: number; description: string }>;
+    expect(devs.some((d) => d.severity === 'critical' && d.description.includes('faltam'))).toBe(true);
+    expect(devs.some((d) => d.severity === 'major' && d.description.includes('não está no texto aprovado'))).toBe(true);
+    expect(devs.map((d) => d.slideIndex)).toContain(2); // aponta o slide certo
+    expect(wsOf('notify')[0]!.args[1]).toMatchObject({ kind: 'needs_review' });
+    expect(wsOf('token').map((c) => String(c.args[1])).join('')).toContain('Análise do revisor');
+  });
+
+  it('o aprovado do reviewer visual NÃO apaga o desvio de texto', async () => {
+    process.env.DESIGNER_BRAIN_BRANDS = 'amanda-coelho';
+    h.session.brandSlug = 'amanda-coelho';
+    await rodarComCopia(() => 'outra coisa inteira'); // o mock do reviewer devolve approved: true
+
+    expect(wsOf('notify')[0]!.args[1]).toMatchObject({ kind: 'needs_review' });
+  });
+
+  it('sem a copy distribuída por slide (planner caiu no esqueleto), a checagem é pulada e não acusa o deck', async () => {
+    process.env.DESIGNER_BRAIN_BRANDS = 'amanda-coelho';
+    h.session.brandSlug = 'amanda-coelho';
+    await rodarComCopia(() => '');
+
+    expect(h.session.pendingReview.deviations).toEqual([]);
+    expect(wsOf('notify')[0]!.args[1]).toMatchObject({ kind: 'done' });
   });
 });

@@ -10,6 +10,7 @@ import { randomUUID } from 'crypto';
 import { Queue, Worker, type Job } from 'bullmq';
 import IORedis from 'ioredis';
 import prisma from './prisma.js';
+import { getSession, updateSession } from './redis.js';
 import { config } from '../config.js';
 import { ws } from './websocket.js';
 import { runPipeline, type PipelineParams } from '../agents/pipeline.js';
@@ -38,6 +39,7 @@ function makeConnection(): IORedis {
 }
 
 export const pipelineQueue = new Queue<PipelineParams>(QUEUE_NAME, {
+  prefix: config.bullmqPrefix,
   connection: makeConnection(),
   defaultJobOptions: {
     attempts: 2,
@@ -76,6 +78,7 @@ export async function enqueuePipeline(params: PipelineParams): Promise<void> {
 const EXPORT_QUEUE_NAME = 'canva-export';
 
 export const canvaExportQueue = new Queue<CanvaExportParams>(EXPORT_QUEUE_NAME, {
+  prefix: config.bullmqPrefix,
   connection: makeConnection(),
   defaultJobOptions: {
     // Só 1 tentativa: um retry re-renderiza e re-sobe tudo, criando designs
@@ -100,6 +103,7 @@ export async function enqueueCanvaExport(params: CanvaExportParams): Promise<str
 const DECK_EXPORT_QUEUE_NAME = 'deck-export';
 
 export const deckExportQueue = new Queue<DeckExportParams>(DECK_EXPORT_QUEUE_NAME, {
+  prefix: config.bullmqPrefix,
   connection: makeConnection(),
   defaultJobOptions: {
     // 1 tentativa: um retry re-renderiza o deck inteiro e sobe outro arquivo no R2.
@@ -125,6 +129,7 @@ export async function enqueueDeckExport(params: DeckExportParams): Promise<strin
 const ASSET_CAPTURE_QUEUE_NAME = 'asset-capture';
 
 export const assetCaptureQueue = new Queue<AssetCaptureParams>(ASSET_CAPTURE_QUEUE_NAME, {
+  prefix: config.bullmqPrefix,
   connection: makeConnection(),
   defaultJobOptions: {
     attempts: 2,
@@ -155,6 +160,7 @@ export function startDeckExportWorker(): Worker<DeckExportParams> {
       });
     },
     {
+      prefix: config.bullmqPrefix,
       connection: makeConnection(),
       // Cada slide é um render full-res. Concorrência 1 por processo mantém a
       // memória previsível — o gargalo é o chromium, não o IO.
@@ -180,6 +186,7 @@ export function startAssetCaptureWorker(): Worker<AssetCaptureParams> {
     ASSET_CAPTURE_QUEUE_NAME,
     async (job: Job<AssetCaptureParams>) => runAssetCapture(job.data),
     {
+      prefix: config.bullmqPrefix,
       connection: makeConnection(),
       // Mesmo raciocínio dos outros workers de render: 1 por processo, o
       // gargalo é o chromium, não a fila.
@@ -232,6 +239,7 @@ export function startCanvaExportWorker(): Worker<CanvaExportParams> {
       return result;
     },
     {
+      prefix: config.bullmqPrefix,
       connection: makeConnection(),
       // Cada slide é um render full-res no chromium. Concorrência 1 por processo
       // mantém o uso de memória previsível — o gargalo real é o chromium, não o IO.
@@ -281,18 +289,46 @@ export function startPipelineWorker(): Worker<PipelineParams> {
       }
     },
     {
+      prefix: config.bullmqPrefix,
       connection: makeConnection(),
       concurrency: config.pipelineConcurrency,
     },
   );
 
-  worker.on('failed', (job, err) => {
+  worker.on('failed', async (job, err) => {
     const attempts = job?.opts.attempts ?? 1;
     const made = job?.attemptsMade ?? 0;
     const isFinal = made >= attempts;
     logger.error('Job de pipeline falhou', { jobId: job?.id, attempt: made, maxAttempts: attempts, error: err.message });
     // Só avisa o usuário quando esgotaram as tentativas — evita ruído em retries.
     if (isFinal && job?.data.sessionId) {
+      const sessionId = job.data.sessionId;
+      try {
+        await updateSession(sessionId, {
+          phase: 'error',
+          workerStatus: 'error',
+          progress: 0,
+          progressLabel: '',
+        });
+        const session = await getSession(sessionId);
+        if (session) {
+          ws.sessionState(sessionId, {
+            phase: session.phase,
+            messages: session.messages,
+            currentDesign: session.currentDesign,
+            workerStatus: session.workerStatus,
+            reviewMode: session.reviewMode,
+            activeQuestion: session.activeQuestion,
+            progress: session.progress,
+            progressLabel: session.progressLabel,
+          });
+        }
+      } catch (stateError) {
+        logger.error('Não foi possível persistir a falha final do pipeline', {
+          sessionId,
+          error: stateError instanceof Error ? stateError.message : String(stateError),
+        });
+      }
       ws.error(job.data.sessionId, `Erro na geração: ${err.message}`);
       // Sem retry pela frente: o que o usuário deixou pendente não terá quem consuma.
       // Devolve ao campo de mensagem em vez de deixar a orientação parada. (O estado
@@ -308,13 +344,15 @@ export function startPipelineWorker(): Worker<PipelineParams> {
   // continua GENERATING além de qualquer geração plausível não tem job vivo
   // por trás — é FAILED. (45min cobre com folga decks grandes e não alcança
   // gerações legítimas de outro processo em deploys multi-worker.)
-  const ZOMBIE_MIN = 45;
-  prisma.post.updateMany({
-    where: { status: 'GENERATING', updatedAt: { lt: new Date(Date.now() - ZOMBIE_MIN * 60_000) } },
-    data: { status: 'FAILED' },
-  }).then((r) => {
-    if (r.count > 0) logger.info('Posts GENERATING órfãos marcados como FAILED', { count: r.count, olderThanMin: ZOMBIE_MIN });
-  }).catch((e) => logger.error('Varredura de posts zumbis falhou', { error: (e as Error).message }));
+  if (config.zombiePostSweepEnabled) {
+    const ZOMBIE_MIN = 45;
+    prisma.post.updateMany({
+      where: { status: 'GENERATING', updatedAt: { lt: new Date(Date.now() - ZOMBIE_MIN * 60_000) } },
+      data: { status: 'FAILED' },
+    }).then((r) => {
+      if (r.count > 0) logger.info('Posts GENERATING órfãos marcados como FAILED', { count: r.count, olderThanMin: ZOMBIE_MIN });
+    }).catch((e) => logger.error('Varredura de posts zumbis falhou', { error: (e as Error).message }));
+  }
 
   console.log(`  ├─ Worker:       fila "${QUEUE_NAME}" (concorrência ${config.pipelineConcurrency})`);
   return worker;
@@ -327,6 +365,7 @@ type ReferenceSyncJobData =
   | { brandId: string; slug: string };
 
 export const referenceSyncQueue = new Queue<ReferenceSyncJobData>(REF_SYNC_QUEUE_NAME, {
+  prefix: config.bullmqPrefix,
   connection: makeConnection(),
   defaultJobOptions: {
     attempts: 2,
@@ -348,7 +387,7 @@ export function startReferenceSyncWorker(): Worker {
         await analyzeReferenceBackground(data.refId, data.slug, data.name, data.analysisUrl, data.sourceType);
       }
     },
-    { connection: makeConnection(), concurrency: 1 }
+    { prefix: config.bullmqPrefix, connection: makeConnection(), concurrency: 1 }
   );
 
 

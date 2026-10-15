@@ -4,6 +4,8 @@
 import createDOMPurify, { type WindowLike } from 'dompurify';
 import { JSDOM } from 'jsdom';
 import { pipelineAdviceBlock } from './adviceText.js';
+import { REAL_PHOTO_RULE_PROMPT } from './designerBrain/prompts.js';
+import { fontFaceCss, type FontFaceCss, type FontFaceRef } from './customFonts.js';
 
 export interface HtmlDesignSlide {
   html: string;
@@ -17,6 +19,8 @@ export interface HtmlDesignContent {
   height: number;
   format: 'single' | 'carousel' | 'story' | 'presentation';
   fonts: string[];
+  /** Fontes próprias da marca usadas no deck (referências; os bytes vêm da biblioteca). */
+  fontFaces?: FontFaceRef[];
   slides: HtmlDesignSlide[];
   reasoning?: string;
 }
@@ -33,6 +37,25 @@ export interface GenerateHtmlDesignInput {
     primaryFonts: string[];
     guidelines?: string;
     agentPrompt?: string;
+    /**
+     * Cérebro do Designer já montado em camadas (global + memória do projeto + modo + regra
+     * de foto + revisão). Quando presente, vai na instrução de sistema e SUBSTITUI as
+     * diretrizes e as "instruções do agente" legadas: as duas versões juntas se contradiriam.
+     */
+    designerBrain?: string;
+    /**
+     * Regra de foto real ativada no chat para um projeto SEM o cérebro completo: o artista recebe a
+     * regra de fotografia e o contrato do espaço de foto, mas as diretrizes do projeto continuam as de antes.
+     */
+    photoRule?: boolean;
+    /**
+     * Variantes oficiais do logo (ficha do projeto): cada uma já traz o fundo da paleta para o qual foi
+     * desenhada. Quando existem, o artista escolhe a variante pelo fundo do slide, em vez de assumir um
+     * único arquivo opaco de fundo branco.
+     */
+    logoVariants?: Array<{ url: string; label: string }>;
+    /** Famílias cujo ARQUIVO o projeto enviou: o sistema as carrega de verdade, o artista as usa pelo nome exato. */
+    ownFonts?: string[];
     logoUrl?: string | null;
     /** URLs reais do pool de assets da marca — o artista prefere estas a inventar fotos de banco. */
     assetUrls?: Array<{ url: string; name: string }>;
@@ -156,15 +179,28 @@ export function googleFontHrefs(fonts: unknown): string[] {
   );
 }
 
+/** Fontes com arquivo próprio instalado: o artista as lista em "fonts" com o nome exato, sem trocar por parecida. */
+export function ownFontsLine(own?: string[]): string {
+  const f = (own ?? []).filter((x) => x.trim());
+  return f.length === 0 ? '' : `
+Fontes PRÓPRIAS da marca (arquivo oficial instalado, carregue pelo nome exato em "fonts" e use nos títulos/textos conforme o manual): ${f.join(', ')}`;
+}
+
 // Monta o documento HTML completo de um slide (para rasterizar OU exibir no iframe).
-export function buildSlideDocument(slide: HtmlDesignSlide, fonts: string[], width: number, height: number): string {
+// `fontFaces`: fontes próprias da marca já resolvidas (data URI). A família que tem arquivo próprio
+// não vai ao Google (nome igual a uma Google Font traria a errada) e ganha @font-face.
+export function buildSlideDocument(slide: HtmlDesignSlide, fonts: string[], width: number, height: number, fontFaces: FontFaceCss[] = []): string {
   const css = sanitizeSlideCss(slide.css ?? '');
   const html = sanitizeSlideHtml(slide.html ?? '');
+  const own = new Set(fontFaces.map((f) => f.family.trim().toLowerCase()));
+  const remote = normalizeFontFamilies(fonts).filter((f) => !own.has(f.toLowerCase()));
+  const links = remote.length > 0 || own.size === 0 ? googleFontHrefs(remote.length > 0 ? remote : fonts) : [];
   return `<!doctype html><html><head><meta charset="utf-8">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-${googleFontHrefs(fonts).map((href) => `<link href="${href}" rel="stylesheet">`).join('\n')}
+${links.map((href) => `<link href="${href}" rel="stylesheet">`).join('\n')}
 <style>
+${fontFaceCss(fontFaces)}
 *{margin:0;padding:0;box-sizing:border-box;}
 html,body{width:${width}px;height:${height}px;overflow:hidden;}
 .slide-root{width:${width}px;height:${height}px;position:relative;overflow:hidden;}
@@ -320,6 +356,45 @@ function renderStyleBible(bible: StyleBible): string {
   ].filter(Boolean).join('\n');
 }
 
+/**
+ * Contrato do espaço de foto (ver lib/photoSlot.ts): é o que deixa a pessoa colocar, trocar e
+ * enquadrar a foto no editor depois, sem refazer a arte. Só vai ao artista nas marcas com o
+ * cérebro ligado; as demais continuam como antes.
+ */
+const PHOTO_SLOT_RULE = `ESPAÇO DE FOTO (para a foto poder entrar ou ser trocada depois, sem refazer a arte):
+- Toda área destinada a uma fotografia é um elemento <div data-photo-slot="N"> (N = 1, 2, 3... único dentro do slide), com posição, largura e altura definidas no CSS e overflow:hidden.
+- Foto real fornecida para o slide: coloque a <img src="URL EXATA"> DENTRO desse <div>, com width:100%;height:100%;object-fit:cover. Não ponha a <img> solta, fora do espaço.
+- Nenhuma foto fornecida para o slide: deixe o <div data-photo-slot="N"> VAZIO. Dê a ele um fundo e uma borda sutis, tirados da paleta, que fiquem bonitos mesmo sem foto. NUNCA escreva "inserir foto", ícone, legenda nem texto dentro dele.
+- Pense na proporção e na posição da área como a de uma fotografia de verdade (retrato, paisagem), e não ponha texto essencial sobre ela.`;
+
+/**
+ * Texto na arte quando o cérebro está ligado: só o texto aprovado do slide. Cobre dois erros vistos
+ * na geração real (achados S1 e S2): o nome da marca digitado no lugar de um logo que não existia,
+ * e numeração "01 02 03" inventada. A checagem em código (designerBrain/textCheck) pega o que
+ * escapar; esta regra evita o erro na origem, que é mais barato que corrigir depois.
+ */
+/**
+ * Regra de fundo do logo. Sem variantes, assume que o arquivo pode ser opaco de fundo branco (o caso da
+ * maioria das marcas). Com as variantes oficiais, cada arquivo traz o fundo da paleta: a escolha é pela cor.
+ */
+export function logoBackgroundRule(hasVariants: boolean): string {
+  if (hasVariants) {
+    return '- LOGO (VARIANTES OFICIAIS): cada variante listada em "Logos oficiais" já traz o fundo da paleta para o qual foi desenhada (a tinta e o fundo estão no nome). Escolha a variante cujo FUNDO tem a mesma cor do lugar onde o logo fica no slide (a de fundo creme sobre uma área creme, a de fundo vinho sobre uma área vinho), de modo que o retângulo do arquivo se funda com o slide e pareça só a marca. Use a URL EXATA, no tamanho natural da proporção (nunca esticar nem deformar). NUNCA aplique filtro de inversão e NUNCA redesenhe o logo. Se nenhuma variante combina com o fundo do lugar, coloque o logo numa faixa ou cartão da cor do fundo da variante, ou omita-o naquele slide.';
+  }
+  return '- LOGO SOBRE FUNDO ESCURO: o arquivo do logo pode ser OPACO (fundo branco sólido em vez de transparente) — nesse caso ele vira um retângulo branco sobre fundo escuro, que é pior do que não ter logo. Não há como saber pelo URL. Portanto: coloque o logo sobre uma superfície CLARA. Se o slide tem fundo escuro, ou você posiciona o logo dentro de uma faixa/cartão claro do próprio layout, ou omite o logo naquele slide. NUNCA aplique filtro de inversão no logo: se o arquivo for transparente, o filtro apaga as cores da marca; se for opaco, não resolve nada.';
+}
+
+export function brainTextRule(hasLogo: boolean): string {
+  const logo = hasLogo
+    ? '- O logo é a imagem fornecida (<img>), nunca o nome da marca digitado.'
+    : '- NENHUM logo foi fornecido: NÃO digite o nome da marca (nem monograma, iniciais ou "assinatura" em letras) para fazer as vezes de logo. Omita o logo; se o layout precisar de um canto de marca, deixe-o vazio.';
+  return `TEXTO NA ARTE (só o texto aprovado do slide, e mais nada):
+- Todo texto visível do slide vem do texto aprovado desse slide. Não escreva nada além dele.
+- NUNCA invente numeração ou paginação ("01", "02/07", "1 de 5"), rótulos, legendas, categorias, botões, setas com texto, frases de apoio nem créditos.
+${logo}
+- Quebrar o texto em várias linhas ou elementos e mudar o tamanho é livre; trocar, resumir ou acrescentar palavras não é.`;
+}
+
 function buildBatchSystemInstruction(input: GenerateHtmlDesignInput, startIndex: number, total: number, bible: StyleBible, batchSize: number): string {
   const endIndex = Math.min(startIndex + batchSize, total);
 
@@ -331,7 +406,22 @@ function buildBatchSystemInstruction(input: GenerateHtmlDesignInput, startIndex:
     }
   }
 
-  return `Você é um diretor de arte premiado especializado em social media premium. Você desenha em HTML e CSS, como um designer que codifica.
+  // Cérebro do Designer (só nas marcas com ele ligado): vem ANTES de tudo e é a autoridade
+  // sobre fidelidade, foto real e identidade do projeto. O restante deste prompt é mecânica
+  // de formato (JSON, classes, tamanho) e não o contradiz.
+  const brainBlock = input.brand.designerBrain
+    ? `${input.brand.designerBrain}\n\n=== MECÂNICA DE SAÍDA (formato do JSON e do HTML; não altera as regras acima) ===\n\n${PHOTO_SLOT_RULE}\n\n${brainTextRule(Boolean(input.brand.logoUrl) || Boolean(input.brand.logoVariants?.length))}\n\n`
+    : input.brand.photoRule
+      ? `${REAL_PHOTO_RULE_PROMPT}
+
+=== MECÂNICA DE SAÍDA (formato do JSON e do HTML; não altera a regra acima) ===
+
+${PHOTO_SLOT_RULE}
+
+`
+      : '';
+
+  return `${brainBlock}Você é um diretor de arte premiado especializado em social media premium. Você desenha em HTML e CSS, como um designer que codifica.
 
 ${renderStyleBible(bible)}
 
@@ -359,7 +449,7 @@ QUALIDADE (nível "designer humano postaria sem retrabalho"):
 - Copy REAL em português (nunca "Texto", "Lorem", placeholders).
 - Visual: prefira gradientes CSS, formas geométricas e tipografia forte. Para fotos/logo, <img> com URLs https REAIS. Sem texto embutido em imagem. Se a URL do Logo não foi fornecida acima, NÃO adicione nenhum logo genérico nem placeholder quadrado. Apenas omita o logo da composição.
 - LOGO: como CABEÇALHO FIXO, discreto — mesmo canto, mesmo tamanho em todos os slides (altura entre 3% e 5% da altura do slide). Na CAPA ele pode ser maior e fazer parte da composição. O que é PROIBIDO é o logo virar elemento de preenchimento: ampliado para ocupar área vazia, centralizado no meio do slide, repetido, ou usado como marca d'água grande.
-- LOGO SOBRE FUNDO ESCURO: o arquivo do logo pode ser OPACO (fundo branco sólido em vez de transparente) — nesse caso ele vira um retângulo branco sobre fundo escuro, que é pior do que não ter logo. Não há como saber pelo URL. Portanto: coloque o logo sobre uma superfície CLARA. Se o slide tem fundo escuro, ou você posiciona o logo dentro de uma faixa/cartão claro do próprio layout, ou omite o logo naquele slide. NUNCA aplique filtro de inversão no logo: se o arquivo for transparente, o filtro apaga as cores da marca; se for opaco, não resolve nada.
+${logoBackgroundRule(Boolean(input.brand.logoVariants?.length))}
 - SLIDE SEM IMAGEM É UM RESULTADO VÁLIDO, e é o caso MAIS COMUM: numa apresentação boa, a maioria dos slides não tem foto. Layouts como list-3-columns, process-flow e comparison vivem de tipografia, forma e cor. Se nenhuma imagem foi fornecida, resolva com um COMPONENTE ESTRUTURAL da lista abaixo — não com espaço vazio e não com enchimento. NUNCA tape um vazio com logo ampliado, ícone repetido ou imagem de outro slide.
 - PREENCHA O QUADRO. O componente escolhido deve ocupar a largura útil do slide. Um bloco de conteúdo espremido em 60% da largura, com o restante vazio, é ERRO de composição — ou o componente cresce, ou a tipografia cresce, ou o layout muda.
 - Marque editáveis com data-editable="true" e data-role="headline|subtitle|body|cta|image".
@@ -453,10 +543,11 @@ function buildBatchUserPrompt(
 
   return `Marca: ${b.name}
 Cores oficiais: ${b.colors.length ? b.colors.join(', ') : 'livre, profissional'}
-Fontes sugeridas: ${b.primaryFonts.length ? b.primaryFonts.join(', ') : 'escolha tipografia premium'}
-Diretrizes: ${b.guidelines || 'não definidas'}
-${b.agentPrompt ? `Instruções do agente: ${b.agentPrompt}` : ''}
+Fontes sugeridas: ${b.primaryFonts.length ? b.primaryFonts.join(', ') : 'escolha tipografia premium'}${ownFontsLine(b.ownFonts)}
+${b.designerBrain ? '' : `Diretrizes: ${b.guidelines || 'não definidas'}`}
+${!b.designerBrain && b.agentPrompt ? `Instruções do agente: ${b.agentPrompt}` : ''}
 ${b.logoUrl ? `Logo: ${b.logoUrl}` : ''}
+${b.logoVariants?.length ? `Logos oficiais (variantes; escolha pela cor do fundo do slide):\n${b.logoVariants.map((v) => `- ${v.label}: ${v.url}`).join('\n')}` : ''}
 ${assetsBlock(b.assetUrls)}
 ${presentationConfigBlock(b.presentationConfig)}
 ${referencesBlock(b.references)}
@@ -730,6 +821,8 @@ export interface EditHtmlSlideInput {
     name: string;
     colors: string[];
     primaryFonts: string[];
+    /** Famílias com arquivo próprio instalado (ver GenerateHtmlDesignInput). */
+    ownFonts?: string[];
     guidelines?: string;
     agentPrompt?: string;
   };
@@ -807,7 +900,7 @@ ${t.outerHTML ? `- Trecho exato no HTML:\n${t.outerHTML}` : ''}\n`
 
   const userPrompt = `Marca: ${input.brand.name}
 Cores: ${input.brand.colors.join(', ') || 'livre'}
-Fontes: ${input.brand.primaryFonts.join(', ') || 'livre'}${guidelinesBlock}${agentPromptBlock}
+Fontes: ${input.brand.primaryFonts.join(', ') || 'livre'}${ownFontsLine(input.brand.ownFonts)}${guidelinesBlock}${agentPromptBlock}
 
 HTML atual:
 ${input.slide.html}

@@ -23,6 +23,7 @@ import { notificationsRouter } from './routes/notifications.js';
 import { memoryRoutes } from './routes/memory.js';
 import { publicPresentationsRouter } from './routes/publicPresentations.js';
 import { mountMcp } from './mcp/index.js';
+import { publicFontsRouter } from './routes/publicFonts.js';
 
 const app = express();
 
@@ -80,6 +81,8 @@ app.use('/api/notifications', requireAuth, notificationsRouter);
 // Apresentação hospedada (Fase 5): página pública, sem sessão nossa — quem acessa
 // é o visitante do link, não um usuário logado.
 app.use('/api/public/presentations', publicPresentationsRouter);
+// Arquivo de fonte própria da marca, com CORS, para o @font-face do preview no navegador.
+app.use('/api/public/fonts', publicFontsRouter);
 
 // ── Canva Routes ──
 // O callback é público (redirect de browser vindo do Canva, sem header nosso) e

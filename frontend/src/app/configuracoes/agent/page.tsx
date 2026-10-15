@@ -8,11 +8,18 @@ import PageHeader from '@/components/ui/PageHeader';
 import Card from '@/components/ui/Card';
 import styles from '../configuracoes.module.css';
 
+/** Papéis de modelo que o backend expõe (config.models). Cada um com o que ele faz de verdade. */
+const MODEL_ROLES: Array<{ key: string; label: string; hint: string }> = [
+  { key: 'artist', label: 'Artista', hint: 'Geração de deck e edição de slide: a composição visual.' },
+  { key: 'brain', label: 'Cérebro do chat', hint: 'Decide o que fazer no chat da Fábrica (gerar, editar, perguntar).' },
+  { key: 'fast', label: 'Rápido', hint: 'Roteiro/planejamento, revisão de texto e pesquisa.' },
+  { key: 'utility', label: 'Auxiliar', hint: 'Tarefas mecânicas: classificar, extrair, sugerir, corrigir ortografia.' },
+  { key: 'image', label: 'Imagem (principal)', hint: 'Geração de imagem e foto.' },
+  { key: 'imageFallback', label: 'Imagem (reserva)', hint: 'Entra quando o modelo de imagem principal falha.' },
+];
+
 interface AgentConfig {
-  models: {
-    main: string;
-    utility: string;
-  };
+  models: Record<string, string | undefined>;
   thinkingBudget: number;
   dailyTokenBudget: number;
   brandDailyTokenBudget: number;
@@ -70,25 +77,18 @@ export default function GlobalAgentSettingsPage() {
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: '16px' }}>
-            <div style={{ padding: '16px', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', backgroundColor: '#fafaf9' }}>
-              <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)', fontWeight: 500 }}>Modelo Principal (Main)</span>
-              <p style={{ margin: '4px 0 0 0', fontFamily: 'monospace', fontSize: '14px', fontWeight: 700, color: 'var(--color-text)' }}>
-                {config?.models.main || 'Carregando...'}
-              </p>
-              <span style={{ fontSize: '11px', color: 'var(--color-text-tertiary)', marginTop: '4px', display: 'block' }}>
-                Usado para criação de roteiros e composições visuais complexas.
-              </span>
-            </div>
-
-            <div style={{ padding: '16px', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', backgroundColor: '#fafaf9' }}>
-              <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)', fontWeight: 500 }}>Modelo Auxiliar (Utility)</span>
-              <p style={{ margin: '4px 0 0 0', fontFamily: 'monospace', fontSize: '14px', fontWeight: 700, color: 'var(--color-text)' }}>
-                {config?.models.utility || 'Carregando...'}
-              </p>
-              <span style={{ fontSize: '11px', color: 'var(--color-text-tertiary)', marginTop: '4px', display: 'block' }}>
-                Usado para stubs, correção ortográfica e extração rápida de logos.
-              </span>
-            </div>
+            {MODEL_ROLES.map((role) => (
+              <div key={role.key} style={{ padding: '16px', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', backgroundColor: '#fafaf9' }}>
+                <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)', fontWeight: 500 }}>{role.label}</span>
+                <p style={{ margin: '4px 0 0 0', fontFamily: 'monospace', fontSize: '14px', fontWeight: 700, color: 'var(--color-text)' }}>
+                  {/* A carga já terminou: sem valor é "indisponível", nunca "Carregando...". */}
+                  {config?.models?.[role.key] || 'Indisponível'}
+                </p>
+                <span style={{ fontSize: '11px', color: 'var(--color-text-tertiary)', marginTop: '4px', display: 'block' }}>
+                  {role.hint}
+                </span>
+              </div>
+            ))}
           </div>
         </Card>
 
@@ -104,7 +104,7 @@ export default function GlobalAgentSettingsPage() {
             <div>
               <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>Teto Diário do Sistema</span>
               <p style={{ margin: '4px 0 0 0', fontSize: '20px', fontWeight: 700 }}>
-                {config?.dailyTokenBudget ? config.dailyTokenBudget.toLocaleString('pt-BR') : 'Sem Limite'}
+                {!config ? '—' : config.dailyTokenBudget ? config.dailyTokenBudget.toLocaleString('pt-BR') : 'Sem Limite'}
               </p>
               <span style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>Tokens por dia (global)</span>
             </div>
@@ -112,7 +112,7 @@ export default function GlobalAgentSettingsPage() {
             <div>
               <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>Teto Diário por Marca (Tenant)</span>
               <p style={{ margin: '4px 0 0 0', fontSize: '20px', fontWeight: 700 }}>
-                {config?.brandDailyTokenBudget ? config.brandDailyTokenBudget.toLocaleString('pt-BR') : 'Sem Limite'}
+                {!config ? '—' : config.brandDailyTokenBudget ? config.brandDailyTokenBudget.toLocaleString('pt-BR') : 'Sem Limite'}
               </p>
               <span style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>Tokens por dia (individual)</span>
             </div>
@@ -120,7 +120,7 @@ export default function GlobalAgentSettingsPage() {
             <div>
               <span style={{ fontSize: '12px', color: 'var(--color-text-secondary)' }}>Limite de Thinking (Gemini 2.0)</span>
               <p style={{ margin: '4px 0 0 0', fontSize: '20px', fontWeight: 700 }}>
-                {config?.thinkingBudget ? config.thinkingBudget.toLocaleString('pt-BR') : 'Inativo'}
+                {!config ? '—' : config.thinkingBudget ? config.thinkingBudget.toLocaleString('pt-BR') : 'Inativo'}
               </p>
               <span style={{ fontSize: '11px', color: 'var(--color-text-tertiary)' }}>Tokens de raciocínio</span>
             </div>

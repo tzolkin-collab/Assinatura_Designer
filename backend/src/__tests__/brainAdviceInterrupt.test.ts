@@ -2,7 +2,7 @@
 // orientações consumidas ao iniciar cada turno do modelo, "Pausar e enviar" abortando
 // o stream com o texto parcial preservado, e a reidratação da lista na reconexão.
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const h = vi.hoisted(() => {
   class GenerationAbortedError extends Error {
@@ -17,6 +17,7 @@ const h = vi.hoisted(() => {
     /** Cada item descreve o stream de UMA chamada ao modelo. */
     streams: [] as Array<(call: { hooks: any }) => AsyncGenerator<any>>,
     enqueued: [] as any[],
+    enqueueError: null as Error | null,
     appended: [] as any[],
     onAppend: null as null | ((msg: any) => Promise<void> | void),
     skillCalls: [] as string[],
@@ -61,9 +62,12 @@ vi.mock('../lib/geminiRetry.js', () => ({
   }),
 }));
 
-vi.mock('../lib/queue.js', () => ({ enqueuePipeline: vi.fn(async (p: any) => { h.enqueued.push(p); }) }));
+vi.mock('../lib/queue.js', () => ({ enqueuePipeline: vi.fn(async (p: any) => {
+  if (h.enqueueError) throw h.enqueueError;
+  h.enqueued.push(p);
+}) }));
 vi.mock('../lib/r2.js', () => ({ uploadFileToR2: vi.fn(async () => 'https://r2/x.png') }));
-vi.mock('../lib/prisma.js', () => ({ default: { post: { findFirst: vi.fn(async () => null) } } }));
+vi.mock('../lib/prisma.js', () => ({ default: { post: { findFirst: vi.fn(async () => null) }, brand: { findUnique: vi.fn(async () => null) } } }));
 vi.mock('../agents/tools/index.js', () => ({ executeTool: vi.fn() }));
 vi.mock('../lib/postHelper.js', () => ({ mergeSlidesIntoPost: vi.fn(), persistPostContent: vi.fn() }));
 vi.mock('../lib/postVersions.js', () => ({ snapshotPost: vi.fn() }));
@@ -101,7 +105,7 @@ const ferramenta = (name: string) => (async function* () {
 beforeEach(() => {
   h.session = {
     id: S, userId: 'u1', brandSlug: 'marca', phase: 'listening', workerStatus: 'idle', reviewMode: 'manual',
-    activeQuestion: null, currentDesign: [], progress: 0, progressLabel: '',
+    activeQuestion: null, currentDesign: [], progress: 0, progressLabel: '', photoRule: 'on',
     messages: [{ role: 'system', content: 'Contexto da marca:\nMarca X', timestamp: 1 }],
   };
   h.wsCalls.length = 0;
@@ -109,6 +113,7 @@ beforeEach(() => {
   h.streamCalls.length = 0;
   h.streams.length = 0;
   h.enqueued.length = 0;
+  h.enqueueError = null;
   h.appended.length = 0;
   h.skillCalls.length = 0;
   h.onAppend = null;
@@ -195,6 +200,235 @@ describe('orientações consumidas pelo cérebro', () => {
     expect(h.enqueued).toHaveLength(1);
     expect(h.session.workerStatus).toBe('running');
     expect((await listAdvice(S))[0]).toMatchObject({ status: 'pending' });
+  });
+
+  it('falha ao enfileirar persiste fase de erro e libera a sessão', async () => {
+    h.enqueueError = new Error('Redis indisponível');
+    h.streams.push(async function* () {
+      yield { candidates: [{ content: { parts: [{ text: 'Gerando! [DISPATCH:carousel]' }] } }] };
+    });
+
+    await send('cria o carrossel');
+
+    expect(h.session).toMatchObject({ phase: 'error', workerStatus: 'error' });
+    expect(wsOf('error')).toHaveLength(1);
+    expect(wsOf('sessionState').at(-1)?.args[1]).toMatchObject({ phase: 'error', workerStatus: 'error' });
+  });
+
+  it('no modo Auto, roteiriza a copy e despacha sem pedir aprovação manual', async () => {
+    const planner = await import('../agents/planner/index');
+    vi.mocked(planner.runPlanner).mockResolvedValueOnce([{
+      order: 1, title: 'Abertura', goal: 'Apresentar o tema', layout_type: 'title-hero',
+      copy: 'Copy aprovada',
+    }]);
+    h.session.reviewMode = 'auto';
+    h.streams.push(texto('Vou criar agora [DISPATCH:presentation]'));
+
+    await send('Copy oficial longa. '.repeat(80));
+
+    expect(h.enqueued).toHaveLength(1);
+    expect(h.enqueued[0].approvedSkeleton).toEqual(expect.arrayContaining([
+      expect.objectContaining({ title: 'Abertura', copy: 'Copy aprovada' }),
+    ]));
+    expect(h.session.pendingPlan).toBeFalsy();
+    expect(h.session.activeQuestion).toBeNull();
+    expect(tokens()).toContain('aprovado automaticamente');
+  });
+
+  describe('regra de foto real: ativada ou confirmada no chat antes de gerar', () => {
+    const original = process.env.DESIGNER_BRAIN_BRANDS;
+    beforeEach(() => { delete h.session.photoRule; delete process.env.DESIGNER_BRAIN_BRANDS; });
+    afterEach(() => {
+      if (original === undefined) delete process.env.DESIGNER_BRAIN_BRANDS;
+      else process.env.DESIGNER_BRAIN_BRANDS = original;
+    });
+
+    it('projeto sem as regras do Designer: a primeira geração PARA e pergunta se ativa', async () => {
+      h.streams.push(texto('Vou criar [DISPATCH:presentation]'));
+      await send('cria uma apresentação');
+
+      expect(h.enqueued).toHaveLength(0);
+      expect(h.session.pendingPhotoRule).toMatchObject({ format: 'presentation', isProof: false });
+      // O assistente já pode ter dito "a geração foi iniciada": o card corrige, no lugar que a pessoa lê.
+      expect(h.session.activeQuestion.helperText).toContain('Ainda não comecei a gerar');
+      const q = h.session.activeQuestion;
+      expect(q.question).toContain('ativo a regra de foto real');
+      expect(q.question).toContain('Fotos reais disponíveis agora');
+      expect(q.options.map((o: { label: string }) => o.label)).toEqual(['Ativar regra de foto real']);
+      expect(q.allowFreeform).toBe(false);
+    });
+
+    it('projeto que já tem as regras: a mesma pausa, mas para CONFIRMAR', async () => {
+      process.env.DESIGNER_BRAIN_BRANDS = 'marca';
+      h.streams.push(texto('Vou criar [DISPATCH:presentation]'));
+      await send('cria uma apresentação');
+
+      expect(h.enqueued).toHaveLength(0);
+      expect(h.session.activeQuestion.question).toContain('confirmo a regra de foto real');
+      expect(h.session.activeQuestion.options[0].label).toBe('Confirmar regra de foto real');
+    });
+
+    it('conta as fotos anexadas na conversa, sem inventar o que não tem', async () => {
+      h.session.messages.push({ role: 'user', content: 'segue a foto', timestamp: 2, attachments: [{ name: 'a.jpg', mimeType: 'image/jpeg', dataBase64: 'AA==' }] });
+      h.streams.push(texto('Vou criar [DISPATCH:presentation]'));
+      await send('cria uma apresentação');
+      expect(h.session.activeQuestion.question).toContain('1 foto(s) anexada(s) nesta conversa');
+    });
+
+    it('a resposta liga a regra para a conversa e retoma a MESMA geração, sem passar pelo modelo', async () => {
+      h.streams.push(texto('Vou criar [DISPATCH:carousel:9x16]'));
+      await send('cria um carrossel');
+      expect(h.enqueued).toHaveLength(0);
+      const chamadasAoModelo = h.streamCalls.length;
+
+      await send('Ativar regra de foto real');
+
+      expect(h.session.photoRule).toBe('on');
+      expect(h.session.pendingPhotoRule).toBeFalsy();
+      expect(h.enqueued).toHaveLength(1);
+      expect(h.enqueued[0]).toMatchObject({ format: 'carousel', aspectRatio: '9:16' });
+      expect(h.streamCalls).toHaveLength(chamadasAoModelo);
+      // O clique de controle não vira "pedido" dentro do briefing da geração.
+      expect(h.enqueued[0].brief).not.toContain('Ativar regra de foto real');
+      expect(h.enqueued[0].brief).toContain('cria um carrossel');
+    });
+
+    it('depois de ativada, as próximas gerações da conversa não perguntam de novo', async () => {
+      h.streams.push(texto('Vou criar [DISPATCH:presentation]'));
+      await send('cria uma apresentação');
+      await send('Ativar regra de foto real');
+      expect(h.enqueued).toHaveLength(1);
+
+      h.streams.push(texto('Refazendo [DISPATCH:presentation]'));
+      await send('refaz');
+      expect(h.enqueued).toHaveLength(2);
+      expect(h.session.activeQuestion).toBeFalsy();
+    });
+
+    it('qualquer outra resposta cancela a pausa: nada é gerado e a regra continua desligada', async () => {
+      h.streams.push(texto('Vou criar [DISPATCH:presentation]'));
+      await send('cria uma apresentação');
+      h.streams.push(texto('Sem problema, me diga o que mudar.'));
+
+      await send('espera, deixa eu pensar');
+
+      expect(h.enqueued).toHaveLength(0);
+      expect(h.session.pendingPhotoRule).toBeFalsy();
+      expect(h.session.photoRule).toBeUndefined();
+    });
+
+    describe('[GENERATE_IMAGE] (Nano Banana pelo chat) e a regra de foto real', () => {
+      const pedido = (t: string) => texto(`${t} [GENERATE_IMAGE:{"prompt":"mulher sorrindo numa mesa de escritório","id":"img1"}]`);
+      const emitidos = () => wsOf('emit').map((c) => ({ evento: c.args[1], dados: c.args[2] }));
+
+      it('com a regra ativada no chat: NÃO gera, e explica no cartão da proposta (nada de pessoa sintética)', async () => {
+        const { generatePhotoBuffer } = await import('../lib/imageResolver.js');
+        vi.mocked(generatePhotoBuffer).mockClear();
+        h.session.photoRule = 'on';
+        h.streams.push(pedido('Vou mostrar uma imagem.'));
+        await send('gera uma imagem de uma mulher no escritório');
+        await new Promise((r) => setTimeout(r, 20));
+
+        expect(generatePhotoBuffer).not.toHaveBeenCalled();
+        const ev = emitidos();
+        expect(ev.map((e) => e.evento)).toEqual(expect.arrayContaining(['image:proposal:start', 'image:proposal:error']));
+        expect(ev.find((e) => e.evento === 'image:proposal:error')!.dados).toMatchObject({ id: 'img1' });
+        expect(String(ev.find((e) => e.evento === 'image:proposal:error')!.dados.message)).toContain('foto real');
+        expect(ev.some((e) => e.evento === 'image:proposal:done')).toBe(false);
+      });
+
+      it('projeto que já tem as regras do Designer: recusa mesmo antes de a pessoa confirmar a regra', async () => {
+        const { generatePhotoBuffer } = await import('../lib/imageResolver.js');
+        vi.mocked(generatePhotoBuffer).mockClear();
+        process.env.DESIGNER_BRAIN_BRANDS = 'marca';
+        h.streams.push(pedido('Segue.'));
+        await send('gera uma imagem');
+        await new Promise((r) => setTimeout(r, 20));
+        expect(generatePhotoBuffer).not.toHaveBeenCalled();
+        expect(emitidos().some((e) => e.evento === 'image:proposal:error')).toBe(true);
+      });
+
+      it('sem regra ativa e sem as regras do projeto: segue como antes (a ferramenta ainda gera)', async () => {
+        const { generatePhotoBuffer } = await import('../lib/imageResolver.js');
+        vi.mocked(generatePhotoBuffer).mockClear();
+        h.streams.push(pedido('Vou mostrar.'));
+        await send('gera uma imagem de um cachorro');
+        await new Promise((r) => setTimeout(r, 20));
+        expect(generatePhotoBuffer).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    it('a nota do chat manda não usar [GENERATE_IMAGE] com a regra ligada', async () => {
+      h.session.photoRule = 'on';
+      h.streams.push(texto('Ok!'));
+      await send('oi');
+      expect(h.streamCalls[0]!.systemInstruction).toContain('NÃO use [GENERATE_IMAGE]');
+    });
+
+    it('com a regra ligada o chat deixa de oferecer IA/Remix/Unsplash (a nota de foto real vai ao modelo)', async () => {
+      h.session.photoRule = 'on';
+      h.streams.push(texto('Ok!'));
+      await send('oi');
+      const sys = h.streamCalls[0]!.systemInstruction;
+      expect(sys).toContain('Regra desta conversa: fotografia real');
+      expect(sys).not.toContain('NÃO dispare a geração sem o texto aprovado'); // isso é do cérebro completo, não da regra de foto
+    });
+  });
+
+  describe('status por bloco (marca com cérebro ligado)', () => {
+    const original = process.env.DESIGNER_BRAIN_BRANDS;
+    afterEach(() => {
+      if (original === undefined) delete process.env.DESIGNER_BRAIN_BRANDS;
+      else process.env.DESIGNER_BRAIN_BRANDS = original;
+    });
+
+    it('o planner recebe só o texto aprovado; o texto com as marcas segue intacto para o pipeline', async () => {
+      process.env.DESIGNER_BRAIN_BRANDS = h.session.brandSlug;
+      const planner = await import('../agents/planner/index');
+      vi.mocked(planner.runPlanner).mockResolvedValueOnce([{ order: 1, title: 'Abertura', goal: 'g', layout_type: 'title-hero', copy: 'TITULO' }]);
+      h.session.reviewMode = 'auto';
+      h.streams.push(texto('Vou criar agora [DISPATCH:presentation]'));
+
+      const bruto = '[APROVADO]\nTITULO\n[FALA]\nFALA-SECRETA\n[INTERNO]\nVALOR-INTERNO\n' + 'Texto de apoio longo. '.repeat(60);
+      await send(bruto);
+
+      const enviado = vi.mocked(planner.runPlanner).mock.calls.at(-1)![0] as { sourceCopy?: string };
+      expect(enviado.sourceCopy).toContain('TITULO');
+      expect(enviado.sourceCopy).not.toContain('FALA-SECRETA');
+      expect(enviado.sourceCopy).not.toContain('VALOR-INTERNO');
+      expect(h.enqueued[0].sourceCopy).toContain('FALA-SECRETA'); // o pipeline usa como orientação
+    });
+
+    it('tudo marcado como fala/contexto: não gera e pede o texto aprovado', async () => {
+      process.env.DESIGNER_BRAIN_BRANDS = h.session.brandSlug;
+      h.streams.push(texto('Vou criar agora [DISPATCH:presentation]'));
+
+      await send('[FALA]\n' + 'Só falado, sem texto de slide. '.repeat(60));
+
+      expect(h.enqueued).toHaveLength(0);
+      expect(tokens()).toContain('marcado como fala, contexto, apoio ou interno');
+      expect(h.session.phase).toBe('listening');
+    });
+  });
+
+  it('preserva moodboards na pausa e os encaminha ao aprovar o roteiro', async () => {
+    const planner = await import('../agents/planner/index');
+    vi.mocked(planner.runPlanner).mockResolvedValueOnce([{
+      order: 1, title: 'Abertura', goal: 'Apresentar o tema', layout_type: 'title-hero', copy: 'Copy oficial',
+    }]);
+    const moodboard = { name: 'Moodboard apresentações.png', mimeType: 'image/png', dataBase64: 'aGVsbG8=', url: 'https://r2/x.png' };
+    h.session.messages.push({ role: 'user', content: 'Copy oficial. '.repeat(100), timestamp: 1, attachments: [moodboard] });
+    h.streams.push(texto('Vou criar agora [DISPATCH:presentation]'));
+
+    await send('crie a apresentação');
+
+    const expectedImages = [{ url: moodboard.url, name: moodboard.name, role: 'style-reference' }];
+    expect(h.session.pendingPlan.attachmentImages).toEqual(expectedImages);
+    expect(h.enqueued).toHaveLength(0);
+
+    await send('Aprovar roteiro e gerar');
+
+    expect(h.enqueued[0].attachmentImages).toEqual(expectedImages);
   });
 
   it('um turno normal (novo ciclo) limpa da lista o que já foi resolvido', async () => {

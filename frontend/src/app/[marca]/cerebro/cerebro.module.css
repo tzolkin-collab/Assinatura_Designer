@@ -1,0 +1,362 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  padding-bottom: 80px;
+  max-width: 920px;
+}
+
+.header h1 {
+  font-size: 36px;
+  font-weight: 500;
+  margin: 0 0 6px;
+}
+
+.header p {
+  margin: 0;
+  color: var(--color-text-secondary, #666);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.bar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(6px);
+  border: 1px solid var(--color-border, rgba(0, 0, 0, 0.1));
+  border-radius: 12px;
+}
+
+.barStatus {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #22a55b;
+  flex-shrink: 0;
+}
+
+.dotPending {
+  background: #f59e0b;
+}
+
+.barSpacer {
+  flex: 1;
+}
+
+.dirty {
+  font-size: 13px;
+  color: #9a5b0b;
+}
+
+.btn {
+  padding: 9px 18px;
+  border-radius: 9px;
+  border: 1px solid transparent;
+  background: #171717;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btnGhost {
+  background: #fff;
+  color: var(--color-text, #111);
+  border-color: var(--color-border, rgba(0, 0, 0, 0.15));
+}
+
+.btnSmall {
+  padding: 5px 11px;
+  font-size: 12.5px;
+}
+
+.notice {
+  padding: 12px 16px;
+  border-radius: 10px;
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+
+.noticeInfo {
+  background: #f1efe9;
+}
+
+.noticeError {
+  background: #fdecec;
+  color: #a12626;
+}
+
+.noticeOk {
+  background: #e8f6ee;
+  color: #146c3a;
+}
+
+/* ── Regras globais (somente leitura) ──────────────────────────────────────── */
+.globalBox {
+  background: #fff;
+  border: 1px solid var(--color-border, rgba(0, 0, 0, 0.1));
+  border-radius: 14px;
+  padding: 18px 20px;
+}
+
+.globalBox h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 17px;
+  margin: 0 0 4px;
+}
+
+.globalBox ul {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  font-size: 13.5px;
+  line-height: 1.6;
+  list-style: disc;
+}
+
+.lock {
+  font-size: 12px;
+  color: var(--color-text-secondary, #777);
+}
+
+/* ── Seções da ficha ───────────────────────────────────────────────────────── */
+.section {
+  background: #fff;
+  border: 1px solid var(--color-border, rgba(0, 0, 0, 0.1));
+  border-radius: 14px;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  scroll-margin-top: 80px;
+}
+
+.sectionHead {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.sectionHead h2 {
+  font-size: 17px;
+  margin: 0;
+}
+
+.hint {
+  font-size: 13px;
+  color: var(--color-text-secondary, #666);
+  line-height: 1.45;
+  margin: 0;
+}
+
+.tag {
+  font-size: 11.5px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: var(--color-surface, #f5f5f4);
+  color: var(--color-text-secondary, #666);
+}
+
+.tagRequired {
+  background: #fdecec;
+  color: #a12626;
+}
+
+.tagDone {
+  background: #e8f6ee;
+  color: #146c3a;
+}
+
+.input,
+.textarea,
+.select {
+  width: 100%;
+  padding: 9px 11px;
+  border: 1px solid var(--color-border, rgba(0, 0, 0, 0.18));
+  border-radius: 9px;
+  font-size: 14px;
+  font-family: inherit;
+  background: #fff;
+  box-sizing: border-box;
+}
+
+.textarea {
+  min-height: 92px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.input:disabled,
+.textarea:disabled,
+.select:disabled {
+  background: #f6f6f5;
+  color: #555;
+}
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.row {
+  display: grid;
+  gap: 8px;
+  align-items: start;
+  padding: 10px;
+  background: #faf9f7;
+  border-radius: 10px;
+}
+
+.rowPalette {
+  grid-template-columns: 44px minmax(90px, 120px) 1fr 1.6fr auto;
+}
+
+.rowType {
+  grid-template-columns: 1fr 1.4fr 1fr auto;
+}
+
+.rowLogo {
+  grid-template-columns: 1.6fr 1fr auto;
+}
+
+.rowCode {
+  grid-template-columns: 1fr 2fr auto;
+}
+
+@media (max-width: 700px) {
+  .rowPalette,
+  .rowType,
+  .rowLogo,
+  .rowCode {
+    grid-template-columns: 1fr;
+  }
+}
+
+.swatch {
+  width: 44px;
+  height: 38px;
+  padding: 0;
+  border: 1px solid var(--color-border, rgba(0, 0, 0, 0.18));
+  border-radius: 8px;
+  background: none;
+  cursor: pointer;
+}
+
+.thumb {
+  max-height: 60px;
+  max-width: 120px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border, rgba(0, 0, 0, 0.12));
+  object-fit: contain;
+  background: #fff;
+}
+
+.pickerWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.note {
+  font-size: 12.5px;
+  color: #9a5b0b;
+  margin: 0;
+}
+
+.remove {
+  border: none;
+  background: transparent;
+  color: #a12626;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 8px;
+  font-family: inherit;
+}
+
+.state {
+  padding: 32px 0;
+  color: var(--color-text-secondary, #666);
+}
+
+/* ── Importar de um manual ─────────────────────────────────────────────────── */
+.importBox {
+  background: #fff;
+  border: 1px solid var(--color-border, rgba(0, 0, 0, 0.1));
+  border-radius: 14px;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.importBox h2 {
+  font-size: 17px;
+  margin: 0;
+}
+
+.importActions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.fileName {
+  font-size: 13px;
+  color: var(--color-text-secondary, #666);
+}
+
+.conflict {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #fff6e5;
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+
+.evidenceList {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.evidenceList q {
+  color: var(--color-text-secondary, #555);
+}
+
+.importBox details summary {
+  cursor: pointer;
+  font-size: 13.5px;
+  font-weight: 500;
+}

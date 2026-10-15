@@ -27,7 +27,7 @@ import { ZipArchive } from 'archiver';
 import { PDFDocument } from 'pdf-lib';
 import prisma from './prisma.js';
 import { mergeSlidesIntoPost } from './postHelper.js';
-import { resolveRenderableDeck, type RenderableDeck } from './renderableDeck.js';
+import { resolveRenderableDeckWithFonts, type RenderableDeck } from './renderableDeck.js';
 import { renderHtmlToPng, renderHtmlToPdf } from './htmlRaster.js';
 import { htmlDocsToPptx } from './htmlToPptx.js';
 import { uploadFileToR2 } from './r2.js';
@@ -80,7 +80,7 @@ async function carregarDeck(postId: string): Promise<{ deck: RenderableDeck; tit
   });
   if (!post) throw createError(404, 'Post não encontrado');
 
-  const deck = resolveRenderableDeck(mergeSlidesIntoPost(post).content);
+  const deck = await resolveRenderableDeckWithFonts(mergeSlidesIntoPost(post).content);
   if (!deck) {
     throw createError(400, 'Export disponível apenas para designs html-design');
   }

@@ -18,15 +18,24 @@ describe('buildMessageParts', () => {
     expect(parts.some((p) => p.text?.includes('produto.png'))).toBe(true);
   });
 
-  it('capa em 4 imagens por mensagem — mais que isso não vira inlineData', () => {
+  it('encaminha PDF como inlineData para o Gemini', () => {
+    const parts = buildMessageParts('Leia o arquivo de logos', [
+      { name: 'logos.pdf', mimeType: 'application/pdf', dataBase64: 'JVBERi0=' },
+    ]);
+
+    expect(parts).toContainEqual({ text: '[PDF anexado pelo usuário: logos.pdf]' });
+    expect(parts).toContainEqual({ inlineData: { mimeType: 'application/pdf', data: 'JVBERi0=' } });
+  });
+
+  it('limita a 5 anexos, mesmo total aceito pela Fábrica', () => {
     const attachments = Array.from({ length: 6 }, (_, i) => ({
       name: `foto-${i}.png`, mimeType: 'image/png', dataBase64: `DATA${i}`,
     }));
     const parts = buildMessageParts('Várias fotos', attachments);
 
     const inlineCount = parts.filter((p) => p.inlineData).length;
-    expect(inlineCount).toBe(4);
-    expect(parts.some((p) => p.text?.includes('foto-4.png'))).toBe(false);
+    expect(inlineCount).toBe(5);
+    expect(parts.some((p) => p.text?.includes('foto-5.png'))).toBe(false);
   });
 
   it('array de anexos vazio se comporta como sem anexo', () => {

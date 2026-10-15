@@ -10,4 +10,22 @@ export {
   REAL_PHOTO_RULE_PROMPT,
 } from './prompts.js';
 export { AMANDA_COELHO_MEMORY } from './seeds/amandaCoelho.js';
+export { PROJECT_MEMORY_SEEDS } from './seeds/index.js';
+export { designerBrainBrands, isDesignerBrainEnabled } from './enabled.js';
+export { isBrainActiveForBrand, loadBrainLayers, loadSavedProfileBySlug } from './savedProfile.js';
+export type { BrainLayers } from './savedProfile.js';
+export { parseCopyBlocks } from './copyBlocks.js';
+export { profileStyleReferences, type StyleReference } from './styleReferences.js';
+export { REFERENCE_ASSET_TAGS } from './referenceTags.js';
+export {
+  DesignerBrainSetupError,
+  buildPipelineBrainContext,
+  resolveProjectMemory,
+} from './pipelineContext.js';
 export type * from './types.js';
+export { checkApprovedText, hasApprovedText, textIssuesToDeviations } from './textCheck.js';
+export type { TextIssue } from './textCheck.js';
+export { buildCorrectionInstruction, correctTextDivergences, MAX_ATTEMPTS as TEXT_CORRECTION_MAX_ATTEMPTS } from './correction.js';
+export type { CorrectionResult, EditSlideFn } from './correction.js';
+export { fontSubstitutionNotice, officialFontsFor, INSTALLED_CUSTOM_FONTS } from './fontNotice.js';
+export { onlyProvidedAssets } from './providedAssets.js';

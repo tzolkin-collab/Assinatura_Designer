@@ -5,6 +5,8 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
+  Brain,
+  LayoutDashboard,
   LayoutGrid,
   Factory,
   FileText,
@@ -45,6 +47,8 @@ const extrasNav: NavItem[] = [
 
 function getBrandNav(marca: string): NavItem[] {
   return [
+    { label: 'Visão geral', href: `/${marca}`, icon: <LayoutDashboard size={18} /> },
+    { label: 'Cérebro da IA', href: `/${marca}/cerebro`, icon: <Brain size={18} /> },
     { label: 'Galeria', href: `/${marca}/galeria`, icon: <Eye size={18} /> },
     { label: 'Fábrica', href: `/${marca}/fabrica`, icon: <Factory size={18} /> },
     { label: 'Editor', href: `/${marca}/editor`, icon: <PenTool size={18} /> },
@@ -111,7 +115,7 @@ function NavLink({ item, pathname }: { item: NavItem; pathname: string }) {
 export default function Sidebar() {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
 
   // Detect if we're inside a brand context ([marca]/...) vs. numa rota GLOBAL
   // (sem marca). Bug real encontrado 2026-07-20: esta lista estava incompleta
@@ -209,7 +213,7 @@ export default function Sidebar() {
           <div className={styles.user}>
             <div className={styles.avatar}>{user?.name?.[0]?.toUpperCase() || user?.email?.[0]?.toUpperCase() || 'U'}</div>
             <div className={styles.userInfo}>
-              <span className={styles.userName}>{user?.name || 'Carregando...'}</span>
+              <span className={styles.userName}>{user?.name || user?.email || (authLoading ? 'Carregando...' : 'Sessão indisponível')}</span>
               <span className={styles.userRole}>{user?.role === 'ADMIN' ? 'Administrador' : 'Designer'}</span>
             </div>
             <NotificationBell />

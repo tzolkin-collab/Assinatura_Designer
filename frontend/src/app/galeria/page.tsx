@@ -9,9 +9,15 @@ import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
 import Card from '@/components/ui/Card';
 import styles from './galeria.module.css';
-import { api, ApiError } from '@/lib/api';
+import { api } from '@/lib/api';
+import NewCollabModal from '@/components/Collab/NewCollabModal';
 
 interface Brand {
+  id: string;
+  /** BASE = projeto-base; INTERNAL / PARTNERSHIP = desdobramento ligado a um projeto-base. */
+  kind?: 'BASE' | 'INTERNAL' | 'PARTNERSHIP';
+  parentBrandId?: string | null;
+  collab?: { baseProtagonism?: number; partner?: { name: string } } | null;
   slug: string;
   name: string;
   color?: string;
@@ -64,6 +70,9 @@ export default function GaleriaPage() {
   const [editColor, setEditColor] = useState('#171717');
   const [savingEdit, setSavingEdit] = useState(false);
 
+  // Novo desdobramento a partir de um projeto-base (o formulário é o NewCollabModal)
+  const [collabParent, setCollabParent] = useState<Brand | null>(null);
+
   const loadBrands = () => {
     setLoading(true);
     const endpoint = filterMode === 'my' ? '/brands' : '/brands/discover';
@@ -82,8 +91,18 @@ export default function GaleriaPage() {
   );
 
   // Agrupa as marcas pelo proprietário (owner)
+  // Desdobramentos aparecem dentro do projeto-base, nao como cards soltos. Se a base nao esta
+  // na lista (busca ou falta de acesso), o desdobramento sobe para o topo e nao some.
+  const collabsOf: { [parentId: string]: Brand[] } = {};
+  filtered.forEach((b) => {
+    if (b.parentBrandId) (collabsOf[b.parentBrandId] ??= []).push(b);
+  });
+  const topLevel = filtered.filter(
+    (b) => !b.parentBrandId || !filtered.some((p) => p.id === b.parentBrandId),
+  );
+
   const groups: { [ownerName: string]: Brand[] } = {};
-  filtered.forEach((brand) => {
+  topLevel.forEach((brand) => {
     const ownerName = brand.user?.name || 'Sem Proprietário';
     if (!groups[ownerName]) {
       groups[ownerName] = [];
@@ -135,6 +154,8 @@ export default function GaleriaPage() {
     }
   };
 
+  const openCollabModal = (brand: Brand) => setCollabParent(brand);
+
   const openEditModal = (brand: Brand) => {
     setEditTarget(brand);
     setEditName(brand.name);
@@ -155,13 +176,13 @@ export default function GaleriaPage() {
   return (
     <div>
       <PageHeader
-        title="Galeria de Marcas"
-        description="Gerencie seus projetos e acesse as configurações de cada marca."
+        title="Galeria de Projetos"
+        description="Cada projeto tem sua identidade; os desdobramentos herdam a do projeto-base."
         actions={
           <Link href="/onboarding">
             <Button size="sm">
               <Plus size={16} />
-              Nova Marca
+              Novo Projeto
             </Button>
           </Link>
         }
@@ -193,7 +214,7 @@ export default function GaleriaPage() {
       <div className={styles.toolbar}>
         <div className={styles.searchWrapper}>
           <Input
-            placeholder="Buscar marcas..."
+            placeholder="Buscar projetos..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             icon={<Search size={16} />}
@@ -202,7 +223,7 @@ export default function GaleriaPage() {
         <div style={{ position: 'relative' }}>
           <Button variant="secondary" size="sm" onClick={() => setShowFilterDropdown(!showFilterDropdown)}>
             <Filter size={14} />
-            <span>Exibindo: {filterMode === 'my' ? 'Minhas Marcas' : 'Descobrir Novas Marcas'}</span>
+            <span>Exibindo: {filterMode === 'my' ? 'Meus Projetos' : 'Descobrir Novos Projetos'}</span>
           </Button>
           {showFilterDropdown && (
             <div className={styles.dropdownList} style={{ position: 'absolute', right: 0, top: '42px', zIndex: 50, minWidth: '200px', boxShadow: 'var(--shadow-lg)' }} onMouseDown={(e) => e.preventDefault()}>
@@ -211,14 +232,14 @@ export default function GaleriaPage() {
                 onClick={() => { setFilterMode('my'); setShowFilterDropdown(false); }}
                 style={{ fontWeight: filterMode === 'my' ? 600 : 400 }}
               >
-                Minhas Marcas
+                Meus Projetos
               </div>
               <div 
                 className={styles.dropdownItem} 
                 onClick={() => { setFilterMode('discover'); setShowFilterDropdown(false); }}
                 style={{ fontWeight: filterMode === 'discover' ? 600 : 400 }}
               >
-                Descobrir Marcas (Solicitar)
+                Descobrir Projetos (Solicitar)
               </div>
             </div>
           )}
@@ -228,7 +249,7 @@ export default function GaleriaPage() {
       {loading ? (
         <div className={styles.loadingState}>
           <Loader2 className={styles.spinner} />
-          <p>Carregando marcas...</p>
+          <p>Carregando projetos...</p>
         </div>
       ) : (
         <>
@@ -239,7 +260,7 @@ export default function GaleriaPage() {
                   Proprietário: <span style={{ color: 'var(--color-text, #111)' }}>{ownerName}</span>
                 </h3>
                 <span style={{ fontSize: '12px', background: 'var(--color-surface, #f5f5f5)', padding: '2px 8px', borderRadius: '12px', fontWeight: 500 }}>
-                  {ownerBrands.length} {ownerBrands.length === 1 ? 'marca' : 'marcas'}
+                  {ownerBrands.length} {ownerBrands.length === 1 ? 'projeto' : 'projetos'}
                 </span>
               </div>
               
@@ -247,7 +268,7 @@ export default function GaleriaPage() {
                 {ownerBrands.map((brand) => (
                   <div key={brand.slug} className={styles.cardWrapper}>
                     {filterMode === 'my' ? (
-                      <Link href={`/${brand.slug}/galeria`} className={styles.cardLink}>
+                      <Link href={`/${brand.slug}`} className={styles.cardLink}>
                         <Card hover padding="none">
                           <div className={styles.cardBanner} style={{ backgroundColor: brand.color || '#171717', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', position: 'relative' }}>
                             {brand.logoUrl ? (
@@ -303,6 +324,30 @@ export default function GaleriaPage() {
                       </div>
                     )}
 
+                    {filterMode === 'my' && (
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', padding: '8px 4px 0' }}>
+                        {(collabsOf[brand.id] ?? []).map((c) => (
+                          <Link
+                            key={c.slug}
+                            href={`/${c.slug}/galeria`}
+                            title={c.kind === 'PARTNERSHIP' ? `Parceria${c.collab?.partner?.name ? ` com ${c.collab.partner.name}` : ''}` : 'Desdobramento interno'}
+                            style={{ fontSize: '12px', padding: '3px 9px', borderRadius: '12px', border: '1px solid var(--color-border, rgba(0,0,0,0.12))', color: 'var(--color-text, #111)', textDecoration: 'none', background: 'var(--color-surface, #f5f5f5)' }}
+                          >
+                            {c.name}
+                          </Link>
+                        ))}
+                        {!brand.parentBrandId && (brand.myRole === 'OWNER' || brand.myRole === 'ADMIN' || brand.myRole === 'EDITOR') && (
+                          <button
+                            type="button"
+                            onClick={() => openCollabModal(brand)}
+                            style={{ fontSize: '12px', padding: '3px 9px', borderRadius: '12px', border: '1px dashed var(--color-border, rgba(0,0,0,0.25))', background: 'transparent', cursor: 'pointer', color: 'var(--color-text-secondary, #666)' }}
+                          >
+                            + Desdobramento
+                          </button>
+                        )}
+                      </div>
+                    )}
+
                     {filterMode === 'my' && (brand.myRole === 'OWNER' || brand.myRole === 'ADMIN') && (
                       <button
                         className={styles.cardEditBtn}
@@ -331,15 +376,27 @@ export default function GaleriaPage() {
             <div className={styles.empty}>
               <p>
                 {search 
-                  ? `Nenhuma marca encontrada para "${search}"` 
+                  ? `Nenhum projeto encontrado para "${search}"` 
                   : filterMode === 'my' 
-                    ? 'Nenhuma marca criada ainda.' 
-                    : 'Todas as marcas do sistema já pertencem ao seu perfil.'
+                    ? 'Nenhum projeto criado ainda.' 
+                    : 'Todos os projetos do sistema já pertencem ao seu perfil.'
                 }
               </p>
             </div>
           )}
         </>
+      )}
+
+      {/* Novo desdobramento */}
+      {collabParent && (
+        <NewCollabModal
+          parent={collabParent}
+          onClose={() => setCollabParent(null)}
+          onCreated={() => {
+            setCollabParent(null);
+            loadBrands();
+          }}
+        />
       )}
 
       {/* Apagar Marca Modal */}

@@ -654,7 +654,7 @@ export default function BrandingPage() {
           <p style={{ marginTop: 8, fontSize: 12, color: 'var(--color-text-muted, #6b7280)' }}>
             {fonts.length > 4
               ? `O gerador carrega as 4 primeiras — as outras ${fonts.length - 4} ficam guardadas, mas não são aplicadas.`
-              : 'Precisa ser o nome exato de uma Google Font. Arquivo próprio (.ttf) ainda não é suportado.'}
+              : 'Aqui vale o nome exato de uma Google Font. Para fonte própria (.ttf, .otf, .woff, .woff2), envie o arquivo na Mídia e marque a fonte como "Arquivo oficial enviado" na ficha do Cérebro.'}
           </p>
         </Card>
 

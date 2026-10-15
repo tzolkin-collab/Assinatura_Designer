@@ -445,4 +445,23 @@ describe('resolveImageCandidateDecisions', () => {
       expect.objectContaining({ data: expect.objectContaining({ source: 'ai-generated' }) }),
     );
   });
+
+  it('"regenerate" com foto real obrigatória: não gera, não busca no Unsplash e não grava asset', async () => {
+    const result = await resolveImageCandidateDecisions(candidates, 'regenerate', {
+      brandName: 'Marca X', width: 1080, height: 1080, brandId: 'brand-1', realPhotosOnly: true,
+    });
+
+    expect(result.size).toBe(0);
+    expect(mockGenerateContent).not.toHaveBeenCalled();
+    expect(uploadFileToR2).not.toHaveBeenCalled();
+    expect(prismaMock.asset.create).not.toHaveBeenCalled();
+  });
+
+  it('"accept" continua funcionando com foto real obrigatória (usa o que já está na biblioteca)', async () => {
+    const result = await resolveImageCandidateDecisions(candidates, 'accept', {
+      brandName: 'Marca X', width: 1080, height: 1080, brandId: 'brand-1', realPhotosOnly: true,
+    });
+
+    expect(result.get(1)).toEqual({ imageUrl: 'https://cdn.example.com/talvez.png' });
+  });
 });

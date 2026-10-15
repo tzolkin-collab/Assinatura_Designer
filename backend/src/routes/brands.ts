@@ -1,4 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
+import { GoogleGenAI } from '@google/genai';
+import { config } from '../config.js';
 import prisma from '../lib/prisma.js';
 import { ensureInternalTeamMemberships } from '../lib/internalTeam.js';
 import { createError } from '../middleware/errorHandler.js';
@@ -9,6 +11,12 @@ import { deleteFromR2 } from '../lib/r2.js';
 import { requireBrandRole, ANY_MEMBER, EDITORS, type BrandRequest } from '../middleware/brandAccess.js';
 import { getUsage, getBilling } from '../lib/aiBudget.js';
 import { rateLimit } from '../middleware/rateLimit.js';
+import { parseBody } from '../lib/validate.js';
+import { createCollabSchema, collabSlug } from '../lib/brandCollab.js';
+import { brandProfileSchema, profileCompleteness, profileFromLegacy, type BrandProfileData } from '../lib/brandProfile.js';
+import { extractProfileFromManual, plainTextFromHtml, PROFILE_IMPORT_RATE_LIMIT } from '../lib/profileExtraction.js';
+import type { BrandbookExtractionInputPart } from '../lib/brandbookExtraction.js';
+import type { Prisma } from '@prisma/client';
 import { SVG_SANITIZE_RATE_LIMIT } from '../lib/svgSanitizeRateLimit.js';
 
 import multer from 'multer';
@@ -17,6 +25,7 @@ import { getValidAccessToken, exportDesign, waitForExport } from '../lib/canvaCl
 
 export const brandsRouter = Router();
 const brandbookUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
+const profileImportUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024, files: 6 } });
 
 // POST /api/brands/:slug/brandbook/ingest - Upload e processamento do Brandbook
 // Requer papel EDITOR+ para evitar que um usuário autenticado processe o brandbook de outra marca
@@ -315,6 +324,20 @@ brandsRouter.get('/:slug/posts', async (req: Request, res: Response, next: NextF
       return;
     }
 
+    // ?recent=N devolve só os N mais recentes, sem slides: a visão geral do projeto lista
+    // "materiais recentes" e não precisa do conteúdo inteiro de cada deck.
+    const recent = Number.parseInt(String(req.query.recent ?? ''), 10);
+    if (Number.isFinite(recent) && recent > 0) {
+      const posts = await prisma.post.findMany({
+        where: { brandId: brand.id },
+        orderBy: { updatedAt: 'desc' },
+        take: Math.min(recent, 24),
+        select: { id: true, name: true, type: true, status: true, previewUrl: true, updatedAt: true },
+      });
+      res.json({ data: posts });
+      return;
+    }
+
     const posts = await prisma.post.findMany({
       where: { brandId: brand.id },
       orderBy: { createdAt: 'desc' },
@@ -356,6 +379,158 @@ brandsRouter.post('/', async (req: Request, res: Response, next: NextFunction) =
     ensureInternalTeamMemberships().catch(() => {});
 
     res.status(201).json({ data: brand });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// GET /api/brands/:slug/profile - Ficha do projeto (Cérebro de IA, §10) e o que falta preencher.
+//
+// Enquanto a marca não tem ficha salva, devolve uma ficha DERIVADA dos campos que o sistema já tem
+// (cores, fontes, logo, diretrizes), com `derived: true`. Nada é gravado só por ler.
+brandsRouter.get('/:slug/profile', requireBrandRole(ANY_MEMBER), async (req: BrandRequest, res: Response, next: NextFunction) => {
+  try {
+    const brand = req.brand!;
+    const row = await prisma.brandProfile.findUnique({ where: { brandId: brand.id } });
+    let profile: BrandProfileData;
+    if (row) {
+      // Dado gravado fora do esquema não derruba a tela: cai na ficha vazia e a pendência aparece.
+      const parsed = brandProfileSchema.safeParse(row.data);
+      profile = parsed.success ? parsed.data : {};
+    } else {
+      const config = await prisma.brandConfig.findUnique({ where: { brandId: brand.id } });
+      profile = profileFromLegacy(config);
+    }
+    res.json({ data: { profile, derived: !row, completeness: profileCompleteness(profile) } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// PUT /api/brands/:slug/profile - Salva a ficha inteira do projeto.
+//
+// Logo, manual visual e arquivos de fonte têm de ser da biblioteca DESTA marca (mesmo critério da
+// troca de foto): sem isso o cliente mandaria qualquer URL e o servidor iria buscá-la (SSRF) ou
+// usaria arquivo de outra marca.
+brandsRouter.put('/:slug/profile', requireBrandRole(EDITORS), async (req: BrandRequest, res: Response, next: NextFunction) => {
+  try {
+    const brand = req.brand!;
+    const profile = parseBody(brandProfileSchema, req.body ?? {});
+
+    const arquivos = [
+      ...(profile.logo?.files ?? []).map((f) => f.url),
+      profile.visualManual?.imageUrl,
+      ...(profile.typography ?? []).flatMap((t) => [t.fileUrl, t.referenceImageUrl]),
+    ].filter((u): u is string => Boolean(u));
+    for (const url of new Set(arquivos)) {
+      const asset = await prisma.asset.findFirst({ where: { brandId: brand.id, url }, select: { id: true } });
+      if (!asset) throw createError(400, 'Logo, manual visual e fontes precisam estar na biblioteca do projeto.');
+    }
+
+    const data = profile as unknown as Prisma.InputJsonValue;
+    await prisma.brandProfile.upsert({
+      where: { brandId: brand.id },
+      create: { brandId: brand.id, data },
+      update: { data },
+    });
+
+    res.json({ data: { profile, derived: false, completeness: profileCompleteness(profile) } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/brands/:slug/profile/import - Lê um manual de marca e PROPÕE um rascunho da ficha.
+//
+// Não grava nada: devolve o rascunho, o trecho do manual que sustenta cada item e o que o manual
+// não traz. Quem decide é a pessoa, na tela, e só então a ficha é salva pelo PUT. Aceita PDF,
+// imagens (png, jpeg, webp) e texto (md, txt, html). Quando há texto, os trechos são conferidos
+// contra ele em código; em PDF e imagem a conferência é da pessoa que revisa.
+//
+// Limite de taxa ANTES do upload: cada PDF vira uma chamada de IA paga.
+brandsRouter.post('/:slug/profile/import', rateLimit(PROFILE_IMPORT_RATE_LIMIT), requireBrandRole(EDITORS), profileImportUpload.array('files', 6), async (req: BrandRequest, res: Response, next: NextFunction) => {
+  try {
+    const files = (req.files as Express.Multer.File[] | undefined) ?? [];
+    if (files.length === 0) throw createError(400, 'Envie ao menos um arquivo do manual.');
+
+    const parts: BrandbookExtractionInputPart[] = [];
+    const texts: string[] = [];
+    for (const f of files) {
+      const name = f.originalname.toLowerCase();
+      if (f.mimetype === 'application/pdf') {
+        parts.push({ kind: 'pdf', buffer: f.buffer, fileName: f.originalname });
+      } else if (['image/png', 'image/jpeg', 'image/webp'].includes(f.mimetype)) {
+        parts.push({ kind: 'image', mimeType: f.mimetype, data: f.buffer.toString('base64'), fileName: f.originalname });
+      } else if (f.mimetype === 'text/html' || /\.html?$/.test(name)) {
+        texts.push(plainTextFromHtml(f.buffer.toString('utf-8')));
+      } else if (f.mimetype.startsWith('text/') || /\.(md|txt)$/.test(name)) {
+        texts.push(f.buffer.toString('utf-8'));
+      } else {
+        throw createError(400, `Tipo de arquivo não aceito: ${f.originalname}. Use PDF, imagem (png, jpeg, webp) ou texto (md, txt, html).`);
+      }
+    }
+
+    const result = await extractProfileFromManual({
+      client: new GoogleGenAI({ apiKey: config.geminiApiKey }),
+      brandName: req.brand!.name,
+      parts,
+      sourceText: texts.length ? texts.join('\n\n') : undefined,
+    });
+    res.json({ data: result });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// POST /api/brands/:slug/collabs - Cria um desdobramento (interno ou parceria) de um projeto-base.
+//
+// O desdobramento é uma marca ligada à base por `parentBrandId`: herda a identidade dela e guarda
+// só o que muda (`collab`). Não pede de novo nada que já exista na base. Quem pode editar a base
+// pode criar desdobramentos, e a equipe da base passa a enxergá-lo com os mesmos papéis.
+// Desdobramento de desdobramento não existe: a herança é de um nível só, para a regra de
+// "o que vale" continuar legível (global → base → desdobramento).
+brandsRouter.post('/:slug/collabs', requireBrandRole(EDITORS), async (req: BrandRequest, res: Response, next: NextFunction) => {
+  try {
+    const input = parseBody(createCollabSchema, req.body ?? {});
+    const parentRef = req.brand!;
+
+    const parent = await prisma.brand.findUnique({
+      where: { id: parentRef.id },
+      select: { id: true, slug: true, color: true, kind: true, members: { select: { userId: true, role: true } } },
+    });
+    if (!parent) throw createError(404, 'Marca não encontrada.');
+    if (parent.kind !== 'BASE') throw createError(400, 'Só um projeto-base pode ter desdobramentos.');
+
+    // Logo e guia visual do parceiro têm de estar na biblioteca da base: sem isto o cliente
+    // mandaria qualquer URL e o servidor iria buscá-la (SSRF) ou exporia arquivo de outra marca.
+    const arquivos = [input.details.partner?.logoUrl, input.details.partner?.visualManualUrl].filter(
+      (u): u is string => Boolean(u),
+    );
+    for (const url of arquivos) {
+      const asset = await prisma.asset.findFirst({ where: { brandId: parent.id, url }, select: { id: true } });
+      if (!asset) throw createError(400, 'O logo e o guia visual do parceiro precisam estar na biblioteca do projeto-base.');
+    }
+
+    const slug = collabSlug(parent.slug, input.name);
+    if (await prisma.brand.findUnique({ where: { slug }, select: { id: true } })) {
+      throw createError(409, 'Já existe um desdobramento com esse nome neste projeto.');
+    }
+
+    const collab = await prisma.brand.create({
+      data: {
+        name: input.name,
+        slug,
+        color: input.color ?? parent.color ?? '#171717',
+        kind: input.kind,
+        parentBrandId: parent.id,
+        collab: input.details as Prisma.InputJsonValue,
+        members: { create: parent.members.map((m) => ({ userId: m.userId, role: m.role })) },
+      },
+    });
+
+    ensureInternalTeamMemberships().catch(() => {});
+
+    res.status(201).json({ data: collab });
   } catch (error) {
     next(error);
   }
