@@ -361,7 +361,7 @@ function renderStyleBible(bible: StyleBible): string {
  * enquadrar a foto no editor depois, sem refazer a arte. Só vai ao artista nas marcas com o
  * cérebro ligado; as demais continuam como antes.
  */
-const PHOTO_SLOT_RULE = `ESPAÇO DE FOTO (para a foto poder entrar ou ser trocada depois, sem refazer a arte):
+export const PHOTO_SLOT_RULE = `ESPAÇO DE FOTO (para a foto poder entrar ou ser trocada depois, sem refazer a arte):
 - Toda área destinada a uma fotografia é um elemento <div data-photo-slot="N"> (N = 1, 2, 3... único dentro do slide), com posição, largura e altura definidas no CSS e overflow:hidden.
 - Foto real fornecida para o slide: coloque a <img src="URL EXATA"> DENTRO desse <div>, com width:100%;height:100%;object-fit:cover. Não ponha a <img> solta, fora do espaço.
 - Nenhuma foto fornecida para o slide: deixe o <div data-photo-slot="N"> VAZIO. Dê a ele um fundo e uma borda sutis, tirados da paleta, que fiquem bonitos mesmo sem foto. NUNCA escreva "inserir foto", ícone, legenda nem texto dentro dele.

@@ -1,0 +1,51 @@
+import { describe, expect, it } from 'vitest';
+import { canWrite, describeAccess, formatRemaining, isLocalServerUrl, mcpServerUrl, plainText, roleLabel } from './mcp';
+
+describe('plainText', () => {
+  it('desfaz as entidades que o servidor escapou', () => {
+    expect(plainText('Barra &amp; Cia')).toBe('Barra & Cia');
+    expect(plainText('&lt;b&gt;x&lt;/b&gt;')).toBe('<b>x</b>');
+    expect(plainText('Nome &quot;A&quot; &#39;B&#39;')).toBe('Nome "A" \'B\'');
+  });
+
+  it('não interpreta outras entidades nem faz decodificação dupla', () => {
+    expect(plainText('&amp;lt;')).toBe('&lt;');
+    expect(plainText('&nbsp;')).toBe('&nbsp;');
+  });
+});
+
+describe('mcpServerUrl', () => {
+  it('usa a origem da API e põe /mcp na raiz do host', () => {
+    expect(mcpServerUrl('https://api.exemplo.com/api')).toBe('https://api.exemplo.com/mcp');
+    expect(mcpServerUrl('http://localhost:4000/api')).toBe('http://localhost:4000/mcp');
+    expect(mcpServerUrl('https://api.exemplo.com')).toBe('https://api.exemplo.com/mcp');
+  });
+
+  it('valor inválido não quebra a tela', () => {
+    expect(mcpServerUrl('não é url')).toBe('/mcp');
+  });
+});
+
+describe('isLocalServerUrl', () => {
+  it('reconhece endereço que o ChatGPT e o Claude não alcançam', () => {
+    expect(isLocalServerUrl('http://localhost:4000/mcp')).toBe(true);
+    expect(isLocalServerUrl('http://api.exemplo.com/mcp')).toBe(true);
+    expect(isLocalServerUrl('https://127.0.0.1/mcp')).toBe(true);
+    expect(isLocalServerUrl('https://api.exemplo.com/mcp')).toBe(false);
+  });
+});
+
+describe('acesso em palavras', () => {
+  it('escrita implica "ver e salvar"; leitura é só ver', () => {
+    expect(canWrite(['designer.write', 'designer.read'])).toBe(true);
+    expect(describeAccess(['designer.read'])).toBe('Só ver');
+    expect(describeAccess(['designer.write'])).toBe('Ver e salvar peças');
+  });
+
+  it('papel e tempo restante', () => {
+    expect(roleLabel('EDITOR')).toBe('Editor');
+    expect(formatRemaining(540)).toBe('9 min');
+    expect(formatRemaining(30)).toBe('30 s');
+    expect(formatRemaining(0)).toBe('expirado');
+  });
+});

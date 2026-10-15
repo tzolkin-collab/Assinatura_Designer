@@ -41,7 +41,8 @@ function LoginContent() {
       localStorage.setItem('auth_token', token);
       document.cookie = `auth_token=${token}; path=/; max-age=604800`; // 7 dias
 
-      if (redirectTo && redirectTo.startsWith('/')) {
+      // Só caminho do próprio app: "//host" e a barra invertida viram URL de outro site (open redirect).
+      if (redirectTo && redirectTo.startsWith('/') && !redirectTo.startsWith('//') && !redirectTo.includes('\\')) {
         router.push(redirectTo);
       } else {
         router.push('/galeria');

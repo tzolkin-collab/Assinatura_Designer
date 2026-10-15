@@ -60,6 +60,9 @@ export function middleware(request: NextRequest) {
   const token = request.cookies.get('auth_token')?.value;
   if (!token) {
     const loginUrl = new URL('/login', request.url);
+    // Volta para onde a pessoa queria ir depois de entrar. Sem isto, o link de consentimento de um
+    // agente (/mcp/consent?request=…) se perdia no login e a conexão nunca terminava.
+    if (pathname !== '/') loginUrl.searchParams.set('redirect', `${pathname}${request.nextUrl.search}`);
     return NextResponse.redirect(loginUrl);
   }
 

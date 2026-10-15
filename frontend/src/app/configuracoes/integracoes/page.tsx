@@ -10,6 +10,7 @@ import PageHeader from '@/components/ui/PageHeader';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import styles from '../configuracoes.module.css';
+import AgentesDeIA from './AgentesDeIA';
 
 interface UserProfile {
   id: string;
@@ -128,13 +129,16 @@ function IntegracoesContent() {
 
       <PageHeader
         title="Minhas Integrações"
-        description="Conecte e gerencie seus perfis de aplicativos integrados ao Assinatura."
+        description="Contas que o Designer usa para importar material e exportar peças, e os agentes de IA que podem desenhar por você."
       />
 
       {successMsg && <div className={styles.msgSuccess}>{successMsg}</div>}
       {errorMsg && <div className={styles.msgError}>{errorMsg}</div>}
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '24px', marginTop: '24px' }}>
+      <AgentesDeIA />
+
+      <h2 style={{ margin: '32px 0 0', fontSize: '16px', fontWeight: 700, color: 'var(--color-text)' }}>Contas conectadas</h2>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '24px', marginTop: '12px' }}>
         <Card variant="section" padding="md">
           <div className={styles.integrationList}>
             {/* Asana Integration */}
@@ -145,6 +149,7 @@ function IntegracoesContent() {
                 </div>
                 <div>
                   <div className={styles.integrationName}>Asana</div>
+                  <div className={styles.integrationStatus} style={{ marginBottom: '2px' }}>Importa arquivos dos seus projetos para a biblioteca da marca.</div>
                   <div className={styles.integrationStatus}>
                     Status:{' '}
                     {profile?.connections.asana ? (
@@ -176,6 +181,7 @@ function IntegracoesContent() {
                 </div>
                 <div>
                   <div className={styles.integrationName}>Google Drive</div>
+                  <div className={styles.integrationStatus} style={{ marginBottom: '2px' }}>Importa arquivos do seu Drive para a biblioteca da marca.</div>
                   <div className={styles.integrationStatus}>
                     Status:{' '}
                     {profile?.connections.googleDrive ? (
@@ -207,6 +213,7 @@ function IntegracoesContent() {
                 </div>
                 <div>
                   <div className={styles.integrationName}>Canva Individual</div>
+                  <div className={styles.integrationStatus} style={{ marginBottom: '2px' }}>Exporta as peças para a sua conta do Canva.</div>
                   <div className={styles.integrationStatus}>
                     Status:{' '}
                     {profile?.connections.canva ? (

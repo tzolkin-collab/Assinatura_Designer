@@ -9,7 +9,8 @@ interface AppShellProps {
   children: React.ReactNode;
 }
 
-const NO_SIDEBAR_ROUTES = ['/login', '/onboarding'];
+// /mcp/consent: o agente abre esta tela direto no navegador; é uma decisão isolada, sem o menu do app.
+const NO_SIDEBAR_ROUTES = ['/login', '/onboarding', '/mcp/consent'];
 // Apresentação hospedada é pública (sem sessão) e precisa da tela inteira, sem
 // nenhum chrome do app — prefixo em vez de match exato por causa do [slug].
 const NO_SIDEBAR_PREFIXES = ['/apresentacao/'];

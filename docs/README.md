@@ -7,6 +7,9 @@
   - Cobre: estado atual verificado, dois bugs concretos, plano por fases (0→4), e pontos frágeis conhecidos.
   - **Este é o documento canônico de planejamento.** Atualizar aqui antes de qualquer feature.
 
+- **[MCP-DESIGNER.md](MCP-DESIGNER.md)**
+  - Designer IA como servidor MCP para qualquer agente (ChatGPT, Claude, Gemini Spark; OAuth 2.1 + Streamable HTTP): agentes suportados, variáveis de ambiente, modelo de segurança, ferramentas (o agente desenha, o Designer valida e guarda), limitações e como testar com o MCP Inspector.
+
 - **ROADMAP.md** (histórico)
   - Roadmap antigo do projeto. Referência apenas — as decisões agora vivem no PLANO-CONSOLIDACAO.md.
 

@@ -22,6 +22,7 @@ import { assetsRouter } from './routes/assets.js';
 import { notificationsRouter } from './routes/notifications.js';
 import { memoryRoutes } from './routes/memory.js';
 import { publicPresentationsRouter } from './routes/publicPresentations.js';
+import { mountMcp } from './mcp/index.js';
 import { publicFontsRouter } from './routes/publicFonts.js';
 
 const app = express();
@@ -50,7 +51,11 @@ app.use(
 // fetch (login incluso) morrer com "Failed to fetch" sem pista nenhuma.
 // Em produção, lista estrita (CORS_ORIGIN aceita várias, separadas por vírgula).
 const corsOrigins = config.corsOrigin.split(',').map((s) => s.trim()).filter(Boolean);
-app.use(cors({ origin: config.isDev ? true : corsOrigins, credentials: true }));
+const apiCors = cors({ origin: config.isDev ? true : corsOrigins, credentials: true });
+// Conector MCP (ChatGPT) — desligado por padrão (MCP_ENABLED). Fica ANTES do cors/json
+// globais de propósito: as rotas OAuth/MCP têm CORS e limite de corpo próprios (ver mcp/routes.ts).
+mountMcp(app, { apiCors });
+app.use(apiCors);
 app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(requestContext);
