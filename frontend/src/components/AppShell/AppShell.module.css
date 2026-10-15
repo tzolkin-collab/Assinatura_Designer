@@ -27,4 +27,22 @@
     padding: var(--space-5);
     padding-top: calc(var(--space-5) + 48px);
   }
+
+  /* Páginas de tela cheia (Fábrica, editor) não tinham reserva para o botão de menu, que é
+     fixo no canto: ele cobria o primeiro controle do cabeçalho. Reserva a faixa do topo e
+     faz o conteúdo ocupar só o que sobra (o !important vence a altura em linha que essas
+     páginas definem: 100dvh). */
+  .mainFull {
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
+    height: 100dvh;
+    padding-top: var(--header-height);
+  }
+
+  .mainFull > * {
+    flex: 1 1 0;
+    min-height: 0;
+    height: auto !important;
+  }
 }

@@ -150,7 +150,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  z-index: var(--z-modal);
   padding: var(--space-4);
 }
 
@@ -186,7 +186,7 @@
 .modalTitle {
   font-family: var(--font-serif);
   font-size: var(--text-2xl);
-  font-weight: 500;
+  font-weight: var(--weight-title);
   color: var(--color-text);
   margin: 0;
 }
@@ -261,6 +261,7 @@
   font-size: var(--text-sm);
   color: var(--color-text-secondary);
   font-family: var(--font-mono);
+  font-size-adjust: none;
 }
 
 .formError {

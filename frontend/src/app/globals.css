@@ -98,6 +98,11 @@ html {
 
 body {
   font-family: var(--font-sans);
+  /* O Source Sans 3 tem altura-x menor que a do Inter (0,486 contra 0,546): no mesmo tamanho em
+     pixels o texto pareceria uns 11% menor e a legibilidade cairia. Igualar a altura-x mantém o
+     tamanho aparente de antes sem mexer em nenhum tamanho do sistema. As fontes serifada e
+     monoespaçada desligam o ajuste (font-size-adjust: none) para não crescerem junto. */
+  font-size-adjust: 0.546;
   font-size: var(--text-base);
   line-height: var(--leading-normal);
   color: var(--color-text);
@@ -116,6 +121,7 @@ a:hover {
 
 button {
   font-family: inherit;
+  font-size-adjust: inherit;
   cursor: pointer;
   border: none;
   background: none;
@@ -126,6 +132,9 @@ textarea,
 select {
   font-family: inherit;
   font-size: inherit;
+  /* Controles de formulário reiniciam a fonte pelo `font` do navegador: sem isto o campo ficava
+     menor que o texto ao redor. */
+  font-size-adjust: inherit;
 }
 
 ul,

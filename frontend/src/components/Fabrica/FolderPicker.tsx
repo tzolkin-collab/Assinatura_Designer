@@ -184,7 +184,7 @@ export default function FolderPicker({ marca, sessionId, disabled }: FolderPicke
             minWidth: 220, maxHeight: 280, overflowY: 'auto',
             background: '#fff', color: '#1f2937',
             border: '1px solid rgba(0,0,0,0.08)', borderRadius: 10,
-            boxShadow: '0 8px 28px rgba(0,0,0,0.12)', zIndex: 200, padding: 4,
+            boxShadow: '0 8px 28px rgba(0,0,0,0.12)', zIndex: 'var(--z-dropdown)', padding: 4,
           }}
         >
           <button

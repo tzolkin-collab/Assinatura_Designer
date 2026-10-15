@@ -164,7 +164,7 @@ export default function GlobalBillingPage() {
               <tbody>
                 {report?.models.map((row) => (
                   <tr key={row.model} className={styles.tenantRow}>
-                    <td><strong style={{ fontFamily: 'monospace' }}>{row.model}</strong></td>
+                    <td><strong style={{ fontFamily: 'monospace', fontSizeAdjust: 'none' }}>{row.model}</strong></td>
                     <td>{row.calls.toLocaleString('pt-BR')}</td>
                     <td>{row.promptTokens.toLocaleString('pt-BR')}</td>
                     <td>{row.outputTokens.toLocaleString('pt-BR')}</td>
