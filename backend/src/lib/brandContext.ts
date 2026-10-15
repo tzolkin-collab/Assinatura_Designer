@@ -1,6 +1,7 @@
 import { createError } from '../middleware/errorHandler.js';
 import type { PresentationConfig } from './fabricaSession.js';
 import prisma from './prisma.js';
+import { REFERENCE_ASSET_TAGS } from './designerBrain/referenceTags.js';
 
 export type DesignDocumentBrandContext = {
   name: string;
@@ -59,6 +60,8 @@ export async function resolveBrandContext(slug: string): Promise<ResolvedBrandCo
       },
       assets: {
         where: {
+          // Material de referência (manual visual, moodboard, fonte, paleta) é para o modelo VER, não para entrar num slide.
+          NOT: { tags: { hasSome: [...REFERENCE_ASSET_TAGS] } },
           OR: [
             { fileType: { startsWith: 'image/' } },
             { fileType: 'image/svg+xml' },
@@ -81,6 +84,7 @@ export async function resolveBrandContext(slug: string): Promise<ResolvedBrandCo
     const parentAssets = await prisma.asset.findMany({
       where: {
         brandId: brand.parentBrandId,
+        NOT: { tags: { hasSome: [...REFERENCE_ASSET_TAGS] } },
         OR: [
           { fileType: { startsWith: 'image/' } },
           { fileType: 'image/svg+xml' },

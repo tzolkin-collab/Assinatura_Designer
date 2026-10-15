@@ -12,6 +12,7 @@ import {
   isDesignerBrainEnabled,
   loadBrainLayers,
   parseCopyBlocks,
+  profileStyleReferences,
   REAL_PHOTO_RULE_PROMPT,
   officialFontsFor,
   textIssuesToDeviations,
@@ -49,14 +50,20 @@ import { isInterruptRequested, markInterruptStopped } from '../lib/interrupt.js'
 
 const ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
 
-async function loadStyleReferenceParts(images: Array<{ url: string; name: string; role?: 'style-reference' | 'content-asset' }> | undefined, brandSlug: string) {
+async function loadStyleReferenceParts(
+  images: Array<{ url: string; name: string; role?: 'style-reference' | 'content-asset' }> | undefined,
+  brandSlug: string,
+  /** URLs já conferidas contra a biblioteca do projeto (manual visual e moodboard da ficha). */
+  trustedUrls: ReadonlySet<string> = new Set(),
+) {
   const base = config.r2PublicUrl.replace(/\/$/, '');
   if (!base) return [] as Array<{ text?: string; inlineData?: { mimeType: string; data: string } }>;
-  const refs = (images ?? []).filter((image) => image.role === 'style-reference').slice(0, 3);
+  const refs = (images ?? []).filter((image) => image.role === 'style-reference').slice(0, 5);
   const parts: Array<{ text?: string; inlineData?: { mimeType: string; data: string } }> = [];
   for (const ref of refs) {
-    // Somente anexos de chat deste bucket/marca; URLs arbitrárias não viram fetch do servidor.
-    if (!ref.url.startsWith(`${base}/brands/${encodeURIComponent(brandSlug)}/chat-attachments/`)) continue;
+    // Somente anexos de chat deste bucket/marca, ou arquivos da biblioteca do projeto já conferidos
+    // (ficha); URLs arbitrárias não viram fetch do servidor.
+    if (!trustedUrls.has(ref.url) && !ref.url.startsWith(`${base}/brands/${encodeURIComponent(brandSlug)}/chat-attachments/`)) continue;
     try {
       const response = await fetch(ref.url, { signal: AbortSignal.timeout(8000) });
       if (!response.ok) continue;
@@ -695,7 +702,18 @@ async function runPipelineInner(
         visualMoodboardCount: (params.attachmentImages ?? []).filter((image) => image.role === 'style-reference').length,
       });
 
-      const moodboardParts = await loadStyleReferenceParts(params.attachmentImages, brand.slug);
+      // O manual visual, o moodboard e a referência das fontes da ficha chegam ao artista como IMAGEM.
+      const profileRefs = designerBrainOn ? await profileStyleReferences(savedProfile, brand.libraryBrandIds) : [];
+      const moodboardParts = await loadStyleReferenceParts(
+        [...profileRefs, ...(params.attachmentImages ?? [])],
+        brand.slug,
+        new Set(profileRefs.map((r) => r.url)),
+      );
+      logger.info('Referências visuais enviadas ao artista', {
+        brandSlug: brand.slug,
+        daFicha: profileRefs.map((r) => r.name),
+        imagensCarregadas: moodboardParts.filter((p) => p.inlineData).length,
+      });
       const contentAssets = (params.attachmentImages ?? []).filter((image) => image.role !== 'style-reference');
 
       const design = await generateHtmlDesignBatched(
@@ -737,6 +755,10 @@ async function runPipelineInner(
             designerBrain: designerBrainOn ? brandContext : undefined,
             // Sem o cérebro completo, a regra de foto real ativada no chat ainda chega ao artista.
             photoRule: photoRuleOn && !designerBrainOn,
+            // Variantes oficiais do logo da ficha: o artista escolhe pela cor do fundo do slide.
+            logoVariants: designerBrainOn && savedProfile?.logo?.files?.length
+              ? savedProfile.logo.files.map((f) => ({ url: f.url, label: f.label ?? 'Logo' }))
+              : undefined,
             logoUrl: brand.logoUrl,
             // Fotos anexadas pelo usuário no chat entram JUNTO com os assets da
             // marca — o artista as trata igual, prefere a inventar foto de banco.
