@@ -2,6 +2,17 @@
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api';
 
+/**
+ * Endereço do login que volta para a tela atual depois de entrar (ex.: o link de consentimento de um
+ * agente). Só caminho do próprio app e nunca a própria tela de login, para não criar laço.
+ */
+function loginUrlComRetorno(): string {
+  if (typeof window === 'undefined') return '/login';
+  const here = `${window.location.pathname}${window.location.search}`;
+  const ok = here.startsWith('/') && !here.startsWith('//') && !here.startsWith('/login') && here !== '/';
+  return ok ? `/login?redirect=${encodeURIComponent(here)}` : '/login';
+}
+
 interface FetchOptions extends RequestInit {
   /**
    * `true` (default) = obrigatório, redireciona pro /login se não houver token.
@@ -76,7 +87,7 @@ async function apiFetch<T>(endpoint: string, options: FetchOptions = {}): Promis
     if (token) {
       headersConfig['Authorization'] = `Bearer ${token}`;
     } else if (requireAuth === true && typeof window !== 'undefined') {
-      window.location.href = '/login';
+      window.location.href = loginUrlComRetorno();
       throw new ApiError(401, 'Missing token, redirecting to login');
     }
   }
@@ -89,7 +100,7 @@ async function apiFetch<T>(endpoint: string, options: FetchOptions = {}): Promis
   if (response.status === 401 && requireAuth === true && typeof window !== 'undefined') {
     localStorage.removeItem('auth_token');
     document.cookie = 'auth_token=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT';
-    window.location.href = '/login';
+    window.location.href = loginUrlComRetorno();
   }
 
   if (response.status === 304) {

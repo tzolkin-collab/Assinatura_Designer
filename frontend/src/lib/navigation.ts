@@ -14,7 +14,6 @@ import {
   Palette,
   PenTool,
   Settings,
-  Settings2,
   SlidersHorizontal,
   Users,
   type LucideIcon,
@@ -105,8 +104,6 @@ export const BRAND_SETTINGS: SettingsSection[] = [
   },
 ];
 
-// "Visão geral" agora é a página inicial da marca (no menu da marca); a das configurações é só "Geral".
-export const BRAND_SETTINGS_OVERVIEW = { label: 'Geral', icon: Settings2 } as const;
 export const BRAND_SETTINGS_GROUP = { label: 'Configurações', icon: SlidersHorizontal } as const;
 
 /** O item está ativo? Igualdade exata para a raiz de uma seção, prefixo para páginas internas. */
