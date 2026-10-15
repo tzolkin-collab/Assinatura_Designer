@@ -9,6 +9,7 @@ import { HtmlDesignValidationError, normalizeFontFamilies, validateHtmlDesign } 
 import prisma from '../../lib/prisma.js';
 import { normalizeEmptyPhotoSlots } from '../../lib/photoSlot.js';
 import { syncPostSlides } from '../../lib/postHelper.js';
+import { snapshotPost } from '../../lib/postVersions.js';
 import { WRITE_SCOPE } from '../config.js';
 import { editorUrl, summarizeIssues } from './designs.js';
 import { ToolUserError, type McpToolDefinition } from './types.js';
@@ -66,6 +67,8 @@ const outputSchema = {
   issues: z.array(issueSchema),
   warnings: z.array(z.string()),
   ownFontsUsed: z.array(z.string()),
+  status: z.enum(['READY', 'DRAFT']),
+  versionId: z.string().nullable(),
 };
 
 /** Famílias próprias que o deck realmente usa (nome no CSS/HTML ou em `fonts`). */
@@ -179,11 +182,24 @@ export const savePresentationTool: McpToolDefinition<typeof inputSchema, typeof 
       mcp: { userId: ctx.userId, clientId: ctx.clientId, familyId: ctx.familyId, savedAt: new Date().toISOString() },
     };
 
+    // Peça com divergência de texto não é entrega: fica em rascunho até uma chamada limpa.
+    const ok = issues.length === 0;
+    const status = ok ? ('READY' as const) : ('DRAFT' as const);
+
     const postId = existing?.id ?? randomUUID();
+    let versionId: string | null = null;
     if (existing) {
+      // Congela o estado ANTES de sobrescrever: o usuário pode ter editado a peça depois do agente,
+      // e a atualização troca o deck inteiro. Sem isto não havia como desfazer (o editor e o cérebro já fazem).
+      const version = await snapshotPost(postId, {
+        source: 'AI',
+        userId: ctx.userId,
+        label: 'Antes da atualização pelo agente',
+      });
+      versionId = version?.id ?? null;
       await prisma.post.update({
         where: { id: postId },
-        data: { name, status: 'READY', content: content as unknown as Prisma.InputJsonValue },
+        data: { name, status, content: content as unknown as Prisma.InputJsonValue },
       });
     } else {
       await prisma.post.create({
@@ -192,7 +208,7 @@ export const savePresentationTool: McpToolDefinition<typeof inputSchema, typeof 
           brandId: grant.id,
           name,
           type: format === 'presentation' ? 'PRESENTATION' : 'CAROUSEL',
-          status: 'READY',
+          status,
           createdById: ctx.userId,
           content: content as unknown as Prisma.InputJsonValue,
         },
@@ -201,7 +217,6 @@ export const savePresentationTool: McpToolDefinition<typeof inputSchema, typeof 
     await syncPostSlides(postId, envelope);
 
     const url = editorUrl(ctx.frontendOrigin, grant.slug, postId);
-    const ok = issues.length === 0;
     const structured = {
       postId,
       editorUrl: url,
@@ -213,10 +228,13 @@ export const savePresentationTool: McpToolDefinition<typeof inputSchema, typeof 
       issues,
       warnings,
       ownFontsUsed: [...new Set(own.map((r) => r.family))],
+      status,
+      versionId,
     };
     const text = [
       `${existing ? 'Peça atualizada' : 'Peça criada'}: ${name} (${slides.length} slides, ${canvas.width}x${canvas.height}). postId: ${postId}`,
       url ? `Acompanhe e edite em: ${url}` : '',
+      versionId ? 'A versão anterior ficou guardada no histórico da peça (o usuário pode restaurá-la).' : '',
       textChecked
         ? ok
           ? 'Texto conferido contra o aprovado: sem divergências.'
