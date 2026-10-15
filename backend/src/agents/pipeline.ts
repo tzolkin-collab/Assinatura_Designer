@@ -10,7 +10,8 @@ import {
   fontSubstitutionNotice,
   hasApprovedText,
   isDesignerBrainEnabled,
-  loadSavedProfileBySlug,
+  loadBrainLayers,
+  parseCopyBlocks,
   officialFontsFor,
   textIssuesToDeviations,
 } from '../lib/designerBrain/index.js';
@@ -296,12 +297,17 @@ async function runPipelineInner(
   // Ligado, o contexto legado (resumo + regras aprendidas no chat) dá lugar às camadas
   // global → projeto → modo: a memória do projeto é a do cadastro, e o chat não a reescreve.
   // A ficha salva do projeto liga o cérebro e é de onde ele lê as regras da marca.
-  const savedProfile = await loadSavedProfileBySlug(session.brandSlug);
-  const designerBrainOn = savedProfile !== null || isDesignerBrainEnabled(session.brandSlug);
+  // Num desdobramento a ficha é a da base, e o que muda vem como camada de collab.
+  const layers = await loadBrainLayers(session.brandSlug);
+  const savedProfile = layers?.projectProfile ?? null;
+  const designerBrainOn = layers !== null || isDesignerBrainEnabled(session.brandSlug);
+  // Status por bloco: só o aprovado (e o em revisão, como rascunho) vira texto de slide.
+  const copy = designerBrainOn ? parseCopyBlocks(params.sourceCopy) : null;
+  const sourceCopy = copy?.hasMarkers ? copy.copyForSlides : params.sourceCopy;
   // Sem texto aprovado o cérebro não tem o que reproduzir literalmente, e o modelo preenche o
   // vazio com texto inventado (visto em geração real: biografia, tópicos e botões que ninguém
   // escreveu). Melhor parar e pedir o texto do que entregar texto que a marca nunca aprovou.
-  if (designerBrainOn && !hasApprovedText({ sourceCopy: params.sourceCopy, approvedSkeleton: params.approvedSkeleton })) {
+  if (designerBrainOn && !hasApprovedText({ sourceCopy, approvedSkeleton: params.approvedSkeleton })) {
     ws.error(
       sessionId,
       'Esta marca só gera com texto aprovado. Envie o texto de cada slide (a copy) e eu o distribuo sem alterar nenhuma palavra.',
@@ -315,6 +321,9 @@ async function runPipelineInner(
       const brain = buildPipelineBrainContext({
         brand,
         profile: savedProfile,
+        projectName: layers?.projectName,
+        collab: layers?.collab,
+        textBlocks: copy?.blocks,
         format,
         aspectRatio: params.aspectRatio,
         pageCount: parseRequestedSlideCount(brief),
@@ -458,7 +467,7 @@ async function runPipelineInner(
           brandContext: plannerBrandContext,
           format,
           targetSlideCount: requestedCount,
-          sourceCopy: params.sourceCopy,
+          sourceCopy,
         }).catch((err) => {
           logger.error('Planner falhou; caindo na contagem de slides de fallback', { error: (err as Error).message });
           const count = requestedCount ?? (format === 'presentation' ? 6 : 4);
@@ -574,6 +583,7 @@ async function runPipelineInner(
     } else {
       const { resolved, pendingCandidates } = await resolveSlideImages({
         brandId: brand.id,
+        libraryBrandIds: brand.libraryBrandIds,
         brandName: brand.name,
         brandColors: brand.colors,
         width,
@@ -605,7 +615,7 @@ async function runPipelineInner(
             enrichedSkeleton: enrichedSoFar,
             candidates: pendingCandidates,
             brief,
-            sourceCopy: params.sourceCopy,
+            sourceCopy,
           },
           activeQuestion: {
             id: randomUUID(),
@@ -999,6 +1009,20 @@ async function runPipelineInner(
       }
 
 
+      // Status por bloco (§4.1): o resultado diz o que ficou de fora da arte e se a peça pode ser final.
+      if (designerBrainOn && copy?.hasMarkers && design.slides.length > 0) {
+        const { guidance, withheld } = copy.excluded;
+        const fora = [
+          guidance > 0 ? `${guidance} bloco${guidance > 1 ? 's' : ''} de fala/contexto/apoio ${guidance > 1 ? 'serviram' : 'serviu'} só de orientação` : '',
+          withheld > 0 ? `${withheld} bloco${withheld > 1 ? 's' : ''} interno${withheld > 1 ? 's' : ''}/não exibir ${withheld > 1 ? 'não foram enviados' : 'não foi enviado'} à IA` : '',
+        ].filter(Boolean);
+        const linhas = [
+          fora.length > 0 ? `**Texto da peça:** ${fora.join('; ')} e não ${guidance + withheld > 1 ? 'aparecem' : 'aparece'} na arte.` : '',
+          copy.hasInReview ? '**Texto em revisão:** há texto marcado como "em revisão" na peça. Ela está diagramada como rascunho e não deve ser tratada como final até a aprovação.' : '',
+        ].filter(Boolean);
+        if (linhas.length > 0) ws.token(sessionId, `\n\n${linhas.join('\n\n')}\n`);
+      }
+
       // Fonte oficial do projeto que o sistema não consegue carregar: o artista usou uma substituta.
       // Antes isso passava em silêncio; agora o resultado diz qual faltou e qual entrou no lugar.
       if (designerBrainOn && design.slides.length > 0) {
@@ -1084,7 +1108,7 @@ ${aviso}
 
       if (usedAssetUrls.length > 0) {
         const usedAssets = await prisma.asset.findMany({
-          where: { brandId: brand.id, url: { in: usedAssetUrls } },
+          where: { brandId: { in: brand.libraryBrandIds }, url: { in: usedAssetUrls } },
           select: { id: true, url: true, name: true },
         });
         contentToSave.usedAssets = usedAssets;
@@ -1143,7 +1167,7 @@ ${aviso}
         postId,
         skeleton,
         brief,
-        sourceCopy: params.sourceCopy,
+        sourceCopy,
       },
       activeQuestion: {
         id: randomUUID(),

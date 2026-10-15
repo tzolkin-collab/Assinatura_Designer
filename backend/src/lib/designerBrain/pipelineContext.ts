@@ -1,7 +1,8 @@
 import { renderProjectMemory, type BrandProfileData } from '../brandProfile.js';
 import { assembleDesignerBrain } from './assemble.js';
+import { renderTextBlocks } from './textStatus.js';
 import { PROJECT_MEMORY_SEEDS } from './seeds/index.js';
-import type { SectionId } from './types.js';
+import type { CollabLayer, SectionId, TextBlock } from './types.js';
 
 /**
  * Ponte entre o pipeline e o cérebro em camadas. Devolve o texto que ocupa o lugar do
@@ -45,6 +46,8 @@ export function resolveProjectMemory(
 const SECTIONS_FOR_BRAND_CONTEXT: ReadonlySet<SectionId> = new Set<SectionId>([
   'global',
   'project',
+  'collab',
+  'assets', // só os do desdobramento (logo e guia do parceiro): os da biblioteca seguem pelo caminho próprio
   'mode',
   'photo-rule',
   'review',
@@ -52,8 +55,14 @@ const SECTIONS_FOR_BRAND_CONTEXT: ReadonlySet<SectionId> = new Set<SectionId>([
 
 export interface PipelineBrainInput {
   brand: { slug: string; name: string; agentPrompt: string | null | undefined };
-  /** Ficha salva do projeto, quando existe. */
+  /** Ficha salva do projeto-base, quando existe. */
   profile?: BrandProfileData | null;
+  /** Nome do projeto-base, quando a marca é um desdobramento (o nome da marca é o do desdobramento). */
+  projectName?: string;
+  /** Camada do desdobramento/collab: só o que muda em relação à base. */
+  collab?: CollabLayer | null;
+  /** Blocos de texto com status. Só os de orientação (apoio, fala, contexto) entram aqui; o texto aprovado segue pelo planner. */
+  textBlocks?: TextBlock[];
   format: 'presentation' | 'carousel';
   aspectRatio?: string;
   /** Quantidade pedida no briefing, quando houver. */
@@ -67,13 +76,19 @@ export interface PipelineBrainContext {
 }
 
 export function buildPipelineBrainContext(input: PipelineBrainInput): PipelineBrainContext {
-  const memory = resolveProjectMemory(input.brand.slug, input.brand.agentPrompt, input.profile, input.brand.name);
+  const memory = resolveProjectMemory(
+    input.brand.slug,
+    input.brand.agentPrompt,
+    input.profile,
+    input.projectName ?? input.brand.name,
+  );
   if (!memory) throw new DesignerBrainSetupError(input.brand.slug);
 
   // O documento tem 3 modos (apresentação, imagem avulsa, e-book A4); carrossel não tem
   // modo próprio. Cada lâmina do carrossel é uma imagem avulsa com proporção definida.
   const assembled = assembleDesignerBrain({
-    project: { name: input.brand.name, memory },
+    project: { name: input.projectName ?? input.brand.name, memory },
+    collab: input.collab ?? null,
     creation: {
       mode: input.format === 'presentation' ? 'presentation' : 'single-image',
       blocks: [],
@@ -84,10 +99,18 @@ export function buildPipelineBrainContext(input: PipelineBrainInput): PipelineBr
     },
   });
 
+  // O briefing não entra (o planner já o recebe), mas a ORIENTAÇÃO sim: fala, apoio e contexto
+  // explicam o que a peça é, sem poder virar texto visível. O renderizador já diz isso ao modelo.
+  const guidance = renderTextBlocks(
+    (input.textBlocks ?? []).filter((x) => x.status === 'support' || x.status === 'speech' || x.status === 'context'),
+  );
+
   return {
-    brandContext: assembled.sections
-      .filter((s) => SECTIONS_FOR_BRAND_CONTEXT.has(s.id))
-      .map((s) => s.text)
+    brandContext: [
+      ...assembled.sections.filter((s) => SECTIONS_FOR_BRAND_CONTEXT.has(s.id)).map((s) => s.text),
+      guidance,
+    ]
+      .filter(Boolean)
       .join('\n\n'),
     pending: assembled.pending,
   };
