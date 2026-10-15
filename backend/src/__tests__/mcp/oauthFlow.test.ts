@@ -382,10 +382,12 @@ describe('consentimento', () => {
     expect(h.redis.keys().filter((k) => k.startsWith('mcp:code:') && !k.startsWith('mcp:code-used:'))).toHaveLength(1);
   });
 
-  it('o usuário pode REDUZIR escopos, nunca ampliar', async () => {
+  it('o usuário pode liberar escopo suportado que o cliente não pediu, mas não escopo desconhecido', async () => {
     const { requestId } = await pending('designer.read');
+    const desconhecido = await decide(h, requestId, 'user-1', { decision: 'approve', brandSlugs: ['marca-a'], scopes: ['admin'] });
+    expect(desconhecido.status).toBe(400);
     const ampliar = await decide(h, requestId, 'user-1', { decision: 'approve', brandSlugs: ['marca-a'], scopes: ['designer.write'] });
-    expect(ampliar.status).toBe(400);
+    expect(ampliar.status).toBe(200);
 
     const w = await pending('designer.read designer.write');
     const reduzir = await decide(h, w.requestId, 'user-1', { decision: 'approve', brandSlugs: ['marca-a'], scopes: ['designer.read'] });
