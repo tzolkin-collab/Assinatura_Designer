@@ -8,7 +8,7 @@ import {
   loadBrainLayers,
   onlyProvidedAssets,
 } from '../../lib/designerBrain/index.js';
-import { PHOTO_SLOT_RULE, brainTextRule } from '../../lib/htmlDesign.js';
+import { PHOTO_SLOT_RULE, brainTextRule, logoBackgroundRule } from '../../lib/htmlDesign.js';
 import { READ_SCOPE } from '../config.js';
 import { DESIGNER_WORKFLOW_CHECKLIST, HTML_OUTPUT_CONTRACT } from './htmlContract.js';
 import type { McpToolDefinition } from './types.js';
@@ -53,6 +53,8 @@ const outputSchema = {
     google: z.array(z.string()),
   }),
   logoUrl: z.string().nullable(),
+  logoVariants: z.array(z.object({ label: z.string(), url: z.string() })),
+  logoRule: z.string(),
   assets: z.array(z.object({ name: z.string(), url: z.string(), source: z.string().nullable() })),
   assetsTotal: z.number(),
   assetsTruncated: z.boolean(),
@@ -119,11 +121,16 @@ export const getDesignerBriefTool: McpToolDefinition<typeof inputSchema, typeof 
     const ownNames = new Set(own.map((o) => o.family.toLowerCase()));
     const google = brand.primaryFonts.filter((f) => !ownNames.has(f.toLowerCase()));
 
+    // Logos oficiais da ficha (uma variante por cor de fundo): o agente escolhe pela cor do slide, como o
+    // artista interno. Saem da lista de arquivos para não aparecerem duas vezes.
+    const logoVariants = (profile?.logo?.files ?? []).map((f) => ({ label: f.label ?? 'Logo', url: f.url }));
+    const logoUrls = new Set(logoVariants.map((l) => l.url));
+
     // Só o que alguém FORNECEU (nunca o que o sistema gerou por IA): é a regra de foto real.
-    const provided = onlyProvidedAssets(brand.assetUrls);
+    const provided = onlyProvidedAssets(brand.assetUrls).filter((a) => !logoUrls.has(a.url));
     const assets = provided.slice(0, MAX_ASSETS).map((a) => ({ name: a.name, url: a.url, source: a.source ?? null }));
 
-    const hasLogo = Boolean(brand.logoUrl);
+    const hasLogo = Boolean(brand.logoUrl) || logoVariants.length > 0;
     const structured = {
       brand: { slug: grant.slug, name: brand.name },
       canvas: { ...canvas, format, aspectRatio },
@@ -138,6 +145,8 @@ export const getDesignerBriefTool: McpToolDefinition<typeof inputSchema, typeof 
       palette: brand.colors,
       fonts: { own, google },
       logoUrl: brand.logoUrl ?? null,
+      logoVariants,
+      logoRule: logoBackgroundRule(logoVariants.length > 0),
       assets,
       assetsTotal: provided.length,
       assetsTruncated: provided.length > MAX_ASSETS,
@@ -168,7 +177,16 @@ export const getDesignerBriefTool: McpToolDefinition<typeof inputSchema, typeof 
             .join('; ')}`
         : '',
       google.length ? `Fontes do Google: ${google.join(', ')}` : '',
-      `Logo: ${structured.logoUrl ?? '(sem logo)'}`,
+      structured.logoUrl ? `Logo: ${structured.logoUrl}` : '',
+      logoVariants.length
+        ? [
+            'Logos oficiais (variantes; escolha pela cor do fundo do slide):',
+            ...logoVariants.map((l) => `- ${l.label}: ${l.url}`),
+            structured.logoRule,
+          ].join('\n')
+        : structured.logoUrl
+          ? structured.logoRule
+          : 'Logo: (sem logo cadastrado; não invente um nem escreva o nome da marca no lugar dele).',
       assets.length
         ? `Arquivos reais disponíveis (${assets.length} de ${provided.length}):\n${assets.map((a) => `- ${a.name}: ${a.url}`).join('\n')}`
         : 'Arquivos reais disponíveis: nenhum. Reserve a área de foto, vazia, onde fizer sentido.',
