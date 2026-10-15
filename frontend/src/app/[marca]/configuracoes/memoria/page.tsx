@@ -87,7 +87,7 @@ export default function MemoriaPage() {
       />
 
       <section className={styles.section}>
-        <Card>
+        <Card variant="section">
           <div className={styles.cardContent}>
             <div className={styles.header}>
               <div className={styles.iconWrapper}>

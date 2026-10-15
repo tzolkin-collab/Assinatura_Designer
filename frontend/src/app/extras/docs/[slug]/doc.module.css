@@ -10,10 +10,10 @@
   top: 16px;
   align-self: start;
   background-color: var(--color-surface);
-  border: 1px solid rgba(0, 0, 0, 0.04);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-xl);
   padding: var(--space-4);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.02);
+  box-shadow: none;
 }
 
 .navTitle {
@@ -58,7 +58,7 @@
   border-radius: var(--radius-2xl);
   background-color: var(--color-surface);
   padding: clamp(24px, 4vw, 40px);
-  box-shadow: 0 4px 32px rgba(0, 0, 0, 0.03);
+  box-shadow: none;
 }
 
 .markdown {
@@ -85,7 +85,7 @@
   line-height: 1.3;
   margin: var(--space-10) 0 var(--space-5) 0;
   color: var(--color-text);
-  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+  border-bottom: 1px solid var(--color-border);
   padding-bottom: var(--space-3);
 }
 
@@ -116,21 +116,21 @@
 .markdown a {
   color: var(--color-brand);
   text-decoration: underline;
-  text-decoration-color: rgba(217, 119, 87, 0.4);
+  text-decoration-color: color-mix(in srgb, var(--color-brand-fill) 40%, transparent);
   text-underline-offset: 4px;
   transition: all var(--transition-fast);
 }
 
 .markdown a:hover {
   text-decoration-color: var(--color-brand);
-  background-color: rgba(217, 119, 87, 0.05);
+  background-color: color-mix(in srgb, var(--color-brand-fill) 5%, transparent);
 }
 
 .markdown blockquote {
   border-left: 3px solid var(--color-brand);
   margin: var(--space-6) 0;
   padding: var(--space-3) var(--space-5);
-  background-color: rgba(217, 119, 87, 0.03);
+  background-color: color-mix(in srgb, var(--color-brand-fill) 3%, transparent);
   border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
   font-style: italic;
 }
@@ -146,7 +146,7 @@
   background-color: var(--color-bg-secondary);
   padding: 3px 6px;
   border-radius: var(--radius-sm);
-  border: 1px solid rgba(0, 0, 0, 0.04);
+  border: 1px solid var(--color-border);
   color: var(--color-text);
 }
 
@@ -172,10 +172,10 @@
   top: 16px;
   align-self: start;
   background-color: var(--color-surface);
-  border: 1px solid rgba(0, 0, 0, 0.04);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-xl);
   padding: var(--space-4);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.02);
+  box-shadow: none;
 }
 
 .tocTitle {

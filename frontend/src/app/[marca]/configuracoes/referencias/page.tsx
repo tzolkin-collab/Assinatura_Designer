@@ -272,7 +272,7 @@ export default function ReferenciasPage() {
           )}
 
           {activeRef && (
-            <Card padding="lg">
+            <Card variant="section" padding="lg">
               <div className={styles.modalHeader}>
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>

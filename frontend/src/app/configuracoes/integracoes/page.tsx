@@ -139,7 +139,7 @@ function IntegracoesContent() {
 
       <h2 style={{ margin: '32px 0 0', fontSize: '16px', fontWeight: 700, color: 'var(--color-text)' }}>Contas conectadas</h2>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '24px', marginTop: '12px' }}>
-        <Card padding="md">
+        <Card variant="section" padding="md">
           <div className={styles.integrationList}>
             {/* Asana Integration */}
             <div className={styles.integrationRow}>

@@ -3,7 +3,7 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-4);
-  margin-bottom: var(--space-8);
+  margin-bottom: var(--space-6);
 }
 
 .textContainer {
@@ -16,11 +16,9 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 48px;
-  height: 48px;
-  background-color: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
+  width: 36px;
+  height: 36px;
+  color: var(--color-text-secondary);
   flex-shrink: 0;
 }
 
@@ -31,9 +29,9 @@
 }
 
 .title {
-  font-family: var(--font-serif);
   font-size: var(--text-3xl);
-  font-weight: 500;
+  font-weight: 600;
+  letter-spacing: -0.02em;
   color: var(--color-text);
   line-height: var(--leading-tight);
 }

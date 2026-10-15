@@ -106,7 +106,7 @@ export default function ConfiguracoesPage() {
             href={`/${params.marca}/configuracoes/${section.key}`}
             className={styles.sectionLink}
           >
-            <Card hover padding="md" style={{ height: '100%' }}>
+            <Card variant="section" hover padding="md" style={{ height: '100%' }}>
               <div className={styles.sectionRow}>
                 <div className={styles.sectionIcon}>{section.icon}</div>
                 <div className={styles.sectionText}>

@@ -398,7 +398,7 @@ export default function BrandingPage() {
       />
 
       <div className={styles.grid}>
-        <Card padding="md">
+        <Card variant="section" padding="md">
           <h3 className={styles.sectionTitle}>Logotipo</h3>
           <label 
             className={`${styles.uploadArea} ${isDragging ? styles.uploadAreaDragging : ''}`}
@@ -435,7 +435,7 @@ export default function BrandingPage() {
 
         </Card>
 
-        <Card padding="md">
+        <Card variant="section" padding="md">
           <h3 className={styles.sectionTitle}>Paleta de Cores</h3>
           <div className={styles.colorGrid}>
             {colors.map((cor, i) => (
@@ -475,7 +475,7 @@ export default function BrandingPage() {
           </p>
         </Card>
 
-        <Card padding="md">
+        <Card variant="section" padding="md">
           <h3 className={styles.sectionTitle}>Direção de Geração</h3>
           <div className={styles.guidelinesGrid}>
             <div className={styles.inputGroup}>
@@ -590,7 +590,7 @@ export default function BrandingPage() {
           </div>
         </Card>
 
-        <Card padding="md">
+        <Card variant="section" padding="md">
           <h3 className={styles.sectionTitle}>Tipografia</h3>
           <div className={styles.typeRow} style={{ flexDirection: 'column', alignItems: 'stretch', gap: 12 }}>
             {fonts.map((fonte, i) => (
@@ -658,7 +658,7 @@ export default function BrandingPage() {
           </p>
         </Card>
 
-        <Card padding="md">
+        <Card variant="section" padding="md">
           <h3 className={styles.sectionTitle}>Identidade e Diretrizes da Marca</h3>
           <div className={styles.guidelinesGrid}>
             <div className={styles.inputGroup}>

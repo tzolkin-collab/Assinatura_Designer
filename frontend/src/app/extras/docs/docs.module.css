@@ -37,16 +37,16 @@
 }
 
 .docCard {
-  border: 1px solid rgba(0, 0, 0, 0.04);
+  border: 1px solid var(--color-border);
   background-color: var(--color-surface);
   border-radius: var(--radius-2xl);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.02);
+  box-shadow: none;
   transition: all var(--transition-base);
   height: 100%;
 }
 
 .docCard:hover {
   transform: translateY(-4px);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.04);
+  box-shadow: none;
   border-color: rgba(0, 0, 0, 0.08);
 }

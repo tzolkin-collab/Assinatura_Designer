@@ -107,7 +107,7 @@ export default function PerfilPage() {
       {errorMsg && <div className={styles.msgError}>{errorMsg}</div>}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '24px', marginTop: '24px' }}>
-        <Card padding="md">
+        <Card variant="section" padding="md">
           <form onSubmit={handleUpdate} className={styles.form}>
             <div className={styles.formGroup}>
               <span className={styles.label}>E-mail da Conta</span>

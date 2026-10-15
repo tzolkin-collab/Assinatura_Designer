@@ -29,12 +29,12 @@
   background: var(--color-bg-secondary, rgba(0, 0, 0, 0.04));
 }
 .chip:focus-visible {
-  outline: 2px solid var(--color-brand, #d97757);
+  outline: 2px solid var(--color-brand, var(--color-brand-fill));
   outline-offset: 2px;
 }
 
 .icon {
-  color: var(--color-brand, #d97757);
+  color: var(--color-brand, var(--color-brand-fill));
   flex-shrink: 0;
 }
 
@@ -92,7 +92,7 @@
   padding: 14px;
   background: var(--color-surface, #fff);
   border: 1px solid var(--color-border, rgba(0, 0, 0, 0.12));
-  border-radius: 14px;
+  border-radius: 10px;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
   color: var(--color-text, #111827);
   text-align: left;
