@@ -128,7 +128,7 @@ export default function EquipePage() {
         </p>
       )}
 
-      <Card padding="none">
+      <Card variant="section" padding="none">
         {loading ? (
           <div style={{ padding: '32px', display: 'flex', gap: '8px', alignItems: 'center', justifyContent: 'center', color: 'var(--color-text-tertiary)' }}>
             <Loader2 className="animate-spin" size={16} /> Carregando equipe...

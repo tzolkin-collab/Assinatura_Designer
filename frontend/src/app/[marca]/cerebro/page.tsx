@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { Lock } from 'lucide-react';
@@ -142,6 +142,7 @@ export default function CerebroPage() {
   const [saveError, setSaveError] = useState('');
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [manualFiles, setManualFiles] = useState<File[]>([]);
+  const manualInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState('');
   const [importResult, setImportResult] = useState<ProfileImportResult | null>(null);
@@ -304,13 +305,23 @@ export default function CerebroPage() {
           </p>
           <div className={styles.importActions}>
             <input
+              ref={manualInputRef}
               type="file"
               multiple
+              hidden
               accept=".pdf,.png,.jpg,.jpeg,.webp,.md,.txt,.html,.htm,application/pdf,image/png,image/jpeg,image/webp,text/markdown,text/plain,text/html"
               disabled={importing}
               onChange={(e) => setManualFiles(Array.from(e.target.files ?? []).slice(0, 6))}
               aria-label="Arquivos do manual"
             />
+            <button type="button" className={[styles.btn, styles.btnGhost].join(' ')} disabled={importing} onClick={() => manualInputRef.current?.click()}>
+              {manualFiles.length > 0 ? 'Trocar arquivos' : 'Escolher arquivos'}
+            </button>
+            {manualFiles.length > 0 && (
+              <span className={styles.fileName}>
+                {manualFiles.length === 1 ? manualFiles[0]!.name : `${manualFiles.length} arquivos: ${manualFiles.map((f) => f.name).join(', ')}`}
+              </span>
+            )}
             <button type="button" className={styles.btn} disabled={importing || manualFiles.length === 0} onClick={runImport}>
               {importing ? 'Lendo o manual...' : 'Ler manual'}
             </button>

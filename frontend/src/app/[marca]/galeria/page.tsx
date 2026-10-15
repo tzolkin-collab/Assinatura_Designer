@@ -1289,20 +1289,13 @@ export default function BrandGaleriaPage() {
         Voltar
       </Link>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '16px', flexWrap: 'wrap' }}>
+      <div className={styles.pageTop}>
         <PageHeader
-          title={marca}
+          title={brand?.name ?? marca}
           description="Histórico de artes e criativos gerados para esta marca."
         />
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-          <Link href={`/${slug}/fabrica`}>
-            <Button size="sm">
-              <Sparkles size={14} />
-              Nova Arte
-            </Button>
-          </Link>
-          <div className={styles.viewToggle}>
+        <div className={styles.toolbar}>
           <AiSpendBadge slug={slug} />
           {brand?.members && (
             <div className={styles.teamAvatars}>
@@ -1319,7 +1312,8 @@ export default function BrandGaleriaPage() {
               </Link>
             </div>
           )}
-          
+
+          <div className={styles.viewToggle}>
           <button 
             className={`${styles.toggleBtn} ${viewMode === 'list' ? styles.toggleBtnActive : ''}`}
             onClick={() => setViewMode('list')}
@@ -1334,14 +1328,20 @@ export default function BrandGaleriaPage() {
           >
             <LayoutGrid size={18} />
           </button>
-        </div>
+          </div>
+          <Link href={`/${slug}/fabrica`}>
+            <Button size="sm">
+              <Sparkles size={14} />
+              Nova Arte
+            </Button>
+          </Link>
         </div>
       </div>
 
       <div className={styles.foldersContainer}>
         <div className={styles.foldersHeader}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)' }}>
-            <h3 className={styles.foldersTitle} style={{ fontFamily: 'var(--font-serif)', fontSize: '20px', textTransform: 'none', color: 'var(--color-text)', letterSpacing: 'normal' }}>Pastas do Projeto</h3>
+            <h3 className={styles.foldersTitle}>Pastas do Projeto</h3>
             <button 
               className={styles.aiReportBtn} 
               title="Gerar relatório de estilo desta pasta com Inteligência Artificial"

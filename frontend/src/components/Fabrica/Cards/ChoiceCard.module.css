@@ -2,9 +2,9 @@
   text-align: left;
   padding: var(--space-5);
   border-radius: var(--radius-2xl);
-  border: 1px solid rgba(0, 0, 0, 0.04);
+  border: 1px solid var(--color-border);
   background-color: var(--color-surface);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.02);
+  box-shadow: none;
   cursor: pointer;
   transition: transform var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast);
   display: flex;
@@ -17,15 +17,14 @@
 .card:hover {
   border-color: rgba(0, 0, 0, 0.08);
   transform: translateY(-2px);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.04);
+  box-shadow: none;
 }
 
 .card::before {
   content: '';
   position: absolute;
   inset: 0;
-  background: radial-gradient(circle at 20% 20%, rgba(217, 119, 87, 0.05), transparent 55%),
-    radial-gradient(circle at 80% 30%, rgba(217, 119, 87, 0.03), transparent 55%);
+  background: var(--color-bg);
   opacity: 0;
   transition: opacity var(--transition-fast);
   pointer-events: none;
@@ -37,20 +36,17 @@
 
 .image::before {
   opacity: 0.85;
-  background: radial-gradient(circle at 20% 20%, rgba(217, 119, 87, 0.08), transparent 55%),
-    radial-gradient(circle at 80% 30%, rgba(0, 0, 0, 0.02), transparent 55%);
+  background: var(--color-bg);
 }
 
 .presentation::before {
   opacity: 0.85;
-  background: radial-gradient(circle at 20% 20%, rgba(0, 0, 0, 0.03), transparent 55%),
-    radial-gradient(circle at 80% 30%, rgba(217, 119, 87, 0.06), transparent 55%);
+  background: var(--color-bg);
 }
 
 .video::before {
   opacity: 0.85;
-  background: radial-gradient(circle at 20% 20%, rgba(217, 119, 87, 0.05), transparent 55%),
-    radial-gradient(circle at 80% 30%, rgba(0, 0, 0, 0.04), transparent 55%);
+  background: var(--color-bg);
 }
 
 .top {
@@ -64,10 +60,10 @@
 .icon {
   width: 44px;
   height: 44px;
-  border-radius: 14px;
+  border-radius: 10px;
   display: grid;
   place-items: center;
-  background: rgba(217, 119, 87, 0.10);
+  background: color-mix(in srgb, var(--color-brand-fill) 10%, transparent);
   color: var(--color-brand);
   z-index: 1;
 }
@@ -78,7 +74,7 @@
 }
 
 .video .icon {
-  background: rgba(217, 119, 87, 0.06);
+  background: color-mix(in srgb, var(--color-brand-fill) 6%, transparent);
   color: var(--color-brand);
 }
 
@@ -132,7 +128,7 @@
   font-weight: 500;
   font-size: var(--text-xs);
   line-height: 1.35;
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.10);
+  box-shadow: none;
   opacity: 0;
   transform: translateY(-6px);
   pointer-events: none;

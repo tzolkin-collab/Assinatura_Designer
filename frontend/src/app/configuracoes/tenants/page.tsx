@@ -104,7 +104,7 @@ export default function TenantsPage() {
       {errorMsg && <div className={styles.msgError}>{errorMsg}</div>}
 
       <div style={{ marginTop: '24px' }}>
-        <Card padding="md">
+        <Card variant="section" padding="md">
           <div style={{ overflowX: 'auto' }}>
             <table className={styles.tenantTable}>
               <thead>

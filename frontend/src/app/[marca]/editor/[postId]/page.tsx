@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { api, getApiErrorMessage } from '@/lib/api';
 import Button from '@/components/ui/Button';
+import styles from './editorPost.module.css';
 import HtmlSlideRenderer from '@/components/DesignDocument/HtmlSlideRenderer';
 import SlideCodeEditor, { type SlideCode } from '@/components/DesignDocument/SlideCodeEditor';
 import PhotoSlotsPanel from '@/components/DesignDocument/PhotoSlotsPanel';
@@ -241,18 +242,18 @@ export default function EditorPage() {
 
   if (carregando) {
     return (
-      <div style={{ display: 'grid', placeItems: 'center', height: '100dvh', color: 'var(--color-text-muted, #6b7280)' }}>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Loader2 size={16} /> Carregando design…</span>
+      <div className={styles.center}>
+        <span className={styles.loading}><Loader2 size={16} /> Carregando design…</span>
       </div>
     );
   }
 
   if (formatoLegado || !content) {
     return (
-      <div style={{ display: 'grid', placeItems: 'center', height: '100dvh', textAlign: 'center', padding: 24 }}>
-        <div>
-          <h2 style={{ marginBottom: 8 }}>Formato não suportado pelo editor</h2>
-          <p style={{ color: 'var(--color-text-muted, #6b7280)', marginBottom: 16, maxWidth: 480 }}>
+      <div className={styles.center}>
+        <div className={styles.centerInner}>
+          <h2>Formato não suportado pelo editor</h2>
+          <p>
             {erro ?? 'Este design é de um formato legado. O acervo atual foi migrado para html-design — se este post importa, me avise no chat da Fábrica.'}
           </p>
           <Button onClick={() => router.push(`/${marca}/galeria`)}>Voltar à galeria</Button>
@@ -261,135 +262,104 @@ export default function EditorPage() {
     );
   }
 
-  const painelBtn = (id: Painel, label: string, Icone: typeof Sparkles) => (
+  const aba = (id: Painel, label: string, Icone: typeof Sparkles) => (
     <button
       key={id}
       type="button"
+      role="tab"
+      aria-selected={painel === id}
       onClick={() => setPainel(id)}
-      style={{
-        display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', fontSize: 12.5, fontWeight: 500,
-        borderRadius: 999, border: '1px solid transparent', cursor: 'pointer',
-        background: painel === id ? 'rgba(0,0,0,0.07)' : 'transparent',
-        color: painel === id ? 'var(--color-text, #111827)' : 'var(--color-text-muted, #6b7280)',
-      }}
+      className={[styles.tab, painel === id ? styles.tabActive : ''].join(' ')}
     >
-      <Icone size={13} /> {label}
+      <Icone size={14} /> {label}
     </button>
   );
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100dvh', background: 'var(--color-bg, #faf8f5)' }}>
-      {/* ── Header ─────────────────────────────────────────────────────────── */}
-      <header style={{
-        display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', flexWrap: 'wrap',
-        borderBottom: '1px solid var(--color-border, rgba(0,0,0,0.08))', background: 'var(--color-surface, #fff)',
-        position: 'relative', zIndex: 30,
-      }}>
-        <button
-          type="button"
-          onClick={() => router.push(`/${marca}/galeria`)}
-          style={{ display: 'flex', alignItems: 'center', gap: 6, border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 13 }}
-        >
+    <div className={styles.page}>
+      <header className={styles.topbar}>
+        <button type="button" onClick={() => router.push(`/${marca}/galeria`)} className={styles.back}>
           <ArrowLeft size={15} /> Galeria
         </button>
-        <div style={{ fontWeight: 600, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '38vw' }}>
-          {post?.name?.trim() || `Design ${postId.slice(0, 8)}`}
-        </div>
-        <span style={{ fontSize: 11, color: 'var(--color-text-muted, #6b7280)' }}>
+        <div className={styles.title}>{post?.name?.trim() || `Design ${postId.slice(0, 8)}`}</div>
+        <span className={styles.meta}>
           {slideCount} slide{slideCount > 1 ? 's' : ''} · {canvasW}×{canvasH}
         </span>
 
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-        <GenerationCostChip postId={postId} refreshKey={custoKey} />
-        <div style={{ position: 'relative' }}>
-          <button
-            type="button"
-            onClick={() => setMenuBaixar(v => !v)}
-            disabled={exportando !== null}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', fontSize: 12.5, fontWeight: 500,
-              borderRadius: 999, border: '1px solid var(--color-border, rgba(0,0,0,0.12))',
-              background: 'transparent', cursor: exportando ? 'wait' : 'pointer',
-            }}
-          >
-            {exportando
-              ? <><Loader2 size={13} /> {exportando.formato.toUpperCase()} {exportando.done}/{exportando.total}</>
-              : <><Download size={13} /> Baixar <ChevronDown size={12} /></>}
-          </button>
-          {menuBaixar && (
-            <div style={{
-              position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 40,
-              width: 'min(250px, calc(100vw - 24px))', padding: '4px 0', background: 'var(--color-surface, #fff)',
-              border: '1px solid var(--color-border, rgba(0,0,0,0.12))', borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
-            }}>
-              {([
-                ['pptx', 'PPTX editável', 'Visual fiel + textos editáveis'],
-                ['pdf', 'PDF do deck', 'Uma página por slide'],
-                ['zip', 'ZIP com PNGs', 'Imagens em alta'],
-              ] as Array<[DeckFileFormat, string, string]>).map(([f, label, hint]) => (
-                <button key={f} type="button" onClick={() => void baixarDeck(f)}
-                  style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 12px', border: 'none', background: 'transparent', cursor: 'pointer' }}>
-                  <span style={{ display: 'block', fontSize: 13, fontWeight: 500 }}>{label}</span>
-                  <span style={{ display: 'block', fontSize: 11, color: 'var(--color-text-muted, #6b7280)' }}>{hint}</span>
+        <div className={styles.actions}>
+          <GenerationCostChip postId={postId} refreshKey={custoKey} />
+          <div className={styles.menuWrap}>
+            <button
+              type="button"
+              onClick={() => setMenuBaixar(v => !v)}
+              disabled={exportando !== null}
+              aria-haspopup="menu"
+              aria-expanded={menuBaixar}
+              className={styles.btn}
+            >
+              {exportando
+                ? <><Loader2 size={14} /> {exportando.formato.toUpperCase()} {exportando.done}/{exportando.total}</>
+                : <><Download size={14} /> Baixar <ChevronDown size={13} /></>}
+            </button>
+            {menuBaixar && (
+              <div className={styles.menu} role="menu">
+                {([
+                  ['pptx', 'PPTX editável', 'Visual fiel + textos editáveis'],
+                  ['pdf', 'PDF do deck', 'Uma página por slide'],
+                  ['zip', 'ZIP com PNGs', 'Imagens em alta'],
+                ] as Array<[DeckFileFormat, string, string]>).map(([f, label, hint]) => (
+                  <button key={f} type="button" role="menuitem" onClick={() => void baixarDeck(f)} className={styles.menuItem}>
+                    {label}
+                    <small>{hint}</small>
+                  </button>
+                ))}
+                <div className={styles.menuRule} />
+                <button type="button" role="menuitem" className={styles.menuItem} onClick={() => { setMenuBaixar(false); void baixarSlide(postId, safeSlide, 'png'); }}>
+                  PNG deste slide
                 </button>
-              ))}
-              <div style={{ height: 1, background: 'rgba(0,0,0,0.08)', margin: '4px 0' }} />
-              <button type="button" onClick={() => { setMenuBaixar(false); void baixarSlide(postId, safeSlide, 'png'); }}
-                style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 12px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 13 }}>
-                PNG deste slide
-              </button>
-              <button type="button" onClick={() => { setMenuBaixar(false); void baixarSlide(postId, safeSlide, 'html'); }}
-                style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 12px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 13 }}>
-                HTML deste slide
-              </button>
-            </div>
-          )}
-        </div>
+                <button type="button" role="menuitem" className={styles.menuItem} onClick={() => { setMenuBaixar(false); void baixarSlide(postId, safeSlide, 'html'); }}>
+                  HTML deste slide
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </header>
 
-      {erro && (
-        <div style={{ padding: '8px 16px', fontSize: 12.5, color: '#b91c1c', background: '#fef2f2' }}>{erro}</div>
-      )}
+      {erro && <div className={styles.alert} role="alert">{erro}</div>}
 
-      {/* ── Corpo: viewer + painel ─────────────────────────────────────────── */}
-      <div style={{ display: 'flex', flex: 1, minHeight: 0, gap: 14, padding: 14, flexWrap: 'wrap', overflowY: 'auto' }}>
-        {/* Viewer */}
-        <div style={{ flex: '1 1 480px', minWidth: 320, display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div className={styles.body}>
+        <div className={styles.stage}>
+          <div className={styles.stageTools}>
             <button
               type="button"
               onClick={() => setInspecionando(v => !v)}
               title="Clique em um elemento do slide para mirar a edição de IA nele"
-              style={{
-                display: 'flex', alignItems: 'center', gap: 6, padding: '5px 12px', fontSize: 12, fontWeight: 500,
-                borderRadius: 999, cursor: 'pointer',
-                border: inspecionando ? '1px solid var(--color-brand, #FF6B35)' : '1px solid var(--color-border, rgba(0,0,0,0.12))',
-                background: inspecionando ? 'rgba(255,107,53,0.1)' : 'transparent',
-                color: inspecionando ? 'var(--color-brand, #FF6B35)' : 'var(--color-text, #111827)',
-              }}
+              className={[styles.btn, inspecionando ? styles.btnActive : ''].join(' ')}
             >
-              <Crosshair size={13} /> {inspecionando ? 'Clique em um elemento do slide…' : 'Selecionar elemento'}
+              <Crosshair size={14} /> {inspecionando ? 'Clique em um elemento do slide…' : 'Selecionar elemento'}
             </button>
             {alvo && !inspecionando && (
-              <span style={{ fontSize: 11.5, color: 'var(--color-text-muted, #6b7280)' }}>
-                alvo: <code style={{ fontSize: 11 }}>{alvo.identifier}</code>
-              </span>
+              <span className={styles.target}>alvo: <code className={styles.code}>{alvo.identifier}</code></span>
             )}
           </div>
-          <div style={{ position: 'relative', borderRadius: 12, overflow: 'hidden', border: inspecionando ? '2px solid var(--color-brand, #FF6B35)' : '1px solid var(--color-border, rgba(0,0,0,0.1))', background: '#fff', aspectRatio: `${canvasW} / ${canvasH}`, maxHeight: '68vh' }}>
+          <div
+            className={[styles.canvas, inspecionando ? styles.canvasInspecting : ''].join(' ')}
+            style={{ aspectRatio: `${canvasW} / ${canvasH}` }}
+          >
             <HtmlSlideRenderer content={content} activeSlide={safeSlide} onSlideChange={setActiveSlide} hideNav inspectorMode={inspecionando} />
           </div>
           {slideCount > 1 && (
-            <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4 }}>
+            <div className={styles.strip}>
               {content.slides.map((_, i) => (
-                <button key={i} type="button" onClick={() => setActiveSlide(i)}
-                  style={{
-                    flexShrink: 0, padding: '5px 12px', fontSize: 12, borderRadius: 8, cursor: 'pointer',
-                    border: i === safeSlide ? '1px solid var(--color-brand, #FF6B35)' : '1px solid var(--color-border, rgba(0,0,0,0.12))',
-                    background: i === safeSlide ? 'rgba(255,107,53,0.08)' : 'transparent',
-                    fontWeight: i === safeSlide ? 600 : 400,
-                  }}>
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => setActiveSlide(i)}
+                  aria-label={`Slide ${i + 1}`}
+                  aria-current={i === safeSlide}
+                  className={[styles.slideBtn, i === safeSlide ? styles.slideBtnActive : ''].join(' ')}
+                >
                   {i + 1}
                 </button>
               ))}
@@ -397,55 +367,47 @@ export default function EditorPage() {
           )}
         </div>
 
-        {/* Painel: IA | Código | Versões */}
-        <div style={{ flex: '1 1 360px', minWidth: 300, maxWidth: 560, display: 'flex', flexDirection: 'column', gap: 10, minHeight: 0 }}>
-          <div style={{ display: 'flex', gap: 4 }}>
-            {painelBtn('ia', 'Editar com IA', Sparkles)}
-            {painelBtn('fotos', espacosDeFoto > 0 ? `Fotos (${espacosDeFoto})` : 'Fotos', ImagePlus)}
-            {painelBtn('codigo', 'Código', MessageSquareText)}
-            {painelBtn('versoes', 'Versões', History)}
+        <div className={styles.panel}>
+          <div className={styles.tabs} role="tablist">
+            {aba('ia', 'Editar com IA', Sparkles)}
+            {aba('fotos', espacosDeFoto > 0 ? `Fotos (${espacosDeFoto})` : 'Fotos', ImagePlus)}
+            {aba('codigo', 'Código', MessageSquareText)}
+            {aba('versoes', 'Versões', History)}
           </div>
 
-          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', border: '1px solid var(--color-border, rgba(0,0,0,0.1))', borderRadius: 12, background: 'var(--color-surface, #fff)', padding: 14 }}>
+          <div className={styles.panelBody}>
             {painel === 'ia' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                <div style={{ fontSize: 13, fontWeight: 600 }}>Editar slide {safeSlide + 1} com IA</div>
-                <p style={{ fontSize: 12, color: 'var(--color-text-muted, #6b7280)', margin: 0 }}>
+              <div className={styles.stack}>
+                <div className={styles.heading}>Editar slide {safeSlide + 1} com IA</div>
+                <p className={styles.hint}>
                   Mesma edição do chat da Fábrica: a IA altera só o que você pedir e preserva o resto do slide. Cada edição cria uma versão.
                   {!alvo && ' Dica: use "Selecionar elemento" no preview para mirar a edição.'}
                 </p>
                 {alvo && (
-                  <div style={{
-                    display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', borderRadius: 8,
-                    border: '1px solid rgba(255,107,53,0.4)', background: 'rgba(255,107,53,0.06)',
-                  }}>
-                    <Crosshair size={13} style={{ flexShrink: 0, color: 'var(--color-brand, #FF6B35)' }} />
-                    <div style={{ flex: 1, minWidth: 0, fontSize: 12 }}>
-                      <code style={{ fontSize: 11.5 }}>{alvo.identifier}</code>
-                      {alvo.text && <span style={{ color: 'var(--color-text-muted, #6b7280)' }}> — “{alvo.text.slice(0, 48)}{(alvo.text.length ?? 0) > 48 ? '…' : ''}”</span>}
+                  <div className={styles.targetBar}>
+                    <Crosshair size={14} style={{ flexShrink: 0, color: 'var(--color-brand)' }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <code>{alvo.identifier}</code>
+                      {alvo.text && <span style={{ color: 'var(--color-text-secondary)' }}> — “{alvo.text.slice(0, 48)}{(alvo.text.length ?? 0) > 48 ? '…' : ''}”</span>}
                     </div>
-                    <button type="button" onClick={() => setAlvo(null)} title="Remover alvo (a instrução volta a valer para o slide todo)"
-                      style={{ border: 'none', background: 'transparent', cursor: 'pointer', color: 'var(--color-text-muted, #6b7280)', display: 'flex' }}>
-                      <X size={13} />
+                    <button type="button" className={styles.iconBtn} onClick={() => setAlvo(null)} aria-label="Remover alvo" title="Remover alvo (a instrução volta a valer para o slide todo)">
+                      <X size={14} />
                     </button>
                   </div>
                 )}
                 {editLog.length > 0 && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    <div style={{ fontSize: 11, color: 'var(--color-text-muted, #6b7280)' }}>
+                  <div className={styles.stack} style={{ gap: 4 }}>
+                    <div className={styles.fine}>
                       A IA recebe estas edições como contexto — dá para dizer &quot;agora um pouco menos&quot;.
                     </div>
                     {editLog.map((m, i) => (
-                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--color-text-secondary, #555)' }}>
-                        <Check size={11} /> {m}
-                      </div>
+                      <div key={i} className={styles.log}><Check size={12} /> {m}</div>
                     ))}
                   </div>
                 )}
-                {erroEdicao && (
-                  <div style={{ fontSize: 12, color: '#b91c1c', background: '#fef2f2', borderRadius: 8, padding: '6px 10px' }}>{erroEdicao}</div>
-                )}
+                {erroEdicao && <div className={styles.alert} role="alert">{erroEdicao}</div>}
                 <textarea
+                  className={styles.textarea}
                   value={instrucao}
                   onChange={(e) => setInstrucao(e.target.value)}
                   onKeyDown={(e) => {
@@ -456,12 +418,11 @@ export default function EditorPage() {
                   placeholder='Ex: "deixa o título maior", "troca o fundo para o verde da marca", "resume o parágrafo"'
                   rows={3}
                   disabled={editando}
-                  style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid var(--color-border, rgba(0,0,0,0.15))', fontSize: 13, resize: 'vertical' }}
                 />
                 <Button onClick={() => void editarComIA()} disabled={editando || !instrucao.trim()}>
                   {editando ? 'Editando…' : 'Aplicar no slide'}
                 </Button>
-                <span style={{ fontSize: 11, color: 'var(--color-text-muted, #6b7280)', marginTop: -4 }}>
+                <span className={styles.fine}>
                   Enter quebra linha · {typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform) ? '⌘' : 'Ctrl'}+Enter aplica
                 </span>
               </div>
@@ -489,39 +450,39 @@ export default function EditorPage() {
             )}
 
             {painel === 'versoes' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <div style={{ fontSize: 13, fontWeight: 600 }}>Histórico de versões</div>
+              <div className={styles.stack}>
+                <div className={styles.heading}>Histórico de versões</div>
                 {versoes.length === 0 && (
-                  <p style={{ fontSize: 12, color: 'var(--color-text-muted, #6b7280)' }}>Nenhuma versão ainda — elas nascem a cada edição de IA ou de código.</p>
+                  <p className={styles.hint}>Nenhuma versão ainda — elas nascem a cada edição de IA ou de código.</p>
                 )}
-                {versoes.map((v) => (
-                  <div key={v.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 8, border: '1px solid var(--color-border, rgba(0,0,0,0.08))' }}>
-                    <Clock size={13} style={{ flexShrink: 0, color: 'var(--color-text-muted, #6b7280)' }} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 12.5, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {v.label?.trim() || VERSION_SOURCE_LABEL[v.source]}
+                <div className={styles.versions}>
+                  {versoes.map((v) => (
+                    <div key={v.id} className={styles.version}>
+                      <Clock size={14} style={{ flexShrink: 0, color: 'var(--color-text-tertiary)' }} />
+                      <div className={styles.versionText}>
+                        <div className={styles.versionName}>{v.label?.trim() || VERSION_SOURCE_LABEL[v.source]}</div>
+                        <div className={styles.fine}>
+                          {formatDate(v.createdAt)}{typeof v.slideCount === 'number' ? ` · ${v.slideCount} slides` : ''}
+                        </div>
                       </div>
-                      <div style={{ fontSize: 11, color: 'var(--color-text-muted, #6b7280)' }}>
-                        {formatDate(v.createdAt)}{typeof v.slideCount === 'number' ? ` · ${v.slideCount} slides` : ''}
-                      </div>
+                      <button
+                        type="button"
+                        className={styles.btn}
+                        onClick={() => void restaurar(v.id)}
+                        disabled={restaurando !== null}
+                        title="Restaurar esta versão (o estado atual vira versão antes)"
+                      >
+                        {restaurando === v.id ? <Loader2 size={13} /> : <RotateCcw size={13} />} Restaurar
+                      </button>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => void restaurar(v.id)}
-                      disabled={restaurando !== null}
-                      title="Restaurar esta versão (o estado atual vira versão antes)"
-                      style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, padding: '5px 10px', borderRadius: 8, border: '1px solid var(--color-border, rgba(0,0,0,0.12))', background: 'transparent', cursor: 'pointer' }}
-                    >
-                      {restaurando === v.id ? <Loader2 size={12} /> : <RotateCcw size={12} />} Restaurar
-                    </button>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
             )}
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: 'var(--color-text-muted, #6b7280)' }}>
-            <Presentation size={12} />
+          <div className={styles.footnote}>
+            <Presentation size={13} />
             Para edição visual completa, baixe o PPTX e abra no Canva/PowerPoint — o texto continua editável.
           </div>
         </div>
