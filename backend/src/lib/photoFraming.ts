@@ -11,6 +11,8 @@ import {
   type SubjectFocus,
 } from './photoFocus.js';
 import { scanHtmlLayout } from './htmlRaster.js';
+import { buildSlideDocument } from './htmlDesign.js';
+import { listPhotoSlots, setPhotoPosition } from './photoSlot.js';
 
 // Enquadramento automático de uma foto da biblioteca num espaço do slide. Baixa a foto, acha o
 // assunto (uma chamada de visão) e devolve o `object-position` que o mantém dentro do espaço.
@@ -97,6 +99,24 @@ const MEASURE_SCRIPT = `Array.from(document.querySelectorAll('[data-photo-slot]'
   return { slot: e.getAttribute('data-photo-slot'), w: r.width, h: r.height };
 })`;
 
+/** Proporção (largura/altura) de TODOS os espaços de foto do documento, por id do espaço. Vazio se falhar. */
+export async function measureSlotAspects(
+  documentHtml: string,
+  size: { width: number; height: number },
+  deps: SlotMeasure = {},
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  try {
+    const run = deps.measure ?? ((html, opts, script) => scanHtmlLayout<Array<{ slot: string | null; w: number; h: number }>>(html, opts, script));
+    for (const s of await run(documentHtml, size, MEASURE_SCRIPT)) {
+      if (s.slot && s.w > 1 && s.h > 1) out.set(s.slot, s.w / s.h);
+    }
+  } catch (err) {
+    logger.warn('Não foi possível medir o espaço da foto', { error: err instanceof Error ? err.message : String(err) });
+  }
+  return out;
+}
+
 /** Proporção (largura/altura) do espaço `slot`, ou `null` se não existe ou não tem tamanho. */
 export async function measureSlotAspect(
   documentHtml: string,
@@ -104,15 +124,7 @@ export async function measureSlotAspect(
   slot: string,
   deps: SlotMeasure = {},
 ): Promise<number | null> {
-  try {
-    const run = deps.measure ?? ((html, opts, script) => scanHtmlLayout<Array<{ slot: string | null; w: number; h: number }>>(html, opts, script));
-    const slots = await run(documentHtml, size, MEASURE_SCRIPT);
-    const hit = slots.find((x) => x.slot === slot);
-    return hit && hit.w > 1 && hit.h > 1 ? hit.w / hit.h : null;
-  } catch (err) {
-    logger.warn('Não foi possível medir o espaço da foto', { error: err instanceof Error ? err.message : String(err) });
-    return null;
-  }
+  return (await measureSlotAspects(documentHtml, size, deps)).get(slot) ?? null;
 }
 
 /** A posição que mantém o assunto no espaço, dado o que se sabe da foto e do espaço. */
@@ -144,4 +156,49 @@ export async function autoFramePhoto(
 /** Só para teste. */
 export function clearFramingCache(): void {
   cache.clear();
+}
+
+export interface FrameSlidesInput<T extends { html: string; css?: string }> {
+  slides: T[];
+  fonts: string[];
+  width: number;
+  height: number;
+  /** Só fotos destas URLs (biblioteca e anexos da conversa) são baixadas: o artista escreve o HTML, e uma URL dele não vira fetch do servidor. */
+  allowedUrls: ReadonlySet<string>;
+}
+
+const isDefaultPosition = (p: { x: number; y: number }): boolean => p.x === 50 && p.y === 50;
+
+/**
+ * Enquadra pelo assunto as fotos que o ARTISTA já colocou nos espaços dos slides (caminho da geração; o do
+ * editor está na rota). Sem isto a foto fornecida ficava sempre centralizada, e um retrato com o rosto no
+ * alto perdia a cabeça. Só mexe no `object-position`; respeita o enquadramento que o artista já definiu e
+ * qualquer falha deixa o slide exatamente como veio.
+ */
+export async function autoFrameSlidePhotos<T extends { html: string; css?: string }>(
+  input: FrameSlidesInput<T>,
+  deps: FramingDeps & SlotMeasure = {},
+): Promise<{ slides: T[]; framed: number }> {
+  let framed = 0;
+  const slides: T[] = [];
+  for (const slide of input.slides) {
+    const candidates = listPhotoSlots(slide.html).filter(
+      (s) => s.hasPhoto && s.src && input.allowedUrls.has(s.src) && s.fit === 'cover' && isDefaultPosition(s.position),
+    );
+    if (candidates.length === 0) {
+      slides.push(slide);
+      continue;
+    }
+    const doc = buildSlideDocument({ html: slide.html, css: slide.css }, input.fonts, input.width, input.height);
+    const aspects = await measureSlotAspects(doc, { width: input.width, height: input.height }, deps);
+    let html = slide.html;
+    for (const c of candidates) {
+      const frame = frameFromAnalysis(await analyzePhoto(c.src!, deps), aspects.get(c.slot) ?? null);
+      if (!frame) continue;
+      html = setPhotoPosition(html, c.slot, frame.position);
+      framed++;
+    }
+    slides.push(html === slide.html ? slide : { ...slide, html });
+  }
+  return { slides, framed };
 }

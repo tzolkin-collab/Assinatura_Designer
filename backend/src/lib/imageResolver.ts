@@ -21,7 +21,7 @@ import { searchUnsplashPhoto } from './unsplash.js';
 import { uploadFileToR2 } from './r2.js';
 import prisma from './prisma.js';
 import { logger } from './logger.js';
-import { REFERENCE_ASSET_TAGS } from './designerBrain/referenceTags.js';
+import { NON_PHOTO_ASSET_TAGS } from './designerBrain/referenceTags.js';
 import type { SlideSkeletonItem } from '../agents/planner/index.js';
 
 const ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
@@ -518,9 +518,9 @@ export async function resolveSlideImages(params: ResolveSlideImagesParams): Prom
     where: {
       brandId: { in: params.libraryBrandIds?.length ? params.libraryBrandIds : [params.brandId] },
       fileType: { startsWith: 'image/' },
-      // Manual visual, moodboard, referência de fonte e de paleta são para o modelo VER: reaproveitá-los
-      // num slide colava o manual inteiro na capa (visto na geração real da Amanda).
-      NOT: { tags: { hasSome: [...REFERENCE_ASSET_TAGS] } },
+      // Manual visual, moodboard, referência de fonte e de paleta são para o modelo VER (reaproveitá-los
+      // colava o manual inteiro na capa, visto na geração real da Amanda), e logo não é foto.
+      NOT: { tags: { hasSome: [...NON_PHOTO_ASSET_TAGS] } },
       ...(params.onlyProvidedAssets ? { source: { not: 'ai-generated' } } : {}),
     },
     orderBy: { createdAt: 'desc' },
