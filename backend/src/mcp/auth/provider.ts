@@ -191,6 +191,7 @@ export class DesignerOAuthProvider implements OAuthServerProvider {
       clientName: client.client_name ?? 'Cliente sem nome',
       scopes: code.scopes,
       brandIds: code.brandIds,
+      brandMode: code.brandMode ?? 'selected',
       resource: code.resource,
       createdAt: this.now(),
     };
@@ -286,6 +287,7 @@ export class DesignerOAuthProvider implements OAuthServerProvider {
         userId: family.userId,
         familyId: family.id,
         brandIds: family.brandIds,
+        brandMode: family.brandMode ?? 'selected',
       },
     };
   }

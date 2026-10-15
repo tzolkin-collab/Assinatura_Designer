@@ -125,7 +125,7 @@ API do usuário (JWT do app no header `Authorization`, como o resto da API; resp
 | Endpoint | Função |
 |---|---|
 | `GET /api/mcp/consent/:requestId` | O que a tela mostra. `404` se o pedido expirou/não existe. |
-| `POST /api/mcp/consent/:requestId` | A decisão. Corpo: `{ decision: "approve"\|"deny", brandSlugs?: string[], scopes?: string[] }`. Devolve `{ data: { redirectUrl } }` para o frontend redirecionar o navegador. |
+| `POST /api/mcp/consent/:requestId` | A decisão. Corpo: `{ decision: "approve"\|"deny", brandSlugs?: string[], allBrands?: boolean, scopes?: string[] }`. Devolve `{ data: { redirectUrl } }` para o frontend redirecionar o navegador. |
 | `GET /api/mcp/connections` | Conexões ativas do usuário (cliente, escopos, marcas atuais). |
 | `DELETE /api/mcp/connections/:id` | Revoga a conexão. |
 
@@ -142,9 +142,11 @@ Contrato do `GET /consent/:id` (para a tela da próxima etapa):
 } }
 ```
 
-Regras do `POST` (aprovar): ao menos uma marca; o usuário só pode **reduzir** os escopos pedidos, nunca ampliar;
-leitura exige ser **membro** (qualquer papel) de cada marca escolhida; escrita (`designer.write`) exige papel
-**EDITOR, ADMIN ou OWNER** em cada uma. Falha de validação (`403`/`400`) **não** consome o pedido — o usuário pode
+Regras do `POST` (aprovar): ao menos uma marca (`brandSlugs`) **ou** `allBrands: true` — nunca os dois; o usuário só
+pode **reduzir** os escopos pedidos, nunca ampliar; leitura exige ser **membro** (qualquer papel) de cada marca
+escolhida; escrita (`designer.write`/`designer.edit_all`) exige papel **EDITOR, ADMIN ou OWNER** em cada uma. Em
+`allBrands` não há lista a validar: o consentimento só exige que o papel do usuário sirva para o escopo em alguma marca,
+e cada chamada filtra pelo papel de agora. Falha de validação (`403`/`400`) **não** consome o pedido — o usuário pode
 corrigir e tentar de novo. A decisão que passa consome o pedido (uso único, atômico). `deny` devolve
 `redirectUrl` com `error=access_denied`.
 
@@ -153,7 +155,26 @@ corrigir e tentar de novo. A decisão que passa consome o pedido (uso único, at
 | Escopo | Dá direito a | Papel mínimo na marca |
 |---|---|---|
 | `designer.read` | listar e ler | qualquer membro (VIEWER+) |
-| `designer.write` | criar/editar/pausar (e **inclui** leitura) | EDITOR+ |
+| `designer.write` | criar peças e atualizar **as que a própria conexão criou** (e **inclui** leitura) | EDITOR+ |
+| `designer.edit_all` | além disso, **sobrescrever qualquer apresentação ou carrossel** das marcas autorizadas (e **inclui** escrita e leitura) | EDITOR+ |
+
+`designer.edit_all` é opcional e só existe se o cliente o pedir no `/authorize`; o usuário pode rebaixá-lo na tela para
+`designer.write` ou leitura. Antes de sobrescrever uma peça que não é da conexão, `save_presentation` congela a versão
+anterior (`snapshotPost`, origem `AI`), que o usuário restaura no histórico da peça. Não apaga nada, não toca em peças
+que não sejam apresentação/carrossel e o papel do usuário na marca (EDITOR+, conferido **a cada chamada**) é o teto:
+rebaixar o usuário a VIEWER derruba a edição na chamada seguinte.
+
+### Modo de marcas: escolhidas × todas
+
+O consentimento guarda no token **um modo**, não só uma lista:
+
+| Modo | Token guarda | Conjunto de marcas a cada chamada |
+|---|---|---|
+| `selected` (padrão) | `brandIds` | `brandIds` ∩ associação atual |
+| `all` ("todas as minhas marcas") | `brandMode: "all"` (sem lista) | toda a associação atual do usuário, filtrada pelo papel que o escopo exige |
+
+No modo `all`, marcas em que o usuário entra depois passam a valer e as que ele perde deixam de valer, sem reconectar.
+Famílias antigas, sem `brandMode`, são `selected`. Um token em `selected` nunca enxerga marca fora da sua lista.
 
 Sem `scope` no `/authorize` (ausente, vazio ou só `offline_access`), o pedido nasce só com `designer.read` (menor
 privilégio). `offline_access` é ignorado — sempre emitimos refresh token —, mas qualquer outro escopo desconhecido é
@@ -173,7 +194,7 @@ topo do descritor **e** em `_meta.securitySchemes`, como pede o Apps SDK.
 | `get_designer_brief(brandSlug, format?, aspectRatio?, pageCount?)` | `designer.read` | **O que o agente precisa para desenhar**: regras da marca e do estúdio (cérebro em camadas: fidelidade ao texto, foto real, identidade, proibições), canvas, contrato do HTML, fontes próprias com os pesos disponíveis, paleta, logo e a lista de arquivos reais (nunca imagens geradas por IA). |
 | `list_designs(brandSlug, limit?)` | `designer.read` | Peças da marca (mais recentes primeiro) com link do editor. |
 | `get_design(brandSlug, postId, includeSource?)` | `designer.read` | Texto visível por slide e, com `includeSource`, o HTML/CSS (para continuar ou ajustar). |
-| `save_presentation(brandSlug, slides[], …, postId?)` | `designer.write` | Salva uma peça que o agente desenhou: sanitiza o HTML, confere o texto de cada slide contra o `approvedText`, normaliza as áreas de foto, embute as fontes próprias e cria a peça no editor. Devolve `issues` por slide. Com `postId` atualiza **só** a peça que o mesmo usuário criou por MCP. |
+| `save_presentation(brandSlug, slides[], …, postId?)` | `designer.write` | Salva uma peça que o agente desenhou: sanitiza o HTML, confere o texto de cada slide contra o `approvedText`, normaliza as áreas de foto, embute as fontes próprias e cria a peça no editor. Devolve `issues` por slide. Com `postId` atualiza **só** a peça que o mesmo usuário criou por MCP — ou, com `designer.edit_all`, qualquer apresentação/carrossel da marca (congelando a versão anterior antes). |
 | `pause_generation`, exportação (Canva/PDF), upload de foto, edição pontual de slide | `designer.write` | planejadas. |
 
 Todas as chamadas terminam em segundos (não há geração longa do nosso lado), o que evita o limite de ~60 s que os clientes
@@ -196,7 +217,7 @@ não consegue esquecer de checar a marca.
 | **/token** | PKCE conferido pelo SDK (verifier errado ⇒ `invalid_grant`; formato 43–128 conferido por nós); `redirect_uri` idêntica à do `/authorize`; `resource` conferido; só os 2 grants suportados. |
 | **Tokens** | Opacos, 256 bits, **só o SHA-256 vai ao Redis** (nem token nem código aparecem em Redis ou logs — há teste varrendo isso). Access: 1 h. Refresh: 30 d, **rotativo de uso único**; reuso de um refresh já consumido (ou apresentado por outro cliente) ⇒ **revoga a família inteira**. |
 | **/mcp (por requisição)** | `Origin` validado quando presente (sem Origin = servidor a servidor, normal); bearer do SDK com audiência (`expectedResource`) + verifier nosso (hash, expiração, família viva, audiência); `401` com `WWW-Authenticate` (`resource_metadata`, `scope`); `403 insufficient_scope` para ferramenta cujo escopo o token não cobre (inclusive dentro de lote); o token **nunca** é repassado a outro serviço nem aparece em log. |
-| **Por chamada (registro central)** | Escopo da ferramenta ⇒ marcas = **token ∩ associação atual** (`BrandMember` consultado agora, com o papel que o escopo exige) ⇒ marca fora disso é recusada com mensagem idêntica à de "não existe". Remover/rebaixar o usuário vale **na chamada seguinte**, sem esperar o token expirar. |
+| **Por chamada (registro central)** | Escopo da ferramenta ⇒ marcas = **token ∩ associação atual** (`BrandMember` consultado agora, com o papel que o escopo exige; no modo "todas" o token não tem lista e vale a associação atual inteira) ⇒ marca fora disso é recusada com mensagem idêntica à de "não existe". Remover/rebaixar o usuário vale **na chamada seguinte**, sem esperar o token expirar. |
 | **Erros** | Erro esperado vira mensagem ao modelo; erro inesperado vira mensagem genérica (detalhe só no log). Sem stack para o ChatGPT. |
 | **Rate limit** | `middleware/rateLimit.ts` (Redis, vale entre instâncias, fail-open): `/register` 20/h/IP; `/token` 100/15 min/IP; `/authorize` 60/15 min/IP; `/revoke` 60/15 min/IP; `/mcp` 600/min/IP antes da auth e 240/min/**usuário** depois; consentimento 60/10 min/usuário. Justificativas em `mcp/limits.ts`. |
 | **Revogação** | `POST /revoke` (RFC 7009) e `DELETE /api/mcp/connections/:id`; revogar derruba access **e** refresh da conexão. |
@@ -207,9 +228,10 @@ não consegue esquecer de checar a marca.
 Por isso a ferramenta passa pelo MESMO funil do pipeline: `validateHtmlDesign` (DOMPurify sobre jsdom: sem script, iframe,
 object, embed, link, meta, base, form; CSS sem `@import`, `expression()` nem `javascript:`), tetos de tamanho (30 slides,
 60 mil caracteres de HTML e 40 mil de CSS por slide) e `maxToolInputElements`. Atualizar uma peça por `postId` exige que
-ela tenha sido criada **pelo mesmo usuário por MCP** nesta marca (`content.mcp.userId`); o agente nunca sobrescreve uma
-peça feita no app web nem a de outro usuário. A escrita exige `designer.write` e papel EDITOR+ na marca, conferido a cada
-chamada. A peça guarda a procedência (`content.mcp`: usuário, cliente e conexão).
+ela tenha sido criada **pelo mesmo usuário por MCP** nesta marca (`content.mcp.userId`) — a menos que a conexão tenha
+`designer.edit_all`, caso em que vale qualquer apresentação/carrossel da marca autorizada, sempre com a versão anterior
+congelada antes. Sem `designer.edit_all`, o agente nunca sobrescreve uma peça feita no app web nem a de outro usuário. A
+escrita exige `designer.write` e papel EDITOR+ na marca, conferido a cada chamada. A peça guarda a procedência (`content.mcp`: usuário, cliente e conexão).
 
 ### Decisões que merecem registro
 

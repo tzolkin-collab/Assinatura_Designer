@@ -24,6 +24,8 @@ export interface McpCallContext {
   userId: string;
   clientId: string;
   familyId: string;
+  /** A conexão tem `designer.edit_all`: pode atualizar peças que não criou (o papel na marca continua sendo o teto). */
+  canEditAll: boolean;
   /** Marcas permitidas para o escopo desta ferramenta, já conferidas no banco AGORA. */
   grants: BrandGrant[];
   /** Presente quando a ferramenta declara `brandArg`: a marca já autorizada. */

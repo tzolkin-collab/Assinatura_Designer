@@ -45,7 +45,11 @@ const inputSchema = {
     .string()
     .uuid()
     .optional()
-    .describe('Para ATUALIZAR uma peça que você mesmo criou antes (devolvida por save_presentation). Sem ele, cria uma nova.'),
+    .describe(
+      'Para ATUALIZAR uma peça já existente. Por padrão só vale para peças que ESTA conexão criou (devolvidas por save_presentation); ' +
+        'com o escopo designer.edit_all vale para qualquer apresentação ou carrossel da marca (get_design.editableViaAgent diz). ' +
+        'A versão anterior fica no histórico. Sem postId, cria uma nova.',
+    ),
 };
 
 const issueSchema = z.object({
@@ -88,7 +92,7 @@ export const savePresentationTool: McpToolDefinition<typeof inputSchema, typeof 
     '`approvedText`, o texto aprovado de cada slide. O Designer sanitiza, confere o texto da arte contra o aprovado, normaliza ' +
     'as áreas de foto, embute as fontes próprias da marca e cria a peça no editor, onde o usuário acompanha e edita. ' +
     'Devolve `issues` (texto faltando ou acrescentado, por slide): se houver, corrija e chame de novo com o `postId` devolvido ' +
-    'para ATUALIZAR a mesma peça. Nunca coloque no slide texto que não esteja no aprovado, nem gere pessoas ou fotos.',
+    'para ATUALIZAR a mesma peça (peças de outras origens só com o escopo designer.edit_all). Nunca coloque no slide texto que não esteja no aprovado, nem gere pessoas ou fotos.',
   scope: WRITE_SCOPE,
   annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   inputSchema,
@@ -100,16 +104,26 @@ export const savePresentationTool: McpToolDefinition<typeof inputSchema, typeof 
     const format = args.format ?? 'presentation';
     const canvas = resolveCanvasSize(format, args.aspectRatio);
 
-    // ── Atualização: só a peça que ESTE usuário criou por MCP, nesta marca ──────────────────────
+    // ── Atualização: a peça que ESTE usuário criou por MCP — ou qualquer peça de deck/carrossel da ──
+    // marca autorizada, quando a conexão tem designer.edit_all. O papel (EDITOR+) já foi exigido
+    // por resolveBrandGrants para o escopo de escrita; a marca é sempre a do grant, nunca a da peça.
     let existing: { id: string; content: unknown } | null = null;
     if (args.postId) {
       const row = await prisma.post.findFirst({
         where: { id: args.postId, brandId: grant.id },
-        select: { id: true, content: true },
+        select: { id: true, type: true, content: true },
       });
       const owner = (row?.content as { mcp?: { userId?: string } } | null)?.mcp?.userId;
-      if (!row || owner !== ctx.userId) {
-        throw new ToolUserError('Peça não encontrada, ou não foi criada por você nesta conexão.', 'post_unavailable');
+      const ownedByUser = owner === ctx.userId;
+      // Fora do caso "criei eu", o agente só reescreve o que sabe desenhar: decks e carrosséis.
+      const editableType = row?.type === 'PRESENTATION' || row?.type === 'CAROUSEL';
+      if (!row || !(ownedByUser || (ctx.canEditAll && editableType))) {
+        throw new ToolUserError(
+          ctx.canEditAll
+            ? 'Peça não encontrada nesta marca, ou não é uma apresentação/carrossel.'
+            : 'Peça não encontrada, ou não foi criada por você nesta conexão.',
+          'post_unavailable',
+        );
       }
       existing = row;
     }

@@ -7,7 +7,7 @@ import {
   type ServerRequest,
 } from '@modelcontextprotocol/sdk/types.js';
 import { logger } from '../../lib/logger.js';
-import type { McpScope } from '../config.js';
+import { EDIT_ALL_SCOPE, type McpScope } from '../config.js';
 import type { McpCallEvent, McpCallLog } from '../store.js';
 import { resolveBrandGrants } from './authorization.js';
 import { ToolUserError, type McpCallContext, type McpToolDefinition } from './types.js';
@@ -72,6 +72,7 @@ async function runTool(tool: AnyTool, args: Record<string, unknown>, extra: Extr
     return toolError('Conexão não autenticada.');
   }
   const brandIds = Array.isArray(auth.extra?.brandIds) ? (auth.extra.brandIds as string[]) : [];
+  const brandMode = auth.extra?.brandMode === 'all' ? ('all' as const) : ('selected' as const);
   const familyId = String(auth.extra?.familyId ?? '');
 
   let errorCode: string | undefined;
@@ -84,8 +85,15 @@ async function runTool(tool: AnyTool, args: Record<string, unknown>, extra: Extr
       return insufficientScopeResult(tool.scope, deps.resourceMetadataUrl);
     }
 
-    const grants = await resolveBrandGrants({ userId, brandIds, scope: tool.scope });
-    const ctx: McpCallContext = { userId, clientId: auth.clientId, familyId, grants, frontendOrigin: deps.frontendOrigin };
+    const grants = await resolveBrandGrants({ userId, brandIds, brandMode, scope: tool.scope });
+    const ctx: McpCallContext = {
+      userId,
+      clientId: auth.clientId,
+      familyId,
+      grants,
+      canEditAll: auth.scopes.includes(EDIT_ALL_SCOPE),
+      frontendOrigin: deps.frontendOrigin,
+    };
 
     if (tool.brandArg) {
       brandSlug = String((args as Record<string, unknown>)[tool.brandArg] ?? '');

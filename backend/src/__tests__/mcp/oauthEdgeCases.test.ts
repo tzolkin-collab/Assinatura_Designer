@@ -220,7 +220,7 @@ describe('verifyAccessToken sozinho (as camadas do SDK no /mcp não mascaram o p
     const familyId = await family();
     await h.store.saveAccessToken(sha256Hex('dsg_at_vivo'), { familyId, scopes: ['designer.read'], expiresAt: h.clock.now() + 60_000 });
     const info = await newProvider().verifyAccessToken('dsg_at_vivo');
-    expect(info.extra).toEqual({ userId: 'user-1', familyId, brandIds: ['brand-a'] });
+    expect(info.extra).toEqual({ userId: 'user-1', familyId, brandIds: ['brand-a'], brandMode: 'selected' });
     expect(info.resource?.href).toBe(RESOURCE);
     expect(info.scopes).toEqual(['designer.read']);
     expect(info.token).not.toContain('dsg_at_vivo');
