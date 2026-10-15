@@ -36,12 +36,27 @@ const border = '1px solid var(--color-border, rgba(0,0,0,0.12))';
 
 const isPhoto = (a: BrandAsset) => a.fileType.startsWith('image/');
 
+interface Framing { mode: 'manual' | 'kept' | 'auto' | 'center'; faceVisible?: number | null }
+
+/** O que dizer à pessoa sobre o enquadramento que o servidor escolheu. `null` = nada a dizer. */
+export function framingNotice(f: Framing | undefined): string | null {
+  if (!f) return null;
+  if (f.mode === 'auto') {
+    return f.faceVisible != null && f.faceVisible < 0.98
+      ? 'Enquadrei pelo rosto, mas este espaço é estreito demais para mostrá-lo inteiro. Ajuste o enquadramento ou use outra foto.'
+      : 'Enquadrei a foto pelo assunto principal. Se preferir outro corte, ajuste o enquadramento abaixo.';
+  }
+  if (f.mode === 'center') return 'Não consegui identificar o assunto da foto, então ela ficou centralizada. Confira o corte e ajuste abaixo se precisar.';
+  return null;
+}
+
 export default function PhotoSlotsPanel({ postId, marca, slideIndex, slideHtml, onApplied }: PhotoSlotsPanelProps) {
   const { assets, loading: carregandoBiblioteca, uploading, error: erroBiblioteca, upload } = useBrandAssets(marca);
   const [slots, setSlots] = useState<PhotoSlot[] | null>(null);
   const [escolhendo, setEscolhendo] = useState<string | null>(null); // slot com o seletor aberto
   const [ocupado, setOcupado] = useState<string | null>(null); // slot em gravação
   const [erro, setErro] = useState<string | null>(null);
+  const [aviso, setAviso] = useState<string | null>(null);
   // Enquadramento em edição: só vai ao servidor quando a pessoa solta o controle.
   const [rascunho, setRascunho] = useState<Record<string, { x: number; y: number }>>({});
 
@@ -58,12 +73,14 @@ export default function PhotoSlotsPanel({ postId, marca, slideIndex, slideHtml, 
   const aplicar = useCallback(async (slot: string, body: Record<string, unknown>) => {
     setOcupado(slot);
     setErro(null);
+    setAviso(null);
     try {
-      const r = await api.put<{ slideIndex: number; slide: SlideCode; slots: PhotoSlot[] }>(
+      const r = await api.put<{ slideIndex: number; slide: SlideCode; slots: PhotoSlot[]; framing?: Framing }>(
         `/posts/${postId}/slides/${slideIndex}/photo`,
         { slot, ...body },
       );
       setSlots(r.slots);
+      setAviso(framingNotice(r.framing));
       setEscolhendo(null);
       setRascunho((prev) => Object.fromEntries(Object.entries(prev).filter(([k]) => k !== slot)));
       onApplied(r.slideIndex, r.slide);
@@ -94,6 +111,7 @@ export default function PhotoSlotsPanel({ postId, marca, slideIndex, slideHtml, 
       </p>
 
       {erro && <div style={{ fontSize: 12, color: '#b91c1c', background: '#fef2f2', borderRadius: 8, padding: '6px 10px' }}>{erro}</div>}
+      {aviso && <div role="status" style={{ fontSize: 12, background: 'var(--color-bg-secondary, #f3f4f6)', borderRadius: 8, padding: '6px 10px' }}>{aviso}</div>}
 
       {slots && slots.length === 0 && (
         <p style={{ fontSize: 12.5, color: muted, margin: 0 }}>

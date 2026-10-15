@@ -1,4 +1,5 @@
 import { JSDOM } from 'jsdom';
+import { slotAspectFromStyle } from './photoFocus.js';
 
 // Espaço de foto: o contrato entre o artista (que desenha o slide) e o editor (que troca a foto).
 //
@@ -141,6 +142,16 @@ export function normalizeEmptyPhotoSlots(html: string): string {
     else applyEmptyFrame(el);
   }
   return body.innerHTML;
+}
+
+/**
+ * Proporção (largura/altura) do espaço, quando o artista a escreveu em pixels. `null` se o espaço
+ * não existe ou o tamanho não está em px (aí só renderizando se descobre).
+ */
+export function photoSlotAspect(html: string, slot: string): number | null {
+  const { body } = parseBody(html);
+  const el = findSlot(body, slot);
+  return el ? slotAspectFromStyle(el.getAttribute('style')) : null;
 }
 
 /** Lista os espaços de foto do slide, na ordem em que aparecem. */

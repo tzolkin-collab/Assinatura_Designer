@@ -62,6 +62,85 @@ Salvar a ficha de um projeto **liga o cérebro dele** (só texto aprovado, só f
 6. **Conferência de trechos em PDF/imagem**: só a pessoa confere (a tela avisa). Conferir em código exigiria lib de leitura de PDF: decisão de dependência do Gustavo.
 7. Pendências menores: `[marca]/configuracoes/agent` tinha 5 problemas de eslint antigos (não são das mudanças recentes); decidir o PR #50 do Jules.
 
+## 5.1 Enquadramento de fotos (achado e correção, 11/10)
+
+**Problema verificado.** A foto entra no espaço com `object-fit: cover` e `object-position: 50% 50%`, sempre o centro, e o sistema não sabia onde está o assunto. O editor dizia explicitamente "foto nova começa centralizada". Retrato com rosto no terço de cima, ou pessoa pequena fora do centro, perdia a cabeça. Medido, não suposto.
+
+**Como foi medido.** 6 fotos de teste (4 recortes do moodboard da Amanda + 2 imagens de IA da biblioteca, **usadas só para medir, nunca em deck**) × 5 formatos de espaço (3:4, 9:16, 1:1, 16:9, 3:1). Detecção do assunto com o Gemini real. Só as combinações em que a foto é de fato cortada contam.
+
+| | centro (antes) | pelo assunto (agora) |
+|---|---|---|
+| combinações em que o rosto é cortado | 11 de 23 | 4 de 23 |
+| rosto visível, média | 80% | 93% |
+
+As 4 que sobram são **geometricamente impossíveis** (retrato fechado numa faixa 3:1 ou 16:9): nenhuma posição resolve, só outra foto, outro espaço ou `contain`. A tela avisa nesses casos.
+
+**Caso real** (deck de teste da Amanda, slide 1, espaço medido em 0,77 de proporção, foto de IA 16:9): antes, a mulher aparece cortada na borda direita; depois, rosto e corpo inteiros. Os espaços reais do artista medem de 0,77 a 1,00.
+
+**O que mudou.** `lib/photoFocus.ts` (geometria pura + detecção), `lib/photoFraming.ts` (baixa a foto, detecta, mede o espaço no Chromium, cache por URL), rota `PUT /posts/:id/slides/:i/photo` (foto NOVA sem posição → enquadramento automático; posição escolhida pela pessoa sempre vence; a mesma foto reenviada mantém o ajuste) e aviso no painel de fotos do editor. A resposta traz `framing: { mode: auto|center|manual|kept, faceVisible }`. Falhou a detecção ou a medição: centro, como antes, sem erro.
+
+**Detalhes que custaram caro.**
+- O artista dimensiona o espaço por **classe CSS**, não inline: ler `width/height` do `style` dá `null`. Por isso a proporção é medida de verdade (`scanHtmlLayout`).
+- Com o raciocínio do modelo ligado, a detecção falhava (`MAX_TOKENS`, JSON cortado) em retratos simples. Desligado (`thinkingBudget: 0`): 6 de 6 detectadas e 1 a 6 s por foto.
+
+**Limites e lacunas (não resolvidos).**
+- **Export PPTX ignora `object-position`** (só lê `object-fit`): o enquadramento, automático ou manual, se perde no PPTX. Já era assim antes; precisa mapear para o recorte do pptxgenjs.
+- **Fotos colocadas pelo artista durante a geração** (foto fornecida no briefing) continuam centralizadas: só o caminho do editor foi coberto. Próximo passo natural: pós-processar os espaços com foto no fim do pipeline.
+- Teste com 6 imagens substitutas, **não** com fotos reais da Amanda (elas só existem no WhatsApp). Refazer a medição quando chegarem.
+- A detecção é de um modelo: as caixas variam entre execuções (mudaram um pouco ao desligar o raciocínio). A folga em volta do rosto erra para mostrar demais, não de menos.
+- Custo: uma chamada de visão (flash, imagem reduzida a 1024 px) por foto nova; cache em memória por URL, que some a cada reinício do servidor.
+- Só rosto/pessoa/objeto principal; não zooma (o `cover` não amplia além do espaço).
+
+## 5.2 Avaliação de resultado do ciclo (11/10)
+
+**Geração real da Amanda, 7 slides, texto aprovado, sem fotos, sem a flag:**
+
+| rodada | código | revisor | resultado |
+|---|---|---|---|
+| 1 | pilha sem o #74 | 35, reprovado | a "Amanda" gerada por IA da biblioteca foi reaproveitada em 4 slides |
+| 2 | pilha + #74 | 75, aprovado | 0 imagens, 5 molduras no lugar da foto, texto literal nos 7 slides |
+
+Custo ~US$ 0,40 por deck (R$ 2 a R$ 3), 208 s. Muito abaixo da estimativa de R$ 20 a R$ 50.
+
+**O que isso prova:** o cérebro liga sozinho pela ficha; a regra de foto real e o texto literal se sustentam; o #74 é indispensável; o custo cabe com folga no teto de R$ 200/mês.
+
+**O que isso NÃO prova:**
+- Foi **um** deck, de **um** projeto. Não é uma amostra.
+- O revisor é do mesmo modelo que gera: nota 75 não é validação da Gabriela, que disse que o Designer ainda não foi validado.
+- 5 dos 7 slides saem com moldura vazia (não há fotos reais da Amanda): o visual final ainda não foi visto de verdade.
+- Queens e Aeonik não estão instaladas: a arte usa Playfair Display + Manrope, o que a Gabriela pode reprovar.
+- Os **8 testes de aceite do Checklist Operacional não foram rodados** (nem o de e-book A4, que não existe).
+- Marcas além da Amanda não foram exercitadas; desdobramento/collab só foi coberto por teste automatizado.
+
+**Dívida de teste:** a geração real roda fora do app (script direto no pipeline, sem worker nem fila). Nada foi testado pelo caminho de uso real (chat → fila → worker → editor).
+
+## 5.3 Avaliação dos posts da Amanda: repetição versus progresso (12/10)
+
+Crítica do Gustavo: "muita coisa repetida ali ao invés de progresso real". Verificado nos posts do banco (renderizados e medidos), e **procede em grande parte**.
+
+**O que existe.** Conta da Amanda: 9 posts, **5 decks com o mesmo título e o mesmo texto** ("Estratégia para uma vida mais extraordinária", de 05/10 a 11/10), mais 2 "VAREJO+ PIUMHI", 1 que falhou e 1 sem nome. O banco todo tem 42 posts; os 30 de `assinatura` e `tzolkin` são antigos e sem nome, não avaliados.
+
+| deck | quando | fontes que renderizam | imagens geradas por IA | molduras vazias |
+|---|---|---|---|---|
+| ff862294 | 05/10 (base) | Queens/Aeonik **não instaladas: cai numa serifa padrão** | 0 | 6 |
+| 369acf21 | 11/10 18:27 | Playfair + Plus Jakarta | **3 (pessoa gerada)** | 0 |
+| 2a92a039 | 11/10 18:33 | Playfair + DM Sans | 0 | 5 |
+| 604108e4 | 11/10 22:41 | Playfair + Manrope | **4 (pessoa + cena de feira)** | 0 |
+| c813c011 | 11/10 22:49 | Playfair + Manrope | 0 | 5 |
+
+**Progresso real (mas invisível no slide):** a pessoa gerada por IA saiu (369acf21 e 604108e4 → 2a92a039 e c813c011); o texto sai literal; o aviso de fonte substituta aparece; a ficha da Amanda existe como dado; o cérebro liga sozinho. Das 4 gerações de 11/10, duas acharam defeitos reais (a pessoa gerada e o #74 fora da pilha) e duas confirmaram o conserto.
+
+**Repetição, sem progresso visual:** vistos lado a lado, os 5 decks têm **o mesmo esqueleto** (título escuro com moldura à direita, texto sobre creme com moldura, três colunas, bloco escuro com moldura). O visual de 05/10 e o de hoje são quase o mesmo. Corpo do texto está legível (28 a 34 px num slide de 1920×1080, medido), então o "texto pequeno" que parece nas miniaturas não procede.
+
+**O que a ficha da Amanda proíbe e o resultado ainda faz:**
+- Falta a **identidade**: nenhum slide tem o wordmark AMANDACOELHO nem o monograma A—C, e não há foto. O que sobra é título, texto e moldura cinza. Parece **template genérico**, o que a própria ficha diz para evitar.
+- Slides 3, 4 e 6 de hoje têm grandes áreas mortas (texto ocupa 35%, 39% e 63% da caixa, o resto é vazio sem intenção).
+- Quase tudo que aparece vazio é **dado que falta, não código**: logo e manual visual em imagem, fotos reais, arquivos das fontes.
+
+**Conclusão:** o trabalho deste ciclo foi infraestrutura e regras (ficha, desdobramento, status do texto, enquadramento): necessário, e testado. Mas a **qualidade visível do deck não mudou**, e gerar o mesmo texto de novo não prova mais nada. Repetir a geração só volta a fazer sentido com insumos novos (logo, manual visual, fotos reais, fontes) ou com **outro texto/outro projeto** (a Assinatura, para provar que generaliza).
+
+**Limpeza pendente (precisa de autorização):** 4 decks de teste na conta da Amanda (369acf21, 2a92a039, 604108e4, c813c011), todos com o mesmo texto. Manter só o de 05/10 como linha de base.
+
 ## 6. Decisões em aberto (do checklist com a Gabriela)
 
 - Regra de foto-real para a Assinatura (vale como na Amanda?).
