@@ -63,8 +63,11 @@ function ConsentContent() {
     };
   }, [requestId]);
 
-  const wantsEditAll = Boolean(data?.scopes.includes(EDIT_ALL_SCOPE));
-  const wantsWrite = Boolean(data?.scopes.includes(WRITE_SCOPE)) || wantsEditAll;
+  // Quem decide é o usuário: as opções de escrita aparecem mesmo que o agente tenha pedido só leitura
+  // (alguns, como o Claude ao conectar por URL, pedem só leitura). `asked*` só alimenta o aviso.
+  const askedWrite = Boolean(data?.scopes.includes(WRITE_SCOPE) || data?.scopes.includes(EDIT_ALL_SCOPE));
+  const wantsEditAll = Boolean(data);
+  const wantsWrite = Boolean(data);
   const writing = access !== 'read';
   const clientName = data ? plainText(data.client.name) : '';
 
@@ -234,6 +237,12 @@ function ConsentContent() {
 
         <fieldset className={styles.group}>
           <legend>O que o agente pode fazer</legend>
+          {!askedWrite && (
+            <p className={styles.note}>
+              {clientName} pediu só leitura. Você pode liberar mais abaixo; vale só para esta conexão e você revoga quando
+              quiser.
+            </p>
+          )}
           <label className={styles.option}>
             <input type="radio" name="access" checked={access === 'read'} onChange={() => setAccess('read')} />
             <span className={styles.optionText}>

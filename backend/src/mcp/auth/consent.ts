@@ -165,8 +165,12 @@ export function createConsentRouter(deps: ConsentDeps): Router {
         let granted: McpScope[] = pending.scopes;
         if (body.scopes) {
           const wanted = body.scopes.filter(isMcpScope);
-          if (wanted.length !== body.scopes.length || wanted.some((s) => !pending.scopes.includes(s))) {
-            throw createError(400, 'scopes inclui escopo que o pedido não solicitou.', 'MCP_BAD_SCOPE');
+          // Decisão do dono do produto (usuário): a tela de consentimento deixa liberar qualquer escopo
+          // SUPORTADO, inclusive um que o cliente não pediu (RFC 6749 §3.3: o servidor pode conceder
+          // escopo diferente do pedido; o token informa o que valeu). Clientes que conectam só por URL
+          // (Claude) pedem leitura, e sem isto não haveria como liberar escrita. Escopo desconhecido segue recusado.
+          if (wanted.length !== body.scopes.length) {
+            throw createError(400, 'scopes inclui escopo desconhecido.', 'MCP_BAD_SCOPE');
           }
           if (wanted.length === 0) throw createError(400, 'Selecione ao menos um escopo.', 'MCP_BAD_SCOPE');
           granted = normalizeScopes(wanted);

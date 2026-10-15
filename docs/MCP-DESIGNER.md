@@ -143,7 +143,9 @@ Contrato do `GET /consent/:id` (para a tela da próxima etapa):
 ```
 
 Regras do `POST` (aprovar): ao menos uma marca (`brandSlugs`) **ou** `allBrands: true` — nunca os dois; o usuário só
-pode **reduzir** os escopos pedidos, nunca ampliar; leitura exige ser **membro** (qualquer papel) de cada marca
+pode **reduzir** os escopos pedidos **ou liberar outro escopo suportado** que o cliente não pediu (RFC 6749 §3.3; o
+token informa o que valeu — é a saída para clientes que conectam só por URL e pedem leitura); escopo desconhecido é
+`400`; leitura exige ser **membro** (qualquer papel) de cada marca
 escolhida; escrita (`designer.write`/`designer.edit_all`) exige papel **EDITOR, ADMIN ou OWNER** em cada uma. Em
 `allBrands` não há lista a validar: o consentimento só exige que o papel do usuário sirva para o escopo em alguma marca,
 e cada chamada filtra pelo papel de agora. Falha de validação (`403`/`400`) **não** consome o pedido — o usuário pode
