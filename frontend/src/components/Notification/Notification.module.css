@@ -47,10 +47,21 @@
   border: 1px solid var(--color-border);
   border-radius: 8px;
   box-shadow: var(--shadow-xl);
-  z-index: 1000;
+  z-index: var(--z-toast);
   overflow: hidden;
   display: flex;
   flex-direction: column;
+}
+
+/* Em tela estreita o menu lateral vira gaveta e o painel não cabe "ao lado" dele: ocupa a
+   largura da tela, com margem, em vez de sair para fora dela. */
+@media (max-width: 768px) {
+  .popover {
+    left: var(--space-3);
+    right: var(--space-3);
+    width: auto;
+    max-height: 60dvh;
+  }
 }
 
 .header {

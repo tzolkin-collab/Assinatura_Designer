@@ -490,7 +490,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 9999;
+  z-index: var(--z-modal);
   padding: var(--space-8);
 }
 
@@ -683,7 +683,7 @@
 .modalTitle {
   font-family: var(--font-serif);
   font-size: var(--text-2xl);
-  font-weight: 500;
+  font-weight: var(--weight-title);
   color: var(--color-text);
   margin: 0;
 }
@@ -866,7 +866,7 @@
 .postId {
   font-family: var(--font-serif);
   font-size: var(--text-base);
-  font-weight: 500;
+  font-weight: var(--weight-title);
   color: var(--color-text);
 }
 
@@ -952,7 +952,7 @@
 .aiReportTitle {
   font-family: var(--font-serif);
   font-size: var(--text-2xl);
-  font-weight: 500;
+  font-weight: var(--weight-title);
   color: var(--color-text);
   margin: 0;
   display: flex;
@@ -1045,7 +1045,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 9999;
+  z-index: var(--z-modal-nested);
   padding: var(--space-8);
 }
 
@@ -1335,6 +1335,7 @@
   white-space: nowrap;
   font-size: 12px;
   font-family: var(--font-mono);
+  font-size-adjust: none;
   color: var(--color-text-secondary);
 }
 
@@ -1500,7 +1501,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 10000;
+  z-index: var(--z-modal-nested);
   padding: var(--space-8);
 }
 
