@@ -176,8 +176,9 @@ O consentimento guarda no token **um modo**, não só uma lista:
 No modo `all`, marcas em que o usuário entra depois passam a valer e as que ele perde deixam de valer, sem reconectar.
 Famílias antigas, sem `brandMode`, são `selected`. Um token em `selected` nunca enxerga marca fora da sua lista.
 
-Sem `scope` no `/authorize` (ausente, vazio ou só `offline_access`), o pedido nasce só com `designer.read` (menor
-privilégio). `offline_access` é ignorado — sempre emitimos refresh token —, mas qualquer outro escopo desconhecido é
+Sem `scope` no `/authorize` (ausente, vazio ou só `offline_access`), o pedido cobre **todos** os escopos suportados (é o que a
+spec MCP manda sem `scope`; o Claude, ao conectar por URL, não manda). Isso não amplia nada: o consentimento só deixa o
+usuário **reduzir** e a tela começa em "só ver". `offline_access` é ignorado — sempre emitimos refresh token —, mas qualquer outro escopo desconhecido é
 `invalid_scope`. O `state` aceita até 512 caracteres. A regra de papel é a mesma de
 `middleware/brandAccess.ts` (`ANY_MEMBER` / `EDITORS`) — o conector nunca concede mais do que o app web.
 

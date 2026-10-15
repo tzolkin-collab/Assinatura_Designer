@@ -38,12 +38,12 @@ async function newClientId() {
 }
 
 describe('escopos pedidos no /authorize', () => {
-  it('scope vazio (scope=) vale como "sem escopo": o pedido nasce com leitura, nunca com zero escopos', async () => {
+  it('scope vazio (scope=) vale como "sem escopo": o pedido cobre todos os escopos suportados, nunca com zero escopos', async () => {
     const { challenge } = pkcePair();
     const res = await authorize(h.app, authorizeQuery(await newClientId(), challenge, { scope: '' }));
     const requestId = requestIdFromLocation(res.headers.location);
     const view = await request(h.app).get(`/api/mcp/consent/${requestId}`).set(h.asUser('user-1'));
-    expect(view.body.data.scopes).toEqual(['designer.read']);
+    expect(view.body.data.scopes).toEqual(['designer.read', 'designer.write', 'designer.edit_all']);
   });
 
   it('espaços extras no scope não viram escopo inválido', async () => {
@@ -63,11 +63,11 @@ describe('escopos pedidos no /authorize', () => {
     expect(new URL(bad.headers.location).searchParams.get('error')).toBe('invalid_scope');
   });
 
-  it('só offline_access (sem escopo do Designer) cai no padrão de leitura', async () => {
+  it('só offline_access (sem escopo do Designer) cai no padrão (todos os escopos suportados)', async () => {
     const { challenge } = pkcePair();
     const res = await authorize(h.app, authorizeQuery(await newClientId(), challenge, { scope: 'offline_access' }));
     const view = await request(h.app).get(`/api/mcp/consent/${requestIdFromLocation(res.headers.location)}`).set(h.asUser('user-1'));
-    expect(view.body.data.scopes).toEqual(['designer.read']);
+    expect(view.body.data.scopes).toEqual(['designer.read', 'designer.write', 'designer.edit_all']);
   });
 });
 

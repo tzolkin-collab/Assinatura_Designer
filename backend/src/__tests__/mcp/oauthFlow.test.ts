@@ -250,7 +250,7 @@ describe('/authorize', () => {
     expect(res.headers.location).toBeUndefined();
   });
 
-  it('sem scope pedido, o pedido nasce só com leitura (menor privilégio)', async () => {
+  it('sem scope pedido, o pedido cobre todos os escopos suportados (o usuário só pode reduzir)', async () => {
     const clientId = await newClient();
     const { challenge } = pkcePair();
     const query: Record<string, string> = authorizeQuery(clientId, challenge);
@@ -258,7 +258,7 @@ describe('/authorize', () => {
     const res = await authorize(h.app, query);
     const requestId = requestIdFromLocation(res.headers.location);
     const view = await request(h.app).get(`/api/mcp/consent/${requestId}`).set(h.asUser('user-1'));
-    expect(view.body.data.scopes).toEqual(['designer.read']);
+    expect(view.body.data.scopes).toEqual(['designer.read', 'designer.write', 'designer.edit_all']);
   });
 });
 
