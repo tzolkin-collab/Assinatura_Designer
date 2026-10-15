@@ -276,6 +276,44 @@ conteúdo.** Falha ao gravar vira aviso no log e não derruba a chamada. A API d
 - **Escopos na renovação:** o `scope` do `/token` por refresh só pode **reduzir**; ampliar exige novo consentimento
   (a resposta é `invalid_scope` e o refresh não é consumido).
 
+## Bloqueadores antes de ampliar o conector (auditoria de 15/10/2026)
+
+Resolver **antes** de acrescentar ferramentas (render, assets, export). Verificados no código de `main`; os itens 1 a 4
+foram confirmados no servidor real contra a marca `amanda-coelho`.
+
+### Brechas (segurança e permissão)
+
+| # | Onde | Problema | Correção |
+|---|---|---|---|
+| B1 ✅ | `lib/logoTransparency.ts` `fetch(logoUrl)`, chamado por `PUT /settings/:slug/config` (qualquer EDITOR) | URL do usuário buscada pelo servidor **sem** `isPublicHttpUrlResolved`, sem limite de tamanho e sem timeout: SSRF para rede interna/metadata e leitura inteira em memória. | Validar com `isPublicHttpUrlResolved`, `redirect: 'error'`, timeout e teto de bytes; só aceitar host do R2 da própria marca. |
+| B2 ✅ | `PUT /settings/:slug/config` aceita `ignoreAiCostLimit`, `autoResearch*` de um EDITOR | Quem edita o branding desliga o teto de custo de IA da marca. | Exigir OWNER/ADMIN para esses três campos; ignorar o resto do corpo por EDITOR (hoje o corpo não tem schema). |
+| B3 | `save_presentation` não chama `snapshotPost` | O agente sobrescreve o trabalho do usuário sem versão; `PUT /posts/:id` e o cérebro já fazem snapshot. Sem isso não há como desfazer. | `snapshotPost(postId, { source: 'AI' })` antes do `update`; devolver `versionId` na resposta. |
+| B4 | `save_presentation` grava `status: 'READY'` mesmo com `issues` | Peça com texto divergente aparece como pronta na Galeria. | Gravar `DRAFT` (ou marcador `needsReview`) enquanto houver `issues`; `READY` só limpa. |
+| B5 | Sem teto por usuário/marca de peças criadas por MCP | 240 chamadas/min x 30 slides x 60 KB: o banco cresce sem limite e nada alerta. | Teto diário de criações por conexão e por marca; erro `quota_exceeded` legível ao agente. |
+| B6 | `content.mcp.userId` vive dentro do `content` que o editor regrava | O dono da peça é um campo de JSON editável pelo cliente web; uma regravação que o omita tira o agente da própria peça, e um EDITOR pode forjá-lo. | Coluna própria (`Post.createdVia`, `createdById` já existe) em vez de JSON; o `PUT` preserva/ignora o campo. |
+
+### Configurações duplicadas (fonte de verdade)
+
+| Dado | Fonte 1 | Fonte 2 | Quem lê |
+|---|---|---|---|
+| Cores, fontes, logo | `BrandConfig.colors/primaryFonts/logoUrl` (tela Branding) | `BrandProfile.data` palette/typography/logo (Cérebro da IA) | `get_brand_kit` lê a 1; `get_designer_brief` e o pipeline leem a 2. Em `amanda-coelho` o kit devolve `logoUrl: null` e `visual` vazio enquanto o brief tem 14 logos e regras completas. |
+| Diretrizes e regras | `BrandConfig.guidelines` + `agentPrompt` (tela Agente) | ficha (essência, nunca fazer) + `/brands/:slug/memory` regras | Quatro lugares para a mesma instrução; o agente externo recebe só parte. |
+| Logo como arquivo | `BrandConfig.logoUrl` (cria Asset `source=branding`) | ficha `logo.files` | Dois sincronismos diferentes (settings e brands/confirm-logo). |
+| Pesquisa automática | `BrandConfig.autoResearch*` | `Reference.autoSyncEnabled/Interval` (DEPRECATED, ainda no schema) | Colunas mortas confundem quem lê o schema. |
+
+Decisão proposta: **a ficha (`BrandProfile`) é a fonte única** de identidade. `BrandConfig` vira só operacional
+(`ignoreAiCostLimit`, `autoResearch*`, `presentationConfig`), e a tela Branding passa a escrever na ficha. Enquanto isso não
+acontece, `get_brand_kit` deve ser um recorte do mesmo resolvedor do brief (uma função, não duas leituras).
+
+**B1 e B2 corrigidos** (PR `fix/seguranca-config-logo-ssrf`): download do logo só de host público, sem redirect, com timeout e teto de 8 MB; `isPublicIp` ignorava IPv6 literal (`URL.hostname` traz colchetes, então `http://[::1]/` passava) e passou a tratá-lo; custo de IA e pesquisa automática só mudam por OWNER/ADMIN.
+
+### Ordem
+
+1. B1, B2 (brechas que valem para o app inteiro, independem do MCP).
+2. B3, B4, B6 (integridade da escrita do agente) e B5.
+3. Unificar a leitura de identidade (`get_brand_kit` = brief).
+4. Só então: `render_slide`, `list_assets`/`upload_asset`, leitura de qualquer peça, `export_design`/`publish_design`.
+
 ## Verificação
 
 ```bash

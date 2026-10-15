@@ -8,6 +8,8 @@ import type { Prisma, BrandRole } from '@prisma/client';
 import prisma from '../lib/prisma.js';
 import { getBilling } from '../lib/aiBudget.js';
 import { assertBrandAccess, ANY_MEMBER, EDITORS } from '../middleware/brandAccess.js';
+
+const ADMIN_ROLES: BrandRole[] = ['OWNER', 'ADMIN'];
 import { createError } from '../middleware/errorHandler.js';
 import { normalizarLogoParaFundoEscuro } from '../lib/logoTransparency.js';
 import { normalizarParaFormulario } from '../lib/brandGuidelines.js';
@@ -79,8 +81,30 @@ settingsRouter.get('/:slug/config', async (req: AuthRequest, res: Response, next
 
 settingsRouter.put('/:slug/config', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const brandId = await getBrandId(req.params.slug as string, req.user?.userId);
+    const { id: brandId, role } = await assertBrandAccess(req.params.slug as string, req.user?.userId, EDITORS);
     const { agentPrompt, primaryFonts, colors, guidelines, logoUrl, presentationConfig, autoResearchEnabled, autoResearchInterval, ignoreAiCostLimit } = req.body;
+
+    // Teto de custo de IA e pesquisa automática movem gasto da marca: só quem administra decide.
+    // A tela de Branding reenvia o valor atual a cada salvamento, então um EDITOR pode salvar com
+    // o campo igual ao que já está; mudar o valor é que exige OWNER/ADMIN (recusado, não ignorado).
+    if (!ADMIN_ROLES.includes(role)) {
+      const atual = await prisma.brandConfig.findUnique({
+        where: { brandId },
+        select: { ignoreAiCostLimit: true, autoResearchEnabled: true, autoResearchInterval: true },
+      });
+      const mudou =
+        (ignoreAiCostLimit !== undefined && !!ignoreAiCostLimit !== (atual?.ignoreAiCostLimit ?? false)) ||
+        (autoResearchEnabled !== undefined && !!autoResearchEnabled !== (atual?.autoResearchEnabled ?? false)) ||
+        (autoResearchInterval !== undefined && Number(autoResearchInterval) !== (atual?.autoResearchInterval ?? 14));
+      if (mudou) {
+        throw createError(403, 'Só o dono ou o administrador da marca altera o limite de custo de IA e a pesquisa automática.');
+      }
+    }
+
+    // O servidor baixa esta URL (normalização do logo): só endereço público é aceito.
+    if (typeof logoUrl === 'string' && logoUrl.trim() && !isPublicHttpUrl(logoUrl.trim())) {
+      throw createError(400, 'logoUrl precisa ser uma URL http(s) pública.');
+    }
 
     // Mesma normalização do confirm-logo do brandbook: sem isto, salvar pela
     // página de Branding reintroduz o logo opaco que o outro caminho corrigiu.

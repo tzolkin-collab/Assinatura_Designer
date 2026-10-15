@@ -24,7 +24,9 @@ import dns from 'dns/promises';
 // Um IP (v4 ou v6 literal) é público? Bloqueia loopback, privado, CGNAT e
 // link-local (inclui a metadata 169.254.169.254) e ULA/link-local IPv6.
 export function isPublicIp(ip: string): boolean {
-  const host = ip.toLowerCase();
+  // `new URL('http://[::1]/').hostname` devolve "[::1]", com colchetes: sem tirá-los, '::1' e
+  // 'fe80…' nunca casavam e todo IPv6 literal passava como público.
+  const host = ip.toLowerCase().replace(/^\[|\]$/g, '');
   const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
   if (v4) {
     const o = v4.slice(1).map(Number);
@@ -42,7 +44,14 @@ export function isPublicIp(ip: string): boolean {
     if (host.startsWith('fe80')) return false;             // link-local
     if (host.startsWith('fc') || host.startsWith('fd')) return false; // ULA
     if (host.startsWith('::ffff:')) {                      // IPv4-mapped → valida o v4 embutido
-      return isPublicIp(host.slice('::ffff:'.length));
+      const resto = host.slice('::ffff:'.length);
+      // O parser de URL normaliza ::ffff:127.0.0.1 para a forma hex ::ffff:7f00:1.
+      const hex = /^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(resto);
+      if (hex) {
+        const hi = parseInt(hex[1]!, 16), lo = parseInt(hex[2]!, 16);
+        return isPublicIp(`${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`);
+      }
+      return isPublicIp(resto);
     }
     return true;
   }
