@@ -186,12 +186,25 @@ export default function FabricaPage() {
 
   // Auto-scroll thread (Smart Scroll)
   useEffect(() => {
-    requestAnimationFrame(() => {
+    const toBottom = () => {
       if (threadRef.current && !isScrolledUp.current) {
         threadRef.current.scrollTop = threadRef.current.scrollHeight;
       }
-    });
+    };
+    requestAnimationFrame(toBottom);
+    // O cartão da pergunta termina de ganhar altura depois do primeiro frame (fontes, markdown):
+    // uma segunda passada curta garante que ele não fique atrás do campo de mensagem.
+    const t = activeQuestion ? window.setTimeout(toBottom, 250) : undefined;
+    return () => { if (t !== undefined) window.clearTimeout(t); };
   }, [messages, isStreaming, workerStatus, activeQuestion]);
+
+  // Uma pergunta nova é um pedido de resposta: leva a pessoa até ela, mesmo que tenha rolado
+  // para cima (ex.: o cartão de confirmar a regra de foto real nascia fora da vista e a geração
+  // parecia travada).
+  const activeQuestionId = activeQuestion?.id ?? null;
+  useEffect(() => {
+    if (activeQuestionId) isScrolledUp.current = false;
+  }, [activeQuestionId]);
 
   // Auto-resize textarea (useLayoutEffect to avoid layout shift)
   useLayoutEffect(() => {
