@@ -25,6 +25,7 @@ import { uploadFileToR2 } from '../../lib/r2.js';
 import { buildMessageParts } from '../../lib/chatMessageParts.js';
 import { uploadChatAttachments } from '../../lib/chatAttachments.js';
 import { BRAIN_SYSTEM_PROMPT, DESIGNER_BRAIN_CHAT_NOTE, PHOTO_RULE_CHAT_NOTE } from './prompts.js';
+import { COPY_MIN_CHARS, dropStrayTagFragments, isPastedCopy } from './entradaChat.js';
 import { isBrainActiveForBrand, parseCopyBlocks } from '../../lib/designerBrain/index.js';
 import prisma from '../../lib/prisma.js';
 import { executeTool } from '../tools/index.js';
@@ -137,7 +138,7 @@ function stripQuestionTag(content: string): string {
   // A detecção de despacho/edição usa o texto cru (fullResponse), então isto é seguro.
   // QUESTION/EDIT passam pelo extrator balanceado — a regex lazy antiga deixava
   // resíduo de JSON aninhado (opções-objeto, payload do [EDIT]) vazar para o chat.
-  return stripBracketedJson(
+  return dropStrayTagFragments(stripBracketedJson(
     stripBracketedJson(
       stripBracketedJson(
         stripBracketedJson(
@@ -149,7 +150,7 @@ function stripQuestionTag(content: string): string {
       'MEMORY',
     ),
     'GENERATE_IMAGE',
-  );
+  ));
 }
 
 function emitSessionState(
@@ -202,11 +203,6 @@ const BRAIN_MODEL = config.models.brain;
 // ela existe, o deck NÃO nasce de um brief resumido: o planner distribui esse
 // texto verbatim pelos slides e o usuário aprova o roteiro ANTES da geração.
 
-/** Mensagem avulsa só vira "copy" se for claramente um texto colado, não um pedido. */
-const LONG_MESSAGE_CHARS = 1200;
-/** Total mínimo para ativar o fluxo copy-first (roteiro + pausa de aprovação). */
-const COPY_MIN_CHARS = 500;
-
 function decodeTextAttachment(a: ChatAttachment): string | null {
   const isText = (a.mimeType ?? '').startsWith('text/') || /\.(txt|md|markdown|csv)$/i.test(a.name ?? '');
   if (!isText || !a.dataBase64) return null;
@@ -225,7 +221,7 @@ function extractSourceCopy(messages: ChatMessage[]): string | undefined {
       const text = decodeTextAttachment(a);
       if (text?.trim()) parts.push(`--- ${a.name} ---\n${text.trim()}`);
     }
-    if (m.content.length >= LONG_MESSAGE_CHARS) parts.push(m.content);
+    if (isPastedCopy(m.content)) parts.push(m.content);
   }
   const joined = parts.join('\n\n');
   return joined.length >= COPY_MIN_CHARS ? joined : undefined;
