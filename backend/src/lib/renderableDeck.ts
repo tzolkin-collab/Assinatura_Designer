@@ -1,4 +1,5 @@
 import { buildSlideDocument } from './htmlDesign.js';
+import { parseFontRefs, toDataUriFaces, type FontFaceCss } from './customFonts.js';
 
 // Normaliza um post html-design para um "deck renderizável": um jeito único de obter
 // width/height/fonts e o documento HTML completo de cada slide. É o que destrava
@@ -14,7 +15,13 @@ export interface RenderableDeck {
   docAt: (idx: number) => string;
 }
 
-export function resolveRenderableDeck(content: unknown): RenderableDeck | null {
+/** Fontes próprias do deck como data URI, para o render do servidor (o R2 não manda CORS para @font-face por URL). */
+export async function deckFontFaces(content: unknown): Promise<FontFaceCss[]> {
+  if (!content || typeof content !== 'object') return [];
+  return toDataUriFaces(parseFontRefs((content as { fontFaces?: unknown }).fontFaces));
+}
+
+export function resolveRenderableDeck(content: unknown, fontFaces: FontFaceCss[] = []): RenderableDeck | null {
   if (!content || typeof content !== 'object') return null;
   const c = content as {
     kind?: string;
@@ -29,8 +36,13 @@ export function resolveRenderableDeck(content: unknown): RenderableDeck | null {
     const height = typeof c.height === 'number' ? c.height : 1080;
     const fonts = Array.isArray(c.fonts) ? c.fonts : ['Inter'];
     const slides = c.slides;
-    return { width, height, count: slides.length, docAt: (i) => buildSlideDocument(slides[i]!, fonts, width, height) };
+    return { width, height, count: slides.length, docAt: (i) => buildSlideDocument(slides[i]!, fonts, width, height, fontFaces) };
   }
 
   return null;
+}
+
+/** Deck renderizável já com as fontes próprias embutidas: o que os exports (PDF, PNG, PPTX, Canva) usam. */
+export async function resolveRenderableDeckWithFonts(content: unknown): Promise<RenderableDeck | null> {
+  return resolveRenderableDeck(content, await deckFontFaces(content));
 }

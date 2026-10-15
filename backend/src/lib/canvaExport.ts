@@ -1,7 +1,7 @@
 import prisma from './prisma.js';
 import { renderHtmlToPng } from './htmlRaster.js';
 import { mergeSlidesIntoPost } from './postHelper.js';
-import { resolveRenderableDeck } from './renderableDeck.js';
+import { resolveRenderableDeckWithFonts } from './renderableDeck.js';
 import { htmlDocsToPptx } from './htmlToPptx.js';
 import { uploadFileToR2, assertR2Configured } from './r2.js';
 import {
@@ -73,7 +73,7 @@ export async function runCanvaExport(
     throw new Error('Canva não conectado para este usuário');
   }
 
-  const deck = resolveRenderableDeck(mergeSlidesIntoPost(post).content);
+  const deck = await resolveRenderableDeckWithFonts(mergeSlidesIntoPost(post).content);
   if (!deck) throw new Error('Export disponível apenas para designs html-design');
 
   const indices =
@@ -185,7 +185,7 @@ export async function runCanvaPptxExport(
   // Falha rápido se o R2 não estiver configurado, antes de gastar tempo gerando o PPTX.
   assertR2Configured();
 
-  const deck = resolveRenderableDeck(mergeSlidesIntoPost(post).content);
+  const deck = await resolveRenderableDeckWithFonts(mergeSlidesIntoPost(post).content);
   if (!deck) throw new Error('Export disponível apenas para designs html-design');
 
   const titleBase = post.name?.trim() || `Design ${postId.slice(0, 8)}`;

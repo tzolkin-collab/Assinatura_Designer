@@ -121,7 +121,7 @@ Origem: `docs/ACABAMENTOS-DESIGNER.md` (21/09) e `docs/PLANO-CONSOLIDACAO.md` (2
 | ◐ | Remover geração de pessoa e stock | Alinhar à regra de foto real | Bloqueado nas marcas com o flag (seção D.1). Nas demais o `imageResolver` ainda gera foto, usa Unsplash e "Remix IA": só mudam se a regra passar a valer para todos |
 | ☐ | Planner pedindo imagem de pessoa | Não pedir o que não pode ser gerado | `imageHint` inclui "pessoa, equipe, depoimento" |
 | ☐ | Checklist pré-geração do chat | Não perguntar "IA / Remix / Unsplash" | Substituir pelos templates de briefing do §12 |
-| ☐ | Upload de fonte `.otf/.ttf` | Usar Queens e Aeonik de verdade | Hoje só entram Google Fonts. Já estava no plano de 21/09 |
+| ◐ | Uso de fonte própria (`.ttf/.otf/.woff/.woff2`) | Usar Queens e Aeonik de verdade | **Construído (12/10):** a fonte marcada como "Arquivo oficial enviado" na ficha vira `@font-face` no preview (rota pública com CORS), no revisor e nas exportações; o artista usa o nome exato e o aviso de substituição some para ela. Conferido com render real: com o arquivo sai a fonte, sem ele cai na genérica. **Falta:** os arquivos da Gabriela (licença comercial) e o PPTX só leva o nome da fonte |
 | ☐ | Gravação da memória pelo chat | Impedir que o bot altere o projeto sem pedir | `updateBrandMemory` grava "sem pedir permissão"; exigir aprovação |
 | ☐ | Slides de fallback silenciosos | Não entregar deck "pronto" com slide genérico | Avisar e sinalizar em vez de preencher o lote |
 | ☐ | Revisão ver todo o deck | Checar quantidade, texto e acentos, não só uma amostra | O reviewer visual amostra ~8 slides |

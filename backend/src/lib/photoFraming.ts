@@ -12,6 +12,7 @@ import {
 } from './photoFocus.js';
 import { scanHtmlLayout } from './htmlRaster.js';
 import { buildSlideDocument } from './htmlDesign.js';
+import type { FontFaceCss } from './customFonts.js';
 import { listPhotoSlots, setPhotoPosition } from './photoSlot.js';
 
 // Enquadramento automático de uma foto da biblioteca num espaço do slide. Baixa a foto, acha o
@@ -161,6 +162,8 @@ export function clearFramingCache(): void {
 export interface FrameSlidesInput<T extends { html: string; css?: string }> {
   slides: T[];
   fonts: string[];
+  /** Fontes próprias já resolvidas (data URI): o texto reflui como no render final. */
+  fontFaces?: FontFaceCss[];
   width: number;
   height: number;
   /** Só fotos destas URLs (biblioteca e anexos da conversa) são baixadas: o artista escreve o HTML, e uma URL dele não vira fetch do servidor. */
@@ -189,7 +192,7 @@ export async function autoFrameSlidePhotos<T extends { html: string; css?: strin
       slides.push(slide);
       continue;
     }
-    const doc = buildSlideDocument({ html: slide.html, css: slide.css }, input.fonts, input.width, input.height);
+    const doc = buildSlideDocument({ html: slide.html, css: slide.css }, input.fonts, input.width, input.height, input.fontFaces);
     const aspects = await measureSlotAspects(doc, { width: input.width, height: input.height }, deps);
     let html = slide.html;
     for (const c of candidates) {

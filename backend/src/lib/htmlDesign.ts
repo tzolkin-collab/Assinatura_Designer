@@ -5,6 +5,7 @@ import createDOMPurify, { type WindowLike } from 'dompurify';
 import { JSDOM } from 'jsdom';
 import { pipelineAdviceBlock } from './adviceText.js';
 import { REAL_PHOTO_RULE_PROMPT } from './designerBrain/prompts.js';
+import { fontFaceCss, type FontFaceCss, type FontFaceRef } from './customFonts.js';
 
 export interface HtmlDesignSlide {
   html: string;
@@ -18,6 +19,8 @@ export interface HtmlDesignContent {
   height: number;
   format: 'single' | 'carousel' | 'story' | 'presentation';
   fonts: string[];
+  /** Fontes próprias da marca usadas no deck (referências; os bytes vêm da biblioteca). */
+  fontFaces?: FontFaceRef[];
   slides: HtmlDesignSlide[];
   reasoning?: string;
 }
@@ -51,6 +54,8 @@ export interface GenerateHtmlDesignInput {
      * único arquivo opaco de fundo branco.
      */
     logoVariants?: Array<{ url: string; label: string }>;
+    /** Famílias cujo ARQUIVO o projeto enviou: o sistema as carrega de verdade, o artista as usa pelo nome exato. */
+    ownFonts?: string[];
     logoUrl?: string | null;
     /** URLs reais do pool de assets da marca — o artista prefere estas a inventar fotos de banco. */
     assetUrls?: Array<{ url: string; name: string }>;
@@ -174,15 +179,28 @@ export function googleFontHrefs(fonts: unknown): string[] {
   );
 }
 
+/** Fontes com arquivo próprio instalado: o artista as lista em "fonts" com o nome exato, sem trocar por parecida. */
+export function ownFontsLine(own?: string[]): string {
+  const f = (own ?? []).filter((x) => x.trim());
+  return f.length === 0 ? '' : `
+Fontes PRÓPRIAS da marca (arquivo oficial instalado, carregue pelo nome exato em "fonts" e use nos títulos/textos conforme o manual): ${f.join(', ')}`;
+}
+
 // Monta o documento HTML completo de um slide (para rasterizar OU exibir no iframe).
-export function buildSlideDocument(slide: HtmlDesignSlide, fonts: string[], width: number, height: number): string {
+// `fontFaces`: fontes próprias da marca já resolvidas (data URI). A família que tem arquivo próprio
+// não vai ao Google (nome igual a uma Google Font traria a errada) e ganha @font-face.
+export function buildSlideDocument(slide: HtmlDesignSlide, fonts: string[], width: number, height: number, fontFaces: FontFaceCss[] = []): string {
   const css = sanitizeSlideCss(slide.css ?? '');
   const html = sanitizeSlideHtml(slide.html ?? '');
+  const own = new Set(fontFaces.map((f) => f.family.trim().toLowerCase()));
+  const remote = normalizeFontFamilies(fonts).filter((f) => !own.has(f.toLowerCase()));
+  const links = remote.length > 0 || own.size === 0 ? googleFontHrefs(remote.length > 0 ? remote : fonts) : [];
   return `<!doctype html><html><head><meta charset="utf-8">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-${googleFontHrefs(fonts).map((href) => `<link href="${href}" rel="stylesheet">`).join('\n')}
+${links.map((href) => `<link href="${href}" rel="stylesheet">`).join('\n')}
 <style>
+${fontFaceCss(fontFaces)}
 *{margin:0;padding:0;box-sizing:border-box;}
 html,body{width:${width}px;height:${height}px;overflow:hidden;}
 .slide-root{width:${width}px;height:${height}px;position:relative;overflow:hidden;}
@@ -525,7 +543,7 @@ function buildBatchUserPrompt(
 
   return `Marca: ${b.name}
 Cores oficiais: ${b.colors.length ? b.colors.join(', ') : 'livre, profissional'}
-Fontes sugeridas: ${b.primaryFonts.length ? b.primaryFonts.join(', ') : 'escolha tipografia premium'}
+Fontes sugeridas: ${b.primaryFonts.length ? b.primaryFonts.join(', ') : 'escolha tipografia premium'}${ownFontsLine(b.ownFonts)}
 ${b.designerBrain ? '' : `Diretrizes: ${b.guidelines || 'não definidas'}`}
 ${!b.designerBrain && b.agentPrompt ? `Instruções do agente: ${b.agentPrompt}` : ''}
 ${b.logoUrl ? `Logo: ${b.logoUrl}` : ''}
@@ -803,6 +821,8 @@ export interface EditHtmlSlideInput {
     name: string;
     colors: string[];
     primaryFonts: string[];
+    /** Famílias com arquivo próprio instalado (ver GenerateHtmlDesignInput). */
+    ownFonts?: string[];
     guidelines?: string;
     agentPrompt?: string;
   };
@@ -880,7 +900,7 @@ ${t.outerHTML ? `- Trecho exato no HTML:\n${t.outerHTML}` : ''}\n`
 
   const userPrompt = `Marca: ${input.brand.name}
 Cores: ${input.brand.colors.join(', ') || 'livre'}
-Fontes: ${input.brand.primaryFonts.join(', ') || 'livre'}${guidelinesBlock}${agentPromptBlock}
+Fontes: ${input.brand.primaryFonts.join(', ') || 'livre'}${ownFontsLine(input.brand.ownFonts)}${guidelinesBlock}${agentPromptBlock}
 
 HTML atual:
 ${input.slide.html}
