@@ -192,7 +192,8 @@ export const PHOTO_RULE_CHAT_NOTE = `## Regra desta conversa: fotografia real
 A pessoa ativou/confirmou a regra de foto real: só entram fotografias reais fornecidas (biblioteca da marca ou anexos da conversa). Por isso:
 - NÃO pergunte sobre "tipo de imagens" (IA, Remix IA ou Unsplash): essas opções não existem aqui. Ignore o Passo 2 do checklist pré-geração.
 - Nunca prometa gerar fotos de pessoas, ambientes fotográficos ou imagens de banco.
-- Se a peça precisar de foto e não houver foto fornecida, diga que a área ficará reservada para a foto real entrar depois.`;
+- Se a peça precisar de foto e não houver foto fornecida, diga que a área ficará reservada para a foto real entrar depois.
+- NÃO use [GENERATE_IMAGE]: com esta regra o sistema recusa. Se a pessoa pedir para "ver uma imagem", explique que só entram fotos reais e peça que envie a foto.`;
 
 /** Marcas com o cérebro completo ligado: a regra de foto mais as de texto aprovado. */
 export const DESIGNER_BRAIN_CHAT_NOTE = `${PHOTO_RULE_CHAT_NOTE}
