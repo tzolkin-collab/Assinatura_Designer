@@ -862,7 +862,7 @@ export default function BrandGaleriaPage() {
       </div>
 
       {loading ? (
-        <p>Carregando galeria...</p>
+        <div className={styles.loadingState} role="status" aria-live="polite">Carregando galeria…</div>
       ) : error ? (
         <p className={styles.error}>Erro ao carregar: {error}</p>
       ) : posts.length === 0 ? (
@@ -892,7 +892,13 @@ export default function BrandGaleriaPage() {
                       <span className={styles.hoverText}>Visualizar</span>
                     </div>
 
-                    {imageUrl ? (
+                    {post.status === 'FAILED' || post.status === 'GENERATING' ? (
+                      <div className={styles.thumbEmpty}>
+                        <span className={post.status === 'FAILED' ? styles.thumbStatusFailed : styles.thumbStatus}>
+                          {post.status === 'FAILED' ? 'Falhou ao gerar' : 'Gerando…'}
+                        </span>
+                      </div>
+                    ) : imageUrl ? (
                       <Image
                         src={imageUrl}
                         alt="Post thumbnail"
@@ -908,10 +914,10 @@ export default function BrandGaleriaPage() {
                       </div>
                     ) : (
                       <div className={styles.thumbEmpty}>
-                        <span style={{ color: 'var(--color-text-tertiary)', fontSize: '12px' }}>Sem preview</span>
+                        <span className={styles.thumbStatus}>Sem preview</span>
                       </div>
                     )}
-                    {htmlContent && (
+                    {htmlContent && post.status !== 'FAILED' && post.status !== 'GENERATING' && (
                       <span className={styles.slideCount}>
                         {htmlContent.slides.length} slides
                       </span>

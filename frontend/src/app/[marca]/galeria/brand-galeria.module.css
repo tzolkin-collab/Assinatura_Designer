@@ -850,6 +850,26 @@
   background-color: var(--color-bg-secondary);
 }
 
+.thumbStatus {
+  color: var(--color-text-tertiary);
+  font-size: 12px;
+}
+
+.thumbStatusFailed {
+  color: var(--color-danger);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.loadingState {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 240px;
+  color: var(--color-text-tertiary);
+  font-size: var(--text-sm);
+}
+
 .postBody {
   display: flex;
   justify-content: space-between;
