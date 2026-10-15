@@ -475,7 +475,7 @@
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   box-shadow: none;
-  z-index: 100;
+  z-index: var(--z-dropdown);
   padding: 4px;
 }
 
@@ -850,6 +850,26 @@
   background-color: var(--color-bg-secondary);
 }
 
+.thumbStatus {
+  color: var(--color-text-tertiary);
+  font-size: 12px;
+}
+
+.thumbStatusFailed {
+  color: var(--color-danger);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.loadingState {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 240px;
+  color: var(--color-text-tertiary);
+  font-size: var(--text-sm);
+}
+
 .postBody {
   display: flex;
   justify-content: space-between;
@@ -1142,7 +1162,7 @@
   justify-content: center;
   color: #fff;
   cursor: pointer;
-  z-index: 100;
+  z-index: var(--z-raised);
   transition: all var(--transition-fast);
 }
 

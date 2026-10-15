@@ -948,7 +948,7 @@
   border-radius: 10px;
   overflow: hidden;
   box-shadow: none;
-  z-index: 50;
+  z-index: var(--z-dropdown);
 }
 
 .slashItem {
