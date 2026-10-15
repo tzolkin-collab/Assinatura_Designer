@@ -79,9 +79,13 @@ describe('cliente MCP oficial com token', () => {
     expect(client.getServerCapabilities()?.tools).toBeDefined();
 
     const { tools } = await client.listTools();
-    expect(tools.map((t) => t.name).sort()).toEqual(['get_brand_kit', 'list_brands']);
+    expect(tools.map((t) => t.name).sort()).toEqual(['get_brand_kit', 'get_design', 'get_designer_brief', 'list_brands', 'list_designs', 'save_presentation']);
     for (const tool of tools) {
-      expect(tool.annotations).toMatchObject({ readOnlyHint: true, destructiveHint: false, openWorldHint: false });
+      expect(tool.annotations).toMatchObject({
+        readOnlyHint: tool.name !== 'save_presentation',
+        destructiveHint: false,
+        openWorldHint: false,
+      });
       expect(tool.outputSchema?.type).toBe('object');
     }
 

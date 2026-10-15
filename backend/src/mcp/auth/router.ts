@@ -89,7 +89,7 @@ export function createOAuthRouter(deps: { config: McpConfig; provider: DesignerO
     revocation_endpoint_auth_methods_supported: ['none'],
     // Prometemos o `iss` em TODA resposta de autorização (sucesso, negação e erro).
     authorization_response_iss_parameter_supported: true,
-    // CIMD não implementado (ver docs/MCP-CHATGPT.md): não anunciamos o que não fazemos.
+    // CIMD não implementado (ver docs/MCP-DESIGNER.md): não anunciamos o que não fazemos.
   };
   const protectedResourceMetadata = {
     resource: config.resourceUrl.href,

@@ -209,21 +209,31 @@ describe('descoberta (initialize / tools/list)', () => {
     const res = await mcpPost(h.app, flow.accessToken, rpc('tools/list'));
     expect(res.status).toBe(200);
     const tools = res.body.result.tools as Array<Record<string, any>>;
-    expect(tools.map((t) => t.name).sort()).toEqual(['get_brand_kit', 'list_brands']);
+    expect(tools.map((t) => t.name).sort()).toEqual([
+      'get_brand_kit',
+      'get_design',
+      'get_designer_brief',
+      'list_brands',
+      'list_designs',
+      'save_presentation',
+    ]);
 
     for (const tool of tools) {
       expect(tool.name).toMatch(/^[a-z]+(_[a-z]+)*$/); // snake_case em inglês
       expect(tool.title).toBeTruthy();
       expect(tool.description).toMatch(/[a-zçãé]/i);
+      // Só save_presentation escreve; as demais são leitura pura.
+      const writes = tool.name === 'save_presentation';
       expect(tool.annotations).toEqual({
-        readOnlyHint: true,
+        readOnlyHint: !writes,
         destructiveHint: false,
-        idempotentHint: true,
+        idempotentHint: !writes,
         openWorldHint: false,
       });
       // Doc do Apps SDK: securitySchemes no descritor + espelho em _meta.
-      expect(tool.securitySchemes).toEqual([{ type: 'oauth2', scopes: ['designer.read'] }]);
-      expect(tool._meta.securitySchemes).toEqual([{ type: 'oauth2', scopes: ['designer.read'] }]);
+      const scopes = [writes ? 'designer.write' : 'designer.read'];
+      expect(tool.securitySchemes).toEqual([{ type: 'oauth2', scopes }]);
+      expect(tool._meta.securitySchemes).toEqual([{ type: 'oauth2', scopes }]);
       expect(tool.inputSchema.type).toBe('object');
       expect(tool.outputSchema.type).toBe('object');
     }

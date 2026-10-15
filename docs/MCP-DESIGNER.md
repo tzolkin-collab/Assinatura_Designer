@@ -1,13 +1,33 @@
-# Designer IA como conector MCP do ChatGPT
+# Designer IA como servidor MCP (qualquer agente)
 
-> **Status:** fundação (servidor OAuth 2.1 + transporte MCP + autenticação/autorização + 2 ferramentas de leitura).
-> **Não verificado contra o ChatGPT real** — tudo foi provado com o cliente oficial do SDK do MCP e com testes
-> automatizados (ver [Verificação](#verificação)). A tela de consentimento do frontend e as demais ferramentas são
-> a próxima etapa.
+> **Status:** servidor OAuth 2.1 + transporte MCP + autorização por marca + **6 ferramentas** (5 de leitura, 1 de escrita),
+> agnóstico de agente. **Não verificado contra nenhum agente real** (ChatGPT, Claude, Gemini Spark): tudo foi provado com o
+> cliente oficial do SDK do MCP e com testes automatizados (ver [Verificação](#verificação)). A tela de consentimento do
+> frontend e o "modo MCP" da Fábrica (preview sem chat) são a próxima etapa.
 
-O ChatGPT (na assinatura do usuário) vira o "cérebro" da conversa; o Designer expõe **ferramentas** por MCP
-(Model Context Protocol), autenticadas por OAuth. O código vive em `backend/src/mcp/` e só é montado com
-`MCP_ENABLED=true`.
+O agente (ChatGPT, Claude, Gemini Spark... na assinatura do próprio usuário) é o **diretor de arte e o artista**: lê o brief,
+escreve cada slide em HTML/CSS e envia. O Designer entrega o contexto da marca, sanitiza, **confere o texto contra o aprovado**,
+embute as fontes próprias, guarda a peça e a mostra no editor. A geração custosa roda na assinatura do usuário, não na chave
+da plataforma. O código vive em `backend/src/mcp/` e só é montado com `MCP_ENABLED=true`.
+
+## Agentes suportados
+
+O servidor fala o OAuth 2.1 padrão do MCP (RFC 9728, 8414, 7591, PKCE S256), então qualquer cliente que o implemente conecta.
+O que muda de um agente para outro é só a `redirect_uri`, que precisa estar na allowlist (o `/register` é público):
+
+| Agente | Redirect | Como liberar |
+|---|---|---|
+| **ChatGPT** | `https://chatgpt.com/connector_platform_oauth_redirect` e `…/connector/oauth/{id}` | preset `chatgpt` (padrão) |
+| **Claude** (claude.ai e app) | `https://claude.ai/api/mcp/auth_callback` (pode migrar para `claude.com`) | preset `claude` (padrão; os dois domínios) |
+| **CLIs** (Claude Code, Codex, Gemini CLI) | loopback `http://127.0.0.1:<porta>/…` | `MCP_ALLOW_LOCALHOST_REDIRECT=true` |
+| **Gemini Spark** | a documentação pública não fixa o valor; o Spark exige OAuth 2.1 com DCR e PKCE | `MCP_ALLOWED_REDIRECT_URIS` com o valor que o Spark enviar (aparece no log `mcp.register_refused`); em último caso o **modo aberto** |
+
+**Modo aberto (`MCP_ALLOW_ANY_HTTPS_REDIRECT=true`).** Aceita qualquer redirect https (forma canônica, sem query, fora de
+loopback e de IP literal). Troca a allowlist por confiança na tela de consentimento, onde o usuário vê o nome do cliente e
+o host de retorno. **Risco:** quem tiver o link de consentimento pode mandá-lo a um membro da equipe (consent phishing).
+Ligue só enquanto o redirect do agente é desconhecido e desligue depois de fixá-lo em `MCP_ALLOWED_REDIRECT_URIS`.
+O que o modo aberto NÃO afrouxa: cliente continua público com PKCE S256, código de uso único, consentimento autenticado,
+escopo reduzível e marcas escolhidas pelo usuário.
 
 ## Como conectar no ChatGPT
 
@@ -27,6 +47,23 @@ O ChatGPT (na assinatura do usuário) vira o "cérebro" da conversa; o Designer 
 > Enquanto a tela `/mcp/consent` do frontend não existir (próxima etapa), o consentimento pode ser feito direto pela API —
 > veja o passo a passo do Inspector abaixo.
 
+## Como conectar no Claude, no Gemini Spark e em CLIs
+
+**Claude (claude.ai / app).** Configurações → Conectores → adicionar conector personalizado, com a URL
+`https://<PUBLIC_BASE_URL>/mcp`. O Claude faz DCR e PKCE; o redirect `claude.ai/api/mcp/auth_callback` já vem no preset.
+Se o conector for removido no servidor, o `/token` devolve `invalid_client` e o Claude se registra de novo.
+
+**Gemini Spark.** Em "Aplicativos conectados", adicionar um app personalizado com a mesma URL. O Spark exige a cadeia
+OAuth 2.1 completa (descoberta, DCR, PKCE) e o transporte Streamable HTTP, que é o que este servidor expõe. Como a
+`redirect_uri` do Spark não está documentada publicamente, o primeiro registro será recusado e o log `mcp.register_refused`
+mostrará o **host** de retorno; use esse valor em `MCP_ALLOWED_REDIRECT_URIS`. Depende de plano e região do Gemini.
+
+**CLIs (Claude Code, Codex, Gemini CLI).** Usam redirect de loopback: ligue `MCP_ALLOW_LOCALHOST_REDIRECT=true` no ambiente
+onde o servidor roda para esse uso (em produção o aviso de log lembra que é só para desenvolvimento).
+
+> Estas três rotas **não foram exercitadas contra o agente real**. Os passos seguem a documentação pública de cada um;
+> o que está provado é o protocolo, com o cliente oficial do SDK.
+
 ## Variáveis de ambiente
 
 | Variável | Padrão | O que faz |
@@ -34,12 +71,14 @@ O ChatGPT (na assinatura do usuário) vira o "cérebro" da conversa; o Designer 
 | `MCP_ENABLED` | `false` | Liga o módulo. Qualquer valor diferente de `true` deixa **todas** as rotas do conector inexistentes (404). |
 | `PUBLIC_BASE_URL` | — (em dev: `http://localhost:<PORT>`) | Origem pública da API, **https e sem path** (`http` só em localhost). `issuer` = esta origem; `resource` = `<origem>/mcp`. **Nunca** derivados do header `Host`. Em produção, se faltar (ou for inválida) o módulo **não monta** e loga o motivo. |
 | `FRONTEND_URL` | primeiro valor de `CORS_ORIGIN` | Origem do frontend. O `/authorize` redireciona o navegador para `<FRONTEND_URL>/mcp/consent?request=<id>`. |
-| `MCP_ALLOWED_REDIRECT_URIS` | os 2 do ChatGPT (abaixo) | `redirect_uri`s aceitas **no registro** (DCR), separadas por vírgula. Match exato; o único curinga é o segmento `{id}`. Definir **substitui** o padrão. |
+| `MCP_CLIENT_PRESETS` | `chatgpt,claude` | Presets de agente cujos redirects valem (ver [Agentes suportados](#agentes-suportados)). Nome desconhecido = erro de configuração (o módulo não monta). |
+| `MCP_ALLOWED_REDIRECT_URIS` | — (usa os presets) | `redirect_uri`s aceitas **no registro** (DCR), separadas por vírgula. Match exato; o único curinga é o segmento `{id}`. Definir **substitui** os presets. |
+| `MCP_ALLOW_ANY_HTTPS_REDIRECT` | `false` | **Modo aberto** para agentes sem redirect conhecido (ver acima). |
 | `MCP_ALLOW_LOCALHOST_REDIRECT` | `false` | Aceita redirect `http://<loopback>:<porta>/…` (loopback = `localhost`, `127.0.0.1` ou `[::1]`) e Origin de loopback. **Só para testar com o Inspector.** Loga aviso se ligado em produção. |
 | `MCP_ALLOWED_ORIGINS` | `PUBLIC_BASE_URL` + `FRONTEND_URL` | Origens (`https://host[:porta]`) aceitas no header `Origin` de `/mcp`. |
 | `MCP_MAX_CLIENTS` | `500` | Teto de clientes DCR ativos ao mesmo tempo. |
 
-Padrão de `MCP_ALLOWED_REDIRECT_URIS`:
+Padrão (preset `chatgpt`; o `claude` acrescenta `https://claude.ai/api/mcp/auth_callback` e o equivalente em `claude.com`):
 
 ```
 https://chatgpt.com/connector_platform_oauth_redirect     # com issuer identification (RFC 9207)
@@ -127,14 +166,18 @@ Todas em `backend/src/mcp/tools/`, descrições em pt-BR, nomes em inglês `snak
 (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) e `securitySchemes` (`oauth2` + escopo) — no
 topo do descritor **e** em `_meta.securitySchemes`, como pede o Apps SDK.
 
-| Ferramenta | Escopo | Estado | O que faz |
-|---|---|---|---|
-| `list_brands` | `designer.read` | **implementada** | Marcas que a conexão pode acessar (slug, nome, papel) = marcas aprovadas no token ∩ associação atual. |
-| `get_brand_kit(brandSlug)` | `designer.read` | **implementada** | Cores, fontes, logo, diretrizes (até 4.000 caracteres, com aviso de corte) e preferências visuais. Não devolve o prompt interno do agente. |
-| `list_designs` / `get_design` | `designer.read` | planejada | Listar e ler designs/decks da marca. |
-| `create_design` / `edit_design` | `designer.write` | planejada | Disparar geração e editar. |
-| `pause_generation` | `designer.write` | planejada | Pausar uma geração em curso. |
-| leitura dos **Registros** | `designer.read` | planejada | API sobre os eventos de chamada já gravados (abaixo). |
+| Ferramenta | Escopo | O que faz |
+|---|---|---|
+| `list_brands` | `designer.read` | Marcas que a conexão pode acessar (slug, nome, papel) = marcas aprovadas no token ∩ associação atual. |
+| `get_brand_kit(brandSlug)` | `designer.read` | Cores, fontes, logo, diretrizes (até 4.000 caracteres, com aviso de corte) e preferências visuais. Não devolve o prompt interno do agente. |
+| `get_designer_brief(brandSlug, format?, aspectRatio?, pageCount?)` | `designer.read` | **O que o agente precisa para desenhar**: regras da marca e do estúdio (cérebro em camadas: fidelidade ao texto, foto real, identidade, proibições), canvas, contrato do HTML, fontes próprias com os pesos disponíveis, paleta, logo e a lista de arquivos reais (nunca imagens geradas por IA). |
+| `list_designs(brandSlug, limit?)` | `designer.read` | Peças da marca (mais recentes primeiro) com link do editor. |
+| `get_design(brandSlug, postId, includeSource?)` | `designer.read` | Texto visível por slide e, com `includeSource`, o HTML/CSS (para continuar ou ajustar). |
+| `save_presentation(brandSlug, slides[], …, postId?)` | `designer.write` | Salva uma peça que o agente desenhou: sanitiza o HTML, confere o texto de cada slide contra o `approvedText`, normaliza as áreas de foto, embute as fontes próprias e cria a peça no editor. Devolve `issues` por slide. Com `postId` atualiza **só** a peça que o mesmo usuário criou por MCP. |
+| `pause_generation`, exportação (Canva/PDF), upload de foto, edição pontual de slide | `designer.write` | planejadas. |
+
+Todas as chamadas terminam em segundos (não há geração longa do nosso lado), o que evita o limite de ~60 s que os clientes
+costumam impor a uma chamada de ferramenta.
 
 **Como acrescentar uma ferramenta:** criar `tools/<nome>.ts` exportando um `McpToolDefinition` (nome, texto, schema zod,
 `scope`, `annotations`, `brandArg` se recebe marca, `handler`) e listá-lo em `tools/index.ts`. Escopo, autorização por
@@ -157,6 +200,16 @@ não consegue esquecer de checar a marca.
 | **Erros** | Erro esperado vira mensagem ao modelo; erro inesperado vira mensagem genérica (detalhe só no log). Sem stack para o ChatGPT. |
 | **Rate limit** | `middleware/rateLimit.ts` (Redis, vale entre instâncias, fail-open): `/register` 20/h/IP; `/token` 100/15 min/IP; `/authorize` 60/15 min/IP; `/revoke` 60/15 min/IP; `/mcp` 600/min/IP antes da auth e 240/min/**usuário** depois; consentimento 60/10 min/usuário. Justificativas em `mcp/limits.ts`. |
 | **Revogação** | `POST /revoke` (RFC 7009) e `DELETE /api/mcp/connections/:id`; revogar derruba access **e** refresh da conexão. |
+
+### O HTML que o agente envia é entrada NÃO confiável
+
+`save_presentation` recebe HTML/CSS escrito por um agente externo, que depois é renderizado no Chromium do servidor.
+Por isso a ferramenta passa pelo MESMO funil do pipeline: `validateHtmlDesign` (DOMPurify sobre jsdom: sem script, iframe,
+object, embed, link, meta, base, form; CSS sem `@import`, `expression()` nem `javascript:`), tetos de tamanho (30 slides,
+60 mil caracteres de HTML e 40 mil de CSS por slide) e `maxToolInputElements`. Atualizar uma peça por `postId` exige que
+ela tenha sido criada **pelo mesmo usuário por MCP** nesta marca (`content.mcp.userId`); o agente nunca sobrescreve uma
+peça feita no app web nem a de outro usuário. A escrita exige `designer.write` e papel EDITOR+ na marca, conferido a cada
+chamada. A peça guarda a procedência (`content.mcp`: usuário, cliente e conexão).
 
 ### Decisões que merecem registro
 
@@ -296,6 +349,7 @@ npx @modelcontextprotocol/inspector --cli http://localhost:4000/mcp \
 backend/src/mcp/
 ├── index.ts          mountMcp(app) — o ÚNICO ponto plugado em app.ts
 ├── config.ts         env → McpConfig (desligado por padrão, falha fechada), escopos e papéis
+├── clients.ts        presets de agente (chatgpt, claude) e seus redirects
 ├── routes.ts         roteador de protocolo (raiz) + tratamento de erro no formato OAuth/MCP
 ├── server.ts         McpServer por requisição + POST /mcp (Origin, bearer, limites, pré-check de escopo)
 ├── store.ts          McpOAuthStore (interface), RedisMcpStore, McpCallLog
@@ -303,5 +357,6 @@ backend/src/mcp/
 ├── limits.ts         rate limits e a justificativa de cada número
 ├── auth/             provider (OAuth), clientsStore (DCR), consent (API do usuário), router (metadados + SDK),
 │                     origin, redirectUris, crypto, constants
-└── tools/            types, registry (escopo + marca + erro + registro), authorization, list_brands, get_brand_kit
+└── tools/            types, registry (escopo + marca + erro + registro), authorization, htmlContract, designs,
+                      list_brands, get_brand_kit, get_designer_brief, list_designs, get_design, save_presentation
 ```
