@@ -4,7 +4,6 @@ import path from 'node:path';
 import {
   BRAND_SETTINGS,
   BRAND_SETTINGS_GROUP,
-  BRAND_SETTINGS_OVERVIEW,
   EXTRAS_NAV,
   GLOBAL_NAV,
   brandNav,
@@ -17,7 +16,6 @@ const todos = () => [
   ...GLOBAL_NAV,
   ...brandNav('marca'),
   BRAND_SETTINGS_GROUP,
-  BRAND_SETTINGS_OVERVIEW,
   ...BRAND_SETTINGS,
   ...EXTRAS_NAV,
 ];

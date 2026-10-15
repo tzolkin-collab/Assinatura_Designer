@@ -10,9 +10,7 @@ import NotificationBell from '../Notification/NotificationBell';
 import { useAuth } from '@/lib/hooks';
 import { api } from '@/lib/api';
 import {
-  BRAND_SETTINGS,
   BRAND_SETTINGS_GROUP,
-  BRAND_SETTINGS_OVERVIEW,
   EXTRAS_NAV,
   GLOBAL_NAV,
   brandNav,
@@ -26,21 +24,16 @@ interface NavItem {
   children?: NavItem[];
 }
 
-/** Configurações da marca: um grupo que abre, com a visão geral e cada seção. */
-function brandSettingsGroup(marca: string): NavItem {
-  const base = `/${marca}/configuracoes`;
+/**
+ * Configurações da marca: UM item só, que leva à tela de configurações (onde as seções já aparecem como
+ * lista). Antes era um grupo que abria com "Geral" e mais seis filhas: junto de "Configurações gerais"
+ * e da própria tela, eram três camadas de configurações para a mesma coisa.
+ */
+function brandSettingsItem(marca: string): NavItem {
   return {
     label: BRAND_SETTINGS_GROUP.label,
     icon: BRAND_SETTINGS_GROUP.icon,
-    href: base,
-    children: [
-      { label: BRAND_SETTINGS_OVERVIEW.label, icon: BRAND_SETTINGS_OVERVIEW.icon, href: base },
-      ...BRAND_SETTINGS.map((section) => ({
-        label: section.label,
-        icon: section.icon,
-        href: `${base}/${section.key}`,
-      })),
-    ],
+    href: `/${marca}/configuracoes`,
   };
 }
 
@@ -100,8 +93,8 @@ function NavLink({ item, pathname }: { item: NavItem; pathname: string }) {
     );
   }
 
-  // A "Visão geral" tem o mesmo endereço do grupo: só é ativa na igualdade exata.
-  const isActive = isActivePath(pathname, item.href, item.href.endsWith('/configuracoes'));
+  // A "Visão geral" é a raiz da marca (/{marca}): por prefixo ficaria ativa em TODAS as páginas dela.
+  const isActive = isActivePath(pathname, item.href, item.href.split('/').filter(Boolean).length === 1);
   return (
     <Link
       href={item.href}
@@ -197,7 +190,7 @@ export default function Sidebar() {
           {marca && (
             <div className={styles.navSection}>
               <span className={styles.navSectionLabel}>{brandName ?? decodeURIComponent(marca)}</span>
-              {[...brandNav(marca), brandSettingsGroup(marca)].map((item) => (
+              {[...brandNav(marca), brandSettingsItem(marca)].map((item) => (
                 <NavLink key={item.href} item={item} pathname={pathname} />
               ))}
             </div>
