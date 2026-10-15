@@ -23,6 +23,37 @@
   --color-success: #15803d;
   --color-success-light: #ecf8f0;
 
+  /* ── Camadas ──
+     Escala ÚNICA, do fundo para o topo. Nunca use número solto em z-index: o menu lateral e o botão de
+     menu já empataram com menus e modais. (Estava definida no PR de interface antigo e se perdeu na
+     consolidação com o redesign: 22 usos de var(--z-*) caíam em "auto" e os pop-ups se sobrepunham.) */
+  --z-raised: 10;
+  --z-sticky: 20;
+  --z-dropdown: 50;          /* menus, popovers e dicas ancorados a um controle */
+  --z-sidebar-overlay: 90;
+  --z-sidebar: 100;
+  --z-menu-button: 110;      /* acima do menu lateral, para poder fechá-lo */
+  --z-modal: 1000;
+  --z-modal-nested: 1100;    /* modal aberto sobre outro modal */
+  --z-toast: 2000;           /* aviso nunca pode ficar escondido atrás de um modal */
+
+  /* ── Apelidos ──
+     Nomes que o código já usa e que nunca foram definidos (caíam no valor inicial do navegador). Cada um
+     aponta para o token real do redesign, para a tela não depender de um fallback escrito à mão. */
+  --color-primary: var(--color-accent);
+  --color-danger: var(--color-error);
+  --color-text-primary: var(--color-text);
+  --color-text-muted: var(--color-text-secondary);
+  --color-text-dim: var(--color-text-tertiary);
+  --color-bg-elevated: var(--color-surface);
+  --color-bg-tertiary: #efefed;
+  --color-border-subtle: var(--color-border);
+  --transition-normal: var(--transition-base);
+  --weight-title: 600;
+  --leading-loose: 1.75;
+  --space-20: 5rem;
+  --font-geist-sans: var(--font-sans);
+
   /* ── Typography ── */
   --font-sans: var(--font-source-sans), -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-serif: var(--font-sans);
