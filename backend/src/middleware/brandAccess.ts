@@ -83,7 +83,7 @@ export async function assertBrandAccess(
   slug: string,
   userId: string | undefined,
   allowed: BrandRole[] = ANY_MEMBER,
-): Promise<{ id: string; slug: string }> {
+): Promise<{ id: string; slug: string; role: BrandRole }> {
   if (!userId) throw createError(401, 'Unauthorized');
 
   const brand = await prisma.brand.findUnique({ where: { slug }, select: { id: true, slug: true } });
@@ -96,5 +96,5 @@ export async function assertBrandAccess(
   if (!membership || !allowed.includes(membership.role)) {
     throw createError(403, FORBIDDEN_MESSAGE);
   }
-  return brand;
+  return { ...brand, role: membership.role };
 }

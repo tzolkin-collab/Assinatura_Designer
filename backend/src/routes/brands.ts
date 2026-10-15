@@ -11,7 +11,7 @@ import { deleteFromR2 } from '../lib/r2.js';
 import { requireBrandRole, ANY_MEMBER, EDITORS, type BrandRequest } from '../middleware/brandAccess.js';
 import { getUsage, getBilling } from '../lib/aiBudget.js';
 import { rateLimit } from '../middleware/rateLimit.js';
-import { parseBody } from '../lib/validate.js';
+import { parseBody, isPublicHttpUrl } from '../lib/validate.js';
 import { createCollabSchema, collabSlug } from '../lib/brandCollab.js';
 import { brandProfileSchema, profileCompleteness, profileFromLegacy, type BrandProfileData } from '../lib/brandProfile.js';
 import { extractProfileFromManual, plainTextFromHtml, PROFILE_IMPORT_RATE_LIMIT } from '../lib/profileExtraction.js';
@@ -143,6 +143,9 @@ brandsRouter.post('/:slug/brandbook/confirm-logo', requireBrandRole(EDITORS), as
     const { logoUrl } = req.body;
 
     if (!logoUrl) throw createError(400, 'logoUrl é obrigatório');
+    if (typeof logoUrl !== 'string' || !isPublicHttpUrl(logoUrl.trim())) {
+      throw createError(400, 'logoUrl precisa ser uma URL http(s) pública.');
+    }
 
     // Logo exportado de Canva/Word chega opaco e vira caixa branca em slide
     // escuro. Devolve a URL original quando não há o que converter.

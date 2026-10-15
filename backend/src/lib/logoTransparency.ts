@@ -1,6 +1,45 @@
 import sharp from 'sharp';
 import { uploadFileToR2 } from './r2.js';
 import { logger } from './logger.js';
+import { isPublicHttpUrlResolved } from './validate.js';
+
+/** Teto do download: um logo legítimo tem poucos MB; acima disso é abuso ou arquivo errado. */
+export const LOGO_MAX_BYTES = 8 * 1024 * 1024;
+const LOGO_FETCH_TIMEOUT_MS = 10_000;
+
+/**
+ * Baixa a imagem do logo de uma URL que veio do usuário. O servidor faz a requisição, então
+ * a URL é tratada como hostil: só host público (DNS resolvido, contra rebinding), sem seguir
+ * redirect (um redirect levaria para fora da checagem), com timeout e teto de bytes lido em
+ * stream — Content-Length sozinho é mentira fácil.
+ */
+export async function baixarLogoComSeguranca(logoUrl: string, maxBytes = LOGO_MAX_BYTES): Promise<Buffer | null> {
+  if (!(await isPublicHttpUrlResolved(logoUrl))) return null;
+
+  const res = await fetch(logoUrl, {
+    redirect: 'error',
+    signal: AbortSignal.timeout(LOGO_FETCH_TIMEOUT_MS),
+  });
+  if (!res.ok || !res.body) return null;
+
+  const declarado = Number(res.headers.get('content-length'));
+  if (Number.isFinite(declarado) && declarado > maxBytes) return null;
+
+  const partes: Uint8Array[] = [];
+  let total = 0;
+  const reader = res.body.getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel();
+      return null;
+    }
+    partes.push(value);
+  }
+  return Buffer.concat(partes);
+}
 
 /**
  * Logo exportado de Canva, Word ou PowerPoint costuma chegar como PNG/JPEG SEM
@@ -107,12 +146,11 @@ export async function normalizarLogoParaFundoEscuro(logoUrl: string): Promise<st
   try {
     if (/\.svg($|\?)/i.test(logoUrl)) return logoUrl;
 
-    const res = await fetch(logoUrl);
-    if (!res.ok) {
-      logger.warn('Logo não pôde ser baixado para normalização', { logoUrl, status: res.status });
+    const buffer = await baixarLogoComSeguranca(logoUrl);
+    if (!buffer) {
+      logger.warn('Logo não pôde ser baixado para normalização (URL não pública, grande demais ou resposta inválida)', { logoUrl });
       return logoUrl;
     }
-    const buffer = Buffer.from(await res.arrayBuffer());
 
     const d = await diagnosticarLogo(buffer);
     if (!d.aplicavel) {
