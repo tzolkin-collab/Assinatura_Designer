@@ -4,29 +4,20 @@ import Image from 'next/image';
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import {
-  Brain,
-  LayoutDashboard,
-  LayoutGrid,
-  Factory,
-  FileText,
-  Settings,
-  Palette,
-  Eye,
-  Bot,
-  PenTool,
-  ChevronDown,
-  Menu,
-  X,
-  LogOut,
-  Users,
-  Globe,
-  BarChart3,
-  Image as ImageIcon,
-} from 'lucide-react';
+import { ChevronDown, Menu, X, LogOut, type LucideIcon } from 'lucide-react';
 import styles from './Sidebar.module.css';
 import NotificationBell from '../Notification/NotificationBell';
-import { useAuth, useBrand } from '@/lib/hooks';
+import { useAuth } from '@/lib/hooks';
+import { api } from '@/lib/api';
+import {
+  BRAND_SETTINGS,
+  BRAND_SETTINGS_GROUP,
+  BRAND_SETTINGS_OVERVIEW,
+  EXTRAS_NAV,
+  GLOBAL_NAV,
+  brandNav,
+  isActivePath,
+} from '@/lib/navigation';
 
 interface NavItem {
   label: string;
@@ -57,30 +48,21 @@ function brandSettingsGroup(marca: string): NavItem {
 // guardado em memória para não buscar de novo a cada navegação.
 const brandNameCache = new Map<string, string>();
 
-function getBrandNav(marca: string): NavItem[] {
-  return [
-    { label: 'Visão geral', href: `/${marca}`, icon: <LayoutDashboard size={18} /> },
-    { label: 'Cérebro da IA', href: `/${marca}/cerebro`, icon: <Brain size={18} /> },
-    { label: 'Galeria', href: `/${marca}/galeria`, icon: <Eye size={18} /> },
-    { label: 'Fábrica', href: `/${marca}/fabrica`, icon: <Factory size={18} /> },
-    { label: 'Editor', href: `/${marca}/editor`, icon: <PenTool size={18} /> },
-    { label: 'Apresentações Publicadas', href: `/${marca}/apresentacoes`, icon: <Globe size={18} /> },
-
-    {
-      label: 'Configurações',
-      href: `/${marca}/configuracoes`,
-      icon: <Settings size={18} />,
-      children: [
-        { label: 'Visão Geral', href: `/${marca}/configuracoes`, icon: <Settings size={16} /> },
-        { label: 'Agente IA', href: `/${marca}/configuracoes/agent`, icon: <Bot size={16} /> },
-        { label: 'Branding', href: `/${marca}/configuracoes/branding`, icon: <Palette size={16} /> },
-        { label: 'Referências', href: `/${marca}/configuracoes/referencias`, icon: <Eye size={16} /> },
-        { label: 'Equipe', href: `/${marca}/configuracoes/equipe`, icon: <Users size={16} /> },
-        { label: 'Mídia e Fontes', href: `/${marca}/configuracoes/midia`, icon: <ImageIcon size={16} /> },
-        { label: 'Gastos de IA', href: `/${marca}/configuracoes/billing`, icon: <BarChart3 size={16} /> },
-      ],
-    },
-  ];
+function useBrandName(slug: string | null): string | null {
+  const [buscados, setBuscados] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (!slug || brandNameCache.has(slug)) return;
+    let vivo = true;
+    api.get<{ name?: string }>(`/brands/${slug}`)
+      .then((b) => {
+        if (!b?.name) return;
+        brandNameCache.set(slug, b.name);
+        if (vivo) setBuscados((prev) => ({ ...prev, [slug]: b.name! }));
+      })
+      .catch(() => { /* sem nome, o título cai no slug como antes */ });
+    return () => { vivo = false; };
+  }, [slug]);
+  return slug ? (brandNameCache.get(slug) ?? buscados[slug] ?? null) : null;
 }
 
 function NavLink({ item, pathname }: { item: NavItem; pathname: string }) {
@@ -171,8 +153,7 @@ export default function Sidebar() {
   }, [urlMarca]);
 
   const marca = urlMarca ?? lastBrand;
-  const { brand: currentBrand } = useBrand(marca ?? "");
-  const brandName = currentBrand?.name;
+  const brandName = useBrandName(marca);
 
   return (
     <>
@@ -216,7 +197,7 @@ export default function Sidebar() {
           {marca && (
             <div className={styles.navSection}>
               <span className={styles.navSectionLabel}>{brandName ?? decodeURIComponent(marca)}</span>
-              {getBrandNav(marca).map((item) => (
+              {[...brandNav(marca), brandSettingsGroup(marca)].map((item) => (
                 <NavLink key={item.href} item={item} pathname={pathname} />
               ))}
             </div>

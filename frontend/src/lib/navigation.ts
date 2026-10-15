@@ -2,6 +2,7 @@ import {
   BarChart3,
   Bot,
   BookOpen,
+  Brain,
   Eye,
   Factory,
   FolderKanban,
@@ -13,6 +14,7 @@ import {
   Palette,
   PenTool,
   Settings,
+  Settings2,
   SlidersHorizontal,
   Users,
   type LucideIcon,
@@ -44,6 +46,10 @@ export const EXTRAS_NAV: NavDef[] = [
 /** Páginas de uma marca. */
 export function brandNav(marca: string): NavDef[] {
   return [
+    // Visão geral e Cérebro da IA entraram depois da reorganização do menu (#76/#77) e foram
+    // religados aqui, na fonte única da navegação.
+    { label: 'Visão geral', icon: LayoutDashboard, href: `/${marca}` },
+    { label: 'Cérebro da IA', icon: Brain, href: `/${marca}/cerebro` },
     { label: 'Galeria', icon: GalleryHorizontalEnd, href: `/${marca}/galeria` },
     { label: 'Fábrica', icon: Factory, href: `/${marca}/fabrica` },
     { label: 'Editor', icon: PenTool, href: `/${marca}/editor` },
@@ -99,7 +105,8 @@ export const BRAND_SETTINGS: SettingsSection[] = [
   },
 ];
 
-export const BRAND_SETTINGS_OVERVIEW = { label: 'Visão geral', icon: LayoutDashboard } as const;
+// "Visão geral" agora é a página inicial da marca (no menu da marca); a das configurações é só "Geral".
+export const BRAND_SETTINGS_OVERVIEW = { label: 'Geral', icon: Settings2 } as const;
 export const BRAND_SETTINGS_GROUP = { label: 'Configurações', icon: SlidersHorizontal } as const;
 
 /** O item está ativo? Igualdade exata para a raiz de uma seção, prefixo para páginas internas. */
