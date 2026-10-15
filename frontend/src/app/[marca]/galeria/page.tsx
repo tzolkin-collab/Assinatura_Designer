@@ -11,7 +11,6 @@ import styles from './brand-galeria.module.css';
 import { PreviewModal } from './components/PreviewModal';
 import { CanvaExportModal } from './components/CanvaExportModal';
 import { ChatHistoryModal } from './components/ChatHistoryModal';
-import { AiReportModal } from './components/AiReportModal';
 import { FolderModal } from './components/FolderModal';
 
 import { useBrandPosts, useBrand, type Post } from '@/lib/hooks';
@@ -247,8 +246,6 @@ export default function BrandGaleriaPage() {
   };
 
   const [showFolderModal, setShowFolderModal] = useState(false);
-  const [showAiReportModal, setShowAiReportModal] = useState(false);
-  const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   
   const [draggedPostId, setDraggedPostId] = useState<string | null>(null);
   const [draggedFolderId, setDraggedFolderId] = useState<string | null>(null);
@@ -579,15 +576,6 @@ export default function BrandGaleriaPage() {
     }
   };
 
-  const handleGenerateAiReport = () => {
-    setIsGeneratingReport(true);
-    setShowAiReportModal(true);
-    // Simulating AI generation delay
-    setTimeout(() => {
-      setIsGeneratingReport(false);
-    }, 2500);
-  };
-
   const handleExportCanva = async (e: React.MouseEvent, postId: string) => {
     e.preventDefault();
     e.stopPropagation();
@@ -711,15 +699,6 @@ export default function BrandGaleriaPage() {
         />
       )}
 
-      {showAiReportModal && (
-        <AiReportModal
-          onClose={() => setShowAiReportModal(false)}
-          isGeneratingReport={isGeneratingReport}
-          activeFolder={activeFolder}
-          folders={folders}
-        />
-      )}
-
       <Link href="/galeria" className={styles.backLink}>
         <ArrowLeft size={16} />
         Voltar
@@ -776,17 +755,7 @@ export default function BrandGaleriaPage() {
 
       <div className={styles.foldersContainer}>
         <div className={styles.foldersHeader}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)' }}>
-            <h3 className={styles.foldersTitle}>Pastas do Projeto</h3>
-            <button 
-              className={styles.aiReportBtn} 
-              title="Gerar relatório de estilo desta pasta com Inteligência Artificial"
-              onClick={handleGenerateAiReport}
-            >
-              <Sparkles size={14} className={styles.sparkleIcon} />
-              Analisar com IA
-            </button>
-          </div>
+          <h3 className={styles.foldersTitle}>Pastas do Projeto</h3>
           <Button size="sm" onClick={() => openFolderModal(null)} disabled={!canEdit} title={canEdit ? undefined : hint}>
             <Plus size={14} />
             Criar Pasta
