@@ -903,7 +903,7 @@ export default function FabricaPage() {
       </aside>
 
       {/* ── Right panel: preview ───────────────────────────────────────────── */}
-      <main className={s.previewPanel}>
+      <main className={`${s.previewPanel} ${currentDesign.length === 0 && workerStatus !== 'running' ? s.previewPanelIdle : ''}`}>
 
         {/* Modo de revisão: configuração PERMANENTE da sessão. Morava dentro do
             card de notificação — some quando o card some, e o usuário perdia o

@@ -478,3 +478,25 @@ a.configCard:hover {
   padding: var(--space-8) 0;
   color: var(--color-text-secondary);
 }
+
+/* Quatro camadas em duas linhas de grade ficavam com o sublinhado só numa coluna: em tela estreita
+   viram uma faixa de uma linha que rola para o lado. */
+@media (max-width: 640px) {
+  .stepper {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .stepper::-webkit-scrollbar {
+    display: none;
+  }
+
+  .step {
+    flex: 0 0 auto;
+    min-width: 0;
+    white-space: nowrap;
+    margin-right: var(--space-4);
+    padding-right: var(--space-2);
+  }
+}

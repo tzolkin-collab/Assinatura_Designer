@@ -276,10 +276,19 @@
   gap: var(--space-4);
   padding: 0 var(--space-5);
   border-bottom: 1px solid var(--color-border);
+  /* Quatro abas não cabem em 375px: rolam para o lado em vez de espremer o ícone e quebrar o rótulo. */
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.tabs::-webkit-scrollbar {
+  display: none;
 }
 
 .tab {
   display: inline-flex;
+  flex-shrink: 0;
+  white-space: nowrap;
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-3) 0;
@@ -293,6 +302,10 @@
   border-bottom: 2px solid transparent;
   cursor: pointer;
   transition: color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.tab svg {
+  flex-shrink: 0;
 }
 
 .tab:hover {

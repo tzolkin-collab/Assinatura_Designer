@@ -212,6 +212,8 @@
 }
 
 .userName {
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-size: var(--text-sm);
   font-weight: 500;
   color: var(--color-text);
@@ -219,6 +221,8 @@
 }
 
 .userRole {
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-size: var(--text-xs);
   color: var(--color-text-tertiary);
   line-height: 1.2;
@@ -241,10 +245,22 @@
 }
 
 /* ── Mobile ── */
+.mobileBar {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--header-height);
+  background-color: var(--color-bg);
+  border-bottom: 1px solid var(--color-border);
+  z-index: var(--z-sticky);
+}
+
 .mobileToggle {
   display: none;
   position: fixed;
-  top: var(--space-3);
+  top: var(--space-2);
   left: var(--space-3);
   z-index: var(--z-menu-button);
   width: 40px;
@@ -267,15 +283,31 @@
 }
 
 @media (max-width: 768px) {
+  /* Mais largo que o menu de desktop: com o sino e o botão de sair, o nome do usuário
+     ficava com 63px e virava "A…". */
   .sidebar {
     position: fixed;
-    width: var(--sidebar-width);
+    width: min(288px, 85vw);
     transform: translateX(-100%);
+  }
+
+  .user {
+    gap: var(--space-2);
   }
 
   .sidebarOpen {
     transform: translateX(0);
     box-shadow: var(--shadow-xl);
+  }
+
+  .mobileBar {
+    display: block;
+  }
+
+  /* Com o menu aberto o botão X ocupa o canto: a marca começa depois dele, alinhada à faixa. */
+  .logo {
+    min-height: var(--header-height);
+    padding: var(--space-2) var(--space-5) var(--space-2) calc(var(--space-3) + 40px + var(--space-3));
   }
 
   .mobileToggle {

@@ -300,3 +300,19 @@ textarea:disabled {
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
+
+/* Alvo de toque dos links "Voltar" das telas de marca (cada módulo CSS tem o seu .backLink de 21px de altura). */
+@media (pointer: coarse), (max-width: 768px) {
+  [class*="backLink"] {
+    min-height: 44px;
+  }
+}
+
+/* iOS dá zoom na página ao focar um campo com fonte menor que 16px (e não volta sozinho). */
+@media (hover: none) and (pointer: coarse), (max-width: 640px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+  select:not([hidden]),
+  textarea:not([hidden]) {
+    font-size: 16px;
+  }
+}

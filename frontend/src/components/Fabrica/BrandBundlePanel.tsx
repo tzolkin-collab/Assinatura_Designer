@@ -49,7 +49,11 @@ export default function BrandBundlePanel({ slug }: BrandBundlePanelProps) {
       if (assetsRes.status === 'fulfilled') {
         const all = Array.isArray(assetsRes.value) ? assetsRes.value : [];
         setBrandbookAssets(
-          all.filter((a) => a.source === 'brandbook' || a.source === 'branding').slice(0, 12),
+          // Só imagem: arquivos de fonte (.otf/.ttf) também são assets "branding" e apareciam como
+          // miniatura quebrada com o nome do arquivo; as fontes já estão listadas em Tipografia.
+          all
+            .filter((a) => (a.source === 'brandbook' || a.source === 'branding') && a.fileType?.startsWith('image/'))
+            .slice(0, 12),
         );
       }
     }).finally(() => {

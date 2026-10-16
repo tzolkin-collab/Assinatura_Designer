@@ -1589,3 +1589,82 @@
   flex-direction: column;
   gap: 8px;
 }
+
+/* Toque: ações do cabeçalho da galeria com alvo de dedo. */
+@media (pointer: coarse), (max-width: 768px) {
+  .inviteBtn,
+  .toggleBtn {
+    min-width: 40px;
+    min-height: 40px;
+  }
+}
+
+/* Sem hover no toque, as ações da visualização em lista ficavam escondidas. */
+@media (hover: none), (max-width: 768px) {
+  .listActions {
+    opacity: 1;
+  }
+}
+
+/* Preview em tela estreita: o painel de 380px ao lado deixava os slides com ~80px (só se via "SLIDE 1…").
+   Empilha — slides em cima, detalhes embaixo, cada um rolando sozinho — e ocupa a tela toda. */
+@media (max-width: 768px) {
+  .adobeModalOverlay {
+    padding: 0;
+  }
+
+  .adobeModalContainer {
+    width: 100vw;
+    height: 100dvh;
+    border-radius: 0;
+    flex-direction: column;
+  }
+
+  .adobePreviewArea {
+    flex: 1 1 52%;
+    min-height: 0;
+    padding: 64px var(--space-4) var(--space-4);
+  }
+
+  .adobePanelArea {
+    flex: 1 1 48%;
+    min-height: 0;
+    width: 100%;
+    border-left: none;
+    border-top: 1px solid var(--color-border);
+    overflow-y: auto;
+  }
+
+  .adobeCloseBtn {
+    top: var(--space-3);
+    left: var(--space-3);
+    width: 44px;
+    height: 44px;
+  }
+}
+
+/* Modais pequenos (criar pasta, histórico, exportar): em tela estreita ocupam quase a largura toda,
+   o campo e o botão empilham (o placeholder aparecia cortado) e a fonte do campo é 16px, que
+   impede o iOS de dar zoom ao focar. */
+@media (max-width: 640px) {
+  .modalContent {
+    width: calc(100vw - var(--space-8));
+    max-width: none;
+    max-height: 88dvh;
+    overflow-y: auto;
+    padding: var(--space-5);
+  }
+
+  .folderForm {
+    flex-direction: column;
+  }
+
+  .folderInput {
+    min-height: 44px;
+    font-size: 16px;
+  }
+
+  .folderForm button {
+    min-height: 44px;
+  }
+}

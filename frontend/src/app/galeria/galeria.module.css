@@ -290,3 +290,29 @@
   gap: var(--space-3);
   margin-top: var(--space-2);
 }
+
+/* Toque não tem hover: sem isto editar e excluir projeto ficavam invisíveis. */
+@media (hover: none), (max-width: 768px) {
+  .cardDeleteBtn,
+  .cardEditBtn {
+    opacity: 1;
+    width: 40px;
+    height: 40px;
+  }
+
+  .cardEditBtn {
+    right: calc(var(--space-2) + 44px);
+  }
+}
+
+/* Busca e filtro lado a lado deixavam a busca com ~100px ("Buscar p"): empilham. */
+@media (max-width: 640px) {
+  .toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .searchWrapper {
+    max-width: none;
+  }
+}

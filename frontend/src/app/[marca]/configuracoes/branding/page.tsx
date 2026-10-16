@@ -458,7 +458,7 @@ export default function BrandingPage() {
                       type="button"
                       onClick={() => removeColor(i)}
                       aria-label={`Remover ${cor}`}
-                      style={{ marginTop: 4, border: 'none', background: 'none', cursor: 'pointer', fontSize: 12, color: 'var(--color-text-muted, #6b7280)', padding: 0 }}
+                      className={styles.removeLink}
                     >Remover</button>
                   )}
                 </div>
@@ -613,7 +613,7 @@ export default function BrandingPage() {
                       type="button"
                       onClick={() => removeFonte(i)}
                       aria-label={`Remover ${fonte || `fonte ${i + 1}`}`}
-                      style={{ border: 'none', background: 'none', cursor: 'pointer', fontSize: 12, color: 'var(--color-text-muted, #6b7280)' }}
+                      className={styles.removeLink}
                     >Remover</button>
                   )}
                 </div>
