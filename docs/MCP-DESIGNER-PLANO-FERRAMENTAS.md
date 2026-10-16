@@ -19,7 +19,7 @@ e os escopos `designer.read`, `designer.write`, `designer.edit_all`.
    central.
 2. **O papel do usuário na marca é o teto**, conferido a cada chamada (`ANY_MEMBER`, `EDITORS`, `ADMINS` de
    `brandAccess.ts`). O agente nunca faz o que o usuário não faria no app.
-3. **Dinheiro**: tudo que gasta IA/render passa pelo teto de custo do app e devolve `usage`/`costEstimate`.
+3. **Custo**: render e exportação consomem servidor; ficam sob limite de taxa por conexão e o gasto de IA da marca (`get_ai_usage`) é legível pelo agente.
 4. **Saída do Designer** (link público, Canva, download): escopo próprio e `openWorldHint: true`.
 5. **Destrutivo**: `destructiveHint: true`, escopo próprio, snapshot/restauração quando houver.
 6. **Chamadas curtas** (~60 s): trabalho longo é `start_*` + `get_*_status`, nunca espera.
@@ -40,7 +40,6 @@ e os escopos `designer.read`, `designer.write`, `designer.edit_all`.
 | `designer.write` | criar peças, subir ativos, editar o que a conexão criou, pastas, versões manuais | EDITOR | existe |
 | `designer.edit_all` | editar/sobrescrever peças de qualquer origem | EDITOR | existe (#99) |
 | `designer.brand` | kit da marca, perfil/cérebro, memória, referências, brandbook | EDITOR (campos de custo: ADMIN) | novo |
-| `designer.ai` | acionar Fábrica e edição com IA (gasta crédito) | EDITOR | novo |
 | `designer.export` | exportar PDF/ZIP/PPTX/HTML e Canva; sincronizar com Canva; baixar | VIEWER (Canva: EDITOR) | novo |
 | `designer.publish` | publicar/despublicar link público e ligar o chat da apresentação | EDITOR | novo |
 | `designer.delete` | apagar peças, ativos, pastas e sessões | EDITOR | novo |
@@ -65,7 +64,7 @@ Legenda: **P0** destrava o fluxo principal · **P1** dia a dia · **P2** conveni
 | `PUT /posts/:id/slides/:i/code` | `update_slide` (HTML/CSS de UM slide) | write / edit_all | P0 |
 | `GET …/slides/:i/photo-slots` | `get_photo_slots` | read | P0 |
 | `PUT …/slides/:i/photo` | `set_slide_photo` (ativo real da marca) | write / edit_all | P0 |
-| `POST /posts/:id/edit-slide` | `edit_slide_with_ai` | ai | P1 |
+| `POST /posts/:id/edit-slide` | — ✗ **decidido**: o agente edita sozinho com `get_design` + `update_slide` | — | — |
 | `GET /posts/:id/cost` | `get_design_cost` | read | P1 |
 | `GET /posts/:id/versions` | `list_versions` | read | P0 |
 | `POST /posts/:id/versions` | `create_version` | write | P0 |
@@ -92,16 +91,14 @@ Legenda: **P0** destrava o fluxo principal · **P1** dia a dia · **P2** conveni
 | `PUT /settings/:slug/config` | `update_brand_kit` (cores, fontes, diretrizes, logo por URL pública, `presentationConfig`). **Sem** `ignoreAiCostLimit`/pesquisa automática (só ADMIN, no app). | brand | P1 |
 | `GET /brands/:slug/profile` | `get_brand_profile` (cérebro) | read | P0 |
 | `PUT /brands/:slug/profile` | `update_brand_profile` (snapshot antes) | brand | P1 |
-| `POST …/profile/import` | `import_brand_profile` (texto/arquivos → perfil) | brand + ai | P2 |
+| `POST …/profile/import` | — ✗ **decidido** (usa IA do servidor): o agente lê o material e grava com `update_brand_profile` | — | — |
 | `GET/PUT /brands/:slug/memory` | `get_brand_memory` / `update_brand_memory` | read / brand | P1 / P2 |
-| `POST …/brandbook/ingest`, `ingest-canva` | `ingest_brandbook` (job assíncrono) | brand + ai | P2 |
-| `POST …/brandbook/confirm-logo` | `confirm_brand_logo` | brand | P2 |
+| `POST …/brandbook/ingest`, `ingest-canva`, `confirm-logo` | — ✗ **decidido** (extração com IA do servidor): o agente lê o brandbook e grava com `update_brand_kit` / `update_brand_profile` | — | — |
 | `GET /settings/:slug/referencias` | `manage_reference` ação `list/get` | read | P2 |
 | `POST/PATCH/DELETE …/referencias[/:id]`, `…/sync` | `manage_reference` ações `create/update/delete/sync` (servidor busca URL externa: revisão SSRF) | brand | P3 |
 | `GET /brands/:slug/ai-usage`, `…/billing` | `get_ai_usage` | read | P1 |
 | `POST /brands/:slug/collabs` | `create_collab_brand` | brand (ADMIN) | P3 |
-| `POST /ai/:slug/generate-briefing` | `generate_briefing` | ai | P2 |
-| `POST /ai/:slug/extract-from-logo` | `extract_brand_from_logo` (cores/fontes a partir do logo) | ai | P2 |
+| `POST /ai/:slug/generate-briefing`, `/extract-from-logo` | — ✗ **decidido**: IA do servidor; o agente faz sozinho | — | — |
 | `GET /brands/discover` | — | ✗ descoberta de marcas alheias; o agente só vê o que o usuário liberou |
 | `POST /brands`, `PUT/DELETE /brands/:slug` | — | ✗ criar/renomear/apagar marca é decisão humana |
 | `POST …/request-access`, `…/requests/:id/approve` | — | ✗ controle de acesso |
@@ -131,24 +128,22 @@ Legenda: **P0** destrava o fluxo principal · **P1** dia a dia · **P2** conveni
 | `POST/PATCH /folders…` | `manage_folder` ações `create/rename/move` | write | P2 |
 | `DELETE /folders/:id` | `manage_folder` ação `delete` | delete | P3 |
 
-### 4.5 `fabrica` + WebSocket — geração com IA (interativa)
+### 4.5 `fabrica` + WebSocket — geração com IA do servidor
 
-A Fábrica é uma conversa em tempo real (WebSocket). O MCP não tem push; precisa de **sessão assíncrona com log de eventos
-consultável** (o servidor já mantém a sessão no Redis).
+**Decisão (dono do produto): o agente externo desenha sozinho.** A Fábrica, a edição com IA do servidor, os conselhos e a
+geração de briefing **não** entram no MCP. O fluxo é: `get_designer_brief` + `get_brand_profile` + `list_assets` →
+o agente desenha o HTML → `save_presentation` (confere o texto contra o aprovado) → ajustes com `get_design` +
+`update_slide`.
 
-| Origem | Ferramenta | Escopo | Pri |
-|---|---|---|---|
-| `POST /fabrica/sessions` | `start_generation` (marca, briefing, formato, pasta; checa teto de custo) | ai | P1 |
-| `GET /fabrica/sessions/:id` | `get_generation_status` (+ `get_generation_events` desde um cursor) | ai | P1 |
-| WS `message` | `factory_respond` ação `message` (instrução/anexos) | ai | P1 |
-| WS `question:answer` | `factory_respond` ação `answer` | ai | P1 |
-| WS `review:approve` / `review:decline` | `factory_respond` ações `approve` / `decline` | ai | P1 |
-| WS `mode:set` | `factory_respond` ação `set_mode` | ai | P2 |
-| WS `generation:cancel`, `message:interrupt` | `cancel_generation` (para o gasto) | ai | P1 |
-| WS `advice:send/update/remove/dismiss` | `manage_advice` | ai | P3 |
-| `PATCH …/sessions/:id/folder` | `start_generation`/`factory_respond` (campo `folderId`) | ai | P2 |
-| `DELETE …/sessions/:id` | `delete_generation_session` | delete | P3 |
-| Notificações de job (`job:done`, `job:error`, `needs_review`) | entram em `get_generation_events` | ai | P1 |
+| Origem | Situação | Por quê |
+|---|---|---|
+| `POST/GET/PATCH/DELETE /fabrica/sessions` | ✗ | O agente é a IA que desenha; não gasta crédito do estúdio em paralelo. |
+| WS `message`, `question:answer`, `review:*`, `mode:set`, `generation:cancel`, `advice:*` | ✗ | Protocolo de conversa da Fábrica (WebSocket), sem sentido sem ela. |
+| `POST /posts/:id/edit-slide` | ✗ | Substituído por `update_slide`. |
+
+Consequências: some o escopo `designer.ai`, some o problema de job assíncrono e de custo de IA do lado do servidor, e a
+conferência de texto/identidade continua sendo feita por **código** no `save_presentation`/`update_slide`
+(`checkApprovedText`, `validateHtmlDesign`), não por prompt.
 
 ### 4.6 `notifications`, `settings` do usuário, integrações
 
@@ -178,11 +173,8 @@ consultável** (o servidor já mantém a sessão no Redis).
 
 ### 4.8 Observabilidade (`GenerationRun` / `GenerationStep`)
 
-| Dado | Ferramenta | Escopo | Pri |
-|---|---|---|---|
-| Execuções da marca (status, tokens, erro) | `list_generation_runs` | read (ADMIN: prompts) | P2 |
-| Passos de uma execução (modelo, latência, erro) | `get_generation_run` (prompt/resposta só ADMIN) | read | P3 |
-| Uso e custo | `get_ai_usage`, `get_design_cost` | read | P1 |
+✗ **Fora**: as execuções existem só para a Fábrica, que não entra. `get_ai_usage` e `get_design_cost` continuam (o
+usuário vê o gasto da marca, e o agente pode respeitá-lo).
 
 ### 4.9 Apresentação pública
 
@@ -191,22 +183,21 @@ consultável** (o servidor já mantém a sessão no Redis).
 | `GET /public/presentations/:slug` | — (é público; `get_design` cobre o conteúdo) | — | — |
 | `GET/POST …/:slug/chat`, `GET …/events` | `get_presentation_activity` (mensagens do chat e visualizações) | read | P3 |
 
-## 5. Catálogo consolidado
+## 5. Catálogo consolidado (sem a Fábrica)
 
 | Grupo | Ferramentas | Total |
 |---|---|---|
-| Leitura/contexto | `list_brands`✓ `get_brand_kit`✓ `get_designer_brief`✓ `get_brand_profile` `get_brand_memory` `list_assets` `get_asset` `list_folders` `list_versions` `get_photo_slots` `get_design_cost` `get_ai_usage` `search_designs` `list_team` `list_notifications` `list_workspaces` `get_integrations_status` `get_connect_url` `list_designs`✓ `get_design`✓ | 20 |
+| Leitura/contexto | `list_brands`✓ `get_brand_kit`✓ `get_designer_brief`✓ `list_designs`✓ `get_design`✓ `get_brand_profile` `get_brand_memory` `list_assets` `get_asset` `list_folders` `list_versions` `get_photo_slots` `get_design_cost` `get_ai_usage` `search_designs` `list_team` `list_notifications` `list_workspaces` `get_integrations_status` `get_connect_url` | 20 |
 | Peças | `save_presentation`✓ `update_slide` `set_slide_photo` `update_design_meta` `duplicate_design` `create_version` `restore_version` `render_preview` | 8 |
 | Mídia | `upload_asset` `import_asset` `update_asset` | 3 |
-| Marca | `update_brand_kit` `update_brand_profile` `update_brand_memory` `import_brand_profile` `ingest_brandbook` `confirm_brand_logo` `manage_reference` `create_collab_brand` | 8 |
-| IA / Fábrica | `start_generation` `get_generation_status` `get_generation_events` `factory_respond` `cancel_generation` `edit_slide_with_ai` `generate_briefing` `extract_brand_from_logo` `manage_advice` | 9 |
+| Marca | `update_brand_kit` `update_brand_profile` `update_brand_memory` `manage_reference` `create_collab_brand` | 5 |
 | Exportar/publicar | `export_file` `get_export_status` `export_to_canva` `get_canva_export_status` `canva_sync` `publish_design` `unpublish_design` `set_presentation_chat` `export_design_json` | 9 |
-| Organização | `manage_folder` `delete_design` `delete_asset` `delete_generation_session` `mark_notifications_read` | 5 |
+| Organização | `manage_folder` `delete_design` `delete_asset` `mark_notifications_read` | 4 |
 | Integrações | `list_integration_files` | 1 |
-| Observabilidade | `list_generation_runs` `get_generation_run` `get_presentation_activity` `get_billing_summary` | 4 |
-| **Total** | (✓ = já existe) | **67, das quais 6 existem** |
+| Outras leituras | `get_presentation_activity` `get_billing_summary` | 2 |
+| **Total** | (✓ = já existe) | **52, das quais 6 existem** |
 
-Com `tools/list` filtrado por escopo, um token só de leitura vê ~25; um com tudo, 67.
+Com `tools/list` filtrado por escopo, um token só de leitura vê ~22; um com tudo, 52.
 
 ## 6. Outras primitivas MCP
 
@@ -223,37 +214,35 @@ Com `tools/list` filtrado por escopo, um token só de leitura vê ~25; um com tu
 
 1. **Lote 1 (P0) — o agente trabalha sozinho no estúdio**: `get_brand_profile`, `list_assets`, `get_photo_slots`,
    `set_slide_photo`, `update_slide`, `list_versions`, `create_version`, `restore_version`, `upload_asset`, `export_file` +
-   status, `export_to_canva` + status, `get_integrations_status`. Escopos novos: `export`.
-2. **Lote 2 (P1) — dia a dia e Fábrica**: `search_designs`, `list_folders`, `update_design_meta`, `update_brand_kit`,
-   `update_brand_profile`, `get_brand_memory`, `get_ai_usage`, `get_design_cost`, `start_generation` +
-   `get_generation_status/events`, `factory_respond`, `cancel_generation`, `edit_slide_with_ai`, `publish/unpublish`,
-   `import_asset`, `get_connect_url`. Escopos: `brand`, `ai`, `publish`, `integrations`.
-3. **Lote 3 (P2)**: pastas, duplicar, atualizar ativo, memória, brandbook, referências (leitura), observabilidade,
-   notificações, workspaces, equipe (leitura).
-4. **Lote 4 (P3)**: exclusões, referências (escrita), coleção de marcas, conselhos, sync com Canva, atividade pública,
-   cobrança.
+   status, `export_to_canva` + status, `get_integrations_status`. Escopo novo: `export`.
+2. **Lote 2 (P1) — dia a dia**: `search_designs`, `list_folders`, `update_design_meta`, `update_brand_kit`,
+   `update_brand_profile`, `get_brand_memory`, `get_ai_usage`, `get_design_cost`, `publish/unpublish`, `import_asset`,
+   `get_connect_url`. Escopos: `brand`, `publish`, `integrations`.
+3. **Lote 3 (P2)**: pastas, duplicar, atualizar ativo, memória, referências (leitura), notificações, workspaces, equipe
+   (leitura), `render_preview`, `export_design_json`.
+4. **Lote 4 (P3)**: exclusões, referências (escrita), marcas "collab", sync com Canva, atividade pública, cobrança.
 
-Cada lote entra com: testes de escopo, papel, marca cruzada e teto de custo (padrão de `editAll.test.ts`);
-`docs/MCP-DESIGNER.md` atualizado; texto novo no consentimento por escopo; e limite de taxa por categoria (leitura
-×escrita×IA×exportação).
+Cada lote entra com: testes de escopo, papel, marca cruzada (padrão de `editAll.test.ts`); `docs/MCP-DESIGNER.md`
+atualizado; texto novo no consentimento por escopo; e limite de taxa por categoria (leitura, escrita, exportação).
 
 ## 8. Riscos a decidir antes de construir
 
 | Risco | Decisão proposta |
 |---|---|
 | `update_brand_profile` muda todas as peças futuras | Snapshot do cérebro antes; escopo próprio `brand`; elicitation; restauração. |
-| Gasto de IA fora de controle (loop do agente) | `designer.ai` separado; teto por conexão/hora; custo no retorno; respeita `ai-usage` e `ignoreAiCostLimit` (que o agente não altera). |
 | Publicação expõe conteúdo | `designer.publish` separado; `unpublish` sempre disponível; log de quem publicou. |
 | Exportar para Canva usa a conta pessoal | Só com `designer.export` e conta conectada; token nunca passa pelo agente. |
 | Entrada hostil (SVG, HTML, URLs de referência) | Mesmos funis do app; novos pontos de entrada com testes de SSRF/XSS. |
+| Exportação/render consome CPU do servidor | Limite de taxa por conexão e fila já existente (`deckExportQueue`). |
 | Catálogo grande degrada o cliente | `tools/list` por escopo + ferramentas por ação. |
-| Fábrica é WebSocket | Sessão assíncrona com log de eventos e cursor; reaproveita o Redis da sessão. |
 | Cliente (Claude) pede só leitura | Resolvido no #102: a tela deixa o usuário liberar o que quiser. |
 
-## 9. Decisões de produto que ficam com o dono
+## 9. Decisões de produto
 
-1. A Fábrica entra no MCP, ou o agente externo desenha sozinho com `save_presentation`?
-2. `designer.publish` e `designer.delete` entram agora?
-3. `update_brand_profile` pode ser feito por agente, ou só leitura do cérebro?
-4. `list_team` entra (só leitura) ou o agente nem vê membros?
-5. Limites de custo por conexão: valor padrão por hora/dia.
+| # | Decisão | Estado |
+|---|---|---|
+| 1 | A Fábrica entra no MCP? | **Não — o agente externo desenha sozinho.** |
+| 2 | `designer.publish` e `designer.delete` entram agora? | pendente (propostos no lote 2 e 4) |
+| 3 | O agente pode alterar o cérebro (`update_brand_profile`) ou só ler? | pendente |
+| 4 | `list_team` entra (só leitura)? | pendente |
+| 5 | Limite de exportações por conexão (hora/dia)? | pendente |
