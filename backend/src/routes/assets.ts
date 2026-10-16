@@ -8,7 +8,8 @@ import { createError } from '../middleware/errorHandler.js';
 import { requireBrandRole, ANY_MEMBER, EDITORS, type BrandRequest } from '../middleware/brandAccess.js';
 import { parseBody } from '../lib/validate.js';
 import { exportDesign, waitForExport } from '../lib/canvaClient.js';
-import { prepareStorableFile, InvalidSvgError } from '../lib/svgSanitize.js';
+import { InvalidSvgError } from '../lib/svgSanitize.js';
+import { storeBrandAsset } from '../lib/assetStore.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { SVG_SANITIZE_RATE_LIMIT } from '../lib/svgSanitizeRateLimit.js';
 
@@ -56,44 +57,12 @@ assetsRouter.post('/', rateLimit(SVG_SANITIZE_RATE_LIMIT), requireBrandRole(EDIT
 
     const brand = req.brand!;
 
-    // O Content-Type que o cliente declara não manda: SVG é higienizado e sai como
-    // image/svg+xml mesmo se veio como text/html; HTML de verdade vira download.
-    // SVG inválido lança InvalidSvgError → 400 pelo errorHandler.
-    const prepared = await prepareStorableFile({ buffer: file.buffer, fileName: file.originalname, mimeType: file.mimetype });
-
-    // Dimensões: sem elas o editor não sabe a proporção e insere a imagem esticada
-    // num quadrado. Falha de leitura não impede o upload (pode ser SVG/fonte).
-    let width: number | undefined;
-    let height: number | undefined;
-    if (prepared.mimeType.startsWith('image/')) {
-      try {
-        const meta = await sharp(prepared.buffer).metadata();
-        width = meta.width;
-        height = meta.height;
-      } catch {
-        // segue sem dimensões
-      }
-    }
-
-    // Upload to R2
-    const url = await uploadFileToR2(
-      prepared.buffer,
-      file.originalname,
-      prepared.mimeType,
-      `brands/${brand.id}`
-    );
-
-    const asset = await prisma.asset.create({
-      data: {
-        brandId: brand.id,
-        uploadedBy: userId,
-        name: file.originalname,
-        url,
-        fileType: prepared.mimeType,
-        sizeBytes: prepared.buffer.length,
-        width,
-        height,
-      }
+    const asset = await storeBrandAsset({
+      brandId: brand.id,
+      userId,
+      buffer: file.buffer,
+      fileName: file.originalname,
+      mimeType: file.mimetype,
     });
     res.status(201).json({ data: asset });
   } catch (error) {
@@ -123,9 +92,17 @@ assetsRouter.post('/import-base64', rateLimit(SVG_SANITIZE_RATE_LIMIT), requireB
 
       // Mesma regra do upload direto. Aqui um SVG inválido só tira ESTE item do lote
       // (como base64 inválido), em vez de derrubar os outros.
-      let prepared: Awaited<ReturnType<typeof prepareStorableFile>>;
+      let asset;
       try {
-        prepared = await prepareStorableFile({ buffer, fileName: att.name, mimeType: att.mimeType });
+        asset = await storeBrandAsset({
+          brandId: brand.id,
+          userId,
+          buffer,
+          fileName: att.name,
+          mimeType: att.mimeType,
+          source,
+          tags: [source],
+        });
       } catch (err) {
         if (err instanceof InvalidSvgError) {
           console.warn(`[Assets] import-base64: "${att.name}" ignorado — ${err.message}`);
@@ -133,35 +110,6 @@ assetsRouter.post('/import-base64', rateLimit(SVG_SANITIZE_RATE_LIMIT), requireB
         }
         throw err;
       }
-
-      let width: number | undefined;
-      let height: number | undefined;
-      if (prepared.mimeType.startsWith('image/')) {
-        try {
-          const meta = await sharp(prepared.buffer).metadata();
-          width = meta.width;
-          height = meta.height;
-        } catch {
-          // segue sem dimensões
-        }
-      }
-
-      const url = await uploadFileToR2(prepared.buffer, att.name, prepared.mimeType, `brands/${brand.id}`);
-
-      const asset = await prisma.asset.create({
-        data: {
-          brandId: brand.id,
-          uploadedBy: userId,
-          name: att.name,
-          url,
-          fileType: prepared.mimeType,
-          sizeBytes: prepared.buffer.length,
-          width,
-          height,
-          source,
-          tags: [source],
-        },
-      });
       created.push(asset);
     }
 
