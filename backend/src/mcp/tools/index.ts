@@ -3,11 +3,14 @@ import { getBrandKitTool } from './getBrandKit.js';
 import { getBrandProfileTool } from './getBrandProfile.js';
 import { getDesignTool } from './getDesign.js';
 import { getDesignerBriefTool } from './getDesignerBrief.js';
+import { getIntegrationsStatusTool } from './integrationsStatus.js';
 import { listAssetsTool } from './listAssets.js';
 import { listBrandsTool } from './listBrands.js';
 import { listDesignsTool } from './listDesigns.js';
+import { getPhotoSlotsTool, setSlidePhotoTool } from './photoSlots.js';
 import { savePresentationTool } from './savePresentation.js';
 import { updateSlideTool } from './updateSlide.js';
+import { uploadAssetTool } from './uploadAsset.js';
 import { createVersionTool, listVersionsTool, restoreVersionTool } from './versions.js';
 
 /**
@@ -19,8 +22,9 @@ import { createVersionTool, listVersionsTool, restoreVersionTool } from './versi
  * entrega o contexto (brief), valida, confere o texto, guarda e mostra no editor.
  *
  *  - leitura (`designer.read`): list_brands, get_brand_kit, get_designer_brief, list_designs, get_design,
- *    get_brand_profile, list_assets, list_versions;
- *  - escrita (`designer.write`): save_presentation, update_slide, create_version, restore_version.
+ *    get_brand_profile, list_assets, list_versions, get_photo_slots, get_integrations_status;
+ *  - escrita (`designer.write`): save_presentation, update_slide, create_version, restore_version,
+ *    set_slide_photo, upload_asset.
  *
  * O plano completo (52 ferramentas, escopos e ordem) está em docs/MCP-DESIGNER-PLANO-FERRAMENTAS.md.
  */
@@ -34,8 +38,12 @@ export const MCP_TOOLS: readonly McpToolDefinition<any, any>[] = [
   getBrandProfileTool,
   listAssetsTool,
   listVersionsTool,
+  getPhotoSlotsTool,
+  getIntegrationsStatusTool,
   savePresentationTool,
   updateSlideTool,
   createVersionTool,
   restoreVersionTool,
+  setSlidePhotoTool,
+  uploadAssetTool,
 ];

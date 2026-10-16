@@ -198,7 +198,9 @@ export function createMcpEndpointRouter(deps: {
     attachUser,
     methodGate,
     // Corpo só é lido DEPOIS da autenticação: anônimo não faz o servidor parsear JSON.
-    express.json({ limit: '1mb' }),
+    // 15 MB: `upload_asset` leva a imagem em base64 (10 MB decodificados = ~13,4 MB) e um deck de 30 slides passa de 1 MB.
+    // Continua atrás do bearer, do limite por IP e do limite por usuário; o teto de cada ferramenta vem do schema dela.
+    express.json({ limit: '15mb' }),
     rateLimit({ ...limits.mcpUser, keyPrefix: `${limits.keyPrefix}-mcp-user`, keyBy: 'user' }),
     scopePrecheck,
     handle,
