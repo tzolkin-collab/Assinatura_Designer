@@ -105,7 +105,7 @@
   --transition-slow: 500ms cubic-bezier(0.16, 1, 0.3, 1);
 
   /* ── Layout ── */
-  --sidebar-width: 232px;
+  --sidebar-width: 256px;
   --sidebar-collapsed: 68px;
   --header-height: 56px;
 }
