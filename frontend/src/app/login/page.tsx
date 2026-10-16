@@ -136,10 +136,6 @@ function LoginContent() {
             Cadastre-se aqui
           </Link>
         </p>
-
-        <p className={styles.hint} style={{ marginTop: 'var(--space-2)' }}>
-          Ou use <strong>admin@assinatura.com</strong> / <strong>admin123</strong>
-        </p>
       </div>
     </div>
   );
