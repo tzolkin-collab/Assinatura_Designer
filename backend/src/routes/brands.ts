@@ -22,6 +22,7 @@ import { SVG_SANITIZE_RATE_LIMIT } from '../lib/svgSanitizeRateLimit.js';
 import multer from 'multer';
 import { processBrandbookIngest } from '../lib/brandbookIngestion.js';
 import { coverFromHtmlRender } from '../lib/publishedCover.js';
+import { toGalleryPost, type GalleryContentRow } from '../lib/galleryPosts.js';
 import { getValidAccessToken, exportDesign, waitForExport } from '../lib/canvaClient.js';
 
 export const brandsRouter = Router();
@@ -348,6 +349,44 @@ brandsRouter.get('/:slug/posts', async (req: Request, res: Response, next: NextF
         select: { id: true, name: true, type: true, status: true, previewUrl: true, updatedAt: true },
       });
       res.json({ data: posts });
+      return;
+    }
+
+    // ?view=gallery: lista leve da Galeria (capa + contagem, sem chatHistory nem os demais slides).
+    // Contrato e motivo em lib/galleryPosts.ts. Sem o parâmetro a lista segue completa, como antes.
+    if (req.query.view === 'gallery') {
+      const [posts, contentRows] = await Promise.all([
+        prisma.post.findMany({
+          where: { brandId: brand.id },
+          orderBy: { createdAt: 'desc' },
+          select: {
+            id: true, name: true, type: true, status: true, previewUrl: true,
+            createdAt: true, updatedAt: true, brandId: true, folderId: true, createdById: true,
+            canvaDesignId: true, canvaExportUrl: true, canvaDesignName: true,
+            canvaSyncEnabled: true, canvaLastSyncedAt: true,
+            publicSlug: true, publishedAt: true, hostingConfig: true,
+            folder: true,
+            createdBy: { select: { id: true, name: true, email: true } },
+            slides: { orderBy: { position: 'asc' }, take: 1, select: { id: true, contentJson: true, metadata: true } },
+            _count: { select: { slides: true } },
+          },
+        }),
+        // `content - 'chave'` tira os campos pesados no banco: 4 MB de chatHistory por post
+        // não trafegam do Postgres até aqui só para serem descartados.
+        prisma.$queryRaw<GalleryContentRow[]>`
+          SELECT
+            id,
+            CASE WHEN jsonb_typeof(content) = 'object'
+                 THEN content - 'slides' - 'chatHistory' - 'usedAssets' - 'reasoning'
+                 ELSE content END AS content,
+            CASE WHEN jsonb_typeof(content -> 'slides') = 'array' THEN content -> 'slides' -> 0 END AS "blobFirstSlide",
+            CASE WHEN jsonb_typeof(content -> 'slides') = 'array' THEN jsonb_array_length(content -> 'slides') ELSE 0 END AS "blobSlideCount",
+            CASE WHEN jsonb_typeof(content -> 'chatHistory') = 'array' THEN jsonb_array_length(content -> 'chatHistory') ELSE 0 END AS "chatCount"
+          FROM "Post"
+          WHERE "brandId" = ${brand.id}`,
+      ]);
+      const byId = new Map(contentRows.map((r) => [r.id, r]));
+      res.json({ data: posts.map((p) => toGalleryPost(p, byId.get(p.id))) });
       return;
     }
 

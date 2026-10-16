@@ -104,6 +104,9 @@ vi.mock('../lib/prisma', () => {
 
   // O aceite de convite roda numa transação. Executamos o callback com o próprio mock,
   // então as asserções sobre user.create/brandMember.create seguem valendo dentro dela.
+  // Consultas cruas (lista leve da Galeria): cada teste define o retorno.
+  prismaMock.$queryRaw = vi.fn();
+
   prismaMock.$transaction = vi.fn((fn: (tx: unknown) => unknown) =>
     typeof fn === 'function' ? fn(prismaMock) : Promise.resolve(fn),
   );

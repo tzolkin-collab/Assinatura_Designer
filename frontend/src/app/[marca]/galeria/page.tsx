@@ -90,9 +90,43 @@ export default function BrandGaleriaPage() {
       .catch(() => { /* sem nome, o título cai no slug como antes */ });
     return () => { vivo = false; };
   }, [slug]);
-  const { posts, loading, error, mutate } = useBrandPosts(slug);
+  const { posts, loading, error, mutate } = useBrandPosts(slug, { view: 'gallery' });
   const { brand } = useBrand(slug);
   const [activePreviewPost, setActivePreviewPost] = useState<Post | null>(null);
+  const [openingPostId, setOpeningPostId] = useState<string | null>(null);
+
+  // A lista da Galeria é leve (só a capa de cada post). Preview e histórico precisam do post
+  // inteiro, então ele é buscado ao abrir. Post que já veio completo abre direto.
+  const fetchFullPost = async (post: Post): Promise<Post> => {
+    if (!post.light) return post;
+    const full = await api.get<Post>(`/posts/${post.id}`);
+    return { ...post, ...full, light: false };
+  };
+
+  const openChatHistory = async (post: Post) => {
+    try {
+      const full = await fetchFullPost(post);
+      setChatHistoryPreview({
+        sessionId: extractSessionId(full.content),
+        messages: extractChatHistory(full.content),
+        postLabel: `Arte ${post.id.split('-')[0]}`,
+      });
+    } catch (err) {
+      alert(getApiErrorMessage(err, 'Não consegui abrir o histórico da conversa.'));
+    }
+  };
+
+  const openPreview = async (post: Post) => {
+    if (openingPostId) return;
+    setOpeningPostId(post.id);
+    try {
+      setActivePreviewPost(await fetchFullPost(post));
+    } catch (err) {
+      alert(getApiErrorMessage(err, 'Não consegui abrir a apresentação.'));
+    } finally {
+      setOpeningPostId(null);
+    }
+  };
 
   // Publicar apresentação — link público navegável, diferente dos downloads.
   const [hostAutoplay, setHostAutoplay] = useState(false);
@@ -855,10 +889,10 @@ export default function BrandGaleriaPage() {
               >
                   <div
                     className={`${styles.postThumb} ${activeBundle === 'PRESENTATION' ? styles.postThumbPresentation : styles.postThumbDesign}`}
-                    onClick={() => setActivePreviewPost(post)}
+                    onClick={() => void openPreview(post)}
                   >
                     <div className={styles.thumbOverlay}>
-                      <span className={styles.hoverText}>Visualizar</span>
+                      <span className={styles.hoverText}>{openingPostId === post.id ? 'Abrindo…' : 'Visualizar'}</span>
                     </div>
 
                     {post.status === 'FAILED' || post.status === 'GENERATING' ? (
@@ -888,7 +922,7 @@ export default function BrandGaleriaPage() {
                     )}
                     {htmlContent && post.status !== 'FAILED' && post.status !== 'GENERATING' && (
                       <span className={styles.slideCount}>
-                        {htmlContent.slides.length} slides
+                        {post.slideCount ?? htmlContent.slides.length} slides
                       </span>
                     )}
                   </div>
@@ -950,7 +984,7 @@ export default function BrandGaleriaPage() {
                         style={{ cursor: 'pointer', width: '100%', height: '100%' }}
                         onClick={(e) => {
                           e.stopPropagation();
-                          setActivePreviewPost(post);
+                          void openPreview(post);
                         }}
                       >
                         <Image
@@ -967,7 +1001,7 @@ export default function BrandGaleriaPage() {
                       <div
                         className={styles.thumbDesign}
                         style={{ cursor: 'pointer' }}
-                        onClick={(e) => { e.stopPropagation(); setActivePreviewPost(post); }}
+                        onClick={(e) => { e.stopPropagation(); void openPreview(post); }}
                       >
                         <HtmlSlideRenderer content={htmlContent} mode="cover" hideNav />
                       </div>
@@ -1019,7 +1053,7 @@ export default function BrandGaleriaPage() {
                         {htmlContent && (
                           <>
                             <span>•</span>
-                            <span>{htmlContent.slides.length} slides</span>
+                            <span>{post.slideCount ?? htmlContent.slides.length} slides</span>
                           </>
                         )}
                       </div>
@@ -1032,7 +1066,7 @@ export default function BrandGaleriaPage() {
                     <>
                       <button
                         className={styles.actionBtn}
-                        onClick={(e) => { e.stopPropagation(); setActivePreviewPost(post); }}
+                        onClick={(e) => { e.stopPropagation(); void openPreview(post); }}
                         title="Visualizar"
                       >
                         <Maximize2 size={16} />
@@ -1071,20 +1105,16 @@ export default function BrandGaleriaPage() {
                   {htmlContent && !imageUrl && (
                      <button
                       className={styles.actionBtn}
-                      onClick={() => setActivePreviewPost(post)}
+                      onClick={() => void openPreview(post)}
                       title="Visualizar Apresentação"
                      >
                        <Maximize2 size={16} />
                      </button>
                   )}
-                  {(chatHistory.length > 0 || sessionId) && (
+                  {(post.hasChatHistory || chatHistory.length > 0 || sessionId) && (
                     <button
                       className={styles.actionBtn}
-                      onClick={() => setChatHistoryPreview({
-                        sessionId,
-                        messages: chatHistory,
-                        postLabel: `Arte ${post.id.split('-')[0]}`,
-                      })}
+                      onClick={() => void openChatHistory(post)}
                       title="Ver histórico da conversa"
                     >
                       <MessageSquareText size={16} />
