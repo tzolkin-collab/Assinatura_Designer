@@ -116,8 +116,14 @@
 
 .typeRow {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--space-4);
+}
+
+@media (max-width: 640px) {
+  .typeRow {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .dropdownList {
@@ -492,4 +498,24 @@
 
 .modalCancelBtn:hover {
   color: var(--color-text);
+}
+
+.removeLink {
+  border: none;
+  background: none;
+  cursor: pointer;
+  padding: 0;
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.removeLink:hover {
+  color: var(--color-text);
+}
+
+@media (pointer: coarse), (max-width: 768px) {
+  .removeLink {
+    min-height: 40px;
+    padding: 0 var(--space-2);
+  }
 }

@@ -1589,3 +1589,12 @@
   flex-direction: column;
   gap: 8px;
 }
+
+/* Toque: ações do cabeçalho da galeria com alvo de dedo. */
+@media (pointer: coarse), (max-width: 768px) {
+  .inviteBtn,
+  .toggleBtn {
+    min-width: 40px;
+    min-height: 40px;
+  }
+}

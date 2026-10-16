@@ -101,3 +101,9 @@
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
+
+/* Toque: 32/38px é pouco para o dedo (mínimo recomendado 44px, aceitável 40px). Só em tela de toque ou estreita. */
+@media (pointer: coarse), (max-width: 768px) {
+  .sm { min-height: 40px; }
+  .md { min-height: 44px; }
+}

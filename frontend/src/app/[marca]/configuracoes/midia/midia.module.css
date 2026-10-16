@@ -82,7 +82,7 @@
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(200px, 100%), 1fr));
   gap: var(--space-5) var(--space-4);
   margin-top: var(--space-5);
 }
@@ -122,7 +122,7 @@
   border-radius: var(--radius-full);
   background: rgba(0, 0, 0, 0.65);
   color: #fff;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.03em;
@@ -392,4 +392,27 @@
 .folderInput:focus {
   outline: 1px solid var(--color-text);
   border-color: var(--color-text);
+}
+
+/* Pastas ao lado da grade não cabem em tela estreita: empilha, e a lista de pastas rola sozinha. */
+@media (max-width: 768px) {
+  .layout {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-4);
+  }
+
+  .statChip,
+  .tagChip {
+    min-height: 40px;
+  }
+
+  .sidebar {
+    width: 100%;
+    position: static;
+    max-height: 220px;
+    padding: 0 0 var(--space-3);
+    border-right: none;
+    border-bottom: 1px solid var(--color-border);
+  }
 }
