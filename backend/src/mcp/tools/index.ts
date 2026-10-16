@@ -1,4 +1,5 @@
 import type { McpToolDefinition } from './types.js';
+import { exportFileTool, exportToCanvaTool, getCanvaExportStatusTool, getExportStatusTool } from './exportTools.js';
 import { getBrandKitTool } from './getBrandKit.js';
 import { getBrandProfileTool } from './getBrandProfile.js';
 import { getDesignTool } from './getDesign.js';
@@ -24,7 +25,8 @@ import { createVersionTool, listVersionsTool, restoreVersionTool } from './versi
  *  - leitura (`designer.read`): list_brands, get_brand_kit, get_designer_brief, list_designs, get_design,
  *    get_brand_profile, list_assets, list_versions, get_photo_slots, get_integrations_status;
  *  - escrita (`designer.write`): save_presentation, update_slide, create_version, restore_version,
- *    set_slide_photo, upload_asset.
+ *    set_slide_photo, upload_asset;
+ *  - saída (`designer.export`): export_file, get_export_status, export_to_canva, get_canva_export_status.
  *
  * O plano completo (52 ferramentas, escopos e ordem) está em docs/MCP-DESIGNER-PLANO-FERRAMENTAS.md.
  */
@@ -46,4 +48,8 @@ export const MCP_TOOLS: readonly McpToolDefinition<any, any>[] = [
   restoreVersionTool,
   setSlidePhotoTool,
   uploadAssetTool,
+  exportFileTool,
+  getExportStatusTool,
+  exportToCanvaTool,
+  getCanvaExportStatusTool,
 ];
