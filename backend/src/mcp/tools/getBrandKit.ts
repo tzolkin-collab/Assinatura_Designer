@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { resolveBrandContext } from '../../lib/brandContext.js';
+import { loadBrainLayers } from '../../lib/designerBrain/index.js';
 import { READ_SCOPE } from '../config.js';
 import type { McpToolDefinition } from './types.js';
 
@@ -26,6 +27,8 @@ const outputSchema = {
   colors: z.array(z.string()),
   fonts: z.array(z.string()),
   logoUrl: z.string().nullable(),
+  /** Logos oficiais da ficha (uma variante por fundo). Marcas com a ficha preenchida podem ter `logoUrl` nulo e variantes aqui. */
+  logoVariants: z.array(z.object({ label: z.string(), url: z.string() })),
   guidelines: z.string(),
   guidelinesTruncated: z.boolean(),
   visual: z.object({
@@ -56,7 +59,8 @@ export const getBrandKitTool: McpToolDefinition<typeof inputSchema, typeof outpu
     const brand = ctx.brand!;
     // Reaproveita a mesma leitura que alimenta o pipeline de geração. Não autoriza nada
     // por si (ver o aviso em brandContext.ts) — a autorização já foi feita no registro.
-    const context = await resolveBrandContext(brand.slug);
+    const [context, layers] = await Promise.all([resolveBrandContext(brand.slug), loadBrainLayers(brand.slug).catch(() => null)]);
+    const logoVariants = (layers?.projectProfile?.logo?.files ?? []).map((f) => ({ label: f.label ?? 'Logo', url: f.url }));
 
     const truncated = context.guidelines.length > MAX_GUIDELINES_CHARS;
     const guidelines = truncated ? context.guidelines.slice(0, MAX_GUIDELINES_CHARS) : context.guidelines;
@@ -69,6 +73,7 @@ export const getBrandKitTool: McpToolDefinition<typeof inputSchema, typeof outpu
       colors: context.colors,
       fonts: context.primaryFonts,
       logoUrl: context.logoUrl ?? null,
+      logoVariants,
       guidelines,
       guidelinesTruncated: truncated,
       visual: {
@@ -86,7 +91,10 @@ export const getBrandKitTool: McpToolDefinition<typeof inputSchema, typeof outpu
       `Marca: ${brand.name} (slug: ${brand.slug}) — seu papel: ${brand.role}`,
       `Cores: ${structured.colors.length ? structured.colors.join(', ') : '(nenhuma definida)'}`,
       `Fontes: ${structured.fonts.length ? structured.fonts.join(', ') : '(nenhuma definida)'}`,
-      `Logo: ${structured.logoUrl ?? '(sem logo)'}`,
+      `Logo: ${structured.logoUrl ?? (logoVariants.length ? '(sem logo único; veja as variantes oficiais abaixo)' : '(sem logo)')}`,
+      ...(logoVariants.length
+        ? ['Logos oficiais (variantes por fundo):', ...logoVariants.map((l) => `- ${l.label}: ${l.url}`)]
+        : []),
       structured.visual.vibe ? `Vibe visual: ${structured.visual.vibe}` : '',
       structured.visual.paletteDirection ? `Direção de paleta: ${structured.visual.paletteDirection}` : '',
       structured.visual.approvedPalette.length ? `Paleta aprovada: ${structured.visual.approvedPalette.join(', ')}` : '',
