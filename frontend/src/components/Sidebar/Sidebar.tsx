@@ -150,6 +150,8 @@ export default function Sidebar() {
 
   return (
     <>
+      {/* Mobile: faixa fixa no topo. Sem ela o botão flutuava sobre o texto ao rolar a página. */}
+      <div className={styles.mobileBar} aria-hidden />
       {/* Mobile toggle */}
       <button
         className={styles.mobileToggle}
