@@ -1,183 +1,259 @@
-# Designer como MCP — o que o agente precisa poder fazer (análise e plano)
+# Designer como MCP — escopo completo (análise e plano)
 
-> Base: inventário das rotas do backend em `main` (16 routers, ~110 endpoints) contra as 6 ferramentas MCP de hoje.
-> Hoje o agente cobre **cerca de 10%** do app: lê marca/peças e salva apresentações. Este documento lista o que falta,
-> em quais escopos, com que risco, e em que ordem construir.
+> Base: inventário completo do `main` — 16 routers (~110 endpoints), 11 mensagens de WebSocket da Fábrica, 5 filas
+> (pipeline, export de deck, export Canva, captura de ativos, sync de referências), 36 páginas do frontend e o modelo de
+> dados (`Post`, `Slide`, `PostVersion`, `Asset`, `Folder`, `Brand`, `BrandConfig`, `BrandProfile`, `Reference`,
+> `GenerationRun/Step`, `Notification`, `Invite`, `AccessRequest`).
+>
+> Hoje o MCP tem 6 ferramentas e cobre ~10% do app. Este documento mapeia **tudo** o que o app faz para uma de três
+> respostas: *vira ferramenta*, *vira ferramenta com escopo próprio*, ou *fica de fora de propósito*.
 
-## 1. O que existe hoje (6 ferramentas)
+## 1. O que existe hoje
 
 `list_brands`, `get_brand_kit`, `get_designer_brief`, `list_designs`, `get_design`, `save_presentation`
-(+ `designer.read`, `designer.write`, `designer.edit_all`).
+e os escopos `designer.read`, `designer.write`, `designer.edit_all`.
 
 ## 2. Princípios (valem para toda ferramenta nova)
 
 1. **Uma ferramenta = um arquivo** em `backend/src/mcp/tools/`; segurança (escopo, marca, papel, log) vem do registro
-   central. Nada de segurança copiado entre ferramentas.
-2. **O papel do usuário na marca é o teto**, conferido a cada chamada (mesmas regras de `brandAccess.ts`: `ANY_MEMBER`,
-   `EDITORS`, `ADMINS`). O agente nunca faz o que o usuário não faria no app.
-3. **Tudo o que gasta dinheiro** (IA, render, Canva) passa pelo mesmo teto de custo do app (`ai-usage`,
-   `ignoreAiCostLimit`) e é visível no resultado (`costEstimate`/`usage`).
-4. **Tudo o que sai do Designer** (link público, exportação para Canva, download) exige escopo próprio e `openWorldHint`.
-5. **Tudo o que apaga** tem `destructiveHint: true`, escopo próprio e snapshot/restauração quando possível.
-6. **Chamadas terminam em segundos** (limite ~60 s dos clientes): trabalho longo é `start_*` + `get_*_status`
-   (job assíncrono), nunca uma chamada que espera.
-7. **Segredos nunca saem**: tokens de Canva/Google/Asana, prompt interno do agente, convites e e-mails de terceiros ficam
-   no servidor. Fluxos de conexão devolvem uma URL para o USUÁRIO abrir.
-8. **Entrada vinda do agente é hostil**: HTML passa por `validateHtmlDesign`; URLs externas por `isPublicHttpUrl`
-   (mesmo funil do #97); arquivos por tamanho/tipo e sanitização de SVG.
+   central.
+2. **O papel do usuário na marca é o teto**, conferido a cada chamada (`ANY_MEMBER`, `EDITORS`, `ADMINS` de
+   `brandAccess.ts`). O agente nunca faz o que o usuário não faria no app.
+3. **Dinheiro**: tudo que gasta IA/render passa pelo teto de custo do app e devolve `usage`/`costEstimate`.
+4. **Saída do Designer** (link público, Canva, download): escopo próprio e `openWorldHint: true`.
+5. **Destrutivo**: `destructiveHint: true`, escopo próprio, snapshot/restauração quando houver.
+6. **Chamadas curtas** (~60 s): trabalho longo é `start_*` + `get_*_status`, nunca espera.
+7. **Segredos nunca saem**: tokens de Canva/Google/Asana, prompt interno do agente, e-mails de terceiros. Fluxos de
+   conexão devolvem uma URL para o USUÁRIO abrir.
+8. **Entrada do agente é hostil**: HTML por `validateHtmlDesign`; URLs por `isPublicHttpUrl` (funil do #97); arquivos com
+   teto de tamanho/tipo; SVG sanitizado.
+9. **`tools/list` filtrado pelo escopo do token**: quem só leu vê ~25 ferramentas, não ~67. Clientes degradam com
+   catálogo grande; a tela de consentimento já controla o que cada conexão enxerga.
+10. **Ferramentas por ação** quando a família é grande (`manage_folder`, `manage_reference`, `factory_respond`): menos
+    nomes, mesma segurança por ação (cada ação declara o escopo/papel exigido).
 
-## 3. Escopos propostos
+## 3. Escopos
 
-| Escopo | Libera | Papel mínimo | Observação |
+| Escopo | Libera | Papel mínimo | Estado |
 |---|---|---|---|
-| `designer.read` | leitura de marcas, peças, ativos, cérebro, uso, versões, jobs | VIEWER | já existe |
-| `designer.write` | criar peças, subir ativos, editar o que a conexão criou | EDITOR | já existe |
-| `designer.edit_all` | editar/sobrescrever peças de qualquer origem | EDITOR | já existe (#99) |
-| `designer.brand` | alterar kit da marca, perfil/cérebro, memória, referências, brandbook | EDITOR (campos de custo: ADMIN) | muda como TODAS as peças futuras saem |
-| `designer.ai` | acionar geração/edição com IA (gasta crédito) | EDITOR | separado para o usuário poder dar escrita sem gasto |
-| `designer.export` | exportar PDF/PNG/Canva e baixar arquivos | VIEWER (Canva: EDITOR) | envolve conta Canva do usuário |
-| `designer.publish` | publicar/despublicar link público | EDITOR | expõe conteúdo fora do app |
-| `designer.delete` | apagar peças, ativos, pastas, sessões | EDITOR | destrutivo; sempre com snapshot quando der |
-| `designer.team` | só LEITURA de membros e pedidos de acesso | VIEWER | convidar/alterar papel **não** vai para o agente |
+| `designer.read` | ler marcas, peças, ativos, cérebro, uso, versões, jobs, integrações (status) | VIEWER | existe |
+| `designer.write` | criar peças, subir ativos, editar o que a conexão criou, pastas, versões manuais | EDITOR | existe |
+| `designer.edit_all` | editar/sobrescrever peças de qualquer origem | EDITOR | existe (#99) |
+| `designer.brand` | kit da marca, perfil/cérebro, memória, referências, brandbook | EDITOR (campos de custo: ADMIN) | novo |
+| `designer.ai` | acionar Fábrica e edição com IA (gasta crédito) | EDITOR | novo |
+| `designer.export` | exportar PDF/ZIP/PPTX/HTML e Canva; sincronizar com Canva; baixar | VIEWER (Canva: EDITOR) | novo |
+| `designer.publish` | publicar/despublicar link público e ligar o chat da apresentação | EDITOR | novo |
+| `designer.delete` | apagar peças, ativos, pastas e sessões | EDITOR | novo |
+| `designer.integrations` | ler fontes do usuário: Drive, Canva (designs), Asana | VIEWER | novo |
+| `designer.team` | só **leitura** de membros e pedidos de acesso | VIEWER | novo |
 
-O usuário continua escolhendo na tela de consentimento (começa em "só ver"); cada escopo ganha texto claro do que libera.
+`designer.edit_all` > `write` > `read` (cada um inclui o anterior). Os demais são independentes. A tela de consentimento
+começa em "só ver" e cada escopo ganha texto claro do que libera.
 
-## 4. Catálogo de ferramentas
+## 4. Cobertura completa: toda rota → ferramenta ou exclusão
 
-Legenda de prioridade: **P0** destrava o fluxo principal · **P1** completa o dia a dia · **P2** conveniência ·
-**P3** só com decisão explícita.
+Legenda: **P0** destrava o fluxo principal · **P1** dia a dia · **P2** conveniência · **P3** só com decisão ·
+**✗** fora de propósito (motivo).
 
-### 4.1 Leitura e contexto (`designer.read`)
+### 4.1 `posts` — peças
 
-| Ferramenta | Rota de origem | Pri | Para quê |
+| Rota | Ferramenta | Escopo | Pri |
 |---|---|---|---|
-| `get_brand_profile` | `GET /brands/:slug/profile` | P0 | O **cérebro** da marca (camadas: identidade, tom, regras, proibições). Hoje só vem filtrado pelo brief. |
-| `get_brand_memory` | `GET /brands/:slug/memory` | P1 | Preferências aprendidas; o agente respeita antes de desenhar. |
-| `list_assets` / `get_asset` | `GET /brands/:id/assets` | P0 | Fotos, logos, fontes próprias reais. Sem isto o agente não sabe o que pode usar. |
-| `list_folders` | `GET /folders/:slug` | P1 | Organização das peças. |
-| `list_versions` | `GET /posts/:id/versions` | P0 | Ver/restaurar o que o agente sobrescreveu (complementa #98/#99). |
-| `get_design_cost` / `get_ai_usage` | `GET /posts/:id/cost`, `/brands/:slug/ai-usage` | P1 | Custo de uma peça e consumo da marca antes de gastar. |
-| `list_references` | `GET /settings/:slug/referencias` | P2 | Referências visuais cadastradas. |
-| `get_photo_slots` | `GET /posts/:id/slides/:i/photo-slots` | P0 | Quais áreas de foto o slide tem, para preencher. |
-| `list_team` | `GET /brands/:id/members` | P2 | Só leitura (nome/papel), sem e-mail se possível. |
-| `list_notifications` | `GET /notifications` | P2 | Estado de jobs e avisos. |
-| `search_designs` | `GET /brands/:slug/posts` | P1 | Busca por nome/status/tipo (hoje `list_designs` só ordena por data). |
+| `GET /posts/:id` | `get_design` (existe) | read | — |
+| `GET /brands/:slug/posts` | `list_designs` (existe) + `search_designs` (nome/status/tipo/pasta) | read | P1 |
+| `PUT /posts/:id` | `update_design_meta` (nome, status, pasta) | write / edit_all | P1 |
+| `PUT /posts/:id/slides/:i/code` | `update_slide` (HTML/CSS de UM slide) | write / edit_all | P0 |
+| `GET …/slides/:i/photo-slots` | `get_photo_slots` | read | P0 |
+| `PUT …/slides/:i/photo` | `set_slide_photo` (ativo real da marca) | write / edit_all | P0 |
+| `POST /posts/:id/edit-slide` | `edit_slide_with_ai` | ai | P1 |
+| `GET /posts/:id/cost` | `get_design_cost` | read | P1 |
+| `GET /posts/:id/versions` | `list_versions` | read | P0 |
+| `POST /posts/:id/versions` | `create_version` | write | P0 |
+| `POST …/versions/:v/restore` | `restore_version` | write / edit_all | P0 |
+| `POST /posts/render-batch` | `render_preview` (miniaturas) | read | P2 |
+| `GET /posts/:id/export` | `export_design_json` (conteúdo cru) | export | P2 |
+| `POST /posts/:id/export-file` | `export_file` (pdf, zip, pptx, html) | export | P0 |
+| `GET …/export-file/:jobId` | `get_export_status` (+ link assinado de download) | export | P0 |
+| `GET …/export-file/:jobId/download` | coberto pelo link assinado (não proxiar binário pelo MCP) | export | P0 |
+| `POST /posts/:id/export-canva` | `export_to_canva` (png/pptx) | export | P0 |
+| `GET …/export-canva/:jobId` | `get_canva_export_status` | export | P0 |
+| `POST /posts/:id/publish` | `publish_design` | publish | P1 |
+| `POST /posts/:id/unpublish` | `unpublish_design` | publish | P1 |
+| `POST /posts/:id/chat/toggle` | `set_presentation_chat` | publish | P2 |
+| `DELETE /posts/:id` | `delete_design` | delete | P2 |
+| — (novo) | `duplicate_design` | write | P2 |
 
-### 4.2 Peças (`designer.write` / `designer.edit_all`)
+### 4.2 `brands` / `settings` — marca, cérebro, mídia
 
-| Ferramenta | Rota | Pri | Observação |
+| Rota | Ferramenta | Escopo | Pri |
 |---|---|---|---|
-| `save_presentation` | (existe) | — | |
-| `update_slide` | `PUT /posts/:id/slides/:i/code` | P0 | Edição pontual de UM slide, sem reenviar o deck inteiro (hoje o agente reescreve tudo). |
-| `set_slide_photo` | `PUT /posts/:id/slides/:i/photo` | P0 | Coloca um ativo real da marca numa área de foto. |
-| `update_design_meta` | `PUT /posts/:id` | P1 | Nome, status, pasta. |
-| `duplicate_design` | novo | P2 | Variação sem tocar no original. |
-| `create_version` / `restore_version` | `POST /posts/:id/versions[/:v/restore]` | P0 | Ponto de restauração explícito; desfaz erro do agente. |
+| `GET /brands`, `/brands/:slug` | `list_brands` (existe) | read | — |
+| `GET /settings/:slug/config` | `get_brand_kit` (existe) | read | — |
+| `PUT /settings/:slug/config` | `update_brand_kit` (cores, fontes, diretrizes, logo por URL pública, `presentationConfig`). **Sem** `ignoreAiCostLimit`/pesquisa automática (só ADMIN, no app). | brand | P1 |
+| `GET /brands/:slug/profile` | `get_brand_profile` (cérebro) | read | P0 |
+| `PUT /brands/:slug/profile` | `update_brand_profile` (snapshot antes) | brand | P1 |
+| `POST …/profile/import` | `import_brand_profile` (texto/arquivos → perfil) | brand + ai | P2 |
+| `GET/PUT /brands/:slug/memory` | `get_brand_memory` / `update_brand_memory` | read / brand | P1 / P2 |
+| `POST …/brandbook/ingest`, `ingest-canva` | `ingest_brandbook` (job assíncrono) | brand + ai | P2 |
+| `POST …/brandbook/confirm-logo` | `confirm_brand_logo` | brand | P2 |
+| `GET /settings/:slug/referencias` | `manage_reference` ação `list/get` | read | P2 |
+| `POST/PATCH/DELETE …/referencias[/:id]`, `…/sync` | `manage_reference` ações `create/update/delete/sync` (servidor busca URL externa: revisão SSRF) | brand | P3 |
+| `GET /brands/:slug/ai-usage`, `…/billing` | `get_ai_usage` | read | P1 |
+| `POST /brands/:slug/collabs` | `create_collab_brand` | brand (ADMIN) | P3 |
+| `POST /ai/:slug/generate-briefing` | `generate_briefing` | ai | P2 |
+| `POST /ai/:slug/extract-from-logo` | `extract_brand_from_logo` (cores/fontes a partir do logo) | ai | P2 |
+| `GET /brands/discover` | — | ✗ descoberta de marcas alheias; o agente só vê o que o usuário liberou |
+| `POST /brands`, `PUT/DELETE /brands/:slug` | — | ✗ criar/renomear/apagar marca é decisão humana |
+| `POST …/request-access`, `…/requests/:id/approve` | — | ✗ controle de acesso |
+| `GET /brands/:slug/logo-asset` | coberto por `get_brand_kit` (logoUrl) | read | — |
 
-### 4.3 Ativos (`designer.write`)
+### 4.3 `assets` e `upload` — mídia
 
-| Ferramenta | Rota | Pri | Observação |
+| Rota | Ferramenta | Escopo | Pri |
 |---|---|---|---|
-| `upload_asset` | `POST /brands/:id/assets/import-base64` | P0 | Base64 com teto; SVG sanitizado. Cliente MCP não faz multipart. |
-| `update_asset` | `PATCH /assets/:id` | P2 | Nome/tags. |
-| `import_asset_from_canva` | `POST …/import-canva/:designId` | P1 | Usa a conta Canva do usuário. |
-| `import_asset_from_drive` | `GET /google/files` + `/download` | P1 | Idem para o Drive. |
+| `GET /brands/:id/assets` | `list_assets` (filtro por fonte, tag, pasta) / `get_asset` | read | P0 |
+| `POST …/assets` (multipart) | `upload_asset` (base64 + teto; SVG sanitizado) | write | P0 |
+| `POST …/assets/import-base64` | idem (mesma ferramenta) | write | P0 |
+| `POST …/assets/import-canva/:designId` | `import_asset` fonte `canva` | write + integrations | P1 |
+| (Drive) `GET /google/files/:id/download` | `import_asset` fonte `drive` | write + integrations | P1 |
+| (Asana) `GET /asana/tasks/:gid/attachments` | `import_asset` fonte `asana` | write + integrations | P2 |
+| `PATCH …/assets/:id` | `update_asset` (nome, tags, pasta) | write | P2 |
+| `DELETE …/assets/:id` | `delete_asset` | delete | P2 |
+| `POST …/assets/:id/export-canva` | `export_asset_to_canva` | export | P3 |
+| `POST /upload`, `/upload/logo` | cobertos por `upload_asset` / `update_brand_kit` | — | — |
+| `GET /public/fonts/:assetId` | — | ✗ endpoint público de fonte, sem uso para o agente |
 
-### 4.4 Marca e cérebro (`designer.brand`)
+### 4.4 `folders`
 
-| Ferramenta | Rota | Pri | Observação |
+| Rota | Ferramenta | Escopo | Pri |
 |---|---|---|---|
-| `update_brand_kit` | `PUT /settings/:slug/config` | P1 | Cores, fontes, diretrizes, logo (URL pública; mesmo funil SSRF). **Campos de custo ficam fora** (só ADMIN, no app). |
-| `update_brand_profile` | `PUT /brands/:slug/profile` | P1 | O cérebro: muda TODAS as gerações futuras. Exige snapshot e confirmação (`destructiveHint` falso, mas aviso forte). |
-| `update_brand_memory` | `PUT /brands/:slug/memory` | P2 | Preferências. |
-| `ingest_brandbook` | `POST …/brandbook/ingest` / `ingest-canva` | P2 | Longo e caro: job assíncrono + `designer.ai`. |
-| `manage_references` | `POST/PATCH/DELETE /settings/:slug/referencias` | P3 | Faz o servidor buscar URLs externas; revisão SSRF antes. |
+| `GET /folders/:slug` | `list_folders` | read | P1 |
+| `POST/PATCH /folders…` | `manage_folder` ações `create/rename/move` | write | P2 |
+| `DELETE /folders/:id` | `manage_folder` ação `delete` | delete | P3 |
 
-### 4.5 Fábrica / geração com IA (`designer.ai`)
+### 4.5 `fabrica` + WebSocket — geração com IA (interativa)
 
-A Fábrica hoje roda por WebSocket (`initBrainHandlers`). Para o agente precisa virar **job assíncrono**:
+A Fábrica é uma conversa em tempo real (WebSocket). O MCP não tem push; precisa de **sessão assíncrona com log de eventos
+consultável** (o servidor já mantém a sessão no Redis).
 
-| Ferramenta | Rota | Pri | Observação |
+| Origem | Ferramenta | Escopo | Pri |
 |---|---|---|---|
-| `start_generation` | `POST /fabrica/sessions` | P1 | Recebe marca, briefing, formato, pasta; devolve `sessionId`. Checa teto de custo antes. |
-| `get_generation_status` | `GET /fabrica/sessions/:id` | P1 | Progresso, peça criada, custo até aqui. |
-| `pause_generation` / `cancel_generation` | novo + `DELETE …/sessions/:id` | P1 | Parar gasto. |
-| `edit_slide_with_ai` | `POST /posts/:id/edit-slide` | P1 | Edição por instrução natural; devolve custo e `versionId`. |
-| `generate_briefing` | `POST /ai/:slug/generate-briefing` | P2 | |
+| `POST /fabrica/sessions` | `start_generation` (marca, briefing, formato, pasta; checa teto de custo) | ai | P1 |
+| `GET /fabrica/sessions/:id` | `get_generation_status` (+ `get_generation_events` desde um cursor) | ai | P1 |
+| WS `message` | `factory_respond` ação `message` (instrução/anexos) | ai | P1 |
+| WS `question:answer` | `factory_respond` ação `answer` | ai | P1 |
+| WS `review:approve` / `review:decline` | `factory_respond` ações `approve` / `decline` | ai | P1 |
+| WS `mode:set` | `factory_respond` ação `set_mode` | ai | P2 |
+| WS `generation:cancel`, `message:interrupt` | `cancel_generation` (para o gasto) | ai | P1 |
+| WS `advice:send/update/remove/dismiss` | `manage_advice` | ai | P3 |
+| `PATCH …/sessions/:id/folder` | `start_generation`/`factory_respond` (campo `folderId`) | ai | P2 |
+| `DELETE …/sessions/:id` | `delete_generation_session` | delete | P3 |
+| Notificações de job (`job:done`, `job:error`, `needs_review`) | entram em `get_generation_events` | ai | P1 |
 
-> Decisão pendente: o agente (Claude/ChatGPT) **já é** uma IA que desenha. Faz sentido expor a Fábrica? Sim para quem
-> quer o estilo/cérebro do estúdio e a conferência de texto; não é necessário para `save_presentation`. Por isso fica em P1
-> e atrás de `designer.ai`.
+### 4.6 `notifications`, `settings` do usuário, integrações
 
-### 4.6 Exportação e publicação
-
-| Ferramenta | Rota | Escopo | Pri | Observação |
-|---|---|---|---|---|
-| `export_file` | `POST /posts/:id/export-file` | `export` | P0 | PDF/PNG/PPTX conforme `exportFileSchema`; devolve `jobId`. |
-| `get_export_status` | `GET …/export-file/:jobId` | `export` | P0 | + URL de download assinada, curta, ou `resource_link`. |
-| `export_to_canva` | `POST /posts/:id/export-canva` | `export` | P0 | Usa a conta Canva do usuário (se não conectada, devolve a URL para ele conectar). |
-| `get_canva_export_status` | `GET …/export-canva/:jobId` | `export` | P0 | |
-| `publish_design` | `POST /posts/:id/publish` | `publish` | P1 | Link público; devolve URL; `openWorldHint: true`. |
-| `unpublish_design` | `POST /posts/:id/unpublish` | `publish` | P1 | |
-| `render_preview` | `POST /posts/render-batch` | `read` | P2 | Miniaturas para o agente "ver" o resultado (precisa de imagem no retorno). |
-
-### 4.7 Organização e exclusão
-
-| Ferramenta | Rota | Escopo | Pri |
+| Rota | Ferramenta | Escopo | Pri |
 |---|---|---|---|
-| `create_folder` / `rename_folder` / `move_design` | `POST/PATCH /folders…` | `write` | P2 |
-| `delete_design` | `DELETE /posts/:id` | `delete` | P2 |
-| `delete_asset` | `DELETE …/assets/:id` | `delete` | P2 |
-| `delete_folder` | `DELETE /folders/:id` | `delete` | P3 |
-| `delete_generation_session` | `DELETE /fabrica/sessions/:id` | `delete` | P3 |
+| `GET /notifications` | `list_notifications` | read | P2 |
+| `PATCH …/:id/read`, `POST …/read-all` | `mark_notifications_read` | write | P3 |
+| `GET /canva/status`, `/google/status`, `/asana/status` | `get_integrations_status` | read | P0 |
+| `GET /*/auth-url` | `get_connect_url` (URL para o USUÁRIO abrir; nunca token) | read | P1 |
+| `GET /canva/designs` | `list_integration_files` fonte `canva` | integrations | P2 |
+| `GET /google/files` | `list_integration_files` fonte `drive` | integrations | P2 |
+| `GET /asana/projects`, `/projects/:id/tasks`, `/tasks/:gid/attachments` | `list_integration_files` fonte `asana` | integrations | P2 |
+| `POST /canva/sync/:postId/fetch`, `/toggle` | `canva_sync` ações `fetch` / `toggle` | export | P3 |
+| `GET /settings/tenants` | `list_workspaces` | read | P2 |
+| `GET /settings/billing` | `get_billing_summary` (só leitura) | read (ADMIN) | P3 |
+| `GET/PUT /settings/perfil`, `/settings/agent` | — | ✗ dados pessoais e prompt do agente do usuário |
+| `DELETE /settings/connections/:provider` | — | ✗ desconectar integração é no app |
 
-### 4.8 Integrações do usuário (status e fontes de conteúdo)
+### 4.7 Equipe e acesso
 
-| Ferramenta | Rota | Pri | Observação |
+| Rota | Ferramenta | Escopo | Pri |
 |---|---|---|---|
-| `get_integrations_status` | `/canva/status`, `/google/status`, `/asana/status` | P0 | Evita o agente tentar exportar sem conta conectada. |
-| `get_connect_url` | `/*/auth-url` | P1 | Devolve **a URL para o usuário abrir**; o token nunca passa pelo agente. |
-| `list_canva_designs` | `GET /canva/designs` | P2 | Fonte para importar ativos. |
-| `list_drive_files` | `GET /google/files` | P2 | |
-| `asana_*` (projetos, tarefas, anexos) | `/asana/*` | P2 | Trazer briefing/anexos de tarefa para o fluxo. |
+| `GET /brands/:id/members` | `list_team` (nome e papel; sem e-mail se possível) | team | P2 |
+| `POST …/invite`, `PATCH/DELETE …/:userId` | — | ✗ convidar, mudar papel ou remover é controle de acesso |
+| `auth/*` (login, registro, convite, Google) | — | ✗ identidade |
+| `data_deletion_requests`, diagnósticos, onboarding | — | ✗ LGPD e fluxos do usuário |
 
-### 4.9 O que NÃO vai para o agente (decisão de produto)
+### 4.8 Observabilidade (`GenerationRun` / `GenerationStep`)
 
-- Convidar/alterar papel/remover membro, aprovar pedido de acesso (`team`, `requests/:id/approve`): é controle de acesso.
-- Criar/apagar marca, login, registro, convites, perfil e cobrança do usuário (`auth`, `settings/perfil|billing`).
-- Tokens de qualquer integração; prompt interno do agente; `ignoreAiCostLimit` e pesquisa automática.
-- Desconectar integrações (`settings/connections/:provider`) — o usuário faz no app.
+| Dado | Ferramenta | Escopo | Pri |
+|---|---|---|---|
+| Execuções da marca (status, tokens, erro) | `list_generation_runs` | read (ADMIN: prompts) | P2 |
+| Passos de uma execução (modelo, latência, erro) | `get_generation_run` (prompt/resposta só ADMIN) | read | P3 |
+| Uso e custo | `get_ai_usage`, `get_design_cost` | read | P1 |
 
-## 5. Além de ferramentas: outras primitivas MCP
+### 4.9 Apresentação pública
+
+| Rota | Ferramenta | Escopo | Pri |
+|---|---|---|---|
+| `GET /public/presentations/:slug` | — (é público; `get_design` cobre o conteúdo) | — | — |
+| `GET/POST …/:slug/chat`, `GET …/events` | `get_presentation_activity` (mensagens do chat e visualizações) | read | P3 |
+
+## 5. Catálogo consolidado
+
+| Grupo | Ferramentas | Total |
+|---|---|---|
+| Leitura/contexto | `list_brands`✓ `get_brand_kit`✓ `get_designer_brief`✓ `get_brand_profile` `get_brand_memory` `list_assets` `get_asset` `list_folders` `list_versions` `get_photo_slots` `get_design_cost` `get_ai_usage` `search_designs` `list_team` `list_notifications` `list_workspaces` `get_integrations_status` `get_connect_url` `list_designs`✓ `get_design`✓ | 20 |
+| Peças | `save_presentation`✓ `update_slide` `set_slide_photo` `update_design_meta` `duplicate_design` `create_version` `restore_version` `render_preview` | 8 |
+| Mídia | `upload_asset` `import_asset` `update_asset` | 3 |
+| Marca | `update_brand_kit` `update_brand_profile` `update_brand_memory` `import_brand_profile` `ingest_brandbook` `confirm_brand_logo` `manage_reference` `create_collab_brand` | 8 |
+| IA / Fábrica | `start_generation` `get_generation_status` `get_generation_events` `factory_respond` `cancel_generation` `edit_slide_with_ai` `generate_briefing` `extract_brand_from_logo` `manage_advice` | 9 |
+| Exportar/publicar | `export_file` `get_export_status` `export_to_canva` `get_canva_export_status` `canva_sync` `publish_design` `unpublish_design` `set_presentation_chat` `export_design_json` | 9 |
+| Organização | `manage_folder` `delete_design` `delete_asset` `delete_generation_session` `mark_notifications_read` | 5 |
+| Integrações | `list_integration_files` | 1 |
+| Observabilidade | `list_generation_runs` `get_generation_run` `get_presentation_activity` `get_billing_summary` | 4 |
+| **Total** | (✓ = já existe) | **67, das quais 6 existem** |
+
+Com `tools/list` filtrado por escopo, um token só de leitura vê ~25; um com tudo, 67.
+
+## 6. Outras primitivas MCP
 
 | Primitiva | Uso |
 |---|---|
-| **Resources** | Kit da marca, brief e cérebro como recursos legíveis (`designer://brand/{slug}/kit`), com `list_changed` quando mudar. |
-| **Prompts** | "Criar carrossel a partir de um texto", "Revisar texto contra o aprovado", "Variação da peça X": fluxos prontos que chamam as ferramentas na ordem certa. |
+| **Resources** | Kit, brief e cérebro como recursos (`designer://brand/{slug}/kit`), com `list_changed` ao mudar. Peça como recurso (`designer://brand/{slug}/design/{id}`). |
 | **Resource links** | Retorno de exportações e miniaturas sem estourar o contexto. |
-| **Annotations** | `readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint` corretos em cada ferramenta (o cliente decide quando pedir confirmação). |
+| **Prompts** | "Carrossel a partir de um texto", "Revisar texto contra o aprovado", "Variação da peça X", "Aplicar nova identidade a um deck". |
+| **Annotations** | `readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint` corretos em cada ferramenta. |
+| **Elicitation** | Confirmação humana antes de `publish`, `delete_*` e `update_brand_profile` (quando o cliente suportar). |
+| **Progress** | Notificação de progresso em `export_*` e `ingest_brandbook`. |
 
-## 6. Ordem sugerida
+## 7. Ordem de construção
 
-1. **Lote 1 (P0)** — o agente passa a *trabalhar sozinho no estúdio*:
-   `list_assets`, `get_brand_profile`, `get_photo_slots`, `set_slide_photo`, `update_slide`, `create_version`,
-   `restore_version`, `list_versions`, `upload_asset`, `export_file` + status, `export_to_canva` + status,
-   `get_integrations_status`.
-2. **Lote 2 (P1)** — `search_designs`, `list_folders`, `update_design_meta`, `update_brand_kit`, `update_brand_profile`,
-   `start_generation` + status/pause, `edit_slide_with_ai`, `publish/unpublish`, `get_connect_url`, `get_design_cost`,
-   `get_ai_usage`, `import_asset_from_canva|drive`.
-3. **Lote 3 (P2/P3)** — pastas, duplicar, exclusão, Asana/Drive/Canva como fontes, referências, brandbook.
+1. **Lote 1 (P0) — o agente trabalha sozinho no estúdio**: `get_brand_profile`, `list_assets`, `get_photo_slots`,
+   `set_slide_photo`, `update_slide`, `list_versions`, `create_version`, `restore_version`, `upload_asset`, `export_file` +
+   status, `export_to_canva` + status, `get_integrations_status`. Escopos novos: `export`.
+2. **Lote 2 (P1) — dia a dia e Fábrica**: `search_designs`, `list_folders`, `update_design_meta`, `update_brand_kit`,
+   `update_brand_profile`, `get_brand_memory`, `get_ai_usage`, `get_design_cost`, `start_generation` +
+   `get_generation_status/events`, `factory_respond`, `cancel_generation`, `edit_slide_with_ai`, `publish/unpublish`,
+   `import_asset`, `get_connect_url`. Escopos: `brand`, `ai`, `publish`, `integrations`.
+3. **Lote 3 (P2)**: pastas, duplicar, atualizar ativo, memória, brandbook, referências (leitura), observabilidade,
+   notificações, workspaces, equipe (leitura).
+4. **Lote 4 (P3)**: exclusões, referências (escrita), coleção de marcas, conselhos, sync com Canva, atividade pública,
+   cobrança.
 
-Cada lote entra com: testes de escopo, de papel, de marca cruzada e do teto de custo (padrão de `editAll.test.ts`);
-atualização de `docs/MCP-DESIGNER.md`; e texto novo no consentimento para cada escopo.
+Cada lote entra com: testes de escopo, papel, marca cruzada e teto de custo (padrão de `editAll.test.ts`);
+`docs/MCP-DESIGNER.md` atualizado; texto novo no consentimento por escopo; e limite de taxa por categoria (leitura
+×escrita×IA×exportação).
 
-## 7. Riscos a decidir antes de construir
+## 8. Riscos a decidir antes de construir
 
-| Risco | Decisão |
+| Risco | Decisão proposta |
 |---|---|
-| `update_brand_profile` altera o comportamento de todas as peças futuras | Snapshot do cérebro antes; escopo próprio (`designer.brand`); aviso na tela. |
-| Gasto de IA fora de controle (loop do agente) | `designer.ai` separado; teto por conexão/hora; custo no retorno; respeitar `ai-usage` da marca. |
+| `update_brand_profile` muda todas as peças futuras | Snapshot do cérebro antes; escopo próprio `brand`; elicitation; restauração. |
+| Gasto de IA fora de controle (loop do agente) | `designer.ai` separado; teto por conexão/hora; custo no retorno; respeita `ai-usage` e `ignoreAiCostLimit` (que o agente não altera). |
 | Publicação expõe conteúdo | `designer.publish` separado; `unpublish` sempre disponível; log de quem publicou. |
-| Exportar para Canva usa a conta pessoal do usuário | Só com `designer.export` e conta conectada; nunca repassar token. |
-| Entrada hostil (SVG, HTML, URLs) | Mesmos funis do app; novos pontos de entrada com testes de SSRF/XSS. |
+| Exportar para Canva usa a conta pessoal | Só com `designer.export` e conta conectada; token nunca passa pelo agente. |
+| Entrada hostil (SVG, HTML, URLs de referência) | Mesmos funis do app; novos pontos de entrada com testes de SSRF/XSS. |
+| Catálogo grande degrada o cliente | `tools/list` por escopo + ferramentas por ação. |
+| Fábrica é WebSocket | Sessão assíncrona com log de eventos e cursor; reaproveita o Redis da sessão. |
 | Cliente (Claude) pede só leitura | Resolvido no #102: a tela deixa o usuário liberar o que quiser. |
+
+## 9. Decisões de produto que ficam com o dono
+
+1. A Fábrica entra no MCP, ou o agente externo desenha sozinho com `save_presentation`?
+2. `designer.publish` e `designer.delete` entram agora?
+3. `update_brand_profile` pode ser feito por agente, ou só leitura do cérebro?
+4. `list_team` entra (só leitura) ou o agente nem vê membros?
+5. Limites de custo por conexão: valor padrão por hora/dia.
