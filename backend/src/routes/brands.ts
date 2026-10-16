@@ -572,36 +572,6 @@ brandsRouter.put('/:slug', async (req: Request, res: Response, next: NextFunctio
   }
 });
 
-// GET /api/brands/:slug/logo-asset — proxy logo server-side to avoid CORS
-brandsRouter.get('/:slug/logo-asset', async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { userId } = (req as AuthRequest).user!;
-    const slug = req.params.slug as string;
-    const brand = await prisma.brand.findFirst({
-      where: { slug, members: { some: { userId } } },
-      include: { config: true },
-    });
-    if (!brand) throw createError(404, 'Brand not found');
-    const logoUrl = brand.config?.logoUrl;
-    if (!logoUrl) throw createError(404, 'No logo configured for this brand');
-    const imgRes = await fetch(logoUrl);
-    if (!imgRes.ok) throw createError(502, 'Failed to fetch logo from storage');
-    const contentType = imgRes.headers.get('content-type') || 'image/png';
-    const buffer = await imgRes.arrayBuffer();
-    const base64 = Buffer.from(buffer).toString('base64');
-    res.json({
-      data: {
-        name: 'logo',
-        mimeType: contentType,
-        dataBase64: base64,
-        sizeBytes: buffer.byteLength,
-      },
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
 // DELETE /api/brands/:slug - Delete brand (must belong to user)
 brandsRouter.delete('/:slug', async (req: Request, res: Response, next: NextFunction) => {
   try {
