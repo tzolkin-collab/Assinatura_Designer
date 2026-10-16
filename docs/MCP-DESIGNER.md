@@ -198,7 +198,13 @@ topo do descritor **e** em `_meta.securitySchemes`, como pede o Apps SDK.
 | `list_designs(brandSlug, limit?)` | `designer.read` | Peças da marca (mais recentes primeiro) com link do editor. |
 | `get_design(brandSlug, postId, includeSource?)` | `designer.read` | Texto visível por slide e, com `includeSource`, o HTML/CSS (para continuar ou ajustar). |
 | `save_presentation(brandSlug, slides[], …, postId?)` | `designer.write` | Salva uma peça que o agente desenhou: sanitiza o HTML, confere o texto de cada slide contra o `approvedText`, normaliza as áreas de foto, embute as fontes próprias e cria a peça no editor. Devolve `issues` por slide. Com `postId` atualiza **só** a peça que o mesmo usuário criou por MCP — ou, com `designer.edit_all`, qualquer apresentação/carrossel da marca (congelando a versão anterior antes). |
-| `pause_generation`, exportação (Canva/PDF), upload de foto, edição pontual de slide | `designer.write` | planejadas. |
+| `get_brand_profile(brandSlug)` | `designer.read` | A ficha do Cérebro (essência, tom, paleta com função, tipografia, logos, direção de arte, foto real, o que nunca fazer) e o que falta preencher. `derived: true` quando a marca ainda não salvou ficha. |
+| `list_assets(brandSlug, query?, tag?, source?, imagesOnly?, limit?)` | `designer.read` | Arquivos reais da biblioteca (e, num collab, os do projeto-base) com a URL exata. **Nunca** devolve imagem gerada por IA. |
+| `list_versions(brandSlug, postId, limit?)` | `designer.read` | Histórico da peça (id, rótulo, origem, nº de slides). Sem o conteúdo da versão. |
+| `update_slide(brandSlug, postId, slide, html, css?, approvedText?)` | `designer.write` | Troca o HTML/CSS de **um** slide (número a partir de 1). Sanitiza no servidor (a mesma porta do editor, `lib/slideEdit.ts`), guarda a versão anterior e, com `approvedText`, confere o texto. Mesma regra de dono do `save_presentation`: peça criada por MCP, ou qualquer apresentação/carrossel com `designer.edit_all`. |
+| `create_version(brandSlug, postId, label?)` | `designer.write` | Marca um ponto de retorno. `created: false` quando nada mudou. |
+| `restore_version(brandSlug, postId, versionId)` | `designer.write` | Volta a peça a uma versão (`destructiveHint: true`); o estado atual vira uma versão antes. |
+| exportação (PDF/ZIP/PPTX/Canva), upload de foto, troca de foto, integrações | vários | planejadas — ver `docs/MCP-DESIGNER-PLANO-FERRAMENTAS.md` (lote 1B e 1C). |
 
 Todas as chamadas terminam em segundos (não há geração longa do nosso lado), o que evita o limite de ~60 s que os clientes
 costumam impor a uma chamada de ferramenta.
