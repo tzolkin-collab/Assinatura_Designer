@@ -240,3 +240,10 @@
   display: flex;
   align-items: center;
 }
+
+/* Sem hover no toque, as ações de cada regra da memória ficavam escondidas. */
+@media (hover: none), (max-width: 768px) {
+  .memoryActions {
+    opacity: 1;
+  }
+}

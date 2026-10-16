@@ -416,3 +416,12 @@
     border-bottom: 1px solid var(--color-border);
   }
 }
+
+/* Sem hover no toque, o botão de remover pasta ficava escondido. */
+@media (hover: none), (max-width: 768px) {
+  .closeBtn {
+    opacity: 0.6;
+    min-width: 40px;
+    min-height: 40px;
+  }
+}
