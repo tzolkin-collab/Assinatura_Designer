@@ -210,24 +210,36 @@ describe('descoberta (initialize / tools/list)', () => {
     expect(res.status).toBe(200);
     const tools = res.body.result.tools as Array<Record<string, any>>;
     expect(tools.map((t) => t.name).sort()).toEqual([
+      'create_version',
       'get_brand_kit',
+      'get_brand_profile',
       'get_design',
       'get_designer_brief',
+      'list_assets',
       'list_brands',
       'list_designs',
+      'list_versions',
+      'restore_version',
       'save_presentation',
+      'update_slide',
     ]);
 
     for (const tool of tools) {
       expect(tool.name).toMatch(/^[a-z]+(_[a-z]+)*$/); // snake_case em inglês
       expect(tool.title).toBeTruthy();
       expect(tool.description).toMatch(/[a-zçãé]/i);
-      // Só save_presentation escreve; as demais são leitura pura.
-      const writes = tool.name === 'save_presentation';
+      // Ferramentas de escrita; as demais são leitura pura. Cada uma declara as 4 dicas ao cliente.
+      const writeHints: Record<string, { destructiveHint: boolean; idempotentHint: boolean }> = {
+        save_presentation: { destructiveHint: false, idempotentHint: false },
+        update_slide: { destructiveHint: false, idempotentHint: true },
+        create_version: { destructiveHint: false, idempotentHint: true },
+        restore_version: { destructiveHint: true, idempotentHint: false },
+      };
+      const writes = tool.name in writeHints;
       expect(tool.annotations).toEqual({
         readOnlyHint: !writes,
-        destructiveHint: false,
-        idempotentHint: !writes,
+        destructiveHint: writes ? writeHints[tool.name]!.destructiveHint : false,
+        idempotentHint: writes ? writeHints[tool.name]!.idempotentHint : true,
         openWorldHint: false,
       });
       // Doc do Apps SDK: securitySchemes no descritor + espelho em _meta.
