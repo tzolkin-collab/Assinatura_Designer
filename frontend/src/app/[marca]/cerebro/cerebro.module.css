@@ -409,3 +409,15 @@
   font-size: var(--text-sm);
   font-weight: 600;
 }
+
+/* Toque: botões de 36px e seletor de cor de 38px ficam abaixo de um alvo confortável. */
+@media (pointer: coarse), (max-width: 768px) {
+  .btn,
+  .remove {
+    min-height: 44px;
+  }
+
+  .swatch {
+    height: 44px;
+  }
+}

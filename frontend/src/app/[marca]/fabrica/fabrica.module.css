@@ -1689,3 +1689,24 @@
 .previewCancelBtn:active {
   transform: translateY(0) scale(0.98);
 }
+
+/* Em tela estreita o preview ficava com 36vh vazio ("O design aparece aqui…") e espremia o chat, que é onde
+   a pessoa começa. Sem design e sem geração em curso ele encolhe até a barra de aprovação. */
+@media (max-width: 900px) {
+  .previewPanelIdle {
+    flex: 0 0 auto;
+    height: auto;
+    max-height: none;
+  }
+
+  .previewPanelIdle .previewEmpty {
+    display: none;
+  }
+}
+
+/* Enter / Shift+Enter não existem no teclado do celular. */
+@media (hover: none), (max-width: 640px) {
+  .inputHint {
+    display: none;
+  }
+}

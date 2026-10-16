@@ -307,3 +307,12 @@ textarea:disabled {
     min-height: 44px;
   }
 }
+
+/* iOS dá zoom na página ao focar um campo com fonte menor que 16px (e não volta sozinho). */
+@media (hover: none) and (pointer: coarse), (max-width: 640px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+  select:not([hidden]),
+  textarea:not([hidden]) {
+    font-size: 16px;
+  }
+}
