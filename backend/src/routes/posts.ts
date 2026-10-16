@@ -14,7 +14,6 @@ import { config } from '../config.js';
 import { generateWithRetry } from '../lib/geminiRetry.js';
 import { extractJsonObject } from '../lib/jsonHelper.js';
 import { resolveBrandContext } from '../lib/brandContext.js';
-import { uploadPngToR2 } from '../lib/r2.js';
 import { mergeSlidesIntoPost, syncPostSlides } from '../lib/postHelper.js';
 import { snapshotPost, restorePostVersion } from '../lib/postVersions.js';
 import { withServerOwnedMcp } from '../lib/mcpOwnership.js';
@@ -44,53 +43,11 @@ const publishSchema = z.object({
   }).optional().default({}),
 });
 const chatToggleSchema = z.object({ enabled: z.boolean() });
-import { deckFontFaces, resolveRenderableDeckWithFonts } from '../lib/renderableDeck.js';
+import { resolveRenderableDeckWithFonts } from '../lib/renderableDeck.js';
 
 const ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
 
 export const postsRouter = Router();
-
-// POST /api/posts/render-batch - renderiza múltiplos slides HTML/CSS em paralelo e envia para o R2
-postsRouter.post('/render-batch', async (req: AuthRequest, res: Response, next: NextFunction) => {
-  try {
-    const { slides, fonts, width, height, fontFaces } = (req.body ?? {}) as {
-      fontFaces?: unknown;
-      slides?: Array<{ html: string; css?: string }>;
-      fonts?: string[];
-      width?: number;
-      height?: number;
-    };
-
-    if (!Array.isArray(slides) || slides.length === 0) {
-      throw createError(400, 'slides é obrigatório e deve ser um array não vazio');
-    }
-
-    const slideWidth = Number(width) || 1080;
-    const slideHeight = Number(height) || 1080;
-    const slideFonts = Array.isArray(fonts) ? fonts : ['Inter'];
-    const ownFaces = await deckFontFaces({ fontFaces });
-
-    // Compila cada slide para um documento HTML completo e agenda a renderização em paralelo
-    const renderPromises = slides.map(async (slide, index) => {
-      try {
-        const doc = buildSlideDocument(slide, slideFonts, slideWidth, slideHeight, ownFaces);
-        // maxDim: 0 significa resolução cheia (fiel ao viewport configurado)
-        const buffer = await renderHtmlToPng(doc, { width: slideWidth, height: slideHeight, maxDim: 0 });
-        const url = await uploadPngToR2(buffer);
-        return { index, url, success: true };
-      } catch (err) {
-        const errMsg = err instanceof Error ? err.message : String(err);
-        return { index, error: errMsg, success: false };
-      }
-    });
-
-    const results = await Promise.all(renderPromises);
-
-    res.json({ data: results });
-  } catch (error) {
-    next(error);
-  }
-});
 
 // POST /api/posts/:id/edit-slide - edição cirúrgica de um slide html-design via instrução
 postsRouter.post('/:id/edit-slide', async (req: AuthRequest, res: Response, next: NextFunction) => {
