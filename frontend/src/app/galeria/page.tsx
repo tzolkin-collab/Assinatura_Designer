@@ -143,7 +143,7 @@ export default function GaleriaPage() {
   const handleRequestAccess = async (brandSlug: string) => {
     setRequestingAccessSlug(brandSlug);
     try {
-      await api.post(`/brands/${brandSlug}/access-requests`, {});
+      await api.post(`/brands/${brandSlug}/request-access`, {});
       alert('Solicitação de acesso enviada com sucesso!');
       loadBrands();
     } catch (err) {
