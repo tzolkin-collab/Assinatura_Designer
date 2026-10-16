@@ -1,6 +1,7 @@
 // designer/frontend/src/lib/hooks.ts
 import { useCallback, useEffect, useState } from 'react';
 import { api } from './api';
+import { brandPostsPath } from './brandPostsPath';
 
 export type Brand = {
   id: string;
@@ -27,6 +28,10 @@ export type Post = {
   publicSlug?: string | null;
   publishedAt?: string | null;
   hostingConfig?: { autoplay?: boolean; showCounter?: boolean } | null;
+  /** Lista leve da Galeria (`view: 'gallery'`): `content` traz só a capa; o resto vem de GET /posts/:id. */
+  light?: boolean;
+  slideCount?: number;
+  hasChatHistory?: boolean;
 };
 
 export type UserConnection = {
@@ -216,7 +221,13 @@ export function useAiBilling(slug: string, month?: string) {
   return { billing, loading, error };
 }
 
-export function useBrandPosts(slug: string) {
+export type BrandPostsOptions = {
+  /** 'gallery': lista leve (capa + contagem de slides), sem chatHistory nem os demais slides. */
+  view?: 'gallery';
+};
+
+export function useBrandPosts(slug: string, options: BrandPostsOptions = {}) {
+  const path = brandPostsPath(slug, options.view);
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -224,11 +235,11 @@ export function useBrandPosts(slug: string) {
   const fetchPosts = useCallback(() => {
     if (!slug) { setLoading(false); return; }
     setLoading(true);
-    api.get<Post[]>(`/brands/${slug}/posts`)
+    api.get<Post[]>(path)
       .then(setPosts)
       .catch((err: unknown) => setError(getErrorMessage(err)))
       .finally(() => setLoading(false));
-  }, [slug]);
+  }, [slug, path]);
 
   useEffect(() => {
     const id = requestAnimationFrame(fetchPosts);
@@ -242,10 +253,10 @@ export function useBrandPosts(slug: string) {
   useEffect(() => {
     if (!slug || !hasGenerating) return;
     const interval = setInterval(() => {
-      api.get<Post[]>(`/brands/${slug}/posts`).then(setPosts).catch(() => {});
+      api.get<Post[]>(path).then(setPosts).catch(() => {});
     }, 4000);
     return () => clearInterval(interval);
-  }, [slug, hasGenerating]);
+  }, [slug, hasGenerating, path]);
 
   return { posts, loading, error, mutate: fetchPosts };
 }
