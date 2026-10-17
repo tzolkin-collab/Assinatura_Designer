@@ -159,6 +159,12 @@ corrigir e tentar de novo. A decisão que passa consome o pedido (uso único, at
 | `designer.read` | listar e ler | qualquer membro (VIEWER+) |
 | `designer.write` | criar peças e atualizar **as que a própria conexão criou** (e **inclui** leitura) | EDITOR+ |
 | `designer.edit_all` | além disso, **sobrescrever qualquer apresentação ou carrossel** das marcas autorizadas (e **inclui** escrita e leitura) | EDITOR+ |
+| `designer.export` | **exportar** uma peça (PDF, ZIP de PNGs, PPTX, HTML) e enviá-la ao Canva do usuário. **Independente**: não inclui leitura nem escrita e não é incluído por elas | qualquer membro (Canva: EDITOR+, conferido na ferramenta) |
+
+`designer.export` é uma saída do Designer (o arquivo vira um link, o Canva recebe um design) e consome servidor, por isso
+tem escopo próprio e limite de taxa. Na tela de consentimento é um quadro à parte, **desmarcado** por padrão ("Permitir
+exportar peças"); o token traz `designer.export` junto do escopo de acesso escolhido, e a lista de conexões mostra
+"· pode exportar". Sem ele, as quatro ferramentas continuam listadas, mas a chamada é recusada com `insufficient_scope`.
 
 `designer.edit_all` é opcional e só existe se o cliente o pedir no `/authorize`; o usuário pode rebaixá-lo na tela para
 `designer.write` ou leitura. Antes de sobrescrever uma peça que não é da conexão, `save_presentation` congela a versão
@@ -208,7 +214,10 @@ topo do descritor **e** em `_meta.securitySchemes`, como pede o Apps SDK.
 | `set_slide_photo(brandSlug, postId, slide, slot, assetUrl?, position?, fit?)` | `designer.write` | Coloca/troca (`assetUrl`), esvazia (`null`) ou reenquadra a foto de um espaço, **só** com arquivo de `list_assets` (biblioteca da marca e, num collab, a do projeto-base). Foto nova é enquadrada pelo assunto; a versão anterior é guardada. Lógica em `lib/slidePhoto.ts`, a mesma do editor. |
 | `upload_asset(brandSlug, fileName, mimeType, dataBase64, tags?)` | `designer.write` | Guarda uma imagem (png, jpeg, webp, gif, avif, svg) até 10 MB na biblioteca e devolve a URL. SVG é higienizado; raster precisa ser lido como imagem de verdade. Divide o orçamento de sanitização por conta das rotas HTTP (`SVG_SANITIZE_RATE_LIMIT`). Lógica em `lib/assetStore.ts`, a mesma do upload da tela de mídia. |
 | `get_integrations_status()` | `designer.read` | Se o usuário conectou Canva, Drive e Asana (sim/não e validade do Canva). Nunca devolve token. |
-| exportação (PDF/ZIP/PPTX/Canva) e escopo `designer.export` | — | planejadas — lote 1C em `docs/MCP-DESIGNER-PLANO-FERRAMENTAS.md`. |
+| `export_file(brandSlug, postId, format)` | `designer.export` | Pede a exportação de um deck como `pdf`, `zip` (um PNG por slide), `pptx` (editável) ou `html`. Assíncrono: devolve `jobId` (nenhuma chamada espera o render). Só decks de slides. Limite de 6 pedidos por minuto por conta (arquivo e Canva dividem o balde). Lógica em `lib/exportJobs.ts`, a mesma das rotas do editor. |
+| `get_export_status(brandSlug, postId, jobId)` | `designer.export` | Andamento: `queued`, `running` (slides prontos/total), `done` (com `downloadUrl`) ou `failed`. Só quem pediu o job o vê. O link só chega se for do nosso storage; falha do worker vira frase genérica (o detalhe vai para o log). |
+| `export_to_canva(brandSlug, postId, mode?, slide?)` | `designer.export` | Envia a peça para o Canva **do usuário** que conectou (`png`, um design por slide ou um para o deck; ou `pptx`, editável). Exige Canva conectado e papel **EDITOR+** na marca. Assíncrono, mesmo limite de taxa. |
+| `get_canva_export_status(brandSlug, postId, jobId)` | `designer.export` | Andamento do envio ao Canva e, pronto, o link do design. Só quem pediu o job o vê. |
 
 Todas as chamadas terminam em segundos (não há geração longa do nosso lado), o que evita o limite de ~60 s que os clientes
 costumam impor a uma chamada de ferramenta.

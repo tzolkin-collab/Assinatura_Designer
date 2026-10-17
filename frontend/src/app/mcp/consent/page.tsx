@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { getApiErrorMessage } from '@/lib/api';
 import {
   EDIT_ALL_SCOPE,
+  EXPORT_SCOPE,
   READ_SCOPE,
   WRITE_SCOPE,
   formatRemaining,
@@ -27,6 +28,7 @@ function ConsentContent() {
   const [error, setError] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [access, setAccess] = useState<Access>('read');
+  const [allowExport, setAllowExport] = useState(false);
   const [allBrands, setAllBrands] = useState(false);
   const [sending, setSending] = useState<'approve' | 'deny' | null>(null);
   const [leaving, setLeaving] = useState(false);
@@ -101,14 +103,9 @@ function ConsentContent() {
     setError('');
     setSending(decision);
     try {
-      const scopes =
-        decision === 'approve'
-          ? access === 'edit_all' && wantsEditAll
-            ? [EDIT_ALL_SCOPE]
-            : access !== 'read' && wantsWrite
-              ? [WRITE_SCOPE]
-              : [READ_SCOPE]
-          : undefined;
+      const accessScope =
+        access === 'edit_all' && wantsEditAll ? EDIT_ALL_SCOPE : access !== 'read' && wantsWrite ? WRITE_SCOPE : READ_SCOPE;
+      const scopes = decision === 'approve' ? [accessScope, ...(allowExport ? [EXPORT_SCOPE] : [])] : undefined;
       const { redirectUrl } = await mcpApi.decideConsent(requestId, {
         decision,
         ...(decision === 'approve'
@@ -275,6 +272,21 @@ function ConsentContent() {
               </span>
             </label>
           )}
+        </fieldset>
+
+        <fieldset className={styles.group}>
+          <legend>Exportar</legend>
+          <label className={styles.option}>
+            <input type="checkbox" checked={allowExport} onChange={(e) => setAllowExport(e.target.checked)} />
+            <span className={styles.optionText}>
+              <span>Permitir exportar peças</span>
+              <span className={styles.optionHint}>
+                O agente pode gerar PDF, imagens, PPTX ou HTML de uma peça e receber um link para baixar, e enviar a peça
+                para o Canva (só em marcas onde você é editor ou mais). É à parte de ver e salvar: sem isto, ele não exporta.
+                Há um limite de pedidos por minuto.
+              </span>
+            </span>
+          </label>
         </fieldset>
 
         {error && (
