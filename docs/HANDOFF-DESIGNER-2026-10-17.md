@@ -89,4 +89,4 @@ Tenant "Assinatura Marca Própria": `7d5f75ba-5dd0-4136-a30c-c9c3372c346e`. Cont
 - O **Core cria atividades como "planejado"**: registros de fatos já ocorridos precisam de `status: done`. `listar_atividades` devolve arquivo grande; resuma com script.
 - **Nada foi mergeado nem enviado à Gabriela por mim.** O classificador de permissões bloqueia `gh pr merge` sem revisão: só com autorização explícita.
 - Credenciais: a **troca das senhas das contas do seed e o redeploy do backend depois dos merges do MCP** são uma pendência registrada com o Gustavo em 16/10. **Não sei se já foi feita**; confirmar antes de assumir.
-- Arquivos soltos locais: `handoff.md` na raiz (proposta de Design em lote de 06/10, anterior a tudo isto) e este documento, ainda **não commitados**.
+- Arquivo solto local: `handoff.md` na raiz (proposta de Design em lote de 06/10, anterior a tudo isto), não commitado.
