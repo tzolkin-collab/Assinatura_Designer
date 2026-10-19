@@ -1,10 +1,14 @@
 import type { McpToolDefinition } from './types.js';
 import { getBrandKitTool } from './getBrandKit.js';
+import { getBrandProfileTool } from './getBrandProfile.js';
 import { getDesignTool } from './getDesign.js';
 import { getDesignerBriefTool } from './getDesignerBrief.js';
+import { listAssetsTool } from './listAssets.js';
 import { listBrandsTool } from './listBrands.js';
 import { listDesignsTool } from './listDesigns.js';
 import { savePresentationTool } from './savePresentation.js';
+import { updateSlideTool } from './updateSlide.js';
+import { createVersionTool, listVersionsTool, restoreVersionTool } from './versions.js';
 
 /**
  * Catálogo de ferramentas do conector. Acrescentar uma ferramenta é criar `tools/<nome>.ts`
@@ -14,11 +18,11 @@ import { savePresentationTool } from './savePresentation.js';
  * Modelo de trabalho: o AGENTE (ChatGPT, Claude, Gemini...) é o diretor de arte e o artista. O Designer
  * entrega o contexto (brief), valida, confere o texto, guarda e mostra no editor.
  *
- *  - leitura (`designer.read`): list_brands, get_brand_kit, get_designer_brief, list_designs, get_design;
- *  - escrita (`designer.write`): save_presentation.
+ *  - leitura (`designer.read`): list_brands, get_brand_kit, get_designer_brief, list_designs, get_design,
+ *    get_brand_profile, list_assets, list_versions;
+ *  - escrita (`designer.write`): save_presentation, update_slide, create_version, restore_version.
  *
- * Planejadas: export (Canva/PDF), upload de foto, edição pontual de slide, pausa de geração e a
- * leitura dos registros de chamadas.
+ * O plano completo (52 ferramentas, escopos e ordem) está em docs/MCP-DESIGNER-PLANO-FERRAMENTAS.md.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const MCP_TOOLS: readonly McpToolDefinition<any, any>[] = [
@@ -27,5 +31,11 @@ export const MCP_TOOLS: readonly McpToolDefinition<any, any>[] = [
   getDesignerBriefTool,
   listDesignsTool,
   getDesignTool,
+  getBrandProfileTool,
+  listAssetsTool,
+  listVersionsTool,
   savePresentationTool,
+  updateSlideTool,
+  createVersionTool,
+  restoreVersionTool,
 ];

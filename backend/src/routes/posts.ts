@@ -16,6 +16,7 @@ import { extractJsonObject } from '../lib/jsonHelper.js';
 import { resolveBrandContext } from '../lib/brandContext.js';
 import { mergeSlidesIntoPost, syncPostSlides } from '../lib/postHelper.js';
 import { snapshotPost, restorePostVersion } from '../lib/postVersions.js';
+import { applySlideCode } from '../lib/slideEdit.js';
 import { withServerOwnedMcp } from '../lib/mcpOwnership.js';
 import { listPhotoSlots, setPhotoInSlot, PhotoSlotNotFoundError } from '../lib/photoSlot.js';
 import { analyzePhoto, frameFromAnalysis, measureSlotAspect } from '../lib/photoFraming.js';
@@ -185,46 +186,23 @@ postsRouter.put('/:id/slides/:index/code', async (req: AuthRequest, res: Respons
     const { html, css } = (req.body ?? {}) as { html?: string; css?: string };
     if (typeof html !== 'string' || !html.trim()) throw createError(400, 'html é obrigatório');
 
-    const post = await prisma.post.findFirst({
+    // Autorização aqui; a escrita (sanitiza + snapshot + grava) é de lib/slideEdit.ts, a mesma do MCP.
+    const allowed = await prisma.post.findFirst({
       where: { id, brand: brandMemberFilter(req.user?.userId, EDITORS) },
-      include: { slides: { orderBy: { position: 'asc' } } },
+      select: { id: true },
     });
-    if (!post) throw createError(404, 'Post não encontrado');
+    if (!allowed) throw createError(404, 'Post não encontrado');
 
-    const content = mergeSlidesIntoPost(post).content as unknown as {
-      kind?: string;
-      width?: number;
-      height?: number;
-      fonts?: string[];
-      slides?: Array<{ html: string; css?: string }>;
-    };
-    if (content?.kind !== 'html-design' || !Array.isArray(content.slides)) {
-      throw createError(400, 'Edição de código disponível apenas para designs html-design');
-    }
-    if (idx >= content.slides.length) throw createError(400, 'slide fora do limite');
-
-    // Sanitização server-side: NUNCA confiar no que veio do cliente.
-    const clean = { html: sanitizeSlideHtml(html), css: css ? sanitizeSlideCss(css) : undefined };
-    if (!clean.html.trim()) throw createError(400, 'html ficou vazio após a sanitização');
-
-    await snapshotPost(post.id, {
-      source: 'EDITOR',
-      label: `Antes da edição de código do slide ${idx + 1}`,
+    const { slideIndex, slide } = await applySlideCode({
+      postId: id,
+      index: idx,
+      html,
+      css,
       userId: req.user?.userId,
+      source: 'EDITOR',
     });
 
-    const existingSlide = post.slides.find((s) => s.position === idx);
-    if (!existingSlide) throw createError(404, 'Slide não encontrado na tabela relacional');
-    await prisma.slide.update({
-      where: { id: existingSlide.id },
-      data: {
-        contentJson: clean as unknown as Prisma.InputJsonValue,
-        htmlRender: buildSlideDocument(clean, content.fonts ?? ['Inter'], content.width ?? 1080, content.height ?? 1080),
-      },
-    });
-    await prisma.post.update({ where: { id: post.id }, data: { updatedAt: new Date() } });
-
-    res.json({ data: { slideIndex: idx, slide: clean } });
+    res.json({ data: { slideIndex, slide } });
   } catch (error) {
     next(error);
   }

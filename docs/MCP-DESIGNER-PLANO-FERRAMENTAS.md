@@ -212,7 +212,9 @@ Com `tools/list` filtrado por escopo, um token só de leitura vê ~22; um com tu
 
 ## 7. Ordem de construção
 
-1. **Lote 1 (P0) — o agente trabalha sozinho no estúdio**: `get_brand_profile`, `list_assets`, `get_photo_slots`,
+1. **Lote 1 (P0) — o agente trabalha sozinho no estúdio** (✅ 1A: `get_brand_profile`, `list_assets`, `update_slide`,
+   `list_versions`, `create_version`, `restore_version`; ⏳ 1B: fotos + `upload_asset` + integrações; ⏳ 1C: exportação e escopo
+   `export`): `get_brand_profile`, `list_assets`, `get_photo_slots`,
    `set_slide_photo`, `update_slide`, `list_versions`, `create_version`, `restore_version`, `upload_asset`, `export_file` +
    status, `export_to_canva` + status, `get_integrations_status`. Escopo novo: `export`.
 2. **Lote 2 (P1) — dia a dia**: `search_designs`, `list_folders`, `update_design_meta`, `update_brand_kit`,
