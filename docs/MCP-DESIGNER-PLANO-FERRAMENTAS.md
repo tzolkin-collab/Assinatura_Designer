@@ -40,7 +40,7 @@ e os escopos `designer.read`, `designer.write`, `designer.edit_all`.
 | `designer.write` | criar peças, subir ativos, editar o que a conexão criou, pastas, versões manuais | EDITOR | existe |
 | `designer.edit_all` | editar/sobrescrever peças de qualquer origem | EDITOR | existe (#99) |
 | `designer.brand` | kit da marca, perfil/cérebro, memória, referências, brandbook | EDITOR (campos de custo: ADMIN) | novo |
-| `designer.export` | exportar PDF/ZIP/PPTX/HTML e Canva; sincronizar com Canva; baixar | VIEWER (Canva: EDITOR) | novo |
+| `designer.export` | exportar PDF/ZIP/PPTX/HTML e Canva; sincronizar com Canva; baixar | VIEWER (Canva: EDITOR) | existe (lote 1C) |
 | `designer.publish` | publicar/despublicar link público e ligar o chat da apresentação | EDITOR | novo |
 | `designer.delete` | apagar peças, ativos, pastas e sessões | EDITOR | novo |
 | `designer.integrations` | ler fontes do usuário: Drive, Canva (designs), Asana | VIEWER | novo |
@@ -214,7 +214,7 @@ Com `tools/list` filtrado por escopo, um token só de leitura vê ~22; um com tu
 
 1. **Lote 1 (P0) — o agente trabalha sozinho no estúdio** (✅ 1A: `get_brand_profile`, `list_assets`, `update_slide`,
    `list_versions`, `create_version`, `restore_version`; ✅ 1B: `get_photo_slots`, `set_slide_photo`, `upload_asset`,
-   `get_integrations_status`; ⏳ 1C: exportação e escopo `export`): `get_brand_profile`, `list_assets`, `get_photo_slots`,
+   `get_integrations_status`; ✅ 1C: `export_file`, `get_export_status`, `export_to_canva`, `get_canva_export_status` e escopo `designer.export`, com a tela de consentimento): `get_brand_profile`, `list_assets`, `get_photo_slots`,
    `set_slide_photo`, `update_slide`, `list_versions`, `create_version`, `restore_version`, `upload_asset`, `export_file` +
    status, `export_to_canva` + status, `get_integrations_status`. Escopo novo: `export`.
 2. **Lote 2 (P1) — dia a dia**: `search_designs`, `list_folders`, `update_design_meta`, `update_brand_kit`,

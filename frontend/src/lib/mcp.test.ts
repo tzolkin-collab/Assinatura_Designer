@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canWrite, describeAccess, formatRemaining, isLocalServerUrl, mcpServerUrl, plainText, roleLabel } from './mcp';
+import { canExport, canWrite, describeAccess, formatRemaining, isLocalServerUrl, mcpServerUrl, plainText, roleLabel } from './mcp';
 
 describe('plainText', () => {
   it('desfaz as entidades que o servidor escapou', () => {
@@ -42,6 +42,14 @@ describe('acesso em palavras', () => {
     expect(describeAccess(['designer.write'])).toBe('Ver e salvar peças');
     expect(describeAccess(['designer.read', 'designer.write', 'designer.edit_all'])).toBe('Ver e editar todas as peças');
     expect(canWrite(['designer.edit_all'])).toBe(true);
+  });
+
+  it('exportar é à parte: não vem de ler nem de escrever', () => {
+    expect(canExport(['designer.read', 'designer.write', 'designer.edit_all'])).toBe(false);
+    expect(canExport(['designer.read', 'designer.export'])).toBe(true);
+    expect(describeAccess(['designer.read', 'designer.export'])).toBe('Só ver · pode exportar');
+    expect(describeAccess(['designer.write', 'designer.export'])).toBe('Ver e salvar peças · pode exportar');
+    expect(describeAccess(['designer.export'])).toBe('Só ver · pode exportar');
   });
 
   it('papel e tempo restante', () => {
