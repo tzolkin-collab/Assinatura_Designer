@@ -17,8 +17,8 @@ const ArtifactPanel = dynamic(() => import('@/components/Fabrica/ArtifactPanel')
 import { RealtimePreview } from '@/components/Fabrica/RealtimePreview';
 const AiSpendBadge = dynamic(() => import('@/components/AiUsage/AiSpendBadge'), { ssr: false });
 import { ChatMessageRow } from '@/components/Fabrica/ChatMessageRow';
-import TextStatusMenu from '@/components/Fabrica/TextStatusMenu';
-import { summarizeStatuses } from '@/lib/textStatus';
+import BriefingPanel from '@/components/Fabrica/BriefingPanel';
+import { composeBriefing, EMPTY_BRIEFING, isBriefingEmpty, type Briefing } from '@/lib/briefing';
 import BrandBundlePanel from '@/components/Fabrica/BrandBundlePanel';
 import { useFabricaWs } from '@/hooks/useFabricaWs';
 import { API_BASE } from '@/lib/api';
@@ -143,6 +143,7 @@ export default function FabricaPage() {
 
   // Input state
   const [input, setInput] = useState('');
+  const [briefing, setBriefing] = useState<Briefing>(EMPTY_BRIEFING);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [attachErro, setAttachErro] = useState<string | null>(null);
   // Espelho síncrono da lista: o handler precisa decidir sobre o valor ATUAL,
@@ -207,8 +208,6 @@ export default function FabricaPage() {
   useEffect(() => {
     if (activeQuestionId) isScrolledUp.current = false;
   }, [activeQuestionId]);
-
-  const statusSummary = useMemo(() => summarizeStatuses(input), [input]);
 
   // Auto-resize textarea (useLayoutEffect to avoid layout shift)
   useLayoutEffect(() => {
@@ -302,7 +301,7 @@ export default function FabricaPage() {
 
   const handleSend = useCallback(() => {
     const text = input.trim();
-    if (!text || busy) return; // ocupado não envia mensagem normal — vira orientação (handleSendAdvice)
+    if ((!text && isBriefingEmpty(briefing)) || busy) return; // ocupado não envia mensagem normal — vira orientação (handleSendAdvice)
 
     if (text === '/editor') {
       if (postId) {
@@ -312,7 +311,7 @@ export default function FabricaPage() {
       return;
     }
 
-    let fullMessage = text;
+    let fullMessage = composeBriefing(text, briefing);
     if (asanaContext.length > 0) {
       fullMessage += `\n\n[Contexto Externo]\n${asanaContext.join('\n\n')}`;
     }
@@ -323,11 +322,12 @@ export default function FabricaPage() {
 
     sendMessage(fullMessage, outboundAttachments.length > 0 ? outboundAttachments : undefined);
     setInput('');
+    setBriefing(EMPTY_BRIEFING);
     aplicarAnexos([]);
     setAttachErro(null);
     setAsanaAttachments([]);
     setAsanaContext([]);
-  }, [input, busy, asanaContext, asanaAttachments, attachments, aplicarAnexos, sendMessage, postId, router, marca]);
+  }, [input, briefing, busy, asanaContext, asanaAttachments, attachments, aplicarAnexos, sendMessage, postId, router, marca]);
 
   // Ocupado + Enter: vira uma orientação (lista "Orientações" acima do campo), não
   // uma mensagem — é o gesto "Aconselhar" da especificação.
@@ -460,7 +460,7 @@ export default function FabricaPage() {
   // Gerar design consome cota do Gemini e cria post: exige papel de edição. Sem isto,
   // um VIEWER dispararia a geração e só descobriria o 403 depois da fila rodar.
   const canGenerate = can('generate');
-  const canSend = input.trim().length > 0 && canGenerate;
+  const canSend = (input.trim().length > 0 || !isBriefingEmpty(briefing)) && canGenerate;
 
   // ── Phase label ─────────────────────────────────────────────────────────────
 
@@ -833,14 +833,7 @@ export default function FabricaPage() {
                 na raiz e só era achado caçando na galeria. */}
             <FolderPicker marca={marca} sessionId={sessionId} disabled={busy || !canGenerate} />
 
-            {statusSummary.hasMarkers && (
-              <p className={s.statusSummary} role="status">
-                {statusSummary.outOfArt > 0
-                  ? `${statusSummary.outOfArt} bloco(s) ficam fora da arte`
-                  : 'Todos os blocos marcados entram na arte'}
-                {statusSummary.inReview ? ' · há texto em revisão: a peça não será dada como final' : ''}
-              </p>
-            )}
+            <BriefingPanel value={briefing} onChange={setBriefing} disabled={busy || !canGenerate} />
 
             <div className={`${s.inputBar} ${!canGenerate ? s.inputBarDisabled : ''}`}>
               <button
@@ -859,12 +852,6 @@ export default function FabricaPage() {
                 accept="image/*,.pdf"
                 className={s.visuallyHidden}
                 onChange={handleFile}
-              />
-              <TextStatusMenu
-                value={input}
-                onChange={(text) => setInput(text)}
-                inputRef={inputRef}
-                disabled={!canGenerate}
               />
               <textarea
                 ref={inputRef}
