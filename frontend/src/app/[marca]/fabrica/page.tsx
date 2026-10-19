@@ -17,6 +17,8 @@ const ArtifactPanel = dynamic(() => import('@/components/Fabrica/ArtifactPanel')
 import { RealtimePreview } from '@/components/Fabrica/RealtimePreview';
 const AiSpendBadge = dynamic(() => import('@/components/AiUsage/AiSpendBadge'), { ssr: false });
 import { ChatMessageRow } from '@/components/Fabrica/ChatMessageRow';
+import TextStatusMenu from '@/components/Fabrica/TextStatusMenu';
+import { summarizeStatuses } from '@/lib/textStatus';
 import BrandBundlePanel from '@/components/Fabrica/BrandBundlePanel';
 import { useFabricaWs } from '@/hooks/useFabricaWs';
 import { API_BASE } from '@/lib/api';
@@ -205,6 +207,8 @@ export default function FabricaPage() {
   useEffect(() => {
     if (activeQuestionId) isScrolledUp.current = false;
   }, [activeQuestionId]);
+
+  const statusSummary = useMemo(() => summarizeStatuses(input), [input]);
 
   // Auto-resize textarea (useLayoutEffect to avoid layout shift)
   useLayoutEffect(() => {
@@ -829,6 +833,15 @@ export default function FabricaPage() {
                 na raiz e só era achado caçando na galeria. */}
             <FolderPicker marca={marca} sessionId={sessionId} disabled={busy || !canGenerate} />
 
+            {statusSummary.hasMarkers && (
+              <p className={s.statusSummary} role="status">
+                {statusSummary.outOfArt > 0
+                  ? `${statusSummary.outOfArt} bloco(s) ficam fora da arte`
+                  : 'Todos os blocos marcados entram na arte'}
+                {statusSummary.inReview ? ' · há texto em revisão: a peça não será dada como final' : ''}
+              </p>
+            )}
+
             <div className={`${s.inputBar} ${!canGenerate ? s.inputBarDisabled : ''}`}>
               <button
                 className={s.iconBtn}
@@ -846,6 +859,12 @@ export default function FabricaPage() {
                 accept="image/*,.pdf"
                 className={s.visuallyHidden}
                 onChange={handleFile}
+              />
+              <TextStatusMenu
+                value={input}
+                onChange={(text) => setInput(text)}
+                inputRef={inputRef}
+                disabled={!canGenerate}
               />
               <textarea
                 ref={inputRef}
