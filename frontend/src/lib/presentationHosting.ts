@@ -41,8 +41,8 @@ export interface PresentationChatState {
   messages: PresentationChatMessage[];
 }
 
-export function publishPost(postId: string, hostingConfig: HostingConfig): Promise<PublishResult> {
-  return api.post<PublishResult>(`/posts/${postId}/publish`, { hostingConfig });
+export function publishPost(postId: string, hostingConfig: HostingConfig, confirmarRascunho = false): Promise<PublishResult> {
+  return api.post<PublishResult>(`/posts/${postId}/publish`, { hostingConfig, ...(confirmarRascunho ? { confirmarRascunho } : {}) });
 }
 
 export function unpublishPost(postId: string): Promise<{ success: boolean }> {
