@@ -287,7 +287,7 @@ brandsRouter.get('/:slug', async (req: Request, res: Response, next: NextFunctio
       where: { slug, members: { some: { userId } } },
       include: { 
         config: true, 
-        _count: { select: { posts: true, refs: true } },
+        _count: { select: { posts: true } },
         members: { include: { user: { select: { id: true, name: true, email: true } } } }
       },
     });

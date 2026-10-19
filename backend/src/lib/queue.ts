@@ -19,7 +19,6 @@ import { CanvaSessionExpiredError } from './canvaClient.js';
 import { getCanvaDesignName } from './canvaSync.js';
 import { runDeckExport, type DeckExportParams } from './deckExport.js';
 import { runAssetCapture, type AssetCaptureParams } from './assetCapture.js';
-import { analyzeReferenceBackground } from './referenceSync.js';
 import { logger } from './logger.js';
 import { expirePendingAdvice } from './advice.js';
 import { clearInterrupt } from './interrupt.js';
@@ -358,53 +357,14 @@ export function startPipelineWorker(): Worker<PipelineParams> {
   return worker;
 }
 
-const REF_SYNC_QUEUE_NAME = 'reference-sync';
-
-type ReferenceSyncJobData =
-  | { refId: string; slug: string; name: string; analysisUrl: string; sourceType: 'WEBSITE' | 'INSTAGRAM' }
-  | { brandId: string; slug: string };
-
-export const referenceSyncQueue = new Queue<ReferenceSyncJobData>(REF_SYNC_QUEUE_NAME, {
-  prefix: config.bullmqPrefix,
-  connection: makeConnection(),
-  defaultJobOptions: {
-    attempts: 2,
-    removeOnComplete: { count: 100 },
-    removeOnFail: { count: 100 },
-  },
-});
-
-referenceSyncQueue.on('error', (err) => logger.error('Fila de reference sync com erro', { error: err.message }));
-
-let refSyncWorker: Worker | null = null;
-export function startReferenceSyncWorker(): Worker {
-  if (refSyncWorker) return refSyncWorker;
-  refSyncWorker = new Worker(
-    REF_SYNC_QUEUE_NAME,
-    async (job) => {
-      if (job.name === 'sync-single') {
-        const data = job.data as { refId: string; slug: string; name: string; analysisUrl: string; sourceType: 'WEBSITE' | 'INSTAGRAM' };
-        await analyzeReferenceBackground(data.refId, data.slug, data.name, data.analysisUrl, data.sourceType);
-      }
-    },
-    { prefix: config.bullmqPrefix, connection: makeConnection(), concurrency: 1 }
-  );
-
-
-  console.log(`  ├─ Worker:       fila "${REF_SYNC_QUEUE_NAME}" (concorrência 1)`);
-  return refSyncWorker;
-}
-
 /** Fecha filas e workers de forma limpa (shutdown). */
 export async function closeQueue(): Promise<void> {
   await worker?.close();
   await exportWorker?.close();
   await deckWorker?.close();
   await assetCaptureWorker?.close();
-  await refSyncWorker?.close();
   await pipelineQueue.close();
   await canvaExportQueue.close();
   await deckExportQueue.close();
   await assetCaptureQueue.close();
-  await referenceSyncQueue.close();
 }

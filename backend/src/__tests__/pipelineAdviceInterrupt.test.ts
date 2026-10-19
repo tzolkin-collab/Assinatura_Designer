@@ -25,6 +25,7 @@ const h = vi.hoisted(() => {
     profileLookupFails: false,
     withEmptySlot: false,
     brandRow: null as Record<string, unknown> | null,
+    contentsSeen: [] as any[],
   };
   return state;
 });
@@ -67,7 +68,7 @@ vi.mock('../lib/websocket.js', () => {
 
 vi.mock('../lib/brandContext.js', () => ({
   resolveBrandContext: vi.fn(async () => ({
-    id: 'brand-1', name: 'Marca X', slug: h.session.brandSlug, agentPrompt: '', guidelines: 'DIRETRIZ-LEGADA', colors: ['#111111'], primaryFonts: ['Inter'], assetUrls: [], libraryBrandIds: ['brand-1'], references: [],
+    id: 'brand-1', name: 'Marca X', slug: h.session.brandSlug, agentPrompt: '', guidelines: 'DIRETRIZ-LEGADA', colors: ['#111111'], primaryFonts: ['Inter'], assetUrls: [], libraryBrandIds: ['brand-1'],
   })),
   buildBrandContextSummary: vi.fn(() => 'contexto da marca'),
 }));
@@ -107,8 +108,10 @@ vi.mock('../lib/imageResolver.js', () => ({
 
 vi.mock('../lib/geminiRetry.js', () => ({
   humanizeGeminiError: (e: unknown) => String(e),
-  generateWithRetry: vi.fn(async (_ai: unknown, opts: { contents: string; config?: { systemInstruction?: string } }) => {
-    const user = opts.contents;
+  generateWithRetry: vi.fn(async (_ai: unknown, opts: { contents: string | Array<{ parts: Array<{ text?: string }> }>; config?: { systemInstruction?: string } }) => {
+    h.contentsSeen.push(opts.contents);
+    // Com moodboard, o conteúdo vai como partes (texto + imagem); o prompt segue sendo a primeira parte.
+    const user = typeof opts.contents === 'string' ? opts.contents : String(opts.contents[0]?.parts[0]?.text ?? '');
     const m = user.match(/Gere os slides de (\d+) a (\d+)/);
     const start = m ? parseInt(m[1]!, 10) : 1;
     const end = m ? parseInt(m[2]!, 10) : 1;
@@ -163,6 +166,7 @@ beforeEach(() => {
   h.brandRow = null;
   h.wsCalls.length = 0;
   h.prompts.length = 0;
+  h.contentsSeen.length = 0;
   h.reviewerBriefs.length = 0;
   h.closedRuns.length = 0;
   h.postUpdates.length = 0;
@@ -734,5 +738,39 @@ describe('cérebro do Designer ligado por marca (DESIGNER_BRAIN_BRANDS)', () => 
 
     expect(h.session.pendingReview.deviations).toEqual([]);
     expect(wsOf('notify')[0]!.args[1]).toMatchObject({ kind: 'done' });
+  });
+});
+
+describe('moodboard anexado no chat continua chegando ao artista', () => {
+  const originalFetch = globalThis.fetch;
+  const originalBase = config.r2PublicUrl;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    (config as { r2PublicUrl: string }).r2PublicUrl = originalBase;
+  });
+
+  it('anexo com papel style-reference vira IMAGEM na chamada de geração, e o texto avisa que não vai no slide', async () => {
+    (config as { r2PublicUrl: string }).r2PublicUrl = 'https://cdn.exemplo.com';
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+    const baixadas: string[] = [];
+    globalThis.fetch = vi.fn(async (url: unknown) => {
+      baixadas.push(String(url));
+      return new Response(png, { status: 200, headers: { 'content-type': 'image/png' } });
+    }) as unknown as typeof fetch;
+    h.slideCount = 3;
+
+    const url = 'https://cdn.exemplo.com/brands/marca/chat-attachments/moodboard-gabi.png';
+    await runPipeline({
+      sessionId: S, brief: 'Apresentação de teste', format: 'presentation', postId: POST,
+      attachmentImages: [{ url, name: 'moodboard-gabi.png', role: 'style-reference' }],
+    });
+
+    expect(baixadas).toContain(url);
+    const comImagem = h.contentsSeen.filter((c) => Array.isArray(c));
+    expect(comImagem.length).toBeGreaterThan(0);
+    const partes = comImagem[0][0].parts as Array<{ text?: string; inlineData?: { mimeType: string } }>;
+    expect(partes.some((p) => p.inlineData?.mimeType === 'image/png')).toBe(true);
+    expect(partes.some((p) => p.text?.includes('Moodboard de referência visual: moodboard-gabi.png') && p.text.includes('nunca insira esta imagem no slide'))).toBe(true);
   });
 });

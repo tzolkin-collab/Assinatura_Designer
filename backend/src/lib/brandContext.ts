@@ -21,14 +21,6 @@ export type ResolvedBrandContext = DesignDocumentBrandContext & {
    * herda a identidade da base: logo, fotos, manual). A própria marca vem primeiro.
    */
   libraryBrandIds: string[];
-  references: Array<{
-    name: string;
-    archetype: string | null;
-    toneOfVoice: string | null;
-    density: string | null;
-    palette: string[];
-    insightsText: string | null;
-  }>;
   /** Imagens do pool de assets da marca (upload/Drive/Asana) — o artista as usa em
    *  vez de inventar fotos de banco quando fizer sentido para o layout. Nome junto
    *  (antes era só URL crua — o artista escolhia sem nenhuma pista do conteúdo). */
@@ -53,11 +45,6 @@ export async function resolveBrandContext(slug: string): Promise<ResolvedBrandCo
     where: { slug },
     include: {
       config: true,
-      refs: {
-        where: { status: 'ANALYZED' },
-        orderBy: { updatedAt: 'desc' },
-        take: 8,
-      },
       assets: {
         where: {
           // Material de referência (manual visual, moodboard, fonte, paleta) é para o modelo VER, não para entrar num slide.
@@ -111,32 +98,11 @@ export async function resolveBrandContext(slug: string): Promise<ResolvedBrandCo
     primaryFonts: brand.config?.primaryFonts ?? [],
     logoUrl: brand.config?.logoUrl,
     presentationConfig: normalizePresentationConfig(brand.config?.presentationConfig),
-    references: brand.refs.map((ref) => ({
-      name: ref.name,
-      archetype: ref.archetype,
-      toneOfVoice: ref.toneOfVoice,
-      density: ref.density,
-      palette: ref.palette,
-      insightsText: ref.insightsText,
-    })),
     assetUrls: assets.map((a) => ({ url: a.url, name: `${a.name}${a.tags.length ? ` [${a.tags.join(',')}]` : ''}`, source: a.source })),
   };
 }
 
 export function buildBrandContextSummary(context: ResolvedBrandContext): string {
-  const referenceLines = context.references
-    .slice(0, 4)
-    .map((reference) => {
-      const descriptors = [reference.archetype, reference.toneOfVoice, reference.density]
-        .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
-        .join(' · ');
-      const palette = reference.palette.length > 0 ? `Paleta: ${reference.palette.join(', ')}` : '';
-      const insights = typeof reference.insightsText === 'string' && reference.insightsText.trim().length > 0
-        ? `Insights: ${reference.insightsText.trim().slice(0, 220)}`
-        : '';
-      return [`- ${reference.name}`, descriptors, palette, insights].filter(Boolean).join(' | ');
-    });
-
   return [
     `Marca: ${context.name}`,
     context.guidelines ? `Diretrizes: ${context.guidelines}` : '',
@@ -150,7 +116,6 @@ export function buildBrandContextSummary(context: ResolvedBrandContext): string 
     context.presentationConfig?.boldness ? `Nível de ousadia: ${context.presentationConfig.boldness}` : '',
     context.presentationConfig?.autoMode !== undefined ? `Modo automático padrão: ${context.presentationConfig.autoMode ? 'ativo' : 'desativado'}` : '',
     context.presentationConfig?.allowSvgLayouts === false ? 'Desenho vetorial: NÃO use <svg> inline nesta marca — resolva com CSS puro.' : '',
-    referenceLines.length > 0 ? `Referências analisadas:\n${referenceLines.join('\n')}` : '',
   ].filter(Boolean).join('\n');
 }
 
@@ -167,14 +132,5 @@ export function buildBrandAssistantInstruction(context: ResolvedBrandContext): s
     context.presentationConfig?.photoPreference ? `Photo Preference: ${context.presentationConfig.photoPreference}` : '',
     context.presentationConfig?.boldness ? `Boldness: ${context.presentationConfig.boldness}` : '',
     context.presentationConfig?.autoMode !== undefined ? `Default Auto Mode: ${context.presentationConfig.autoMode ? 'enabled' : 'disabled'}` : '',
-    context.references.length > 0
-      ? `Analyzed References:\n${context.references.slice(0, 4).map((reference) => {
-          const palette = reference.palette.length > 0 ? `Palette ${reference.palette.join(', ')}` : '';
-          const descriptors = [reference.archetype, reference.toneOfVoice, reference.density]
-            .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
-            .join(' · ');
-          return `- ${reference.name}${descriptors ? ` | ${descriptors}` : ''}${palette ? ` | ${palette}` : ''}`;
-        }).join('\n')}`
-      : '',
   ].filter(Boolean).join('\n');
 }

@@ -29,7 +29,7 @@ vi.mock('../lib/r2', () => ({
   s3: { send: vi.fn(async (cmd: { input: Record<string, unknown> }) => { hoisted.s3Sent.push(cmd); return {}; }) },
 }));
 
-// upload.ts (rota /logo) e referenceSync.ts (uploadBase64ToR2) gravam direto no S3.
+// upload.ts (rota /logo) grava direto no S3.
 vi.mock('@aws-sdk/client-s3', () => ({
   S3Client: class {
     send = vi.fn(async (cmd: { input: Record<string, unknown> }) => {
@@ -76,7 +76,6 @@ import { app } from '../app';
 import { config } from '../config';
 import { uploadFileToR2 } from '../lib/r2';
 import { uploadChatAttachments } from '../lib/chatAttachments';
-import { uploadBase64ToR2 } from '../lib/referenceSync';
 import { normalizeImage } from '../lib/imageNormalizer';
 import type { ChatAttachment } from '../lib/redis';
 
@@ -395,33 +394,6 @@ describe('uploadChatAttachments', () => {
     expect(anexos[0]!.url).toBeUndefined();
     expect(anexos[1]!.url).toBeDefined();
     expect(mockedUpload).toHaveBeenCalledTimes(1);
-  });
-});
-
-// ── lib/referenceSync.uploadBase64ToR2 (upload manual de referência) ───────────
-describe('uploadBase64ToR2 (referências)', () => {
-  it('SVG enviado como print de referência é gravado sanitizado, com Content-Type fixo', async () => {
-    const url = await uploadBase64ToR2(Buffer.from(SVG_SUJO).toString('base64'), 'image/svg+xml');
-
-    expect(url).toMatch(/^https:\/\/cdn\.exemplo\.com\/references\/[0-9a-f-]+\.svg$/);
-    expect(hoisted.s3Sent).toHaveLength(1);
-    const put = hoisted.s3Sent[0]!.input;
-    assertLimpo((put.Body as Buffer).toString('utf-8'));
-    expect(put.ContentType).toBe('image/svg+xml');
-    expect(put.ContentDisposition).toBe('attachment');
-  });
-
-  it('SVG inválido lança (nada é gravado)', async () => {
-    await expect(uploadBase64ToR2(Buffer.from('<html/>').toString('base64'), 'image/svg+xml')).rejects.toMatchObject({ code: 'INVALID_SVG' });
-    expect(hoisted.s3Sent).toHaveLength(0);
-  });
-
-  it('imagem comum continua igual', async () => {
-    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
-    const url = await uploadBase64ToR2(png.toString('base64'), 'image/png');
-    expect(url).toMatch(/\.png$/);
-    expect(hoisted.s3Sent[0]!.input.ContentType).toBe('image/png');
-    expect(hoisted.s3Sent[0]!.input.ContentDisposition).toBeUndefined();
   });
 });
 

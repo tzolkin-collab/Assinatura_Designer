@@ -47,11 +47,21 @@ describe('posts/settings — validação de corpo (zod)', () => {
     });
   });
 
-  describe('POST /api/settings/:slug/referencias', () => {
-    it('400 sem name (após resolver a marca)', async () => {
-      const res = await auth(request(app).post('/api/settings/minha-marca/referencias').send({ analysisUrl: 'https://exemplo.com' }));
-      expect(res.status).toBe(400);
-      expect(res.body.error.message).toContain('Reference name is required');
+  describe('rotas de referências (pesquisa de concorrentes removida)', () => {
+    it.each([
+      ['get', '/api/settings/minha-marca/referencias'],
+      ['post', '/api/settings/minha-marca/referencias'],
+      ['patch', '/api/settings/minha-marca/referencias/ref-1'],
+      ['post', '/api/settings/minha-marca/referencias/ref-1/sync'],
+      ['post', '/api/settings/minha-marca/referencias/ref-1/upload-imagem'],
+      ['delete', '/api/settings/minha-marca/referencias/ref-1'],
+    ] as const)('%s %s não existe mais (404) e não toca a tabela Reference', async (metodo, rota) => {
+      const res = await auth(request(app)[metodo](rota).send({ name: 'X', analysisUrl: 'https://exemplo.com' }));
+      expect(res.status).toBe(404);
+      expect(prismaMock.reference.findMany).not.toHaveBeenCalled();
+      expect(prismaMock.reference.create).not.toHaveBeenCalled();
+      expect(prismaMock.reference.update).not.toHaveBeenCalled();
+      expect(prismaMock.reference.deleteMany).not.toHaveBeenCalled();
     });
   });
 });

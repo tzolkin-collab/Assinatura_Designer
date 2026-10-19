@@ -29,7 +29,7 @@ beforeEach(() => {
 
 describe('resolveBrandContext: biblioteca de um desdobramento', () => {
   it('marca comum: só a biblioteca dela, e a base não é consultada', async () => {
-    h.brand = { id: 'b1', name: 'Base', slug: 'base', parentBrandId: null, config: null, refs: [], assets: own(2) };
+    h.brand = { id: 'b1', name: 'Base', slug: 'base', parentBrandId: null, config: null, assets: own(2) };
     const ctx = await resolveBrandContext('base');
     expect(ctx.libraryBrandIds).toEqual(['b1']);
     expect(ctx.assetUrls).toHaveLength(2);
@@ -37,7 +37,7 @@ describe('resolveBrandContext: biblioteca de um desdobramento', () => {
   });
 
   it('desdobramento herda os arquivos da base: os dele primeiro, sem repetir, no teto de 20', async () => {
-    h.brand = { id: 'c1', name: 'Collab', slug: 'base-collab', parentBrandId: 'b1', config: null, refs: [], assets: own(2) };
+    h.brand = { id: 'c1', name: 'Collab', slug: 'base-collab', parentBrandId: 'b1', config: null, assets: own(2) };
     h.parentAssets = [
       { url: 'https://x/own-0.png', name: 'repetido', tags: [] },
       { url: 'https://x/logo-base.png', name: 'logo-base', tags: ['LOGOTYPE'] },
@@ -49,7 +49,7 @@ describe('resolveBrandContext: biblioteca de um desdobramento', () => {
   });
 
   it('teto de 20 arquivos no total, com os da própria marca na frente', async () => {
-    h.brand = { id: 'c1', name: 'Collab', slug: 'c', parentBrandId: 'b1', config: null, refs: [], assets: own(18) };
+    h.brand = { id: 'c1', name: 'Collab', slug: 'c', parentBrandId: 'b1', config: null, assets: own(18) };
     h.parentAssets = Array.from({ length: 5 }, (_, i) => ({ url: `https://x/base-${i}.png`, name: `base-${i}`, tags: [] as string[] }));
     const ctx = await resolveBrandContext('c');
     expect(ctx.assetUrls).toHaveLength(20);
