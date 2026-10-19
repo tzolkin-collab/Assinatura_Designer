@@ -169,17 +169,23 @@ describe('métodos e corpo', () => {
     expect(res.body.error.code).toBe(-32700);
   });
 
-  it('corpo acima de 1 MB → 413', async () => {
+  it('corpo acima de 15 MB → 413 (o teto comporta upload_asset em base64)', async () => {
     const flow = await connect(h);
-    const res = await mcpPost(h.app, flow.accessToken, { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'x', arguments: { blob: 'a'.repeat(1_200_000) } } });
+    const res = await mcpPost(h.app, flow.accessToken, { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'x', arguments: { blob: 'a'.repeat(16_000_000) } } });
     expect(res.status).toBe(413);
+  });
+
+  it('corpo de 2 MB autenticado passa do parser (era 413 com o teto antigo de 1 MB)', async () => {
+    const flow = await connect(h);
+    const res = await mcpPost(h.app, flow.accessToken, { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'x', arguments: { blob: 'a'.repeat(2_000_000) } } });
+    expect(res.status).not.toBe(413);
   });
 
   it('o corpo só é lido depois da autenticação (anônimo com corpo gigante NUNCA leva 413)', async () => {
     // Se o parser de JSON rodasse antes do bearer, a resposta seria 413. O servidor
     // responde 401 sem drenar o corpo, e o cliente pode ver isso como 401 ou como reset da
     // conexão (o servidor fechou antes de o corpo terminar) — ambos provam que não parseou.
-    const outcome = await mcpPost(h.app, undefined, { blob: 'a'.repeat(1_200_000) }).then(
+    const outcome = await mcpPost(h.app, undefined, { blob: 'a'.repeat(16_000_000) }).then(
       (res) => res.status,
       (err: Error) => err.message,
     );
@@ -215,13 +221,17 @@ describe('descoberta (initialize / tools/list)', () => {
       'get_brand_profile',
       'get_design',
       'get_designer_brief',
+      'get_integrations_status',
+      'get_photo_slots',
       'list_assets',
       'list_brands',
       'list_designs',
       'list_versions',
       'restore_version',
       'save_presentation',
+      'set_slide_photo',
       'update_slide',
+      'upload_asset',
     ]);
 
     for (const tool of tools) {
@@ -234,6 +244,8 @@ describe('descoberta (initialize / tools/list)', () => {
         update_slide: { destructiveHint: false, idempotentHint: true },
         create_version: { destructiveHint: false, idempotentHint: true },
         restore_version: { destructiveHint: true, idempotentHint: false },
+        set_slide_photo: { destructiveHint: false, idempotentHint: true },
+        upload_asset: { destructiveHint: false, idempotentHint: false },
       };
       const writes = tool.name in writeHints;
       expect(tool.annotations).toEqual({

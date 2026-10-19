@@ -204,7 +204,11 @@ topo do descritor **e** em `_meta.securitySchemes`, como pede o Apps SDK.
 | `update_slide(brandSlug, postId, slide, html, css?, approvedText?)` | `designer.write` | Troca o HTML/CSS de **um** slide (número a partir de 1). Sanitiza no servidor (a mesma porta do editor, `lib/slideEdit.ts`), guarda a versão anterior e, com `approvedText`, confere o texto. Mesma regra de dono do `save_presentation`: peça criada por MCP, ou qualquer apresentação/carrossel com `designer.edit_all`. |
 | `create_version(brandSlug, postId, label?)` | `designer.write` | Marca um ponto de retorno. `created: false` quando nada mudou. |
 | `restore_version(brandSlug, postId, versionId)` | `designer.write` | Volta a peça a uma versão (`destructiveHint: true`); o estado atual vira uma versão antes. |
-| exportação (PDF/ZIP/PPTX/Canva), upload de foto, troca de foto, integrações | vários | planejadas — ver `docs/MCP-DESIGNER-PLANO-FERRAMENTAS.md` (lote 1B e 1C). |
+| `get_photo_slots(brandSlug, postId, slide)` | `designer.read` | Espaços de foto (`data-photo-slot`) de um slide: vazio/preenchido, URL, enquadramento e ajuste. |
+| `set_slide_photo(brandSlug, postId, slide, slot, assetUrl?, position?, fit?)` | `designer.write` | Coloca/troca (`assetUrl`), esvazia (`null`) ou reenquadra a foto de um espaço, **só** com arquivo de `list_assets` (biblioteca da marca e, num collab, a do projeto-base). Foto nova é enquadrada pelo assunto; a versão anterior é guardada. Lógica em `lib/slidePhoto.ts`, a mesma do editor. |
+| `upload_asset(brandSlug, fileName, mimeType, dataBase64, tags?)` | `designer.write` | Guarda uma imagem (png, jpeg, webp, gif, avif, svg) até 10 MB na biblioteca e devolve a URL. SVG é higienizado; raster precisa ser lido como imagem de verdade. Divide o orçamento de sanitização por conta das rotas HTTP (`SVG_SANITIZE_RATE_LIMIT`). Lógica em `lib/assetStore.ts`, a mesma do upload da tela de mídia. |
+| `get_integrations_status()` | `designer.read` | Se o usuário conectou Canva, Drive e Asana (sim/não e validade do Canva). Nunca devolve token. |
+| exportação (PDF/ZIP/PPTX/Canva) e escopo `designer.export` | — | planejadas — lote 1C em `docs/MCP-DESIGNER-PLANO-FERRAMENTAS.md`. |
 
 Todas as chamadas terminam em segundos (não há geração longa do nosso lado), o que evita o limite de ~60 s que os clientes
 costumam impor a uma chamada de ferramenta.
@@ -302,6 +306,9 @@ conteúdo.** Falha ao gravar vira aviso no log e não derruba a chamada. A API d
   só membros logados aprovam.
 - **Refresh deslizante:** cada rotação renova 30 dias; não há teto absoluto de vida da conexão (o usuário/admin revoga em
   `/api/mcp/connections`).
+- **Corpo de `/mcp` até 15 MB** (era 1 MB): `upload_asset` leva a imagem em base64 (10 MB decodificados são ~13,4 MB) e um deck de
+  30 slides já passava de 1 MB. O corpo continua sendo lido só **depois** do bearer, com limite por IP e por usuário; o teto de cada
+  ferramenta vem do schema dela.
 - **Sem validação do header `Host`** (a spec pede Origin, que fazemos); o proxy do deploy deve só encaminhar o host público.
 - **Sem filtro por IP do ChatGPT** nem mTLS (o ChatGPT oferece mTLS; não usado aqui).
 - **Escopos na renovação:** o `scope` do `/token` por refresh só pode **reduzir**; ampliar exige novo consentimento
