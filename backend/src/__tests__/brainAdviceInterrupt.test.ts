@@ -80,6 +80,8 @@ vi.mock('../agents/brain/skills.js', () => ({
 }));
 
 import { initBrainHandlers, reconnectSession } from '../agents/brain/index';
+import prisma from '../lib/prisma';
+import { hasApprovedText } from '../lib/designerBrain/index';
 import { setAdviceStore, submitAdvice, listAdvice } from '../lib/advice';
 import { setInterruptStore } from '../lib/interrupt';
 import { createMemoryAdviceStore, createMemoryInterruptStore } from './helpers/memoryLiveControl';
@@ -483,6 +485,211 @@ describe('orientações consumidas pelo cérebro', () => {
       expect(h.enqueued).toHaveLength(0);
       expect(tokens()).toContain('marcado como fala, contexto, apoio ou interno');
       expect(h.session.phase).toBe('listening');
+    });
+  });
+
+  describe('cérebro global: o texto interno e a regeneração, pelo caminho do chat', () => {
+    const original = process.env.DESIGNER_BRAIN_BRANDS;
+    const originalGlobal = process.env.DESIGNER_BRAIN_GLOBAL;
+    beforeEach(() => { delete process.env.DESIGNER_BRAIN_BRANDS; delete process.env.DESIGNER_BRAIN_GLOBAL; });
+    afterEach(() => {
+      if (original === undefined) delete process.env.DESIGNER_BRAIN_BRANDS;
+      else process.env.DESIGNER_BRAIN_BRANDS = original;
+      if (originalGlobal === undefined) delete process.env.DESIGNER_BRAIN_GLOBAL;
+      else process.env.DESIGNER_BRAIN_GLOBAL = originalGlobal;
+      vi.mocked(prisma.brand.findUnique).mockReset();
+      vi.mocked(prisma.brand.findUnique).mockResolvedValue(null as never);
+    });
+
+    const bruto = '[APROVADO]\nTITULO\n[INTERNO]\nVALOR-INTERNO\n[NÃO EXIBIR]\nSEGREDO-DO-CLIENTE\n' + 'Texto de apoio longo. '.repeat(60);
+    const roteiro1 = [{ order: 1, title: 'Abertura', goal: 'g', layout_type: 'title-hero', copy: 'TITULO' }];
+    const comFicha = () => vi.mocked(prisma.brand.findUnique).mockResolvedValue({
+      name: 'Marca', kind: 'PROJECT', collab: null, profile: { data: { essence: 'ESSENCIA' } }, parent: null,
+    } as never);
+
+    it('(a) sem ficha, modo automático: o texto de [INTERNO]/[NÃO EXIBIR] não chega ao runPlanner nem à fila', async () => {
+      const planner = await import('../agents/planner/index');
+      vi.mocked(planner.runPlanner).mockResolvedValueOnce(roteiro1);
+      h.session.reviewMode = 'auto';
+      h.streams.push(texto('Vou criar agora [DISPATCH:presentation]'));
+
+      await send(bruto);
+
+      const chamada = vi.mocked(planner.runPlanner).mock.calls.at(-1)![0] as { brief: string; sourceCopy?: string };
+      expect(chamada.brief).toContain('TITULO');
+      expect(JSON.stringify(chamada)).not.toContain('VALOR-INTERNO');
+      expect(JSON.stringify(chamada)).not.toContain('SEGREDO-DO-CLIENTE');
+      expect(h.enqueued).toHaveLength(1);
+      expect(h.enqueued[0].brief).toContain('TITULO');
+      expect(h.enqueued[0].brief).not.toContain('VALOR-INTERNO');
+      expect(h.enqueued[0].brief).not.toContain('SEGREDO-DO-CLIENTE');
+      // A copy segue com as marcas: o pipeline as usa (fala/contexto como orientação) e limpa o resto.
+      expect(h.enqueued[0].sourceCopy).toContain('VALOR-INTERNO');
+    });
+
+    it('(a) sem ficha, modo manual: o pendingPlan e a fila, depois de aprovar o roteiro, também vêm sem o texto interno', async () => {
+      const planner = await import('../agents/planner/index');
+      vi.mocked(planner.runPlanner).mockResolvedValueOnce(roteiro1);
+      h.streams.push(texto('Vou criar agora [DISPATCH:presentation]'));
+
+      await send(bruto);
+
+      const chamada = vi.mocked(planner.runPlanner).mock.calls.at(-1)![0] as { brief: string };
+      expect(chamada.brief).not.toContain('VALOR-INTERNO');
+      expect(h.session.pendingPlan.brief).toContain('TITULO');
+      expect(h.session.pendingPlan.brief).not.toContain('VALOR-INTERNO');
+      expect(h.session.pendingPlan.brief).not.toContain('SEGREDO-DO-CLIENTE');
+      expect(h.enqueued).toHaveLength(0);
+
+      await send('Aprovar roteiro e gerar');
+
+      expect(h.enqueued).toHaveLength(1);
+      expect(h.enqueued[0].brief).not.toContain('VALOR-INTERNO');
+      expect(h.enqueued[0].brief).not.toContain('SEGREDO-DO-CLIENTE');
+    });
+
+    it('(a) texto sem NENHUMA marca passa byte a byte pelo planner, pelo pendingPlan e pela fila', async () => {
+      const planner = await import('../agents/planner/index');
+      vi.mocked(planner.runPlanner).mockResolvedValueOnce(roteiro1);
+      h.streams.push(texto('Vou criar agora [DISPATCH:presentation]'));
+      const livre = 'Título livre\r\n\r\n  Texto com   espaços e [colchetes] no meio.\n' + 'Mais texto corrido. '.repeat(60);
+
+      await send(livre);
+
+      const chamada = vi.mocked(planner.runPlanner).mock.calls.at(-1)![0] as { brief: string };
+      expect(chamada.brief).toBe(livre.trim());
+      expect(h.session.pendingPlan.brief).toBe(livre.trim());
+    });
+
+    it('(a) COM ficha, modo automático: o texto de [INTERNO]/[NÃO EXIBIR] também não chega ao runPlanner nem à fila', async () => {
+      comFicha();
+      const planner = await import('../agents/planner/index');
+      vi.mocked(planner.runPlanner).mockResolvedValueOnce(roteiro1);
+      h.session.reviewMode = 'auto';
+      h.streams.push(texto('Vou criar agora [DISPATCH:presentation]'));
+
+      await send(bruto);
+
+      const chamada = vi.mocked(planner.runPlanner).mock.calls.at(-1)![0] as { brief: string };
+      expect(chamada.brief).toContain('TITULO');
+      expect(JSON.stringify(chamada.brief)).not.toContain('VALOR-INTERNO');
+      expect(JSON.stringify(chamada.brief)).not.toContain('SEGREDO-DO-CLIENTE');
+      expect(h.enqueued).toHaveLength(1);
+      expect(h.enqueued[0].brief).toContain('TITULO');
+      expect(h.enqueued[0].brief).not.toContain('VALOR-INTERNO');
+      expect(h.enqueued[0].brief).not.toContain('SEGREDO-DO-CLIENTE');
+    });
+
+    it('(a) COM ficha, modo manual: o pendingPlan e a fila, depois de aprovar o roteiro, vêm sem o texto interno', async () => {
+      comFicha();
+      const planner = await import('../agents/planner/index');
+      vi.mocked(planner.runPlanner).mockResolvedValueOnce(roteiro1);
+      h.streams.push(texto('Vou criar agora [DISPATCH:presentation]'));
+
+      await send(bruto);
+
+      expect(h.session.pendingPlan.brief).toContain('TITULO');
+      expect(h.session.pendingPlan.brief).not.toContain('VALOR-INTERNO');
+      expect(h.session.pendingPlan.brief).not.toContain('SEGREDO-DO-CLIENTE');
+      await send('Aprovar roteiro e gerar');
+      expect(h.enqueued[0].brief).not.toContain('VALOR-INTERNO');
+      expect(h.enqueued[0].brief).not.toContain('SEGREDO-DO-CLIENTE');
+    });
+
+    it('(a) sem copy colada (fluxo direto), o [INTERNO] de uma mensagem curta também não vai para a fila, com e sem ficha', async () => {
+      for (const ficha of [false, true]) {
+        h.enqueued.length = 0;
+        h.session.messages.length = 0;
+        if (ficha) comFicha();
+        h.streams.push(texto('Vou criar agora [DISPATCH:presentation]'));
+
+        await send('Faça 3 slides.\n[INTERNO]\nORCAMENTO-SECRETO');
+
+        expect(h.enqueued).toHaveLength(1);
+        expect(h.enqueued[0].brief).toContain('Faça 3 slides.');
+        expect(h.enqueued[0].brief).not.toContain('ORCAMENTO-SECRETO');
+      }
+    });
+
+    it('(e) briefing SEM nenhuma marca passa byte a byte também COM ficha (planner, pendingPlan e fila)', async () => {
+      comFicha();
+      const planner = await import('../agents/planner/index');
+      vi.mocked(planner.runPlanner).mockResolvedValueOnce(roteiro1);
+      h.streams.push(texto('Vou criar agora [DISPATCH:presentation]'));
+      const livre = 'Título livre\r\n\r\n  Texto com   espaços e [colchetes] no meio.\n' + 'Mais texto corrido. '.repeat(60);
+
+      await send(livre);
+
+      expect((vi.mocked(planner.runPlanner).mock.calls.at(-1)![0] as { brief: string }).brief).toBe(livre.trim());
+      expect(h.session.pendingPlan.brief).toBe(livre.trim());
+      await send('Aprovar roteiro e gerar');
+      expect(h.enqueued[0].brief).toBe(livre.trim());
+    });
+
+    it('(d) saída de emergência (DESIGNER_BRAIN_GLOBAL=off), sem ficha: o briefing segue sem alteração', async () => {
+      process.env.DESIGNER_BRAIN_GLOBAL = 'off';
+      process.env.DESIGNER_BRAIN_BRANDS = 'marca';
+      const planner = await import('../agents/planner/index');
+      vi.mocked(planner.runPlanner).mockResolvedValueOnce(roteiro1);
+      h.streams.push(texto('Vou criar agora [DISPATCH:presentation]'));
+
+      await send(bruto);
+
+      expect((vi.mocked(planner.runPlanner).mock.calls.at(-1)![0] as { brief: string }).brief).toBe(bruto.trim());
+      expect(h.session.pendingPlan.brief).toBe(bruto.trim());
+    });
+
+    it('(c) regenerar tudo depois de recusar o resultado, sem ficha: enfileira com a copy e o roteiro aprovado, e a trava de texto aprovado não para', async () => {
+      const planner = await import('../agents/planner/index');
+      vi.mocked(planner.runPlanner).mockResolvedValueOnce(roteiro1);
+      h.session.reviewMode = 'auto';
+      h.streams.push(texto('Vou criar agora [DISPATCH:presentation]'));
+      await send(bruto);
+      expect(h.enqueued).toHaveLength(1);
+
+      await h.handlers.get('review:decline')!(S, 'u1', { reason: 'Não gostei do fundo' });
+
+      expect(h.enqueued).toHaveLength(2);
+      const regeneracao = h.enqueued[1];
+      expect(regeneracao.brief).toBe('Não gostei do fundo');
+      expect(regeneracao.sourceCopy).toContain('TITULO');
+      expect(regeneracao.approvedSkeleton).toEqual(roteiro1);
+      // A trava do pipeline (a mesma função) deixa passar: há texto aprovado.
+      expect(hasApprovedText({ sourceCopy: regeneracao.sourceCopy, approvedSkeleton: regeneracao.approvedSkeleton })).toBe(true);
+    });
+
+    it('(c) regenerar tudo sem roteiro aprovado guardado: leva a copy da sessão e o pipeline replaneja a partir dela', async () => {
+      h.session.messages.push({ role: 'user', content: bruto, timestamp: 1 });
+
+      await h.handlers.get('review:decline')!(S, 'u1', { reason: 'refaz' });
+
+      expect(h.enqueued).toHaveLength(1);
+      expect(h.enqueued[0].sourceCopy).toContain('TITULO');
+      expect(h.enqueued[0].approvedSkeleton).toBeUndefined();
+      expect(hasApprovedText({ sourceCopy: h.enqueued[0].sourceCopy })).toBe(true);
+    });
+
+    it('(c) regenerar tudo, COM ficha, também leva a copy e o roteiro aprovado', async () => {
+      comFicha();
+      const planner = await import('../agents/planner/index');
+      vi.mocked(planner.runPlanner).mockResolvedValueOnce(roteiro1);
+      h.session.reviewMode = 'auto';
+      h.streams.push(texto('Vou criar agora [DISPATCH:presentation]'));
+      await send(bruto);
+
+      await h.handlers.get('review:decline')!(S, 'u1', { reason: 'refaz' });
+
+      expect(h.enqueued[1].sourceCopy).toContain('TITULO');
+      expect(h.enqueued[1].approvedSkeleton).toEqual(roteiro1);
+    });
+
+    it('(c) saída de emergência, sem ficha: a regeneração segue como antes (só brief e formato)', async () => {
+      process.env.DESIGNER_BRAIN_GLOBAL = 'off';
+      h.session.messages.push({ role: 'user', content: bruto, timestamp: 1 });
+
+      await h.handlers.get('review:decline')!(S, 'u1', { reason: 'refaz' });
+
+      expect(h.enqueued).toEqual([{ sessionId: S, brief: 'refaz', format: 'presentation' }]);
     });
   });
 

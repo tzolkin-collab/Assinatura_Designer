@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseCopyBlocks, withoutWithheldText } from '../lib/designerBrain/copyBlocks.js';
+import { BRIEF_MESSAGE_SEPARATOR, briefForBrain, parseCopyBlocks, withoutWithheldText } from '../lib/designerBrain/copyBlocks.js';
 
 describe('parseCopyBlocks', () => {
   it('sem marcas: o texto passa intacto e vale como aprovado (nada muda para quem não usa)', () => {
@@ -61,11 +61,16 @@ describe('withoutWithheldText (o interno também sai do briefing da conversa)', 
 
   it('sem nenhuma marca devolve o texto original, byte a byte (inclusive CRLF)', () => {
     const livre = 'Brief\r\n  com   espaços\n[Slide 3] x\n';
-    expect(withoutWithheldText(livre, parseCopyBlocks(livre))).toBe(livre);
+    expect(withoutWithheldText(livre)).toBe(livre);
   });
 
-  it('tira o conteúdo de [INTERNO] e [NÃO EXIBIR] (multilinha e na mesma linha da marca) e deixa o resto', () => {
-    const out = withoutWithheldText(`Faça uma apresentação.\n\n${colado}`, parseCopyBlocks(colado));
+  it('com marcas, mas nenhuma interna, também devolve o texto original, byte a byte', () => {
+    const t = 'Brief\r\n[APROVADO]\r\nTexto   ok\n[FALA] fala\n';
+    expect(withoutWithheldText(t)).toBe(t);
+  });
+
+  it('tira o BLOCO de [INTERNO] e [NÃO EXIBIR] (multilinha e na mesma linha da marca) e deixa o resto', () => {
+    const out = withoutWithheldText(`Faça uma apresentação.\n\n${colado}`);
     expect(out).not.toContain('VALOR-DO-CONTRATO');
     expect(out).not.toContain('SEGUNDA-LINHA');
     expect(out).not.toContain('SEGREDO-INLINE');
@@ -74,15 +79,47 @@ describe('withoutWithheldText (o interno também sai do briefing da conversa)', 
     expect(out).toContain('FALA-OK'); // fala e contexto são orientação, não ficam de fora do briefing
   });
 
-  it('funciona com quebra de linha do Windows (CRLF)', () => {
+  it('funciona com quebra de linha do Windows (CRLF) e preserva o CRLF do que fica', () => {
     const crlfText = colado.replace(/\n/g, '\r\n');
-    const out = withoutWithheldText(crlfText, parseCopyBlocks(crlfText));
+    const out = withoutWithheldText(crlfText);
     expect(out).not.toContain('VALOR-DO-CONTRATO');
     expect(out).not.toContain('SEGUNDA-LINHA');
+    expect(out).toContain('TITULO-APROVADO\r\n');
   });
 
-  it('trecho interno curto demais (menos de 3 caracteres) não é removido, para não estragar o briefing', () => {
-    const src = '[APROVADO]\nTítulo ok\n[INTERNO]\nok';
-    expect(withoutWithheldText(src, parseCopyBlocks(src))).toContain('Título ok');
+  it('remove o bloco, e não o trecho: um trecho curto igual ao interno, em outro lugar, fica', () => {
+    const src = 'Texto ok e nada mais\n[APROVADO]\nTítulo ok\n[INTERNO]\nok';
+    const out = withoutWithheldText(src);
+    expect(out).toBe('Texto ok e nada mais\n[APROVADO]\nTítulo ok');
+  });
+
+  it('o mesmo texto do bloco interno, repetido em OUTRO bloco, só sai do bloco marcado', () => {
+    const src = '[APROVADO]\nPreço de lançamento\n[INTERNO]\nPreço de lançamento';
+    expect(withoutWithheldText(src)).toBe('[APROVADO]\nPreço de lançamento');
+  });
+
+  it('o bloco termina no separador entre mensagens: o pedido seguinte da pessoa não é engolido', () => {
+    const src = `[INTERNO]\nSEGREDO-AQUI\n\n${BRIEF_MESSAGE_SEPARATOR}\nTroque a cor do fundo`;
+    const out = withoutWithheldText(src);
+    expect(out).not.toContain('SEGREDO-AQUI');
+    expect(out).toContain('Troque a cor do fundo');
+    expect(out).toContain(BRIEF_MESSAGE_SEPARATOR);
+  });
+
+  it('é idempotente', () => {
+    const uma = withoutWithheldText(colado);
+    expect(withoutWithheldText(uma)).toBe(uma);
+  });
+});
+
+describe('briefForBrain (ponto único da limpeza do briefing)', () => {
+  const bruto = '[APROVADO]\nTITULO\n[INTERNO]\nSEGREDO';
+
+  it('com o cérebro global ligado limpa, com ou sem ficha (a regra não olha a ficha)', () => {
+    expect(briefForBrain(bruto, true)).not.toContain('SEGREDO');
+  });
+
+  it('na saída de emergência devolve o briefing exatamente como veio', () => {
+    expect(briefForBrain(bruto, false)).toBe(bruto);
   });
 });

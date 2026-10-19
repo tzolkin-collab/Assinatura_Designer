@@ -1,5 +1,5 @@
 // Testes de aceite do cerebro (checklist da Gabriela, secao 10) direto no pipeline, sem chat nem fila.
-// Uso: pnpm exec tsx scripts/aceiteCerebro.ts <t1|t3|t4|t4b|t6|gpt1>. Grava um deck de verdade na marca do cenario
+// Uso: pnpm exec tsx scripts/aceiteCerebro.ts <t1|t3|t4|t4b|t6|gpt1> [sem-cerebro]. Grava um deck de verdade na marca do cenario
 // (banco e Gemini reais; ~US$ 0,40 por execucao). Apague o deck depois.
 import 'dotenv/config';
 import { randomUUID } from 'node:crypto';
@@ -74,7 +74,12 @@ async function main() {
   const id = process.argv[2]!;
   const sc = SCENARIOS[id];
   if (!sc) throw new Error('cenário inválido');
+  // O cérebro é global (padrão): apagar DESIGNER_BRAIN_BRANDS NÃO o desliga mais; ele liga em toda marca, com ou
+  // sem ficha. Para o cenário "sem cérebro" passe `sem-cerebro` como 2o argumento: define DESIGNER_BRAIN_GLOBAL=off
+  // (a saída de emergência; nela uma marca COM ficha ainda liga o cérebro, e sem ficha volta ao caminho antigo).
   delete process.env.DESIGNER_BRAIN_BRANDS;
+  if (process.argv[3] === 'sem-cerebro') process.env.DESIGNER_BRAIN_GLOBAL = 'off';
+  else delete process.env.DESIGNER_BRAIN_GLOBAL;
   const sessionId = randomUUID(), postId = randomUUID();
   await createSession(sessionId, sc.slug, undefined, 'auto');
   const t0 = Date.now();

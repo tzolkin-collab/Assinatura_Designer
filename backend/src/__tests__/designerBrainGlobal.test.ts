@@ -5,7 +5,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const h = vi.hoisted(() => ({
   row: null as Record<string, unknown> | null,
-  fails: false,
+  fails: false as false | true | 'p2021',
   lookups: 0,
 }));
 
@@ -14,7 +14,8 @@ vi.mock('../lib/prisma.js', () => ({
     brand: {
       findUnique: vi.fn(async () => {
         h.lookups++;
-        if (h.fails) throw new Error('relation "BrandProfile" does not exist');
+        if (h.fails === 'p2021') throw Object.assign(new Error('The table `public.BrandProfile` does not exist'), { code: 'P2021' });
+        if (h.fails) throw new Error('Connection terminated unexpectedly');
         return h.row;
       }),
     },
@@ -22,7 +23,10 @@ vi.mock('../lib/prisma.js', () => ({
 }));
 
 import {
+  BrainLayersReadError,
   isBrainActiveForBrand,
+  loadBrainLayers,
+  loadBrainLayersStrict,
   isBrainOnWithoutProfile,
   isGlobalBrainEnabled,
 } from '../lib/designerBrain/index';
@@ -130,5 +134,31 @@ describe('isBrainActiveForBrand (chat/API)', () => {
         }
       }
     }
+  });
+});
+
+describe('leitura da ficha: falha não é "sem ficha" (exceto tabela inexistente)', () => {
+  it('erro genérico: a leitura estrita lança BrainLayersReadError (quem gera para com erro visível)', async () => {
+    h.fails = true;
+    const erro = await loadBrainLayersStrict('marca').catch((e) => e);
+    expect(erro).toBeInstanceOf(BrainLayersReadError);
+    expect(erro.brandSlug).toBe('marca');
+  });
+
+  it('tabela inexistente (Prisma P2021, migration não aplicada): vale como sem ficha, com aviso, sem lançar', async () => {
+    h.fails = 'p2021';
+    await expect(loadBrainLayersStrict('marca')).resolves.toBeNull();
+  });
+
+  it('a versão tolerante (tools MCP) segue devolvendo null nos dois casos, como sempre', async () => {
+    h.fails = true;
+    await expect(loadBrainLayers('marca')).resolves.toBeNull();
+    h.fails = 'p2021';
+    await expect(loadBrainLayers('marca')).resolves.toBeNull();
+  });
+
+  it('sem falha, a estrita devolve a ficha', async () => {
+    h.row = FICHA;
+    expect((await loadBrainLayersStrict('marca'))?.projectProfile).toMatchObject({ essence: 'X' });
   });
 });

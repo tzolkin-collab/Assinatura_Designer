@@ -22,7 +22,7 @@ const h = vi.hoisted(() => {
     synced: [] as any[],
     slideCount: 12,
     savedProfile: null as Record<string, unknown> | null,
-    profileLookupFails: false,
+    profileLookupError: null as unknown,
     withEmptySlot: false,
     brandRow: null as Record<string, unknown> | null,
     agentPrompt: '',
@@ -40,7 +40,7 @@ vi.mock('../lib/prisma.js', () => ({
     asset: { findMany: vi.fn(async () => []) },
     brand: {
       findUnique: vi.fn(async () => {
-        if (h.profileLookupFails) throw new Error('relation "BrandProfile" does not exist');
+        if (h.profileLookupError) throw h.profileLookupError;
         if (h.brandRow) return h.brandRow;
         return h.savedProfile ? { name: 'Marca X', kind: 'BASE', collab: null, profile: { data: h.savedProfile }, parent: null } : null;
       }),
@@ -134,6 +134,8 @@ vi.mock('../lib/generationTracing.js', () => ({
 vi.mock('../lib/queue.js', () => ({ enqueueAssetCapture: vi.fn(async () => {}) }));
 
 import { runPipeline, INTERRUPTED_RUN_PREFIX } from '../agents/pipeline';
+import { openRun } from '../lib/generationTracing';
+import { logger } from '../lib/logger';
 import { setAdviceStore, submitAdvice, listAdvice, type AdviceItem } from '../lib/advice';
 import { setInterruptStore, requestInterrupt, getInterruptState } from '../lib/interrupt';
 import { createMemoryAdviceStore, createMemoryInterruptStore } from './helpers/memoryLiveControl';
@@ -156,6 +158,11 @@ const promptOf = (start: number) => h.prompts.find((p) => p.start === start)!.us
 // O cérebro é global (vale em todo projeto, com ou sem ficha) e uma geração sem texto aprovado para e pede o
 // texto. Estas suítes testam orientações, pausa e interrupção, não a trava de texto: o harness entrega a copy,
 // como a Fábrica entrega, e o cérebro roda de verdade com o padrão ligado.
+/** Prisma P2021: a tabela não existe (migration ainda não aplicada). */
+function tabelaInexistente() {
+  return Object.assign(new Error('The table `public.BrandProfile` does not exist in the current database.'), { code: 'P2021' });
+}
+
 async function rodar() {
   await runPipeline({ sessionId: S, brief: 'Apresentação de teste', format: 'presentation', postId: POST, sourceCopy: 'texto aprovado' });
 }
@@ -167,7 +174,7 @@ async function rodarSemTexto() {
 
 beforeEach(() => {
   h.savedProfile = null;
-  h.profileLookupFails = false;
+  h.profileLookupError = null;
   h.withEmptySlot = false;
   h.brandRow = null;
   h.agentPrompt = '';
@@ -655,7 +662,7 @@ describe('cérebro do Designer com a saída de emergência (DESIGNER_BRAIN_GLOBA
 
   it('banco sem a tabela da ficha: a geração não cai, segue no caminho legado', async () => {
     delete process.env.DESIGNER_BRAIN_BRANDS;
-    h.profileLookupFails = true;
+    h.profileLookupError = tabelaInexistente();
     vi.mocked(runPlanner).mockResolvedValue(roteiro(() => '') as never);
     await rodar();
     const planner = vi.mocked(runPlanner).mock.calls[0]![0] as { brandContext: string };
@@ -876,6 +883,48 @@ describe('cérebro global (padrão): projeto sem ficha passa pelo mesmo cérebro
     expect(wsOf('error')).toHaveLength(0);
   });
 
+  it('(b) sem ficha: o briefing gravado no trace da geração NÃO contém o texto interno', async () => {
+    const bruto = ['[APROVADO]', 'TITULO-APROVADO', '[INTERNO]', 'VALOR-DO-CONTRATO', '[NÃO EXIBIR]', 'SEGREDO-DO-CLIENTE'].join('\n');
+    vi.mocked(openRun).mockClear();
+    await gerar(bruto, `Apresentação de teste\n\n${bruto}`);
+
+    const gravado = vi.mocked(openRun).mock.calls.map((c) => (c[0] as { brief?: string }).brief ?? '');
+    expect(gravado.length).toBeGreaterThan(0);
+    expect(gravado.join('\n')).toContain('TITULO-APROVADO');
+    expect(gravado.join('\n')).not.toContain('VALOR-DO-CONTRATO');
+    expect(gravado.join('\n')).not.toContain('SEGREDO-DO-CLIENTE');
+  });
+
+  it('(b) COM ficha: o briefing gravado no trace e o do planner também vêm sem o texto interno', async () => {
+    h.savedProfile = { essence: 'X' };
+    const bruto = '[APROVADO]\nTITULO-APROVADO\n[INTERNO]\nVALOR-DO-CONTRATO';
+    vi.mocked(openRun).mockClear();
+    await gerar(bruto, `Apresentação de teste\n${bruto}`);
+    const gravado = vi.mocked(openRun).mock.calls.map((c) => (c[0] as { brief?: string }).brief ?? '').join('\n');
+    expect(gravado).toContain('TITULO-APROVADO');
+    expect(gravado).not.toContain('VALOR-DO-CONTRATO');
+    expect(plannerCall().brief).not.toContain('VALOR-DO-CONTRATO');
+  });
+
+  it('(e) COM ficha: briefing sem nenhuma marca passa byte a byte (planner e trace)', async () => {
+    h.savedProfile = { essence: 'X' };
+    const livre = 'Título livre\r\n\r\n  Texto com   espaços\ne [colchetes] no meio.\n';
+    const brief = 'Apresentação de teste\r\n' + livre;
+    vi.mocked(openRun).mockClear();
+    await gerar(livre, brief);
+    expect(plannerCall().brief).toBe(brief);
+    expect(vi.mocked(openRun).mock.calls.map((c) => (c[0] as { brief?: string }).brief)).toContain(brief);
+  });
+
+  it('saída de emergência (DESIGNER_BRAIN_GLOBAL=off): o briefing segue como veio, sem limpeza', async () => {
+    process.env.DESIGNER_BRAIN_GLOBAL = 'off';
+    h.savedProfile = { essence: 'X' };
+    const bruto = '[APROVADO]\nTITULO-APROVADO\n[INTERNO]\nVALOR-DO-CONTRATO';
+    const brief = `Apresentação de teste\n${bruto}`;
+    await gerar(bruto, brief);
+    expect(plannerCall().brief).toBe(brief);
+  });
+
   it('(b) sem ficha e SEM texto aprovado: para e pede o texto, em vez de deixar o modelo inventar', async () => {
     await rodarSemTexto();
 
@@ -914,10 +963,42 @@ describe('cérebro global (padrão): projeto sem ficha passa pelo mesmo cérebro
   });
 
   it('banco sem a tabela da ficha: a geração não cai e segue com o cérebro global (sem ficha)', async () => {
-    h.profileLookupFails = true;
+    h.profileLookupError = tabelaInexistente();
+    const aviso = vi.spyOn(logger, 'warn').mockImplementation(() => {});
     await gerar('texto aprovado');
     expect(wsOf('error')).toHaveLength(0);
     expect(plannerCall().brandContext).toContain(GLOBAL);
+    expect(aviso.mock.calls.map((c) => String(c[0])).join(' | ')).toContain('migration não aplicada');
+    aviso.mockRestore();
+  });
+
+  it('(d) falha de LEITURA da ficha (erro genérico): para com erro visível, sem gerar nada, e registra o erro no log', async () => {
+    h.profileLookupError = new Error('Connection terminated unexpectedly');
+    const erroLog = vi.spyOn(logger, 'error').mockImplementation(() => {});
+    await gerar('texto aprovado');
+
+    const erro = wsOf('error');
+    expect(erro).toHaveLength(1);
+    expect(String(erro[0]!.args[1])).toContain('Não consegui ler a ficha');
+    expect(String(erro[0]!.args[1])).toContain('Tente de novo');
+    expect(vi.mocked(runPlanner)).not.toHaveBeenCalled();
+    expect(h.modelCalls).toBe(0);
+    expect(h.postCreates).toHaveLength(0);
+    expect(h.session.phase).toBe('listening'); // a pessoa tenta de novo na mesma conversa
+    expect(h.session.workerStatus).toBe('idle');
+    expect(erroLog).toHaveBeenCalled();
+    expect(String(erroLog.mock.calls[0]![0])).toContain('ler a ficha');
+    erroLog.mockRestore();
+  });
+
+  it('(d) falha de leitura da ficha também para na saída de emergência: projeto que tem ficha não segue em silêncio', async () => {
+    process.env.DESIGNER_BRAIN_GLOBAL = 'off';
+    h.profileLookupError = new Error('timeout');
+    const erroLog = vi.spyOn(logger, 'error').mockImplementation(() => {});
+    await gerar('texto aprovado');
+    expect(wsOf('error')).toHaveLength(1);
+    expect(vi.mocked(runPlanner)).not.toHaveBeenCalled();
+    erroLog.mockRestore();
   });
 
   it('ficha inválida no banco é ignorada: o projeto segue sem ficha, com o cérebro global', async () => {
@@ -1020,12 +1101,12 @@ describe('cérebro global (padrão): projeto sem ficha passa pelo mesmo cérebro
     expect(vi.mocked(runPlanner)).not.toHaveBeenCalled();
   });
 
-  it('(d) COM ficha: o briefing NÃO é alterado (o texto interno só é retirado do briefing em projeto sem ficha)', async () => {
+  it('(a) COM ficha: o texto interno também sai do briefing (a limpeza vale com ou sem ficha) e a copy segue igual', async () => {
     h.savedProfile = { essence: 'X' };
     const bruto = '[APROVADO]\nTITULO-APROVADO\n[INTERNO]\nVALOR-DO-CONTRATO';
-    const brief = `Apresentação de teste\n${bruto}`;
-    await gerar(bruto, brief);
-    expect(plannerCall().brief).toBe(brief);
+    await gerar(bruto, `Apresentação de teste\n${bruto}`);
+    expect(plannerCall().brief).toContain('TITULO-APROVADO');
+    expect(plannerCall().brief).not.toContain('VALOR-DO-CONTRATO');
     expect(plannerCall().sourceCopy).toBe('TITULO-APROVADO');
   });
 });

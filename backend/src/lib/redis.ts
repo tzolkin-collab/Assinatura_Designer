@@ -120,6 +120,12 @@ export interface FabricaSession {
     attachmentImages?: Array<{ url: string; name: string; role?: 'style-reference' | 'content-asset' }>;
   } | null;
   /**
+   * Último roteiro APROVADO (manual ou automático) que foi para a geração. Fica depois que o pendingPlan
+   * morre para a regeneração total, após recusar o resultado, reaproveitar a estrutura e a copy aprovadas
+   * em vez de partir de um briefing vazio. Zerado quando uma nova geração nasce sem copy.
+   */
+  lastApprovedSkeleton?: Array<{ title: string; goal: string; layout_type: string; order: number; copy?: string }> | null;
+  /**
    * Pausa estratégica (Amostra de Estilo): o pipeline gera apenas o slide 0 e
    * pausa aguardando o usuário aprovar o estilo visual antes de continuar.
    */

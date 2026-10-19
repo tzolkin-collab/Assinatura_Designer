@@ -128,14 +128,14 @@ Origem: `docs/ACABAMENTOS-DESIGNER.md` (21/09) e `docs/PLANO-CONSOLIDACAO.md` (2
 
 ---
 
-## D.1 Como ligar o cérebro para um caso específico
+## D.1 Como o cérebro liga (e a saída de emergência)
 
-O cérebro é opt-in por marca. **Padrão: desligado em todas**, e a geração segue exatamente como antes.
+O cérebro é **global: ligado em todo projeto, com ou sem ficha salva**. Regras globais, regra de foto real, trava de texto aprovado, status por bloco e revisão final valem sempre; a ficha só acrescenta a camada do projeto.
 
-1. Defina a variável de ambiente no backend (e no worker): `DESIGNER_BRAIN_BRANDS=amanda-coelho` (slugs separados por vírgula).
-2. A marca precisa existir com esse slug, com **cores e fontes** cadastradas (elas continuam vindo da configuração da marca, inclusive o carregamento de fonte).
-3. A memória do projeto vem de **"Instruções do agente"** da marca. Se estiver vazia, usa o seed do repositório (`seeds/index.ts`, hoje só `amanda-coelho`). Sem nenhuma das duas, a geração **falha com mensagem clara**, em vez de seguir com as regras erradas.
-4. Para desligar: tirar o slug da lista.
+1. A marca precisa existir com **cores e fontes** cadastradas (elas continuam vindo da configuração da marca, inclusive o carregamento de fonte).
+2. A memória do projeto vem, nesta ordem, da **ficha salva**, de **"Instruções do agente"** da marca e do seed do repositório (`seeds/index.ts`, hoje só `amanda-coelho`). Sem nenhuma das três, a geração **não falha**: usa o resumo do cadastro (diretrizes, cores, fontes) no lugar da memória e avisa a pendência "Memória do projeto-base (ficha do projeto)". A IA não preenche nada que falte.
+3. **Saída de emergência:** `DESIGNER_BRAIN_GLOBAL=off` (também `0`, `false`, `no`) no backend e no worker devolve o comportamento anterior, em que o cérebro só liga com ficha salva ou com o slug em `DESIGNER_BRAIN_BRANDS` (slugs separados por vírgula). Nesse modo, marca sem ficha e fora da lista segue pelo caminho antigo, e uma marca da lista sem memória nenhuma volta a falhar com mensagem clara.
+4. `DESIGNER_BRAIN_BRANDS` só tem efeito com a saída de emergência ligada; com o cérebro global (padrão), apagá-la ou preenchê-la não muda nada.
 
 **O que muda quando ligado:** o artista, o planner e o reviewer recebem global + memória + modo + regra de foto + revisão no lugar das diretrizes legadas; o resolver não gera foto nem usa Unsplash; o chat não oferece IA/Remix/Unsplash; o que o chat "aprendeu" não reescreve a memória.
 

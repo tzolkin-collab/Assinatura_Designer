@@ -26,7 +26,7 @@ import { buildMessageParts } from '../../lib/chatMessageParts.js';
 import { uploadChatAttachments } from '../../lib/chatAttachments.js';
 import { BRAIN_SYSTEM_PROMPT, DESIGNER_BRAIN_CHAT_NOTE, PHOTO_RULE_CHAT_NOTE } from './prompts.js';
 import { COPY_MIN_CHARS, dropStrayTagFragments, isPastedCopy } from './entradaChat.js';
-import { isBrainActiveForBrand, parseCopyBlocks } from '../../lib/designerBrain/index.js';
+import { BRIEF_MESSAGE_SEPARATOR, briefForBrain, isBrainActiveForBrand, parseCopyBlocks } from '../../lib/designerBrain/index.js';
 import prisma from '../../lib/prisma.js';
 import { executeTool } from '../tools/index.js';
 import { mergeSlidesIntoPost, persistPostContent } from '../../lib/postHelper.js';
@@ -285,7 +285,7 @@ async function planAndAskApproval(
     });
 
     if (session.reviewMode === 'auto') {
-      await updateSession(sessionId, { phase: 'ready', workerStatus: 'running', activeQuestion: null });
+      await updateSession(sessionId, { phase: 'ready', workerStatus: 'running', activeQuestion: null, lastApprovedSkeleton: skeleton });
       const atual = await getSession(sessionId);
       if (atual) emitSessionState(sessionId, atual);
       ws.token(sessionId, '\n\nRoteiro montado e aprovado automaticamente — iniciando a geração.\n');
@@ -426,10 +426,20 @@ export function initBrainHandlers(): void {
       const updated = await getSession(sessionId);
       if (updated) emitSessionState(sessionId, updated);
       ws.token(sessionId, '\n\nEntendido, vou corrigir. Um momento...');
+      // Reaproveita a copy já enviada na sessão e o roteiro aprovado, quando existem: com o cérebro global a
+      // geração só roda com texto aprovado, e sem eles a pessoa receberia "só gera com texto aprovado" embora
+      // já tenha mandado a copy. O pipeline faz a mesma limpeza de [INTERNO]/[NÃO EXIBIR] que na 1a geração.
+      // Só com o cérebro ligado para a marca (o padrão, com ou sem ficha): na saída de emergência
+      // (DESIGNER_BRAIN_GLOBAL=off) sem ficha, a regeneração segue exatamente como antes.
+      const brainOn = await isBrainActiveForBrand(session.brandSlug);
+      const sourceCopy = brainOn ? extractSourceCopy(session.messages) : undefined;
+      const approvedSkeleton = brainOn && session.lastApprovedSkeleton?.length ? session.lastApprovedSkeleton : undefined;
       await enqueuePipelineOrFailSession({
         sessionId,
         brief,
         format: 'presentation',
+        ...(sourceCopy ? { sourceCopy } : {}),
+        ...(approvedSkeleton ? { approvedSkeleton } : {}),
       }, 'regeneração após recusa');
     };
 
@@ -750,7 +760,7 @@ async function handleUserMessageInner(
     const aprovou = msg.toLowerCase() === APROVAR_ROTEIRO_LABEL.toLowerCase()
       || /^(aprovado|aprovo|aprovar|pode gerar|gera|manda ver|perfeito,? pode gerar)[.!]?$/i.test(msg);
     if (aprovou) {
-      await updateSession(sessionId, { pendingPlan: null, activeQuestion: null, phase: 'ready', workerStatus: 'running' });
+      await updateSession(sessionId, { pendingPlan: null, activeQuestion: null, phase: 'ready', workerStatus: 'running', lastApprovedSkeleton: plan.skeleton });
       const aprovada = await getSession(sessionId);
       if (aprovada) emitSessionState(sessionId, aprovada);
       ws.token(sessionId, '\nRoteiro aprovado — gerando o deck inteiro agora, sem mais pausas.\n');
@@ -1227,11 +1237,15 @@ async function executeDispatch(
   }
 
   // Concatena as intenções do usuário para formar o brief completo (essencial para edições)
-  const fullBrief = session.messages
+  const rawBrief = session.messages
     // O clique na pergunta da regra de foto real é uma resposta de controle, não um pedido de design.
     .filter(m => m.role === 'user' && ![PHOTO_RULE_CONFIRM_LABEL, PHOTO_RULE_ACTIVATE_LABEL].includes(m.content.trim()))
     .map(m => m.content)
-    .join('\n\n[Nova solicitação de edição]:\n');
+    .join(`\n\n${BRIEF_MESSAGE_SEPARATOR}\n`);
+  // O briefing carrega a mensagem colada inteira. Com o cérebro global (com ou sem ficha) o [INTERNO] e o
+  // [NÃO EXIBIR] saem dele AQUI, num ponto só, antes de chegar ao planner, ao pendingPlan e à fila, tanto no
+  // fluxo com copy quanto no direto. O pipeline repete a mesma limpeza (briefForBrain) por segurança.
+  const fullBrief = briefForBrain(rawBrief);
 
   // Fotos anexadas na conversa (já com URL do R2, ver handleUserMessageInner) —
   // o artista passa a poder usá-las de verdade no deck, igual um asset da marca.
@@ -1257,7 +1271,8 @@ async function executeDispatch(
     return;
   }
 
-  await updateSession(sessionId, { phase: 'ready', workerStatus: 'running', activeQuestion: null });
+  // Sem copy não há roteiro aprovado: o que sobrou de uma geração anterior não vale para esta.
+  await updateSession(sessionId, { phase: 'ready', workerStatus: 'running', activeQuestion: null, lastApprovedSkeleton: null });
   const updated = await getSession(sessionId);
   if (updated) emitSessionState(sessionId, updated);
 
