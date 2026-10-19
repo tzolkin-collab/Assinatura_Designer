@@ -20,6 +20,7 @@ import {
   type ProjectBrand,
   type ProjectProfileResponse,
 } from '@/lib/projectOverview';
+import { deferLoad } from '@/lib/deferLoad';
 import styles from './project-overview.module.css';
 
 interface RecentPost {
@@ -91,10 +92,9 @@ export default function ProjectOverviewPage() {
   }, [slug]);
 
   useEffect(() => {
-    const id = requestAnimationFrame(() => {
+    return deferLoad(() => {
       void load();
     });
-    return () => cancelAnimationFrame(id);
   }, [load]);
 
   if (loading) return <div className={styles.state}>Carregando projeto...</div>;

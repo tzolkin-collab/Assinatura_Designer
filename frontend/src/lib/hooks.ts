@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from './api';
 import { brandPostsPath } from './brandPostsPath';
+import { deferLoad } from './deferLoad';
 
 export type Brand = {
   id: string;
@@ -54,8 +55,7 @@ export function useAuth() {
   useEffect(() => {
     const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
     if (!token) {
-      const id = requestAnimationFrame(() => setLoading(false));
-      return () => cancelAnimationFrame(id);
+      return deferLoad(() => setLoading(false));
     }
 
     api.get<User>('/auth/me')
@@ -189,12 +189,8 @@ export function useAiUsage(slug: string) {
       .finally(() => setLoading(false));
   }, [slug]);
 
-  // rAF adia o setState para fora do corpo do efeito (evita cascading renders) — mesmo
-  // padrão de useBrandPosts.
-  useEffect(() => {
-    const id = requestAnimationFrame(fetchUsage);
-    return () => cancelAnimationFrame(id);
-  }, [fetchUsage]);
+  // Adia o setState para fora do corpo do efeito (evita cascading renders), sem rAF: ver deferLoad.
+  useEffect(() => deferLoad(fetchUsage), [fetchUsage]);
 
   return { usage, loading, error, refresh: fetchUsage };
 }
@@ -206,7 +202,7 @@ export function useAiBilling(slug: string, month?: string) {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    const id = requestAnimationFrame(() => {
+    return deferLoad(() => {
       if (!slug) { setLoading(false); return; }
       setLoading(true);
       const qs = month ? `?month=${encodeURIComponent(month)}` : '';
@@ -215,7 +211,6 @@ export function useAiBilling(slug: string, month?: string) {
         .catch((err: unknown) => setError(getErrorMessage(err)))
         .finally(() => setLoading(false));
     });
-    return () => cancelAnimationFrame(id);
   }, [slug, month]);
 
   return { billing, loading, error };
@@ -241,10 +236,7 @@ export function useBrandPosts(slug: string, options: BrandPostsOptions = {}) {
       .finally(() => setLoading(false));
   }, [slug, path]);
 
-  useEffect(() => {
-    const id = requestAnimationFrame(fetchPosts);
-    return () => cancelAnimationFrame(id);
-  }, [fetchPosts]);
+  useEffect(() => deferLoad(fetchPosts), [fetchPosts]);
 
   // Auto-refresh enquanto algum post estiver GENERATING (ex.: recém-criado na
   // Fábrica) — antes só aparecia como READY após reload manual. Faz um fetch
