@@ -5,7 +5,6 @@ import Link from 'next/link';
 import { 
   User as UserIcon, 
   PlugZap, 
-  Building2, 
   ChevronRight, 
   ArrowLeft,
   Loader2,
@@ -85,13 +84,6 @@ export default function GlobalSettingsPage() {
         description: 'Visualize o consumo de tokens e custos estimados consolidados de todas as marcas.',
         icon: <BarChart3 size={20} />,
         href: '/configuracoes/billing'
-      },
-      {
-        key: 'tenants',
-        label: 'Gestão de Tenants',
-        description: 'Gerencie marcas ativas no sistema, veja membros associados e crie novos tenants.',
-        icon: <Building2 size={20} />,
-        href: '/configuracoes/tenants'
       }
     );
   }

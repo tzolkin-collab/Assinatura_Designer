@@ -240,13 +240,7 @@
   border-color: rgb(220, 38, 38);
 }
 
-/* Tenant management tab */
-.tenantTableHeader {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 16px;
-}
+/* Tabela de gastos (Gastos de IA Globais) */
 
 .tenantTable {
   width: 100%;
@@ -274,45 +268,6 @@
 
 .tenantRow:hover {
   background-color: #fafaf9;
-}
-
-.tenantNameCol {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.tenantColorBadge {
-  width: 12px;
-  height: 12px;
-  border-radius: var(--radius-full);
-}
-
-.tenantActionsCol {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-}
-
-.memberBadge {
-  display: inline-block;
-  padding: 2px 6px;
-  font-size: 10px;
-  font-weight: 600;
-  background-color: #f3f4f6;
-  color: #374151;
-  border-radius: var(--radius-sm);
-  margin-right: 4px;
-}
-
-.memberBadge[data-role='OWNER'] {
-  background-color: #fef3c7;
-  color: #d97706;
-}
-
-.memberBadge[data-role='ADMIN'] {
-  background-color: #dbeafe;
-  color: #2563eb;
 }
 
 .msgSuccess {
