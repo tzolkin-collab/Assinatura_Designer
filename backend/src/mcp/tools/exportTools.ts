@@ -11,6 +11,7 @@ import {
   type ExportablePost,
   type ExportStatus,
 } from '../../lib/exportJobs.js';
+import { draftRefusal, readFinalGate } from '../../lib/designerBrain/finalGate.js';
 import { EDITORS } from '../../middleware/brandAccess.js';
 import { consumeRateLimit, type RateLimitPolicy } from '../../middleware/rateLimit.js';
 import { EXPORT_SCOPE } from '../config.js';
@@ -56,6 +57,23 @@ async function loadExportable(ctx: McpCallContext, id: string): Promise<Exportab
 }
 
 /** Erro 4xx de domínio da lib vira frase para o agente; o resto segue como erro interno (sem detalhe). */
+/**
+ * Porta de "final" (a mesma do app): peça com texto em revisão não sai como entrega sem o usuário confirmar que é
+ * rascunho. O agente só passa `confirmarRascunho` depois de o USUÁRIO ter dito isso; a recusa explica o motivo.
+ */
+function assertDeliverable(post: ExportablePost, action: string, confirmarRascunho?: boolean): void {
+  const gate = readFinalGate((post as { content?: unknown }).content);
+  if (!gate || gate.blocking.length === 0 || confirmarRascunho) return;
+  throw new ToolUserError(draftRefusal(gate, action), 'draft_not_final');
+}
+
+const confirmarRascunho = z
+  .boolean()
+  .optional()
+  .describe(
+    'Passe true SÓ se o usuário disse, nesta conversa, que quer entregar mesmo como rascunho (a peça tem texto em revisão). Sem isso, a exportação é recusada com o motivo.',
+  );
+
 function asToolError(err: unknown, code: string): never {
   const status = (err as { statusCode?: number }).statusCode;
   if (err instanceof Error && status !== undefined && status >= 400 && status < 500) throw new ToolUserError(err.message, code);
@@ -79,6 +97,7 @@ const fileInput = {
   format: z
     .enum(FORMATS)
     .describe('pdf (texto de verdade, não imagem), zip (um PNG por slide), pptx (editável: texto continua texto) ou html.'),
+  confirmarRascunho,
 };
 
 const requestOutput = {
@@ -104,6 +123,7 @@ export const exportFileTool: McpToolDefinition<typeof fileInput, typeof requestO
   async handler(ctx, args) {
     await throttle(ctx);
     const post = await loadExportable(ctx, args.postId);
+    assertDeliverable(post, 'exportar', args.confirmarRascunho);
     let requested;
     try {
       requested = await requestDeckExport(post, ctx.userId, args.format);
@@ -195,6 +215,7 @@ const canvaInput = {
     .max(60)
     .optional()
     .describe('Só no modo png: exporta apenas este slide (a partir de 1). Sem ele, o deck inteiro. No pptx o deck sempre vai inteiro.'),
+  confirmarRascunho,
 };
 
 const canvaRequestOutput = {
@@ -225,6 +246,7 @@ export const exportToCanvaTool: McpToolDefinition<typeof canvaInput, typeof canv
     }
     await throttle(ctx);
     const post = await loadExportable(ctx, args.postId);
+    assertDeliverable(post, 'exportar para o Canva', args.confirmarRascunho);
     const mode = args.mode ?? 'png';
 
     let requested;

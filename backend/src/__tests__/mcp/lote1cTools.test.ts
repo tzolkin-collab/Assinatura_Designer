@@ -348,3 +348,55 @@ describe('get_canva_export_status', () => {
     expect(readCanvaExportStatus).toHaveBeenCalledWith('job-canva-1', 'user-1', POST);
   });
 });
+
+describe('porta de rascunho nas exportações (texto em revisão)', () => {
+  const rascunho = {
+    ...post,
+    content: { kind: 'html-design', finalGate: { blocking: ['Há texto marcado como "em revisão".'], notes: [] } },
+  };
+  beforeEach(() => {
+    prismaMock.post.findFirst.mockResolvedValue(rascunho as never);
+  });
+
+  it('export_file recusa, explica o motivo e não enfileira', async () => {
+    const flow = await asExporter();
+    const r = result(await mcpPost(h.app, flow.accessToken, callTool('export_file', { brandSlug: 'marca-a', postId: POST, format: 'pdf' })));
+    expect(r.isError).toBe(true);
+    expect(r.content[0]!.text).toContain('em revisão');
+    expect(r.content[0]!.text).toContain('confirmarRascunho');
+    expect(requestDeckExport).not.toHaveBeenCalled();
+  });
+
+  it('export_file com confirmarRascunho entrega como rascunho', async () => {
+    const flow = await asExporter();
+    const r = result(
+      await mcpPost(h.app, flow.accessToken, callTool('export_file', { brandSlug: 'marca-a', postId: POST, format: 'pdf', confirmarRascunho: true })),
+    );
+    expect(r.isError).toBeFalsy();
+    expect(requestDeckExport).toHaveBeenCalledTimes(1);
+  });
+
+  it('export_to_canva recusa antes de pedir a exportação', async () => {
+    const flow = await asExporter();
+    const r = result(await mcpPost(h.app, flow.accessToken, callTool('export_to_canva', { brandSlug: 'marca-a', postId: POST })));
+    expect(r.isError).toBe(true);
+    expect(r.content[0]!.text).toContain('em revisão');
+    expect(requestCanvaExport).not.toHaveBeenCalled();
+  });
+
+  it('export_to_canva com confirmarRascunho segue', async () => {
+    const flow = await asExporter();
+    const r = result(
+      await mcpPost(h.app, flow.accessToken, callTool('export_to_canva', { brandSlug: 'marca-a', postId: POST, confirmarRascunho: true })),
+    );
+    expect(r.isError).toBeFalsy();
+    expect(requestCanvaExport).toHaveBeenCalledTimes(1);
+  });
+
+  it('só notas (sem bloqueio) não impedem a exportação', async () => {
+    prismaMock.post.findFirst.mockResolvedValue({ ...post, content: { finalGate: { blocking: [], notes: ['Falta definir: x.'] } } } as never);
+    const flow = await asExporter();
+    const r = result(await mcpPost(h.app, flow.accessToken, callTool('export_file', { brandSlug: 'marca-a', postId: POST, format: 'zip' })));
+    expect(r.isError).toBeFalsy();
+  });
+});
