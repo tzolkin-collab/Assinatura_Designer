@@ -7,6 +7,38 @@ import type { AuthRequest } from './auth.js';
 // contrário de um contador em memória). Usado para frear brute-force em
 // login/registro. Fail-open: se o Redis estiver fora, NÃO bloqueia requisições
 // legítimas — segurança não deve derrubar o login por indisponibilidade da fila.
+export interface RateLimitPolicy {
+  windowSec: number;
+  max: number;
+  keyPrefix: string;
+}
+
+/**
+ * Consome UMA unidade do balde `ratelimit:<prefixo>:<identidade>` e diz se ainda cabe. É o miolo do middleware
+ * abaixo, exposto para quem não passa por rota HTTP (ferramentas MCP) dividir o MESMO balde — o orçamento de
+ * sanitização de SVG é do processo inteiro, e uma conta não pode furá-lo entrando por outra porta.
+ * Fail-open, como o middleware: Redis fora não bloqueia ninguém.
+ */
+export async function consumeRateLimit(
+  policy: RateLimitPolicy,
+  identity: string,
+): Promise<{ allowed: boolean; retryAfterSec: number }> {
+  try {
+    const key = `ratelimit:${policy.keyPrefix}:${identity}`;
+    const count = await redis.incr(key);
+    if (count === 1) {
+      await redis.expire(key, policy.windowSec);
+    }
+    if (count > policy.max) {
+      const ttl = await redis.ttl(key);
+      return { allowed: false, retryAfterSec: ttl > 0 ? ttl : policy.windowSec };
+    }
+    return { allowed: true, retryAfterSec: 0 };
+  } catch {
+    return { allowed: true, retryAfterSec: 0 };
+  }
+}
+
 export function rateLimit(opts: { windowSec: number; max: number; keyPrefix: string; keyBy?: 'ip' | 'user' }) {
   const { windowSec, max, keyPrefix, keyBy = 'ip' } = opts;
 

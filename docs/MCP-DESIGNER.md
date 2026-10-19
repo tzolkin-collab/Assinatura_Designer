@@ -159,6 +159,12 @@ corrigir e tentar de novo. A decisão que passa consome o pedido (uso único, at
 | `designer.read` | listar e ler | qualquer membro (VIEWER+) |
 | `designer.write` | criar peças e atualizar **as que a própria conexão criou** (e **inclui** leitura) | EDITOR+ |
 | `designer.edit_all` | além disso, **sobrescrever qualquer apresentação ou carrossel** das marcas autorizadas (e **inclui** escrita e leitura) | EDITOR+ |
+| `designer.export` | **exportar** uma peça (PDF, ZIP de PNGs, PPTX, HTML) e enviá-la ao Canva do usuário. **Independente**: não inclui leitura nem escrita e não é incluído por elas | qualquer membro (Canva: EDITOR+, conferido na ferramenta) |
+
+`designer.export` é uma saída do Designer (o arquivo vira um link, o Canva recebe um design) e consome servidor, por isso
+tem escopo próprio e limite de taxa. Na tela de consentimento é um quadro à parte, **desmarcado** por padrão ("Permitir
+exportar peças"); o token traz `designer.export` junto do escopo de acesso escolhido, e a lista de conexões mostra
+"· pode exportar". Sem ele, as quatro ferramentas continuam listadas, mas a chamada é recusada com `insufficient_scope`.
 
 `designer.edit_all` é opcional e só existe se o cliente o pedir no `/authorize`; o usuário pode rebaixá-lo na tela para
 `designer.write` ou leitura. Antes de sobrescrever uma peça que não é da conexão, `save_presentation` congela a versão
@@ -198,7 +204,20 @@ topo do descritor **e** em `_meta.securitySchemes`, como pede o Apps SDK.
 | `list_designs(brandSlug, limit?)` | `designer.read` | Peças da marca (mais recentes primeiro) com link do editor. |
 | `get_design(brandSlug, postId, includeSource?)` | `designer.read` | Texto visível por slide e, com `includeSource`, o HTML/CSS (para continuar ou ajustar). |
 | `save_presentation(brandSlug, slides[], …, postId?)` | `designer.write` | Salva uma peça que o agente desenhou: sanitiza o HTML, confere o texto de cada slide contra o `approvedText`, normaliza as áreas de foto, embute as fontes próprias e cria a peça no editor. Devolve `issues` por slide. Com `postId` atualiza **só** a peça que o mesmo usuário criou por MCP — ou, com `designer.edit_all`, qualquer apresentação/carrossel da marca (congelando a versão anterior antes). |
-| `pause_generation`, exportação (Canva/PDF), upload de foto, edição pontual de slide | `designer.write` | planejadas. |
+| `get_brand_profile(brandSlug)` | `designer.read` | A ficha do Cérebro (essência, tom, paleta com função, tipografia, logos, direção de arte, foto real, o que nunca fazer) e o que falta preencher. `derived: true` quando a marca ainda não salvou ficha. |
+| `list_assets(brandSlug, query?, tag?, source?, imagesOnly?, limit?)` | `designer.read` | Arquivos reais da biblioteca (e, num collab, os do projeto-base) com a URL exata. **Nunca** devolve imagem gerada por IA. |
+| `list_versions(brandSlug, postId, limit?)` | `designer.read` | Histórico da peça (id, rótulo, origem, nº de slides). Sem o conteúdo da versão. |
+| `update_slide(brandSlug, postId, slide, html, css?, approvedText?)` | `designer.write` | Troca o HTML/CSS de **um** slide (número a partir de 1). Sanitiza no servidor (a mesma porta do editor, `lib/slideEdit.ts`), guarda a versão anterior e, com `approvedText`, confere o texto. Mesma regra de dono do `save_presentation`: peça criada por MCP, ou qualquer apresentação/carrossel com `designer.edit_all`. |
+| `create_version(brandSlug, postId, label?)` | `designer.write` | Marca um ponto de retorno. `created: false` quando nada mudou. |
+| `restore_version(brandSlug, postId, versionId)` | `designer.write` | Volta a peça a uma versão (`destructiveHint: true`); o estado atual vira uma versão antes. |
+| `get_photo_slots(brandSlug, postId, slide)` | `designer.read` | Espaços de foto (`data-photo-slot`) de um slide: vazio/preenchido, URL, enquadramento e ajuste. |
+| `set_slide_photo(brandSlug, postId, slide, slot, assetUrl?, position?, fit?)` | `designer.write` | Coloca/troca (`assetUrl`), esvazia (`null`) ou reenquadra a foto de um espaço, **só** com arquivo de `list_assets` (biblioteca da marca e, num collab, a do projeto-base). Foto nova é enquadrada pelo assunto; a versão anterior é guardada. Lógica em `lib/slidePhoto.ts`, a mesma do editor. |
+| `upload_asset(brandSlug, fileName, mimeType, dataBase64, tags?)` | `designer.write` | Guarda uma imagem (png, jpeg, webp, gif, avif, svg) até 10 MB na biblioteca e devolve a URL. SVG é higienizado; raster precisa ser lido como imagem de verdade. Divide o orçamento de sanitização por conta das rotas HTTP (`SVG_SANITIZE_RATE_LIMIT`). Lógica em `lib/assetStore.ts`, a mesma do upload da tela de mídia. |
+| `get_integrations_status()` | `designer.read` | Se o usuário conectou Canva, Drive e Asana (sim/não e validade do Canva). Nunca devolve token. |
+| `export_file(brandSlug, postId, format)` | `designer.export` | Pede a exportação de um deck como `pdf`, `zip` (um PNG por slide), `pptx` (editável) ou `html`. Assíncrono: devolve `jobId` (nenhuma chamada espera o render). Só decks de slides. Limite de 6 pedidos por minuto por conta (arquivo e Canva dividem o balde). Lógica em `lib/exportJobs.ts`, a mesma das rotas do editor. |
+| `get_export_status(brandSlug, postId, jobId)` | `designer.export` | Andamento: `queued`, `running` (slides prontos/total), `done` (com `downloadUrl`) ou `failed`. Só quem pediu o job o vê. O link só chega se for do nosso storage; falha do worker vira frase genérica (o detalhe vai para o log). |
+| `export_to_canva(brandSlug, postId, mode?, slide?)` | `designer.export` | Envia a peça para o Canva **do usuário** que conectou (`png`, um design por slide ou um para o deck; ou `pptx`, editável). Exige Canva conectado e papel **EDITOR+** na marca. Assíncrono, mesmo limite de taxa. |
+| `get_canva_export_status(brandSlug, postId, jobId)` | `designer.export` | Andamento do envio ao Canva e, pronto, o link do design. Só quem pediu o job o vê. |
 
 Todas as chamadas terminam em segundos (não há geração longa do nosso lado), o que evita o limite de ~60 s que os clientes
 costumam impor a uma chamada de ferramenta.
@@ -296,6 +315,9 @@ conteúdo.** Falha ao gravar vira aviso no log e não derruba a chamada. A API d
   só membros logados aprovam.
 - **Refresh deslizante:** cada rotação renova 30 dias; não há teto absoluto de vida da conexão (o usuário/admin revoga em
   `/api/mcp/connections`).
+- **Corpo de `/mcp` até 15 MB** (era 1 MB): `upload_asset` leva a imagem em base64 (10 MB decodificados são ~13,4 MB) e um deck de
+  30 slides já passava de 1 MB. O corpo continua sendo lido só **depois** do bearer, com limite por IP e por usuário; o teto de cada
+  ferramenta vem do schema dela.
 - **Sem validação do header `Host`** (a spec pede Origin, que fazemos); o proxy do deploy deve só encaminhar o host público.
 - **Sem filtro por IP do ChatGPT** nem mTLS (o ChatGPT oferece mTLS; não usado aqui).
 - **Escopos na renovação:** o `scope` do `/token` por refresh só pode **reduzir**; ampliar exige novo consentimento

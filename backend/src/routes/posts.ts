@@ -8,7 +8,7 @@ import { AuthRequest } from '../middleware/auth.js';
 import { brandMemberFilter, ANY_MEMBER, EDITORS, FORBIDDEN_MESSAGE } from '../middleware/brandAccess.js';
 import { estimatePostCost, isPostInProgress } from '../lib/generationCost.js';
 import { renderHtmlToPng } from '../lib/htmlRaster.js';
-import { buildSlideDocument, editHtmlSlide, sanitizeSlideHtml, sanitizeSlideCss } from '../lib/htmlDesign.js';
+import { buildSlideDocument, editHtmlSlide } from '../lib/htmlDesign.js';
 import { GoogleGenAI } from '@google/genai';
 import { config } from '../config.js';
 import { generateWithRetry } from '../lib/geminiRetry.js';
@@ -16,12 +16,14 @@ import { extractJsonObject } from '../lib/jsonHelper.js';
 import { resolveBrandContext } from '../lib/brandContext.js';
 import { mergeSlidesIntoPost, syncPostSlides } from '../lib/postHelper.js';
 import { snapshotPost, restorePostVersion } from '../lib/postVersions.js';
+import { applySlideCode } from '../lib/slideEdit.js';
+import { applySlidePhoto } from '../lib/slidePhoto.js';
+import { CanvaNotConnectedError, readCanvaExportStatus, readDeckExportStatus, requestCanvaExport, requestDeckExport, type ExportablePost } from '../lib/exportJobs.js';
 import { withServerOwnedMcp } from '../lib/mcpOwnership.js';
 import { readFinalGate, draftRefusal, withServerOwnedFinalGate } from '../lib/designerBrain/finalGate.js';
-import { listPhotoSlots, setPhotoInSlot, PhotoSlotNotFoundError } from '../lib/photoSlot.js';
-import { analyzePhoto, frameFromAnalysis, measureSlotAspect } from '../lib/photoFraming.js';
+import { listPhotoSlots } from '../lib/photoSlot.js';
 import { enrichAiContext } from '../lib/aiContext.js';
-import { enqueueCanvaExport, canvaExportQueue, enqueueDeckExport, deckExportQueue } from '../lib/queue.js';
+import { deckExportQueue } from '../lib/queue.js';
 import { publishPost, unpublishPost, type HostingConfig } from '../lib/presentationHosting.js';
 import { setChatEnabled } from '../lib/presentationChat.js';
 import { z } from 'zod';
@@ -196,46 +198,23 @@ postsRouter.put('/:id/slides/:index/code', async (req: AuthRequest, res: Respons
     const { html, css } = (req.body ?? {}) as { html?: string; css?: string };
     if (typeof html !== 'string' || !html.trim()) throw createError(400, 'html é obrigatório');
 
-    const post = await prisma.post.findFirst({
+    // Autorização aqui; a escrita (sanitiza + snapshot + grava) é de lib/slideEdit.ts, a mesma do MCP.
+    const allowed = await prisma.post.findFirst({
       where: { id, brand: brandMemberFilter(req.user?.userId, EDITORS) },
-      include: { slides: { orderBy: { position: 'asc' } } },
+      select: { id: true },
     });
-    if (!post) throw createError(404, 'Post não encontrado');
+    if (!allowed) throw createError(404, 'Post não encontrado');
 
-    const content = mergeSlidesIntoPost(post).content as unknown as {
-      kind?: string;
-      width?: number;
-      height?: number;
-      fonts?: string[];
-      slides?: Array<{ html: string; css?: string }>;
-    };
-    if (content?.kind !== 'html-design' || !Array.isArray(content.slides)) {
-      throw createError(400, 'Edição de código disponível apenas para designs html-design');
-    }
-    if (idx >= content.slides.length) throw createError(400, 'slide fora do limite');
-
-    // Sanitização server-side: NUNCA confiar no que veio do cliente.
-    const clean = { html: sanitizeSlideHtml(html), css: css ? sanitizeSlideCss(css) : undefined };
-    if (!clean.html.trim()) throw createError(400, 'html ficou vazio após a sanitização');
-
-    await snapshotPost(post.id, {
-      source: 'EDITOR',
-      label: `Antes da edição de código do slide ${idx + 1}`,
+    const { slideIndex, slide } = await applySlideCode({
+      postId: id,
+      index: idx,
+      html,
+      css,
       userId: req.user?.userId,
+      source: 'EDITOR',
     });
 
-    const existingSlide = post.slides.find((s) => s.position === idx);
-    if (!existingSlide) throw createError(404, 'Slide não encontrado na tabela relacional');
-    await prisma.slide.update({
-      where: { id: existingSlide.id },
-      data: {
-        contentJson: clean as unknown as Prisma.InputJsonValue,
-        htmlRender: buildSlideDocument(clean, content.fonts ?? ['Inter'], content.width ?? 1080, content.height ?? 1080),
-      },
-    });
-    await prisma.post.update({ where: { id: post.id }, data: { updatedAt: new Date() } });
-
-    res.json({ data: { slideIndex: idx, slide: clean } });
+    res.json({ data: { slideIndex, slide } });
   } catch (error) {
     next(error);
   }
@@ -288,97 +267,26 @@ postsRouter.put('/:id/slides/:index/photo', async (req: AuthRequest, res: Respon
     const idx = Math.max(0, parseInt(req.params.index as string, 10) || 0);
     const body = parseBody(photoSlotSchema, req.body ?? {});
 
-    const post = await prisma.post.findFirst({
+    // Autorização aqui; a troca da foto (biblioteca da marca, enquadramento, sanitização, snapshot) é de
+    // lib/slidePhoto.ts, a mesma do MCP.
+    const allowed = await prisma.post.findFirst({
       where: { id, brand: brandMemberFilter(req.user?.userId, EDITORS) },
-      include: { slides: { orderBy: { position: 'asc' } } },
+      select: { id: true },
     });
-    if (!post) throw createError(404, 'Post não encontrado');
+    if (!allowed) throw createError(404, 'Post não encontrado');
 
-    const content = mergeSlidesIntoPost(post).content as unknown as HtmlSlideContent;
-    if (content?.kind !== 'html-design' || !Array.isArray(content.slides)) {
-      throw createError(400, 'Troca de foto disponível apenas para designs html-design');
-    }
-    const current = content.slides[idx];
-    if (!current) throw createError(400, 'slide fora do limite');
-
-    const atual = listPhotoSlots(current.html).find((s) => s.slot === body.slot);
-
-    let placement: Parameters<typeof setPhotoInSlot>[2];
-    // Como o enquadramento foi decidido: a tela usa para avisar a pessoa.
-    let framing: { mode: 'manual' | 'kept' | 'auto' | 'center'; faceVisible?: number | null } = { mode: 'manual' };
-    if (body.assetUrl === null) {
-      placement = null;
-    } else if (typeof body.assetUrl === 'string') {
-      // Só foto da biblioteca DESTA marca. Sem isto, o cliente poderia mandar qualquer URL
-      // e o chromium do raster iria buscá-la (SSRF), além de poder expor foto de outra marca.
-      const asset = await prisma.asset.findFirst({
-        where: { brandId: post.brandId, url: body.assetUrl, fileType: { startsWith: 'image/' } },
-        select: { name: true },
-      });
-      if (!asset) throw createError(400, 'Essa foto não está na biblioteca da marca');
-      // A mesma foto reenviada mantém o enquadramento que já tinha; a pessoa que escolhe a posição
-      // manda. Foto NOVA é enquadrada pelo assunto (rosto/pessoa/objeto) em vez de pelo centro:
-      // o centro cortava a cabeça em retratos com o rosto no terço de cima. Se não der para
-      // detectar ou medir, volta ao centro, como antes.
-      const mesmaFoto = atual?.src === body.assetUrl;
-      let position = body.position ?? (mesmaFoto ? atual!.position : { x: 50, y: 50 });
-      framing = body.position ? { mode: 'manual' } : mesmaFoto ? { mode: 'kept' } : { mode: 'center' };
-      if (!body.position && !mesmaFoto) {
-        const doc = buildSlideDocument(current, content.fonts ?? ['Inter'], content.width ?? 1080, content.height ?? 1080);
-        const [analysis, aspect] = await Promise.all([
-          analyzePhoto(body.assetUrl),
-          measureSlotAspect(doc, { width: content.width ?? 1080, height: content.height ?? 1080 }, body.slot),
-        ]);
-        const auto = frameFromAnalysis(analysis, aspect);
-        if (auto) {
-          position = auto.position;
-          framing = { mode: 'auto', faceVisible: auto.faceVisible };
-        }
-      }
-      placement = {
-        url: body.assetUrl,
-        position,
-        fit: body.fit ?? atual?.fit,
-        alt: asset.name,
-      };
-    } else {
-      // Só enquadramento: mantém a foto e o ajuste que já estão no espaço.
-      if (!atual?.src) throw createError(400, 'Não há foto neste espaço para reenquadrar');
-      placement = { url: atual.src, position: body.position ?? atual.position, fit: body.fit ?? atual.fit };
-    }
-
-    let novoHtml: string;
-    try {
-      novoHtml = setPhotoInSlot(current.html, body.slot, placement);
-    } catch (e) {
-      if (e instanceof PhotoSlotNotFoundError) throw createError(404, e.message);
-      throw e;
-    }
-
-    // Mesma porta de escrita da edição de código: sanitiza no servidor e snapshota antes.
-    const clean = { html: sanitizeSlideHtml(novoHtml), css: current.css ? sanitizeSlideCss(current.css) : undefined };
-    if (!clean.html.trim()) throw createError(400, 'html ficou vazio após a sanitização');
-
-    const row = post.slides.find((s) => s.position === idx);
-    if (!row) throw createError(404, 'Slide não encontrado na tabela relacional');
-
-    await snapshotPost(post.id, {
-      source: 'EDITOR',
-      label: body.assetUrl === null
-        ? `Antes de remover a foto do slide ${idx + 1}`
-        : `Antes de trocar a foto do slide ${idx + 1}`,
+    const applied = await applySlidePhoto({
+      postId: id,
+      index: idx,
+      slot: body.slot,
+      assetUrl: body.assetUrl,
+      position: body.position,
+      fit: body.fit,
       userId: req.user?.userId,
+      source: 'EDITOR',
     });
-    await prisma.slide.update({
-      where: { id: row.id },
-      data: {
-        contentJson: clean as unknown as Prisma.InputJsonValue,
-        htmlRender: buildSlideDocument(clean, content.fonts ?? ['Inter'], content.width ?? 1080, content.height ?? 1080),
-      },
-    });
-    await prisma.post.update({ where: { id: post.id }, data: { updatedAt: new Date() } });
 
-    res.json({ data: { slideIndex: idx, slide: clean, slots: listPhotoSlots(clean.html), framing } });
+    res.json({ data: { slideIndex: applied.slideIndex, slide: applied.slide, slots: applied.slots, framing: applied.framing } });
   } catch (error) {
     next(error);
   }
@@ -789,8 +697,6 @@ postsRouter.post('/:id/export-file', async (req: AuthRequest, res: Response, nex
     const { format, confirmarRascunho } = parseBody(exportFileSchema, req.body ?? {});
     const userId = req.user?.userId;
 
-    // Valida barato ANTES de enfileirar: um job que morre no worker por post
-    // inexistente ou formato não-renderizável é péssima experiência.
     const post = await prisma.post.findFirst({
       where: { id, brand: brandMemberFilter(userId, ANY_MEMBER) },
       include: { slides: { orderBy: { position: 'asc' } } },
@@ -798,15 +704,10 @@ postsRouter.post('/:id/export-file', async (req: AuthRequest, res: Response, nex
     if (!post) throw createError(404, 'Post não encontrado');
     assertDeliverable(post.content, 'exportar', confirmarRascunho);
 
-    const deck = await resolveRenderableDeckWithFonts(mergeSlidesIntoPost(post).content);
-    if (!deck) {
-      throw createError(400, 'Export disponível apenas para designs html-design');
-    }
-    if (deck.count === 0) throw createError(400, 'Este design ainda não tem slides.');
+    // Validação barata + enfileiramento: lib/exportJobs.ts, a mesma do MCP.
+    const { jobId, total } = await requestDeckExport(post as unknown as ExportablePost, userId!, format);
 
-    const jobId = await enqueueDeckExport({ postId: id, userId: userId!, format });
-
-    res.status(202).json({ data: { jobId, total: deck.count } });
+    res.status(202).json({ data: { jobId, total } });
   } catch (error) {
     next(error);
   }
@@ -815,38 +716,8 @@ postsRouter.post('/:id/export-file', async (req: AuthRequest, res: Response, nex
 // GET /api/posts/:id/export-file/:jobId — progresso do export do deck.
 postsRouter.get('/:id/export-file/:jobId', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const jobId = req.params.jobId as string;
-    const job = await deckExportQueue.getJob(jobId);
-    if (!job) throw createError(404, 'Job de export não encontrado');
-
-    // O job carrega o userId de quem pediu: sem esta checagem, qualquer usuário
-    // logado leria o progresso (e o link do arquivo) de um export alheio.
-    if (job.data.userId !== req.user?.userId || job.data.postId !== req.params.id) {
-      throw createError(403, 'Este export não pertence a você.');
-    }
-
-    const state = await job.getState();
-    const progress = (job.progress ?? {}) as { done?: number; total?: number };
-
-    // Corrida getJob→getState: se o job completa ENTRE as duas leituras, o
-    // returnvalue lido junto com o job ainda é null e o cliente recebe
-    // "completed sem resultado". O estado 'completed' é gravado junto com o
-    // returnvalue (mesmo script Lua), então uma releitura resolve.
-    let returnvalue: unknown = job.returnvalue;
-    if (state === 'completed' && returnvalue == null) {
-      returnvalue = (await deckExportQueue.getJob(jobId))?.returnvalue ?? null;
-    }
-
-    res.json({
-      data: {
-        jobId,
-        status: state, // waiting | active | completed | failed
-        done: progress.done ?? 0,
-        total: progress.total ?? 0,
-        result: state === 'completed' ? returnvalue : undefined,
-        error: state === 'failed' ? job.failedReason : undefined,
-      },
-    });
+    const status = await readDeckExportStatus(req.params.jobId as string, req.user!.userId, req.params.id as string);
+    res.json({ data: status });
   } catch (error) {
     next(error);
   }
@@ -903,8 +774,6 @@ postsRouter.post('/:id/export-canva', async (req: AuthRequest, res: Response, ne
     const { slideIndex, mode, confirmarRascunho } = parseBody(exportCanvaSchema, req.body ?? {});
     const userId = req.user?.userId;
 
-    // Valida tudo o que dá pra validar de forma barata ANTES de enfileirar: um job
-    // que morre no worker por Canva desconectado é péssima experiência.
     const post = await prisma.post.findFirst({
       where: { id, brand: brandMemberFilter(userId, EDITORS) },
       include: {
@@ -915,34 +784,20 @@ postsRouter.post('/:id/export-canva', async (req: AuthRequest, res: Response, ne
     if (!post) throw createError(404, 'Post não encontrado');
     assertDeliverable(post.content, 'exportar para o Canva', confirmarRascunho);
 
-    // Canva é a conta do DESIGNER que pediu o export (userId), não da marca.
-    const requester = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { canvaAccessToken: true },
-    });
-    if (!requester?.canvaAccessToken) {
-      return res.status(401).json({
-        error: { code: 'CANVA_NOT_CONNECTED', message: 'Canva não conectado para este usuário' },
-      });
+    // Validação barata + enfileiramento: lib/exportJobs.ts, a mesma do MCP.
+    let requested;
+    try {
+      requested = await requestCanvaExport(post as unknown as ExportablePost, userId!, { slideIndex, mode });
+    } catch (err) {
+      if (err instanceof CanvaNotConnectedError) {
+        return res.status(401).json({
+          error: { code: 'CANVA_NOT_CONNECTED', message: 'Canva não conectado para este usuário' },
+        });
+      }
+      throw err;
     }
 
-    const deck = await resolveRenderableDeckWithFonts(mergeSlidesIntoPost(post).content);
-    if (!deck) {
-      throw createError(400, 'Export Canva disponível apenas para designs html-design');
-    }
-
-    if (typeof slideIndex === 'number' && (slideIndex < 0 || slideIndex >= deck.count)) {
-      throw createError(400, 'slideIndex fora do limite');
-    }
-
-    // slideIndex só se aplica ao caminho PNG (asset por slide); PPTX sempre exporta
-    // o deck inteiro num arquivo só.
-    const effectiveSlideIndex = mode === 'pptx' ? undefined : slideIndex;
-    const jobId = await enqueueCanvaExport({ postId: id, userId: userId!, slideIndex: effectiveSlideIndex, mode });
-
-    res.status(202).json({
-      data: { jobId, total: typeof effectiveSlideIndex === 'number' ? 1 : deck.count },
-    });
+    res.status(202).json({ data: requested });
   } catch (error) {
     next(error);
   }
@@ -951,35 +806,8 @@ postsRouter.post('/:id/export-canva', async (req: AuthRequest, res: Response, ne
 // GET /api/posts/:id/export-canva/:jobId — progresso do export.
 postsRouter.get('/:id/export-canva/:jobId', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
-    const jobId = req.params.jobId as string;
-    const job = await canvaExportQueue.getJob(jobId);
-    if (!job) throw createError(404, 'Job de export não encontrado');
-
-    // O job carrega o userId de quem pediu: sem esta checagem, qualquer usuário
-    // logado leria o progresso (e o link do design) de um export alheio.
-    if (job.data.userId !== req.user?.userId || job.data.postId !== req.params.id) {
-      throw createError(403, 'Este export não pertence a você.');
-    }
-
-    const state = await job.getState();
-    const progress = (job.progress ?? {}) as { done?: number; total?: number };
-
-    // Mesma corrida getJob→getState do export-file: releitura se completou no meio.
-    let returnvalue: unknown = job.returnvalue;
-    if (state === 'completed' && returnvalue == null) {
-      returnvalue = (await canvaExportQueue.getJob(jobId))?.returnvalue ?? null;
-    }
-
-    res.json({
-      data: {
-        jobId,
-        status: state, // waiting | active | completed | failed
-        done: progress.done ?? 0,
-        total: progress.total ?? 0,
-        result: state === 'completed' ? returnvalue : undefined,
-        error: state === 'failed' ? job.failedReason : undefined,
-      },
-    });
+    const status = await readCanvaExportStatus(req.params.jobId as string, req.user!.userId, req.params.id as string);
+    res.json({ data: status });
   } catch (error) {
     next(error);
   }

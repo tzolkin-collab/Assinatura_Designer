@@ -16,7 +16,7 @@ import { DEFAULT_CLIENT_PRESETS, resolveClientPresets } from './clients.js';
  */
 
 /** Escopos OAuth do Designer. `designer.write` INCLUI leitura (ver `normalizeScopes`). */
-export const MCP_SCOPES = ['designer.read', 'designer.write', 'designer.edit_all'] as const;
+export const MCP_SCOPES = ['designer.read', 'designer.write', 'designer.edit_all', 'designer.export'] as const;
 export type McpScope = (typeof MCP_SCOPES)[number];
 
 export const READ_SCOPE: McpScope = 'designer.read';
@@ -27,6 +27,12 @@ export const WRITE_SCOPE: McpScope = 'designer.write';
  * checada no handler.
  */
 export const EDIT_ALL_SCOPE: McpScope = 'designer.edit_all';
+/**
+ * Exportar uma peça: arquivo (PDF, ZIP de PNGs, PPTX, HTML) e Canva. É uma SAÍDA do Designer (o arquivo vira um link, o
+ * Canva recebe um design), por isso tem escopo próprio e é independente: não implica leitura nem escrita, e a tela de
+ * consentimento o pede à parte. Consome servidor (renderiza no chromium), então as ferramentas têm limite de taxa.
+ */
+export const EXPORT_SCOPE: McpScope = 'designer.export';
 
 /** Quais marcas a conexão enxerga: as escolhidas no consentimento ou todas as do usuário, a cada chamada. */
 export type BrandMode = 'selected' | 'all';
@@ -41,6 +47,9 @@ export const ROLES_FOR_SCOPE: Record<McpScope, BrandRole[]> = {
   'designer.read': ['OWNER', 'ADMIN', 'EDITOR', 'VIEWER'],
   'designer.write': ['OWNER', 'ADMIN', 'EDITOR'],
   'designer.edit_all': ['OWNER', 'ADMIN', 'EDITOR'],
+  // Exportar arquivo vale para qualquer membro (como `GET/POST /posts/:id/export-file`, ANY_MEMBER). A exportação para o Canva
+  // exige EDITOR e isso é conferido na própria ferramenta, como na rota (EDITORS).
+  'designer.export': ['OWNER', 'ADMIN', 'EDITOR', 'VIEWER'],
 };
 
 export function isMcpScope(value: string): value is McpScope {

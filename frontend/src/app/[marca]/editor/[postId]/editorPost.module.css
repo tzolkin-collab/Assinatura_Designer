@@ -184,6 +184,7 @@
   min-height: 0;
   flex-wrap: wrap;
   overflow-y: auto;
+  container-type: inline-size;
 }
 
 .stage {
@@ -434,4 +435,15 @@
   border-top: 1px solid var(--color-border);
   font-size: var(--text-xs);
   color: var(--color-text-tertiary);
+}
+
+/* Quando palco (480px) e painel (360px) não cabem lado a lado o painel quebra para baixo, mas o teto de
+   560px o deixava com 560 de 792px, colado à esquerda e com a borda lateral solta. Abaixo disso ele ocupa a largura toda. */
+@container (max-width: 839px) {
+  .panel {
+    flex-basis: 100%;
+    max-width: none;
+    border-left: none;
+    border-top: 1px solid var(--color-border);
+  }
 }

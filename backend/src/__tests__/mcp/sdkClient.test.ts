@@ -79,12 +79,17 @@ describe('cliente MCP oficial com token', () => {
     expect(client.getServerCapabilities()?.tools).toBeDefined();
 
     const { tools } = await client.listTools();
-    expect(tools.map((t) => t.name).sort()).toEqual(['get_brand_kit', 'get_design', 'get_designer_brief', 'list_brands', 'list_designs', 'save_presentation']);
+    expect(tools.map((t) => t.name).sort()).toEqual([
+      'create_version', 'export_file', 'export_to_canva', 'get_brand_kit', 'get_brand_profile', 'get_canva_export_status',
+      'get_design', 'get_designer_brief', 'get_export_status', 'get_integrations_status', 'get_photo_slots', 'list_assets',
+      'list_brands', 'list_designs', 'list_versions', 'restore_version', 'save_presentation', 'set_slide_photo', 'update_slide',
+      'upload_asset',
+    ]);
     for (const tool of tools) {
       expect(tool.annotations).toMatchObject({
-        readOnlyHint: tool.name !== 'save_presentation',
-        destructiveHint: false,
-        openWorldHint: false,
+        readOnlyHint: !['save_presentation', 'update_slide', 'create_version', 'restore_version', 'set_slide_photo', 'upload_asset', 'export_file', 'export_to_canva'].includes(tool.name),
+        destructiveHint: tool.name === 'restore_version',
+        openWorldHint: tool.name.includes('export'),
       });
       expect(tool.outputSchema?.type).toBe('object');
     }
@@ -207,7 +212,7 @@ describe('OAuth completo conduzido pelo cliente oficial do SDK', () => {
     // O que o SDK mandou no /authorize prova S256 + resource + escopo vindos do nosso metadata.
     expect(provider.authorizeUrl?.searchParams.get('code_challenge_method')).toBe('S256');
     expect(provider.authorizeUrl?.searchParams.get('resource')).toBe(`${baseUrl}/mcp`);
-    expect(provider.authorizeUrl?.searchParams.get('scope')).toBe('designer.read designer.write designer.edit_all');
+    expect(provider.authorizeUrl?.searchParams.get('scope')).toBe('designer.read designer.write designer.edit_all designer.export');
     expect(provider.clientInfo?.client_id).toBeTruthy();
     expect((provider.clientInfo as { client_secret?: string }).client_secret).toBeUndefined();
     // iss e state voltam na resposta de autorização.
@@ -219,7 +224,7 @@ describe('OAuth completo conduzido pelo cliente oficial do SDK', () => {
     await transport.finishAuth(provider.authorizationCode!);
     expect(provider.savedTokens?.access_token).toMatch(/^dsg_at_/);
     expect(provider.savedTokens?.refresh_token).toMatch(/^dsg_rt_/);
-    expect(provider.savedTokens?.scope).toBe('designer.read designer.write designer.edit_all');
+    expect(provider.savedTokens?.scope).toBe('designer.read designer.write designer.edit_all designer.export');
 
     // Nova conexão, agora autenticada.
     const client = newClient();

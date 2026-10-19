@@ -34,6 +34,7 @@ export interface ConsentRequest {
 export const READ_SCOPE = 'designer.read';
 export const WRITE_SCOPE = 'designer.write';
 export const EDIT_ALL_SCOPE = 'designer.edit_all';
+export const EXPORT_SCOPE = 'designer.export';
 
 const ENTITIES: Record<string, string> = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'", '&#x27;': "'" };
 
@@ -73,10 +74,15 @@ export function canEditAll(scopes: readonly string[]): boolean {
   return scopes.includes(EDIT_ALL_SCOPE);
 }
 
-/** "Ver", "Ver e salvar peças" ou "Ver e editar todas as peças": o que o agente pode fazer, em palavras. */
+/** Exportar é independente de ler e escrever: só o escopo próprio vale. */
+export function canExport(scopes: readonly string[]): boolean {
+  return scopes.includes(EXPORT_SCOPE);
+}
+
+/** "Só ver", "Ver e salvar peças" ou "Ver e editar todas as peças", com " · pode exportar" quando vale: o que o agente pode fazer, em palavras. */
 export function describeAccess(scopes: readonly string[]): string {
-  if (canEditAll(scopes)) return 'Ver e editar todas as peças';
-  return canWrite(scopes) ? 'Ver e salvar peças' : 'Só ver';
+  const base = canEditAll(scopes) ? 'Ver e editar todas as peças' : canWrite(scopes) ? 'Ver e salvar peças' : 'Só ver';
+  return canExport(scopes) ? `${base} · pode exportar` : base;
 }
 
 const ROLE_LABEL: Record<ConsentBrand['role'], string> = {

@@ -70,7 +70,7 @@ describe('autenticação (401 com WWW-Authenticate)', () => {
     expect(res.status).toBe(401);
     const header = res.headers['www-authenticate'];
     // Formato EXATO do doc de auth do ChatGPT, e sem `error` (nenhuma credencial foi enviada).
-    expect(header).toBe(`Bearer resource_metadata="${METADATA_URL}", scope="designer.read designer.write designer.edit_all"`);
+    expect(header).toBe(`Bearer resource_metadata="${METADATA_URL}", scope="designer.read designer.write designer.edit_all designer.export"`);
     // O metadata que o header aponta realmente existe e descreve o recurso certo.
     const meta = await request(h.app).get(new URL(METADATA_URL).pathname);
     expect(meta.body.resource).toBe(RESOURCE);
@@ -169,17 +169,23 @@ describe('métodos e corpo', () => {
     expect(res.body.error.code).toBe(-32700);
   });
 
-  it('corpo acima de 1 MB → 413', async () => {
+  it('corpo acima de 15 MB → 413 (o teto comporta upload_asset em base64)', async () => {
     const flow = await connect(h);
-    const res = await mcpPost(h.app, flow.accessToken, { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'x', arguments: { blob: 'a'.repeat(1_200_000) } } });
+    const res = await mcpPost(h.app, flow.accessToken, { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'x', arguments: { blob: 'a'.repeat(16_000_000) } } });
     expect(res.status).toBe(413);
+  });
+
+  it('corpo de 2 MB autenticado passa do parser (era 413 com o teto antigo de 1 MB)', async () => {
+    const flow = await connect(h);
+    const res = await mcpPost(h.app, flow.accessToken, { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'x', arguments: { blob: 'a'.repeat(2_000_000) } } });
+    expect(res.status).not.toBe(413);
   });
 
   it('o corpo só é lido depois da autenticação (anônimo com corpo gigante NUNCA leva 413)', async () => {
     // Se o parser de JSON rodasse antes do bearer, a resposta seria 413. O servidor
     // responde 401 sem drenar o corpo, e o cliente pode ver isso como 401 ou como reset da
     // conexão (o servidor fechou antes de o corpo terminar) — ambos provam que não parseou.
-    const outcome = await mcpPost(h.app, undefined, { blob: 'a'.repeat(1_200_000) }).then(
+    const outcome = await mcpPost(h.app, undefined, { blob: 'a'.repeat(16_000_000) }).then(
       (res) => res.status,
       (err: Error) => err.message,
     );
@@ -210,28 +216,56 @@ describe('descoberta (initialize / tools/list)', () => {
     expect(res.status).toBe(200);
     const tools = res.body.result.tools as Array<Record<string, any>>;
     expect(tools.map((t) => t.name).sort()).toEqual([
+      'create_version',
+      'export_file',
+      'export_to_canva',
       'get_brand_kit',
+      'get_brand_profile',
+      'get_canva_export_status',
       'get_design',
       'get_designer_brief',
+      'get_export_status',
+      'get_integrations_status',
+      'get_photo_slots',
+      'list_assets',
       'list_brands',
       'list_designs',
+      'list_versions',
+      'restore_version',
       'save_presentation',
+      'set_slide_photo',
+      'update_slide',
+      'upload_asset',
     ]);
 
     for (const tool of tools) {
       expect(tool.name).toMatch(/^[a-z]+(_[a-z]+)*$/); // snake_case em inglês
       expect(tool.title).toBeTruthy();
       expect(tool.description).toMatch(/[a-zçãé]/i);
-      // Só save_presentation escreve; as demais são leitura pura.
-      const writes = tool.name === 'save_presentation';
+      // Ferramentas de escrita e de saída; as demais são leitura pura. Cada uma declara as 4 dicas ao cliente.
+      const writeHints: Record<string, { destructiveHint: boolean; idempotentHint: boolean; openWorldHint?: boolean }> = {
+        save_presentation: { destructiveHint: false, idempotentHint: false },
+        update_slide: { destructiveHint: false, idempotentHint: true },
+        create_version: { destructiveHint: false, idempotentHint: true },
+        restore_version: { destructiveHint: true, idempotentHint: false },
+        set_slide_photo: { destructiveHint: false, idempotentHint: true },
+        upload_asset: { destructiveHint: false, idempotentHint: false },
+        // Saída do Designer: openWorldHint verdadeiro (o arquivo vira um link, o Canva recebe um design).
+        export_file: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
+        export_to_canva: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
+      };
+      const exportReads = ['get_export_status', 'get_canva_export_status'];
+      const isExport = tool.name.includes('export');
+      const writes = tool.name in writeHints;
       expect(tool.annotations).toEqual({
         readOnlyHint: !writes,
-        destructiveHint: false,
-        idempotentHint: !writes,
-        openWorldHint: false,
+        destructiveHint: writes ? writeHints[tool.name]!.destructiveHint : false,
+        idempotentHint: writes ? writeHints[tool.name]!.idempotentHint : true,
+        openWorldHint: isExport,
       });
+      expect(exportReads.every((n) => !(n in writeHints))).toBe(true);
       // Doc do Apps SDK: securitySchemes no descritor + espelho em _meta.
-      const scopes = [writes ? 'designer.write' : 'designer.read'];
+      const scopes = [isExport ? 'designer.export' : writes ? 'designer.write' : 'designer.read'];
       expect(tool.securitySchemes).toEqual([{ type: 'oauth2', scopes }]);
       expect(tool._meta.securitySchemes).toEqual([{ type: 'oauth2', scopes }]);
       expect(tool.inputSchema.type).toBe('object');

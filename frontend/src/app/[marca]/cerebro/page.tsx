@@ -26,6 +26,7 @@ import {
   type FontSource,
   type ProfileFormState,
 } from '@/lib/profileForm';
+import { deferLoad } from '@/lib/deferLoad';
 import styles from './cerebro.module.css';
 
 interface LibraryFile {
@@ -158,7 +159,7 @@ export default function CerebroPage() {
 
   useEffect(() => {
     let cancelled = false;
-    const id = requestAnimationFrame(async () => {
+    const cancelDefer = deferLoad(async () => {
       const [p, a] = await Promise.allSettled([
         api.get<ProjectProfileResponse>(`/brands/${slug}/profile`),
         api.get<unknown>(`/brands/${slug}/assets`),
@@ -171,7 +172,7 @@ export default function CerebroPage() {
     });
     return () => {
       cancelled = true;
-      cancelAnimationFrame(id);
+      cancelDefer();
     };
   }, [slug, apply]);
 
