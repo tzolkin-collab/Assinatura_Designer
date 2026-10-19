@@ -17,6 +17,7 @@ import { resolveBrandContext } from '../lib/brandContext.js';
 import { mergeSlidesIntoPost, syncPostSlides } from '../lib/postHelper.js';
 import { snapshotPost, restorePostVersion } from '../lib/postVersions.js';
 import { withServerOwnedMcp } from '../lib/mcpOwnership.js';
+import { readFinalGate, draftRefusal, withServerOwnedFinalGate } from '../lib/designerBrain/finalGate.js';
 import { listPhotoSlots, setPhotoInSlot, PhotoSlotNotFoundError } from '../lib/photoSlot.js';
 import { analyzePhoto, frameFromAnalysis, measureSlotAspect } from '../lib/photoFraming.js';
 import { enrichAiContext } from '../lib/aiContext.js';
@@ -30,13 +31,16 @@ const exportFileSchema = z.object({
   format: z.enum(['pdf', 'zip', 'pptx', 'html'], {
     errorMap: () => ({ message: "format deve ser 'pdf', 'zip', 'pptx' ou 'html'" }),
   }),
+  confirmarRascunho: z.boolean().optional(),
 });
 const createVersionSchema = z.object({ label: z.string().optional() });
 const exportCanvaSchema = z.object({
   slideIndex: z.number().int().nonnegative().optional(),
   mode: z.enum(['png', 'pptx']).optional(),
+  confirmarRascunho: z.boolean().optional(),
 });
 const publishSchema = z.object({
+  confirmarRascunho: z.boolean().optional(),
   hostingConfig: z.object({
     autoplay: z.boolean().optional(),
     showCounter: z.boolean().optional(),
@@ -48,6 +52,13 @@ import { resolveRenderableDeckWithFonts } from '../lib/renderableDeck.js';
 const ai = new GoogleGenAI({ apiKey: config.geminiApiKey });
 
 export const postsRouter = Router();
+
+/** Porta de "final": peça com texto em revisão só sai como entrega se a pessoa confirmar que é rascunho. */
+function assertDeliverable(content: unknown, action: string, confirmarRascunho?: boolean): void {
+  const gate = readFinalGate(content);
+  if (!gate || gate.blocking.length === 0 || confirmarRascunho) return;
+  throw createError(409, draftRefusal(gate, action), 'DRAFT_NOT_FINAL');
+}
 
 // POST /api/posts/:id/edit-slide - edição cirúrgica de um slide html-design via instrução
 postsRouter.post('/:id/edit-slide', async (req: AuthRequest, res: Response, next: NextFunction) => {
@@ -527,7 +538,7 @@ postsRouter.put('/:id', async (req: AuthRequest, res: Response, next: NextFuncti
     if (!post) throw createError(404, 'Post not found');
 
     // A procedência de peça de agente (content.mcp) é do servidor: o corpo nunca a altera.
-    if (content !== undefined) content = withServerOwnedMcp(content, post.content);
+    if (content !== undefined) content = withServerOwnedFinalGate(withServerOwnedMcp(content, post.content), post.content);
 
     const dataToUpdate: Prisma.PostUncheckedUpdateInput = {};
     if (name !== undefined) {
@@ -710,13 +721,14 @@ postsRouter.delete('/:id', async (req: AuthRequest, res: Response, next: NextFun
 postsRouter.post('/:id/publish', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const id = req.params.id as string;
-    const { hostingConfig } = parseBody(publishSchema, req.body ?? {});
+    const { hostingConfig, confirmarRascunho } = parseBody(publishSchema, req.body ?? {});
 
     const post = await prisma.post.findFirst({
       where: { id, brand: brandMemberFilter(req.user?.userId, EDITORS) },
-      select: { id: true },
+      select: { id: true, content: true },
     });
     if (!post) throw createError(404, 'Post não encontrado');
+    assertDeliverable(post.content, 'publicar', confirmarRascunho);
 
     const { publicSlug, publishedAt } = await publishPost(post.id, hostingConfig as HostingConfig);
     res.json({ data: { publicSlug, publishedAt, path: `/apresentacao/${publicSlug}` } });
@@ -774,7 +786,7 @@ postsRouter.post('/:id/chat/toggle', async (req: AuthRequest, res: Response, nex
 postsRouter.post('/:id/export-file', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const id = req.params.id as string;
-    const { format } = parseBody(exportFileSchema, req.body ?? {});
+    const { format, confirmarRascunho } = parseBody(exportFileSchema, req.body ?? {});
     const userId = req.user?.userId;
 
     // Valida barato ANTES de enfileirar: um job que morre no worker por post
@@ -784,6 +796,7 @@ postsRouter.post('/:id/export-file', async (req: AuthRequest, res: Response, nex
       include: { slides: { orderBy: { position: 'asc' } } },
     });
     if (!post) throw createError(404, 'Post não encontrado');
+    assertDeliverable(post.content, 'exportar', confirmarRascunho);
 
     const deck = await resolveRenderableDeckWithFonts(mergeSlidesIntoPost(post).content);
     if (!deck) {
@@ -887,7 +900,7 @@ postsRouter.get('/:id/export-file/:jobId/download', async (req: AuthRequest, res
 postsRouter.post('/:id/export-canva', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const id = req.params.id as string;
-    const { slideIndex, mode } = parseBody(exportCanvaSchema, req.body ?? {});
+    const { slideIndex, mode, confirmarRascunho } = parseBody(exportCanvaSchema, req.body ?? {});
     const userId = req.user?.userId;
 
     // Valida tudo o que dá pra validar de forma barata ANTES de enfileirar: um job
@@ -900,6 +913,7 @@ postsRouter.post('/:id/export-canva', async (req: AuthRequest, res: Response, ne
     });
 
     if (!post) throw createError(404, 'Post não encontrado');
+    assertDeliverable(post.content, 'exportar para o Canva', confirmarRascunho);
 
     // Canva é a conta do DESIGNER que pediu o export (userId), não da marca.
     const requester = await prisma.user.findUnique({

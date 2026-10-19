@@ -74,10 +74,11 @@ export async function exportarDeck(
   format: DeckFileFormat,
   onProgress?: (done: number, total: number) => void,
   opts: AcompanharOpts = {},
+  confirmarRascunho = false,
 ): Promise<DeckExportResult> {
   const { jobId } = await api.post<{ jobId: string; total: number }>(
     `/posts/${postId}/export-file`,
-    { format },
+    { format, ...(confirmarRascunho ? { confirmarRascunho } : {}) },
   );
 
   const resultado = await acompanharJobDeExport<DeckExportResult>(

@@ -8,6 +8,7 @@ import {
   buildPipelineBrainContext,
   correctTextDivergences,
   fontSubstitutionNotice,
+  computeFinalGate,
   hasApprovedText,
   isDesignerBrainEnabled,
   loadBrainLayers,
@@ -315,6 +316,8 @@ async function runPipelineInner(
     return;
   }
   let brandContext: string;
+  let brainPending: string[] = [];
+  let fontNoticeText: string | null = null;
   if (designerBrainOn) {
     try {
       const brain = buildPipelineBrainContext({
@@ -328,6 +331,7 @@ async function runPipelineInner(
         pageCount: parseRequestedSlideCount(brief),
       });
       brandContext = brain.brandContext;
+      brainPending = brain.pending;
       if (brain.pending.length > 0) {
         logger.info('Cérebro do Designer: informações ainda não definidas', { brandSlug: brand.slug, pending: brain.pending });
       }
@@ -1083,12 +1087,27 @@ async function runPipelineInner(
       // Antes isso passava em silêncio; agora o resultado diz qual faltou e qual entrou no lugar.
       if (designerBrainOn && design.slides.length > 0) {
         const aviso = fontSubstitutionNotice({ official: officialFontsFor(brand.slug, savedProfile), used: design.fonts, installed: ownFonts });
+        fontNoticeText = aviso;
         if (aviso) {
           logger.warn('Fonte oficial do projeto indisponível, usando substituta', { brandSlug: brand.slug, usadas: design.fonts });
           ws.token(sessionId, `
 
 ${aviso}
 `);
+        }
+      }
+
+      // Pendências objetivas (§13 passo 8): o que o cadastro não definiu ou não bateu, dito à pessoa.
+      // A fonte e o texto em revisão já têm aviso próprio acima; aqui entram as demais.
+      if (designerBrainOn && design.slides.length > 0) {
+        const gate = computeFinalGate({
+          hasInReview: false,
+          requestedCount,
+          generatedCount: design.slides.length,
+          brainPending,
+        });
+        if (gate.notes.length > 0) {
+          ws.token(sessionId, `\n\n**Pendências:**\n${gate.notes.map((n) => `- ${n}`).join('\n')}\n`);
         }
       }
 
@@ -1150,6 +1169,19 @@ ${aviso}
     // (a tabela relacional é a fonte).
     const contentToSave: Record<string, unknown> = { ...postContent };
     delete contentToSave.slides;
+
+    // Porta de "final" (§2, §4.1, §13): pendências objetivas e o que impede a entrega. É gravada pelo
+    // servidor; publicar e exportar a conferem. Só marcas com o cérebro ligado têm porta.
+    if (designerBrainOn) {
+      const gate = computeFinalGate({
+        hasInReview: copy?.hasInReview ?? false,
+        requestedCount,
+        generatedCount: Array.isArray(envelope.slides) ? envelope.slides.length : slideCount,
+        fontNotice: fontNoticeText,
+        brainPending,
+      });
+      if (gate.blocking.length > 0 || gate.notes.length > 0) contentToSave.finalGate = gate;
+    }
 
     // Quais assets da Biblioteca de Mídia entraram de fato no deck — pra mostrar
     // um card de transparência na tela ("usei estas imagens da sua marca").

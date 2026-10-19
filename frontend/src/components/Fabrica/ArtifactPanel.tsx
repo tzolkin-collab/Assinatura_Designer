@@ -9,6 +9,7 @@ import { api, getApiErrorMessage } from '@/lib/api';
 import { acompanharExport } from '@/lib/canvaExport';
 import { publishPost, unpublishPost, type HostingConfig } from '@/lib/presentationHosting';
 import SlideCodeEditor, { type SlideCode } from '@/components/DesignDocument/SlideCodeEditor';
+import { entregarOuConfirmarRascunho, readFinalGate } from '@/lib/finalGate';
 import GenerationCostChip from '@/components/GenerationCost/GenerationCostChip';
 
 interface ArtifactPanelProps {
@@ -127,8 +128,10 @@ export function ArtifactPanel({
     setPublishing(true);
     setHostErro(null);
     try {
-      const result = await publishPost(postId, { autoplay: hostAutoplay, showCounter: hostShowCounter });
-      setPublicSlug(result.publicSlug);
+      const result = await entregarOuConfirmarRascunho((confirmar) =>
+        publishPost(postId, { autoplay: hostAutoplay, showCounter: hostShowCounter }, confirmar),
+      );
+      if (result) setPublicSlug(result.publicSlug);
     } catch (err) {
       setHostErro(getApiErrorMessage(err, 'Falha ao publicar a apresentação.'));
     } finally {
@@ -199,7 +202,10 @@ export function ArtifactPanel({
     setExportandoCanva(true);
     setErro(null);
     try {
-      const res = await api.post<{ data?: { jobId?: string }; jobId?: string }>(`/posts/${postId}/export-canva`, {});
+      const res = await entregarOuConfirmarRascunho((confirmar) =>
+        api.post<{ data?: { jobId?: string }; jobId?: string }>(`/posts/${postId}/export-canva`, confirmar ? { confirmarRascunho: true } : {}),
+      );
+      if (!res) return;
       const jobId = res.data?.jobId || res.jobId;
       if (!jobId) throw new Error('Não retornou o ID do job.');
       await acompanharExport(postId, jobId, (done, total) => {
@@ -224,6 +230,7 @@ export function ArtifactPanel({
     return () => document.removeEventListener('mousedown', fora);
   }, [menuAberto]);
 
+  const finalGate = readFinalGate(design);
   const temArtefato = Boolean(design) && slideCount > 0;
   const podeBaixar = temArtefato && Boolean(postId);
   const fonte = temArtefato ? fonteDoSlide(design, slideIndex).texto : '';
@@ -263,8 +270,8 @@ export function ArtifactPanel({
         if (!postId) return;
         setJob({ formato, done: 0, total: slideCount });
         try {
-          await exportarDeck(postId, formato, (done, total) =>
-            setJob({ formato, done, total: total || slideCount }),
+          await entregarOuConfirmarRascunho((confirmar) =>
+            exportarDeck(postId, formato, (done, total) => setJob({ formato, done, total: total || slideCount }), {}, confirmar),
           );
         } finally {
           setJob(null);
@@ -425,6 +432,16 @@ export function ArtifactPanel({
               Reconectar Canva
             </button>
           )}
+        </div>
+      )}
+
+      {/* ── Pendências (§13): o que impede de ser final e o que ficou por definir ────────────── */}
+      {finalGate && (
+        <div role="status" className={styles.alert} data-testid="final-gate">
+          {finalGate.blocking.length > 0 && (
+            <strong>Rascunho, ainda não é final. </strong>
+          )}
+          {[...finalGate.blocking, ...finalGate.notes].join(' ')}
         </div>
       )}
 

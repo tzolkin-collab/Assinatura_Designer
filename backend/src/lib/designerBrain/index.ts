@@ -29,3 +29,11 @@ export { buildCorrectionInstruction, correctTextDivergences, MAX_ATTEMPTS as TEX
 export type { CorrectionResult, EditSlideFn } from './correction.js';
 export { fontSubstitutionNotice, officialFontsFor, INSTALLED_CUSTOM_FONTS } from './fontNotice.js';
 export { onlyProvidedAssets } from './providedAssets.js';
+export {
+  canBeDelivered,
+  computeFinalGate,
+  draftRefusal,
+  readFinalGate,
+  withServerOwnedFinalGate,
+} from './finalGate.js';
+export type { FinalGate, FinalGateInput } from './finalGate.js';
