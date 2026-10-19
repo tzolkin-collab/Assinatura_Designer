@@ -9,4 +9,6 @@ if (!password || password.length < 12) {
   process.exit(1);
 }
 // Aspas simples: o hash tem "$" e o dotenv expandiria sem elas.
-console.log(`ROOT_ADMIN_PASSWORD_HASH='${await bcrypt.hash(password, 12)}'`);
+void bcrypt.hash(password, 12).then((hash) => {
+  console.log(`ROOT_ADMIN_PASSWORD_HASH='${hash}'`);
+});

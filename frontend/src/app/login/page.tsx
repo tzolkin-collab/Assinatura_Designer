@@ -78,8 +78,11 @@ function LoginContent() {
         {/* Form */}
         <form onSubmit={handleSubmit} className={styles.form}>
           <Input
-            label="E-mail"
-            type="email"
+            label="E-mail ou usuário"
+            type="text"
+            inputMode="email"
+            autoComplete="username"
+            autoCapitalize="none"
             placeholder="seu@email.com"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
