@@ -77,9 +77,10 @@ async function main() {
   // O cérebro é global (padrão): apagar DESIGNER_BRAIN_BRANDS NÃO o desliga mais; ele liga em toda marca, com ou
   // sem ficha. Para o cenário "sem cérebro" passe `sem-cerebro` como 2o argumento: define DESIGNER_BRAIN_GLOBAL=off
   // (a saída de emergência; nela uma marca COM ficha ainda liga o cérebro, e sem ficha volta ao caminho antigo).
+  // Só esse cenário define DESIGNER_BRAIN_GLOBAL: nos demais, o valor que o desenvolvedor já pôs no ambiente é
+  // respeitado, e quando ela não existe vale o padrão (cérebro global ligado), sem precisar definir nada.
   delete process.env.DESIGNER_BRAIN_BRANDS;
   if (process.argv[3] === 'sem-cerebro') process.env.DESIGNER_BRAIN_GLOBAL = 'off';
-  else delete process.env.DESIGNER_BRAIN_GLOBAL;
   const sessionId = randomUUID(), postId = randomUUID();
   await createSession(sessionId, sc.slug, undefined, 'auto');
   const t0 = Date.now();

@@ -5,7 +5,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const h = vi.hoisted(() => ({
   row: null as Record<string, unknown> | null,
-  fails: false as false | true | 'p2021',
+  fails: false as false | true | 'p2021' | 'p2022' | 'p2002',
   lookups: 0,
 }));
 
@@ -15,6 +15,9 @@ vi.mock('../lib/prisma.js', () => ({
       findUnique: vi.fn(async () => {
         h.lookups++;
         if (h.fails === 'p2021') throw Object.assign(new Error('The table `public.BrandProfile` does not exist'), { code: 'P2021' });
+        if (h.fails === 'p2022') throw Object.assign(new Error('The column `BrandProfile.data` does not exist in the current database.'), { code: 'P2022' });
+        // Outro erro do Prisma (violação de unicidade): tem `code`, mas NÃO é banco com migrations parciais.
+        if (h.fails === 'p2002') throw Object.assign(new Error('Unique constraint failed'), { code: 'P2002' });
         if (h.fails) throw new Error('Connection terminated unexpectedly');
         return h.row;
       }),
@@ -30,6 +33,7 @@ import {
   isBrainOnWithoutProfile,
   isGlobalBrainEnabled,
 } from '../lib/designerBrain/index';
+import { logger } from '../lib/logger';
 
 const FICHA = { name: 'Marca', kind: 'BASE', collab: null, profile: { data: { essence: 'X' } }, parent: null };
 
@@ -137,7 +141,7 @@ describe('isBrainActiveForBrand (chat/API)', () => {
   });
 });
 
-describe('leitura da ficha: falha não é "sem ficha" (exceto tabela inexistente)', () => {
+describe('leitura da ficha: falha não é "sem ficha" (exceto tabela ou coluna inexistente)', () => {
   it('erro genérico: a leitura estrita lança BrainLayersReadError (quem gera para com erro visível)', async () => {
     h.fails = true;
     const erro = await loadBrainLayersStrict('marca').catch((e) => e);
@@ -145,15 +149,45 @@ describe('leitura da ficha: falha não é "sem ficha" (exceto tabela inexistente
     expect(erro.brandSlug).toBe('marca');
   });
 
-  it('tabela inexistente (Prisma P2021, migration não aplicada): vale como sem ficha, com aviso, sem lançar', async () => {
+  it('tabela inexistente (Prisma P2021, migration não aplicada): vale como sem ficha, com aviso em nível warn, sem lançar', async () => {
     h.fails = 'p2021';
+    const aviso = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    const erroLog = vi.spyOn(logger, 'error').mockImplementation(() => {});
     await expect(loadBrainLayersStrict('marca')).resolves.toBeNull();
+    expect(aviso).toHaveBeenCalledTimes(1);
+    expect(aviso.mock.calls[0]![1]).toMatchObject({ brandSlug: 'marca', code: 'P2021' });
+    expect(erroLog).not.toHaveBeenCalled();
+    aviso.mockRestore();
+    erroLog.mockRestore();
+  });
+
+  it('coluna inexistente (Prisma P2022, migrations parciais): o mesmo tratamento da tabela inexistente', async () => {
+    h.fails = 'p2022';
+    const aviso = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    const erroLog = vi.spyOn(logger, 'error').mockImplementation(() => {});
+    await expect(loadBrainLayersStrict('marca')).resolves.toBeNull();
+    expect(aviso).toHaveBeenCalledTimes(1);
+    expect(aviso.mock.calls[0]![1]).toMatchObject({ brandSlug: 'marca', code: 'P2022' });
+    expect(erroLog).not.toHaveBeenCalled();
+    aviso.mockRestore();
+    erroLog.mockRestore();
+  });
+
+  it('qualquer outro erro, inclusive outro código do Prisma, continua lançando BrainLayersReadError', async () => {
+    for (const falha of [true, 'p2002'] as const) {
+      h.fails = falha;
+      const erro = await loadBrainLayersStrict('marca').catch((e) => e);
+      expect(erro, String(falha)).toBeInstanceOf(BrainLayersReadError);
+      expect(erro.brandSlug).toBe('marca');
+    }
   });
 
   it('a versão tolerante (tools MCP) segue devolvendo null nos dois casos, como sempre', async () => {
     h.fails = true;
     await expect(loadBrainLayers('marca')).resolves.toBeNull();
     h.fails = 'p2021';
+    await expect(loadBrainLayers('marca')).resolves.toBeNull();
+    h.fails = 'p2022';
     await expect(loadBrainLayers('marca')).resolves.toBeNull();
   });
 

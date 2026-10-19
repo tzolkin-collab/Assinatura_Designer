@@ -81,6 +81,7 @@ vi.mock('../agents/brain/skills.js', () => ({
 
 import { initBrainHandlers, reconnectSession } from '../agents/brain/index';
 import prisma from '../lib/prisma';
+import { logger } from '../lib/logger';
 import { hasApprovedText } from '../lib/designerBrain/index';
 import { setAdviceStore, submitAdvice, listAdvice } from '../lib/advice';
 import { setInterruptStore } from '../lib/interrupt';
@@ -681,6 +682,71 @@ describe('orientações consumidas pelo cérebro', () => {
 
       expect(h.enqueued[1].sourceCopy).toContain('TITULO');
       expect(h.enqueued[1].approvedSkeleton).toEqual(roteiro1);
+    });
+
+    it('(c) regenerar depois de APROVAR O ROTEIRO À MÃO (modo manual): o roteiro é gravado na aprovação e reaproveitado na regeneração', async () => {
+      const planner = await import('../agents/planner/index');
+      vi.mocked(planner.runPlanner).mockResolvedValueOnce(roteiro1);
+      h.streams.push(texto('Vou criar agora [DISPATCH:presentation]'));
+      await send(bruto);
+      // Roteiro só proposto: ainda não vale como aprovado.
+      expect(h.session.pendingPlan.skeleton).toEqual(roteiro1);
+      expect(h.session.lastApprovedSkeleton ?? null).toBeNull();
+
+      await send('Aprovar roteiro e gerar');
+      expect(h.session.lastApprovedSkeleton).toEqual(roteiro1);
+      expect(h.enqueued).toHaveLength(1);
+      expect(h.enqueued[0].approvedSkeleton).toEqual(roteiro1);
+
+      await h.handlers.get('review:decline')!(S, 'u1', { reason: 'Não gostei do fundo' });
+
+      expect(h.enqueued).toHaveLength(2);
+      const regeneracao = h.enqueued[1];
+      expect(regeneracao.brief).toBe('Não gostei do fundo');
+      expect(regeneracao.approvedSkeleton).toEqual(roteiro1);
+      expect(regeneracao.sourceCopy).toContain('TITULO');
+      expect(hasApprovedText({ sourceCopy: regeneracao.sourceCopy, approvedSkeleton: regeneracao.approvedSkeleton })).toBe(true);
+    });
+
+    it('(c) geração nova SEM copy (fluxo direto) ZERA o roteiro aprovado guardado, e a regeneração seguinte não o reaproveita', async () => {
+      // Sobrou o roteiro de uma geração anterior, de outra copy.
+      h.session.lastApprovedSkeleton = roteiro1;
+      h.streams.push(texto('Vou criar agora [DISPATCH:presentation]'));
+
+      await send('Faça 3 slides sobre o lançamento.');
+
+      expect(h.session.lastApprovedSkeleton).toBeNull();
+      expect(h.enqueued).toHaveLength(1);
+      expect(h.enqueued[0].approvedSkeleton).toBeUndefined();
+
+      await h.handlers.get('review:decline')!(S, 'u1', { reason: 'refaz' });
+
+      expect(h.enqueued).toHaveLength(2);
+      expect(h.enqueued[1].approvedSkeleton).toBeUndefined();
+    });
+
+    it('(c) planner indisponível (geração direta de contingência): o roteiro aprovado guardado é ZERADO e a regeneração replaneja com a copy', async () => {
+      const planner = await import('../agents/planner/index');
+      vi.mocked(planner.runPlanner).mockRejectedValueOnce(new Error('planner fora do ar'));
+      const erroLog = vi.spyOn(logger, 'error').mockImplementation(() => {});
+      // Sobrou o roteiro de uma geração anterior, de OUTRA copy.
+      h.session.lastApprovedSkeleton = [{ order: 1, title: 'Outra copy', goal: 'g', layout_type: 'title-hero', copy: 'TEXTO-VELHO' }];
+      h.streams.push(texto('Vou criar agora [DISPATCH:presentation]'));
+
+      await send(bruto);
+
+      expect(h.enqueued).toHaveLength(1);
+      expect(h.enqueued[0].approvedSkeleton).toBeUndefined();
+      expect(h.enqueued[0].sourceCopy).toContain('TITULO');
+      expect(h.session.lastApprovedSkeleton).toBeNull();
+
+      await h.handlers.get('review:decline')!(S, 'u1', { reason: 'refaz' });
+
+      expect(h.enqueued).toHaveLength(2);
+      expect(h.enqueued[1].approvedSkeleton).toBeUndefined();
+      expect(JSON.stringify(h.enqueued[1])).not.toContain('TEXTO-VELHO');
+      expect(h.enqueued[1].sourceCopy).toContain('TITULO');
+      erroLog.mockRestore();
     });
 
     it('(c) saída de emergência, sem ficha: a regeneração segue como antes (só brief e formato)', async () => {

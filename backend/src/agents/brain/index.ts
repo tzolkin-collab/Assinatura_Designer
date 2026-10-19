@@ -329,6 +329,10 @@ async function planAndAskApproval(
     // recebe a copy e replaneja lá dentro, só perde a pausa de aprovação).
     logger.error('Roteiro copy-first falhou; caindo para geração direta', { error: (err as Error).message });
     ws.token(sessionId, '\n\n*Não consegui montar o roteiro prévio agora — vou gerar direto usando a copy como fonte.*\n');
+    // Este ramo enfileira sem `approvedSkeleton`: o roteiro guardado de uma geração anterior (ou desta mesma, se o
+    // erro veio depois de o modo automático gravá-lo) é de OUTRA copy e não pode ser reaproveitado numa regeneração
+    // após recusa. Zerado, a regeneração seguinte replaneja a partir da copy da sessão.
+    await updateSession(sessionId, { lastApprovedSkeleton: null });
     await enqueuePipelineOrFailSession({ sessionId, brief: fullBrief, format, sourceCopy, aspectRatio }, 'fallback copy-first');
   }
 }

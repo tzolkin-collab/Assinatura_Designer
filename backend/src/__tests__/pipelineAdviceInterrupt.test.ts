@@ -158,7 +158,7 @@ const promptOf = (start: number) => h.prompts.find((p) => p.start === start)!.us
 // O cérebro é global (vale em todo projeto, com ou sem ficha) e uma geração sem texto aprovado para e pede o
 // texto. Estas suítes testam orientações, pausa e interrupção, não a trava de texto: o harness entrega a copy,
 // como a Fábrica entrega, e o cérebro roda de verdade com o padrão ligado.
-/** Prisma P2021: a tabela não existe (migration ainda não aplicada). */
+/** Prisma P2021: a tabela não existe (migration ainda não aplicada). O P2022 (coluna) é tratado igual. */
 function tabelaInexistente() {
   return Object.assign(new Error('The table `public.BrandProfile` does not exist in the current database.'), { code: 'P2021' });
 }
@@ -970,6 +970,19 @@ describe('cérebro global (padrão): projeto sem ficha passa pelo mesmo cérebro
     expect(plannerCall().brandContext).toContain(GLOBAL);
     expect(aviso.mock.calls.map((c) => String(c[0])).join(' | ')).toContain('migration não aplicada');
     aviso.mockRestore();
+  });
+
+  it('banco com a coluna da ficha faltando (P2022): o mesmo que tabela inexistente, segue sem ficha com aviso warn', async () => {
+    h.profileLookupError = Object.assign(new Error('The column `BrandProfile.data` does not exist in the current database.'), { code: 'P2022' });
+    const aviso = vi.spyOn(logger, 'warn').mockImplementation(() => {});
+    const erroLog = vi.spyOn(logger, 'error').mockImplementation(() => {});
+    await gerar('texto aprovado');
+    expect(wsOf('error')).toHaveLength(0);
+    expect(plannerCall().brandContext).toContain(GLOBAL);
+    expect(aviso.mock.calls.map((c) => String(c[0])).join(' | ')).toContain('migration não aplicada');
+    expect(erroLog.mock.calls.map((c) => String(c[0])).join(' | ')).not.toContain('ler a ficha');
+    aviso.mockRestore();
+    erroLog.mockRestore();
   });
 
   it('(d) falha de LEITURA da ficha (erro genérico): para com erro visível, sem gerar nada, e registra o erro no log', async () => {

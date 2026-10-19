@@ -64,9 +64,13 @@ export class BrainLayersReadError extends Error {
   }
 }
 
-/** Prisma P2021: a tabela não existe (migration ainda não aplicada neste banco). */
-function isMissingTable(err: unknown): boolean {
-  return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === 'P2021';
+/**
+ * Banco com migrations parciais: Prisma P2021 (a tabela não existe) ou P2022 (a coluna não existe). Os
+ * dois dizem a mesma coisa, que a migration da ficha ainda não foi aplicada por inteiro neste banco.
+ */
+function isPartialMigration(err: unknown): boolean {
+  const code = typeof err === 'object' && err !== null ? (err as { code?: unknown }).code : undefined;
+  return code === 'P2021' || code === 'P2022';
 }
 
 /**
@@ -75,9 +79,9 @@ function isMissingTable(err: unknown): boolean {
  *
  * Falha de leitura NÃO é "sem ficha": um projeto que TEM ficha não pode seguir em silêncio como se não
  * tivesse. Aqui ela vira `BrainLayersReadError`, e quem gera (o pipeline) para com erro visível. A única
- * exceção é tabela inexistente (P2021, migration ainda não aplicada): aí não existe ficha alguma para
- * perder, então vale como "sem ficha", com aviso no log, para não quebrar toda geração enquanto a
- * migration não é aplicada.
+ * exceção é tabela ou coluna inexistente (P2021/P2022, banco com migrations parciais): aí não existe ficha
+ * alguma para perder, então vale como "sem ficha", com aviso no log (nível warn), para não quebrar toda
+ * geração enquanto a migration não é aplicada. Qualquer outro erro continua parando a geração.
  */
 export async function loadBrainLayersStrict(brandSlug: string): Promise<BrainLayers | null> {
   const slug = brandSlug.trim().toLowerCase();
@@ -94,9 +98,10 @@ export async function loadBrainLayersStrict(brandSlug: string): Promise<BrainLay
       },
     });
   } catch (err) {
-    if (isMissingTable(err)) {
-      logger.warn('Tabela da ficha não existe (migration não aplicada): projeto tratado como sem ficha', {
+    if (isPartialMigration(err)) {
+      logger.warn('Tabela ou coluna da ficha não existe (migration não aplicada ou parcial): projeto tratado como sem ficha', {
         brandSlug,
+        code: (err as { code?: string }).code,
         error: err instanceof Error ? err.message : String(err),
       });
       return null;

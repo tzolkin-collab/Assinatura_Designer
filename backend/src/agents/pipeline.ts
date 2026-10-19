@@ -300,7 +300,7 @@ async function runPipelineInner(
   // resolveProjectMemory achar (instruções do agente ou seed) e o que falta vira pendência, sem a IA preencher nada.
   // Num desdobramento a ficha é a da base, e o que muda vem como camada de collab.
   // Falha de LEITURA da ficha não é "sem ficha": um projeto que tem ficha não pode seguir em silêncio sem ela.
-  // Para com erro visível e pede para tentar de novo. Tabela inexistente (migration ainda não aplicada) é a
+  // Para com erro visível e pede para tentar de novo. Tabela ou coluna inexistente (P2021/P2022: migrations parciais) é a
   // exceção: não há ficha para perder, e loadBrainLayersStrict a trata como sem ficha, com aviso no log.
   let layers: Awaited<ReturnType<typeof loadBrainLayersStrict>>;
   try {
@@ -591,7 +591,7 @@ async function runPipelineInner(
       postId,
       brandSlug: session.brandSlug,
       sessionId,
-      // O briefing LIMPO: o texto de [INTERNO]/[NÃO EXIBIR] de projeto sem ficha não fica gravado no trace.
+      // O briefing LIMPO: o texto de [INTERNO]/[NÃO EXIBIR] de qualquer projeto com o cérebro global (com ou sem ficha) não fica gravado no trace.
       brief,
       format: params.format,
       aspectRatio: params.aspectRatio,
