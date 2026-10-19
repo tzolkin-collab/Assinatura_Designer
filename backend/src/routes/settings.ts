@@ -18,7 +18,6 @@ import { AuthRequest } from '../middleware/auth.js';
 import { z } from 'zod';
 import { isPublicHttpUrl, isPublicHttpUrlResolved } from '../lib/validate.js';
 import { analyzeReferenceBackground, analyzeReferenceWithUploadedImage } from '../lib/referenceSync.js';
-import { rootAdminDbEmail } from '../lib/rootAdmin.js';
 
 export const settingsRouter = Router();
 
@@ -458,11 +457,7 @@ settingsRouter.get('/tenants', async (req: AuthRequest, res: Response, next: Nex
       orderBy: { createdAt: 'desc' },
     });
 
-    // O login root não é membro "de verdade" de marca: não aparece na lista.
-    const rootEmail = rootAdminDbEmail();
-    const visible = brands.map((b) => ({ ...b, members: b.members.filter((m) => m.user.email !== rootEmail) }));
-
-    res.json({ data: visible });
+    res.json({ data: brands });
   } catch (error) {
     next(error);
   }
