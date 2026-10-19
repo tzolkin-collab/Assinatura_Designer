@@ -10,13 +10,15 @@ import {
   fontSubstitutionNotice,
   computeFinalGate,
   hasApprovedText,
-  isDesignerBrainEnabled,
+  isBrainOnWithoutProfile,
+  isGlobalBrainEnabled,
   loadBrainLayers,
   parseCopyBlocks,
   profileStyleReferences,
   REAL_PHOTO_RULE_PROMPT,
   officialFontsFor,
   textIssuesToDeviations,
+  withoutWithheldText,
 } from '../lib/designerBrain/index.js';
 import type { TextIssue } from '../lib/designerBrain/index.js';
 import { executeTool } from './tools/index.js';
@@ -269,7 +271,7 @@ async function runPipelineInner(
   params: PipelineParams,
   session: NonNullable<Awaited<ReturnType<typeof getSession>>>,
 ): Promise<PipelineOutcome | void> {
-  const { sessionId, brief, format } = params;
+  const { sessionId, format } = params;
 
   // ── Carregar contexto canônico da marca ─────────────────────────────────────
   let brand;
@@ -290,20 +292,26 @@ async function runPipelineInner(
     ? `Regras aprendidas sobre esta marca em conversas anteriores (respeite):\n${Object.entries(learnedPreferences).map(([k, v]) => `- ${k}: ${typeof v === 'string' ? v : JSON.stringify(v)}`).join('\n')}`
     : '';
 
-  // Cérebro do Designer em camadas: ligado nas marcas com ficha salva (e, por retaguarda, nas de DESIGNER_BRAIN_BRANDS).
+  // Cérebro do Designer em camadas: GLOBAL, ligado em todo projeto, com ou sem ficha salva (e só na saída de
+  // emergência DESIGNER_BRAIN_GLOBAL=off volta a depender de ficha ou de DESIGNER_BRAIN_BRANDS).
   // Ligado, o contexto legado (resumo + regras aprendidas no chat) dá lugar às camadas
   // global → projeto → modo: a memória do projeto é a do cadastro, e o chat não a reescreve.
-  // A ficha salva do projeto liga o cérebro e é de onde ele lê as regras da marca.
+  // A ficha salva do projeto é de onde ele lê as regras da marca; sem ficha, a memória é a que o
+  // resolveProjectMemory achar (instruções do agente ou seed) e o que falta vira pendência, sem a IA preencher nada.
   // Num desdobramento a ficha é a da base, e o que muda vem como camada de collab.
   const layers = await loadBrainLayers(session.brandSlug);
   const savedProfile = layers?.projectProfile ?? null;
-  const designerBrainOn = layers !== null || isDesignerBrainEnabled(session.brandSlug);
+  const designerBrainOn = layers !== null || isBrainOnWithoutProfile(session.brandSlug);
   // Regra de foto real (Cérebro de IA §5): estrutural, vale para todo projeto. Ligada pelo cérebro OU
   // pela pessoa, que a ativa/confirma no chat antes de gerar; não depende de o projeto ter ficha.
   const photoRuleOn = designerBrainOn || session.photoRule === 'on';
   // Status por bloco: só o aprovado (e o em revisão, como rascunho) vira texto de slide.
   const copy = designerBrainOn ? parseCopyBlocks(params.sourceCopy) : null;
   const sourceCopy = copy?.hasMarkers ? copy.copyForSlides : params.sourceCopy;
+  // O briefing da conversa carrega a mensagem colada inteira: sem isto o [INTERNO]/[NÃO EXIBIR] de um projeto
+  // SEM ficha chegaria ao planner e ao artista por ele, mesmo depois de sair da copy. Só neste caso (cérebro
+  // global em projeto sem ficha): projeto com ficha e a saída de emergência seguem exatamente como antes.
+  const brief = copy && layers === null && isGlobalBrainEnabled() ? withoutWithheldText(params.brief, copy) : params.brief;
   // Sem texto aprovado o cérebro não tem o que reproduzir literalmente, e o modelo preenche o
   // vazio com texto inventado (visto em geração real: biografia, tópicos e botões que ninguém
   // escreveu). Melhor parar e pedir o texto do que entregar texto que a marca nunca aprovou.
@@ -325,6 +333,8 @@ async function runPipelineInner(
         profile: savedProfile,
         projectName: layers?.projectName,
         collab: layers?.collab,
+        // Cérebro global: projeto sem memória nenhuma não é erro, segue com o resumo do cadastro e a pendência.
+        fallbackMemory: isGlobalBrainEnabled() ? buildBrandContextSummary(brand) : undefined,
         textBlocks: copy?.blocks,
         format,
         aspectRatio: params.aspectRatio,

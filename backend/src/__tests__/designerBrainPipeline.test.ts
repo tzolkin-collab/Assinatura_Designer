@@ -112,3 +112,57 @@ describe('contexto do pipeline com o cérebro ligado', () => {
     expect(brandContext).not.toContain('Queens');
   });
 });
+
+describe('contexto do pipeline com o cérebro global: projeto sem memória não é erro', () => {
+  const semMemoria = { slug: 'marca-nova', name: 'Nova', agentPrompt: '' };
+
+  it('com o resumo do cadastro como reserva, usa-o como projeto e registra a memória como pendência (nada inventado)', () => {
+    const { brandContext, pending } = buildPipelineBrainContext({
+      brand: semMemoria,
+      format: 'presentation',
+      pageCount: 5,
+      fallbackMemory: 'Marca: Nova\nCores: #112233',
+    });
+    expect(brandContext).toContain('Você é a inteligência de direção de arte do sistema Designer');
+    expect(brandContext).toContain('Cores: #112233');
+    expect(pending).toEqual(['Memória do projeto-base (ficha do projeto)']);
+  });
+
+  it('reserva vazia (só espaços) continua sendo erro de configuração', () => {
+    expect(() =>
+      buildPipelineBrainContext({ brand: semMemoria, format: 'presentation', fallbackMemory: '   ' }),
+    ).toThrow(DesignerBrainSetupError);
+  });
+
+  it('a reserva só entra quando NADA resolve: instruções do agente, seed e ficha vencem', () => {
+    const agente = buildPipelineBrainContext({
+      brand: { ...semMemoria, agentPrompt: 'INSTRUCOES-DO-AGENTE' },
+      format: 'presentation',
+      pageCount: 5,
+      fallbackMemory: 'RESERVA-DO-CADASTRO',
+    });
+    expect(agente.brandContext).toContain('INSTRUCOES-DO-AGENTE');
+    expect(agente.brandContext).not.toContain('RESERVA-DO-CADASTRO');
+    expect(agente.pending).toEqual([]);
+
+    const seed = buildPipelineBrainContext({
+      brand: { slug: 'amanda-coelho', name: 'Amanda Coelho', agentPrompt: '' },
+      format: 'presentation',
+      pageCount: 5,
+      fallbackMemory: 'RESERVA-DO-CADASTRO',
+    });
+    expect(seed.brandContext).toContain('#410C1C');
+    expect(seed.brandContext).not.toContain('RESERVA-DO-CADASTRO');
+
+    const ficha = buildPipelineBrainContext({
+      brand: semMemoria,
+      profile: { essence: 'ESSENCIA-FICHA' },
+      format: 'presentation',
+      pageCount: 5,
+      fallbackMemory: 'RESERVA-DO-CADASTRO',
+    });
+    expect(ficha.brandContext).toContain('ESSENCIA-FICHA');
+    expect(ficha.brandContext).not.toContain('RESERVA-DO-CADASTRO');
+    expect(ficha.pending).toEqual([]);
+  });
+});

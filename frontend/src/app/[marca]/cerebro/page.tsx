@@ -268,8 +268,9 @@ export default function CerebroPage() {
           O que ficar em branco continua pendente, e a IA não preenche por conta própria.
         </p>
         <p>
-          <strong>Ao salvar, o Designer passa a gerar este projeto com esta ficha</strong>: só com texto aprovado e só com foto real fornecida.
-          Enquanto não houver ficha salva, o projeto segue com as configurações antigas.
+          <strong>Todo projeto já é gerado com as regras fixas do Designer</strong>, com ou sem ficha: só com texto aprovado e só com foto real fornecida.
+          <strong> Ao salvar, o Designer passa a usar esta ficha como a memória do projeto</strong>. Enquanto não houver ficha salva, usa o que o projeto já tem
+          cadastrado, e o que faltar fica pendente.
         </p>
       </div>
 
@@ -287,7 +288,7 @@ export default function CerebroPage() {
 
       {result.derived && (
         <div className={[styles.notice, styles.noticeInfo].join(' ')}>
-          Esta ficha foi montada a partir dos campos que o projeto já tinha (cores, fontes, logo e textos antigos). Ela só passa a valer depois de salva.
+          Esta ficha foi montada a partir dos campos que o projeto já tinha (cores, fontes, logo e textos antigos). Ela só passa a valer como a ficha do projeto depois de salva.
         </div>
       )}
       {readOnly && <div className={[styles.notice, styles.noticeInfo].join(' ')}>{perms.hint || 'Você só pode visualizar esta ficha.'}</div>}

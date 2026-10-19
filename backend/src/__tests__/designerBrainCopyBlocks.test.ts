@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseCopyBlocks } from '../lib/designerBrain/copyBlocks.js';
+import { parseCopyBlocks, withoutWithheldText } from '../lib/designerBrain/copyBlocks.js';
 
 describe('parseCopyBlocks', () => {
   it('sem marcas: o texto passa intacto e vale como aprovado (nada muda para quem não usa)', () => {
@@ -53,5 +53,36 @@ describe('parseCopyBlocks', () => {
   it('só orientação, sem nada aprovado: os slides ficam sem texto (o pipeline então para e pede)', () => {
     const r = parseCopyBlocks('[FALA] só fala\n[CONTEXTO] só contexto');
     expect(r.copyForSlides).toBe('');
+  });
+});
+
+describe('withoutWithheldText (o interno também sai do briefing da conversa)', () => {
+  const colado = ['[APROVADO]', 'TITULO-APROVADO', '[INTERNO]', 'VALOR-DO-CONTRATO', 'SEGUNDA-LINHA', '[NÃO EXIBIR] SEGREDO-INLINE', '[FALA]', 'FALA-OK'].join('\n');
+
+  it('sem nenhuma marca devolve o texto original, byte a byte (inclusive CRLF)', () => {
+    const livre = 'Brief\r\n  com   espaços\n[Slide 3] x\n';
+    expect(withoutWithheldText(livre, parseCopyBlocks(livre))).toBe(livre);
+  });
+
+  it('tira o conteúdo de [INTERNO] e [NÃO EXIBIR] (multilinha e na mesma linha da marca) e deixa o resto', () => {
+    const out = withoutWithheldText(`Faça uma apresentação.\n\n${colado}`, parseCopyBlocks(colado));
+    expect(out).not.toContain('VALOR-DO-CONTRATO');
+    expect(out).not.toContain('SEGUNDA-LINHA');
+    expect(out).not.toContain('SEGREDO-INLINE');
+    expect(out).toContain('Faça uma apresentação.');
+    expect(out).toContain('TITULO-APROVADO');
+    expect(out).toContain('FALA-OK'); // fala e contexto são orientação, não ficam de fora do briefing
+  });
+
+  it('funciona com quebra de linha do Windows (CRLF)', () => {
+    const crlfText = colado.replace(/\n/g, '\r\n');
+    const out = withoutWithheldText(crlfText, parseCopyBlocks(crlfText));
+    expect(out).not.toContain('VALOR-DO-CONTRATO');
+    expect(out).not.toContain('SEGUNDA-LINHA');
+  });
+
+  it('trecho interno curto demais (menos de 3 caracteres) não é removido, para não estragar o briefing', () => {
+    const src = '[APROVADO]\nTítulo ok\n[INTERNO]\nok';
+    expect(withoutWithheldText(src, parseCopyBlocks(src))).toContain('Título ok');
   });
 });

@@ -235,12 +235,19 @@ describe('orientações consumidas pelo cérebro', () => {
     expect(tokens()).toContain('aprovado automaticamente');
   });
 
-  describe('regra de foto real: ativada ou confirmada no chat antes de gerar', () => {
+  // Estes testes descrevem o chat ANTES do cérebro global ("projeto sem as regras do Designer"). Assumiam o
+  // cérebro desligado por padrão, o que deixou de ser verdade: rodam com a saída de emergência
+  // DESIGNER_BRAIN_GLOBAL=off, o que também prova que ela devolve o comportamento anterior. O padrão (cérebro
+  // global ligado em todo projeto) é coberto no describe seguinte.
+  describe('regra de foto real: ativada ou confirmada no chat antes de gerar (saída de emergência DESIGNER_BRAIN_GLOBAL=off)', () => {
     const original = process.env.DESIGNER_BRAIN_BRANDS;
-    beforeEach(() => { delete h.session.photoRule; delete process.env.DESIGNER_BRAIN_BRANDS; });
+    const originalGlobal = process.env.DESIGNER_BRAIN_GLOBAL;
+    beforeEach(() => { delete h.session.photoRule; delete process.env.DESIGNER_BRAIN_BRANDS; process.env.DESIGNER_BRAIN_GLOBAL = 'off'; });
     afterEach(() => {
       if (original === undefined) delete process.env.DESIGNER_BRAIN_BRANDS;
       else process.env.DESIGNER_BRAIN_BRANDS = original;
+      if (originalGlobal === undefined) delete process.env.DESIGNER_BRAIN_GLOBAL;
+      else process.env.DESIGNER_BRAIN_GLOBAL = originalGlobal;
     });
 
     it('projeto sem as regras do Designer: a primeira geração PARA e pergunta se ativa', async () => {
@@ -375,15 +382,71 @@ describe('orientações consumidas pelo cérebro', () => {
     });
   });
 
-  describe('status por bloco (marca com cérebro ligado)', () => {
+  describe('cérebro global (padrão): projeto SEM ficha tem as mesmas regras no chat', () => {
+    const keys = ['DESIGNER_BRAIN_BRANDS', 'DESIGNER_BRAIN_GLOBAL'] as const;
+    const originais = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+    beforeEach(() => { delete h.session.photoRule; for (const k of keys) delete process.env[k]; });
+    afterEach(() => {
+      for (const k of keys) {
+        if (originais[k] === undefined) delete process.env[k];
+        else process.env[k] = originais[k];
+      }
+    });
+    const pedido = (t: string) => texto(`${t} [GENERATE_IMAGE:{"prompt":"mulher sorrindo numa mesa de escritório","id":"img1"}]`);
+
+    it('a primeira geração PARA e pede para CONFIRMAR a regra de foto real (não "ativar")', async () => {
+      h.streams.push(texto('Vou criar [DISPATCH:presentation]'));
+      await send('cria uma apresentação');
+
+      expect(h.enqueued).toHaveLength(0);
+      expect(h.session.activeQuestion.question).toContain('confirmo a regra de foto real');
+      expect(h.session.activeQuestion.options[0].label).toBe('Confirmar regra de foto real');
+    });
+
+    it('a nota do chat traz a regra de foto real E a trava de texto aprovado', async () => {
+      h.streams.push(texto('Ok!'));
+      await send('oi');
+      const sys = h.streamCalls[0]!.systemInstruction;
+      expect(sys).toContain('Regra desta conversa: fotografia real');
+      expect(sys).toContain('NÃO dispare a geração sem o texto aprovado');
+    });
+
+    it('[GENERATE_IMAGE] é recusado, sem a pessoa ter ativado nada', async () => {
+      const { generatePhotoBuffer } = await import('../lib/imageResolver.js');
+      vi.mocked(generatePhotoBuffer).mockClear();
+      h.streams.push(pedido('Vou mostrar.'));
+      await send('gera uma imagem de um cachorro');
+      await new Promise((r) => setTimeout(r, 20));
+      expect(generatePhotoBuffer).not.toHaveBeenCalled();
+      expect(wsOf('emit').some((c) => c.args[1] === 'image:proposal:error')).toBe(true);
+    });
+
+    it('saída de emergência (DESIGNER_BRAIN_GLOBAL=off): o chat volta a ser o de antes (a ferramenta gera, a nota não aparece)', async () => {
+      process.env.DESIGNER_BRAIN_GLOBAL = 'off';
+      const { generatePhotoBuffer } = await import('../lib/imageResolver.js');
+      vi.mocked(generatePhotoBuffer).mockClear();
+      h.streams.push(texto('Ok!'));
+      await send('oi');
+      expect(h.streamCalls[0]!.systemInstruction).not.toContain('Regra desta conversa: fotografia real');
+      h.streams.push(pedido('Vou mostrar.'));
+      await send('gera uma imagem de um cachorro');
+      await new Promise((r) => setTimeout(r, 20));
+      expect(generatePhotoBuffer).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('status por bloco (cérebro global, projeto sem ficha)', () => {
     const original = process.env.DESIGNER_BRAIN_BRANDS;
+    const originalGlobal = process.env.DESIGNER_BRAIN_GLOBAL;
+    beforeEach(() => { delete process.env.DESIGNER_BRAIN_BRANDS; delete process.env.DESIGNER_BRAIN_GLOBAL; });
     afterEach(() => {
       if (original === undefined) delete process.env.DESIGNER_BRAIN_BRANDS;
       else process.env.DESIGNER_BRAIN_BRANDS = original;
+      if (originalGlobal === undefined) delete process.env.DESIGNER_BRAIN_GLOBAL;
+      else process.env.DESIGNER_BRAIN_GLOBAL = originalGlobal;
     });
 
     it('o planner recebe só o texto aprovado; o texto com as marcas segue intacto para o pipeline', async () => {
-      process.env.DESIGNER_BRAIN_BRANDS = h.session.brandSlug;
       const planner = await import('../agents/planner/index');
       vi.mocked(planner.runPlanner).mockResolvedValueOnce([{ order: 1, title: 'Abertura', goal: 'g', layout_type: 'title-hero', copy: 'TITULO' }]);
       h.session.reviewMode = 'auto';
@@ -399,8 +462,20 @@ describe('orientações consumidas pelo cérebro', () => {
       expect(h.enqueued[0].sourceCopy).toContain('FALA-SECRETA'); // o pipeline usa como orientação
     });
 
+    it('saída de emergência: sem ficha e sem o slug na lista, o texto com as marcas segue inteiro ao planner (como antes)', async () => {
+      process.env.DESIGNER_BRAIN_GLOBAL = 'off';
+      const planner = await import('../agents/planner/index');
+      vi.mocked(planner.runPlanner).mockResolvedValueOnce([{ order: 1, title: 'Abertura', goal: 'g', layout_type: 'title-hero', copy: 'TITULO' }]);
+      h.session.reviewMode = 'auto';
+      h.streams.push(texto('Vou criar agora [DISPATCH:presentation]'));
+
+      await send(['[APROVADO]', 'TITULO', '[INTERNO]', 'VALOR-INTERNO', 'Texto de apoio longo. '.repeat(60)].join('\n'));
+
+      const enviado = vi.mocked(planner.runPlanner).mock.calls.at(-1)![0] as { sourceCopy?: string };
+      expect(enviado.sourceCopy).toContain('VALOR-INTERNO');
+    });
+
     it('tudo marcado como fala/contexto: não gera e pede o texto aprovado', async () => {
-      process.env.DESIGNER_BRAIN_BRANDS = h.session.brandSlug;
       h.streams.push(texto('Vou criar agora [DISPATCH:presentation]'));
 
       await send('[FALA]\n' + 'Só falado, sem texto de slide. '.repeat(60));

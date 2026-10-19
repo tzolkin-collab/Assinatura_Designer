@@ -90,3 +90,18 @@ export function parseCopyBlocks(source: string | undefined): ParsedCopy {
     },
   };
 }
+
+/**
+ * Tira de um texto livre (o briefing da conversa, que carrega a mensagem colada inteira) o conteúdo dos
+ * blocos [INTERNO] e [NÃO EXIBIR]. O parser já os tira da copy; sem isto o mesmo texto chegava ao
+ * planner e ao artista pelo briefing. Trechos curtos demais (menos de 3 caracteres) ficam: remover "ok"
+ * de todo o briefing o estragaria. Sem nenhuma marca, devolve o texto original, byte a byte.
+ */
+export function withoutWithheldText(text: string, parsed: ParsedCopy): string {
+  if (!parsed.hasMarkers) return text;
+  let out = text.replace(/\r\n/g, '\n');
+  for (const block of parsed.blocks) {
+    if (isWithheld(block.status) && block.text.length >= 3) out = out.split(block.text).join('');
+  }
+  return out;
+}

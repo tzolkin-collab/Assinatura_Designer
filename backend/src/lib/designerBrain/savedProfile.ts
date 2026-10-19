@@ -2,7 +2,7 @@ import prisma from '../prisma.js';
 import { logger } from '../logger.js';
 import { collabDetailsSchema, type CollabDetails } from '../brandCollab.js';
 import { brandProfileSchema, renderProjectMemory, type BrandProfileData } from '../brandProfile.js';
-import { isDesignerBrainEnabled } from './enabled.js';
+import { isBrainOnWithoutProfile } from './enabled.js';
 import type { BrainAsset, CollabLayer } from './types.js';
 
 /**
@@ -57,7 +57,8 @@ function collabAssets(details: CollabDetails): BrainAsset[] {
 }
 
 /**
- * `null` = a marca não tem ficha salva (nem ela nem a base): o cérebro fica desligado, como antes.
+ * `null` = a marca não tem ficha salva (nem ela nem a base). Isso NÃO desliga o cérebro: ele é global
+ * e a marca segue com as camadas globais e a memória que o `resolveProjectMemory` achar.
  * Se a leitura falhar (tabela sem migration, banco fora) a geração segue sem o cérebro, com aviso
  * no log: uma camada opcional não pode derrubar a geração.
  */
@@ -118,11 +119,12 @@ export async function loadSavedProfileBySlug(brandSlug: string): Promise<BrandPr
 }
 
 /**
- * O cérebro está ativo para a marca quando ela (ou a base dela) tem ficha salva.
- * `DESIGNER_BRAIN_BRANDS` continua valendo como retaguarda até as marcas piloto (a Amanda)
- * existirem como ficha no banco.
+ * O cérebro está ativo para a marca. Por padrão (cérebro global) SEMPRE, com ou sem ficha. Só na
+ * saída de emergência (`DESIGNER_BRAIN_GLOBAL=off`) volta a depender de ficha salva (da marca ou da
+ * base) ou de o slug estar em `DESIGNER_BRAIN_BRANDS`. O pipeline usa a mesma regra
+ * (`isBrainOnWithoutProfile`) em vez de uma cópia, para a API e o worker nunca divergirem.
  */
 export async function isBrainActiveForBrand(brandSlug: string): Promise<boolean> {
-  if (isDesignerBrainEnabled(brandSlug)) return true;
+  if (isBrainOnWithoutProfile(brandSlug)) return true;
   return (await loadBrainLayers(brandSlug)) !== null;
 }

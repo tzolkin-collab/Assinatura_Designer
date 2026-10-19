@@ -25,6 +25,7 @@ const h = vi.hoisted(() => {
     profileLookupFails: false,
     withEmptySlot: false,
     brandRow: null as Record<string, unknown> | null,
+    agentPrompt: '',
   };
   return state;
 });
@@ -67,7 +68,7 @@ vi.mock('../lib/websocket.js', () => {
 
 vi.mock('../lib/brandContext.js', () => ({
   resolveBrandContext: vi.fn(async () => ({
-    id: 'brand-1', name: 'Marca X', slug: h.session.brandSlug, agentPrompt: '', guidelines: 'DIRETRIZ-LEGADA', colors: ['#111111'], primaryFonts: ['Inter'], assetUrls: [], libraryBrandIds: ['brand-1'], references: [],
+    id: 'brand-1', name: 'Marca X', slug: h.session.brandSlug, agentPrompt: h.agentPrompt, guidelines: 'DIRETRIZ-LEGADA', colors: ['#111111'], primaryFonts: ['Inter'], assetUrls: [], libraryBrandIds: ['brand-1'], references: [],
   })),
   buildBrandContextSummary: vi.fn(() => 'contexto da marca'),
 }));
@@ -152,7 +153,15 @@ const wsOf = (fn: string) => h.wsCalls.filter((c) => c.fn === fn);
 const emitsOf = (type: string) => wsOf('emit').filter((c) => c.args[1] === type).map((c) => c.args[2]);
 const promptOf = (start: number) => h.prompts.find((p) => p.start === start)!.user;
 
+// O cérebro é global (vale em todo projeto, com ou sem ficha) e uma geração sem texto aprovado para e pede o
+// texto. Estas suítes testam orientações, pausa e interrupção, não a trava de texto: o harness entrega a copy,
+// como a Fábrica entrega, e o cérebro roda de verdade com o padrão ligado.
 async function rodar() {
+  await runPipeline({ sessionId: S, brief: 'Apresentação de teste', format: 'presentation', postId: POST, sourceCopy: 'texto aprovado' });
+}
+
+/** Geração SEM nenhum texto aprovado (sem copy nem roteiro aprovado): é o que a trava de texto barra. */
+async function rodarSemTexto() {
   await runPipeline({ sessionId: S, brief: 'Apresentação de teste', format: 'presentation', postId: POST });
 }
 
@@ -161,6 +170,7 @@ beforeEach(() => {
   h.profileLookupFails = false;
   h.withEmptySlot = false;
   h.brandRow = null;
+  h.agentPrompt = '';
   h.wsCalls.length = 0;
   h.prompts.length = 0;
   h.reviewerBriefs.length = 0;
@@ -392,11 +402,17 @@ describe('cancelamento cooperativo (Pausar e enviar)', () => {
   });
 });
 
-describe('cérebro do Designer ligado por marca (DESIGNER_BRAIN_BRANDS)', () => {
+// Estes testes descrevem o comportamento ANTERIOR ao cérebro global: o cérebro só liga com ficha salva ou com o
+// slug em DESIGNER_BRAIN_BRANDS. Assumiam "desligado por padrão", o que deixou de ser verdade; agora rodam com a
+// saída de emergência DESIGNER_BRAIN_GLOBAL=off e provam que ela devolve o comportamento anterior. O padrão
+// (cérebro global ligado) é coberto na suíte seguinte.
+describe('cérebro do Designer com a saída de emergência (DESIGNER_BRAIN_GLOBAL=off): ficha ou DESIGNER_BRAIN_BRANDS', () => {
   const original = process.env.DESIGNER_BRAIN_BRANDS;
+  const originalGlobal = process.env.DESIGNER_BRAIN_GLOBAL;
   const GLOBAL = 'Você é a inteligência de direção de arte do sistema Designer';
 
   beforeEach(() => {
+    process.env.DESIGNER_BRAIN_GLOBAL = 'off';
     vi.mocked(runPlanner).mockReset();
     vi.mocked(resolveSlideImages).mockClear();
     h.slideCount = 3; // um lote só
@@ -416,9 +432,11 @@ describe('cérebro do Designer ligado por marca (DESIGNER_BRAIN_BRANDS)', () => 
   afterEach(() => {
     if (original === undefined) delete process.env.DESIGNER_BRAIN_BRANDS;
     else process.env.DESIGNER_BRAIN_BRANDS = original;
+    if (originalGlobal === undefined) delete process.env.DESIGNER_BRAIN_GLOBAL;
+    else process.env.DESIGNER_BRAIN_GLOBAL = originalGlobal;
   });
 
-  it('desligado (padrão): nada muda — diretrizes legadas, sem cérebro, geração de foto como antes', async () => {
+  it('desligado (saída de emergência): nada muda — diretrizes legadas, sem cérebro, geração de foto como antes', async () => {
     delete process.env.DESIGNER_BRAIN_BRANDS;
     vi.mocked(runPlanner).mockResolvedValue(roteiro(() => '') as never);
     await rodar();
@@ -630,7 +648,7 @@ describe('cérebro do Designer ligado por marca (DESIGNER_BRAIN_BRANDS)', () => 
     delete process.env.DESIGNER_BRAIN_BRANDS;
     h.session.brandSlug = 'marca-com-ficha';
     h.savedProfile = { essence: 'X' };
-    await rodar();
+    await rodarSemTexto();
     expect(String(wsOf('error')[0]!.args[1])).toContain('só gera com texto aprovado');
     expect(vi.mocked(runPlanner)).not.toHaveBeenCalled();
   });
@@ -679,7 +697,7 @@ describe('cérebro do Designer ligado por marca (DESIGNER_BRAIN_BRANDS)', () => 
   it('ligado e SEM texto aprovado: para e pede o texto, em vez de deixar o modelo inventar', async () => {
     process.env.DESIGNER_BRAIN_BRANDS = 'amanda-coelho';
     h.session.brandSlug = 'amanda-coelho';
-    await rodar(); // sem sourceCopy nem roteiro aprovado
+    await rodarSemTexto(); // sem sourceCopy nem roteiro aprovado
 
     const erro = wsOf('error');
     expect(erro).toHaveLength(1);
@@ -689,10 +707,10 @@ describe('cérebro do Designer ligado por marca (DESIGNER_BRAIN_BRANDS)', () => 
     expect(h.session.phase).toBe('listening'); // a pessoa pode mandar o texto e seguir na mesma conversa
   });
 
-  it('marca SEM o cérebro continua gerando sem texto aprovado, como antes', async () => {
+  it('marca SEM o cérebro (saída de emergência) continua gerando sem texto aprovado, como antes', async () => {
     delete process.env.DESIGNER_BRAIN_BRANDS;
     vi.mocked(runPlanner).mockResolvedValue(roteiro(() => '') as never);
-    await rodar();
+    await rodarSemTexto();
     expect(wsOf('error')).toHaveLength(0);
     expect(h.modelCalls).toBeGreaterThan(0);
   });
@@ -734,5 +752,280 @@ describe('cérebro do Designer ligado por marca (DESIGNER_BRAIN_BRANDS)', () => 
 
     expect(h.session.pendingReview.deviations).toEqual([]);
     expect(wsOf('notify')[0]!.args[1]).toMatchObject({ kind: 'done' });
+  });
+});
+
+// ── Cérebro global: vale em TODO projeto, com ou sem ficha ──────────────────────────────────────────────
+// O padrão é ligado. Nenhum destes testes usa DESIGNER_BRAIN_BRANDS nem ficha salva (salvo o que diz o título).
+describe('cérebro global (padrão): projeto sem ficha passa pelo mesmo cérebro', () => {
+  const GLOBAL = 'Você é a inteligência de direção de arte do sistema Designer';
+  const keys = ['DESIGNER_BRAIN_GLOBAL', 'DESIGNER_BRAIN_BRANDS'] as const;
+  const originais = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+
+  beforeEach(() => {
+    for (const k of keys) delete process.env[k];
+    vi.mocked(runPlanner).mockReset();
+    vi.mocked(resolveSlideImages).mockClear();
+    h.slideCount = 3;
+    h.session.brandSlug = 'marca-sem-ficha';
+  });
+  afterEach(() => {
+    for (const k of keys) {
+      if (originais[k] === undefined) delete process.env[k];
+      else process.env[k] = originais[k];
+    }
+  });
+
+  const roteiro = (copy: (i: number) => string) =>
+    Array.from({ length: 3 }, (_, i) => ({ title: `Slide ${i + 1}`, goal: 'Objetivo', layout_type: 'content-split', order: i + 1, copy: copy(i) }));
+  const plannerCall = () => vi.mocked(runPlanner).mock.calls[0]![0] as { brandContext: string; sourceCopy?: string; brief: string };
+  const avisos = () => wsOf('token').map((c) => String(c.args[1])).join('');
+
+  async function gerar(sourceCopy: string, brief = 'Apresentação de teste') {
+    vi.mocked(runPlanner).mockResolvedValue(roteiro((i) => `Slide ${i + 1}`) as never);
+    await runPipeline({ sessionId: S, brief, format: 'presentation', postId: POST, sourceCopy });
+  }
+
+  it('sem ficha: planner e artista recebem as camadas globais, a regra de foto real e o resumo do cadastro (nada inventado)', async () => {
+    await gerar('texto aprovado');
+
+    expect(wsOf('error')).toHaveLength(0);
+    expect(plannerCall().brandContext).toContain(GLOBAL);
+    expect(plannerCall().brandContext).toContain('MODO: APRESENTAÇÃO');
+    expect(plannerCall().brandContext).toContain('REGRA DE FOTOGRAFIA PARA ESTA PEÇA');
+    // Sem ficha, sem instruções do agente e sem seed: a memória é o resumo do que o cadastro já tem.
+    expect(plannerCall().brandContext).toContain('contexto da marca');
+    const sys = h.prompts[0]!.sys;
+    expect(sys.startsWith(GLOBAL)).toBe(true);
+    expect(sys).toContain('data-photo-slot');
+    expect(promptOf(1)).not.toContain('Diretrizes: DIRETRIZ-LEGADA'); // as camadas ocupam o lugar do legado
+    // E o que falta vira pendência dita à pessoa, sem a IA preencher nada.
+    expect(avisos()).toContain('Falta definir: Memória do projeto-base (ficha do projeto)');
+    const gate = (h.postUpdates.at(-1)!.data.content as { finalGate?: { notes: string[]; blocking: string[] } }).finalGate;
+    expect(gate?.notes).toContain('Falta definir: Memória do projeto-base (ficha do projeto).');
+    expect(gate?.blocking).toEqual([]); // pendência avisa, não barra a entrega
+  });
+
+  it('sem ficha: regra de foto real em vigor — o deck não usa imagem gerada, e o espaço de foto vazio ganha a moldura padrão', async () => {
+    h.withEmptySlot = true;
+    await gerar('texto aprovado');
+
+    const resolver = vi.mocked(resolveSlideImages).mock.calls[0]![0] as { allowGeneratedGraphics?: boolean; onlyProvidedAssets?: boolean };
+    expect(resolver.allowGeneratedGraphics).toBe(false);
+    expect(resolver.onlyProvidedAssets).toBe(true);
+    for (const sl of h.synced[0].content.slides as Array<{ html: string }>) expect(sl.html).toContain('data-photo-empty');
+  });
+
+  it('sem ficha: a memória é a que o resolveProjectMemory acha — "Instruções do agente" quando existem, sem pendência de memória', async () => {
+    h.agentPrompt = 'INSTRUCOES-DO-AGENTE-DA-MARCA';
+    await gerar('texto aprovado');
+
+    expect(plannerCall().brandContext).toContain('INSTRUCOES-DO-AGENTE-DA-MARCA');
+    expect(plannerCall().brandContext).not.toContain('contexto da marca');
+    expect(avisos()).not.toContain('Memória do projeto-base');
+  });
+
+  it('sem ficha: o seed do repositório entra quando não há instruções do agente', async () => {
+    h.session.brandSlug = 'amanda-coelho';
+    await gerar('texto aprovado');
+    expect(plannerCall().brandContext).toContain('#410C1C');
+    expect(avisos()).not.toContain('Memória do projeto-base');
+  });
+
+  it('(a) sem ficha: [INTERNO] não chega ao planner nem ao artista, e [CONTEXTO]/[FALA] só orientam (não são texto de slide)', async () => {
+    const bruto = ['[APROVADO]', 'TITULO-APROVADO', '[FALA]', 'FALA-DO-PALESTRANTE', '[CONTEXTO]', 'CONTEXTO-DA-REUNIAO', '[INTERNO]', 'VALOR-DO-CONTRATO', '[NÃO EXIBIR]', 'SEGREDO-DO-CLIENTE'].join('\n');
+    // O briefing da Fábrica carrega a mensagem colada inteira (é o que a Fábrica faz): o interno sai dele também.
+    await gerar(bruto, `Apresentação de teste\n\n${bruto}`);
+
+    expect(plannerCall().sourceCopy).toBe('TITULO-APROVADO');
+    expect(plannerCall().brandContext).toContain('FALA-DO-PALESTRANTE');
+    expect(plannerCall().brandContext).toContain('NÃO é texto da peça');
+    const tudo = JSON.stringify([vi.mocked(runPlanner).mock.calls, h.prompts, h.reviewerBriefs]);
+    expect(tudo).not.toContain('VALOR-DO-CONTRATO');
+    expect(tudo).not.toContain('SEGREDO-DO-CLIENTE');
+    expect(avisos()).toContain('2 blocos de fala/contexto/apoio serviram só de orientação');
+    expect(avisos()).toContain('2 blocos internos/não exibir não foram enviados à IA');
+    expect(avisos()).not.toContain('VALOR-DO-CONTRATO');
+  });
+
+  it('(a) sem ficha: o contexto e a fala nunca viram o texto de um slide — o roteiro que o artista segue só tem o aprovado', async () => {
+    const bruto = '[APROVADO]\nTITULO-APROVADO\n[CONTEXTO]\nCONTEXTO-DA-REUNIAO\n[FALA]\nFALA-DO-PALESTRANTE';
+    await gerar(bruto);
+    // O planner recebe só o aprovado como copy para distribuir; fala e contexto chegam à parte, como orientação.
+    expect(plannerCall().sourceCopy).toBe('TITULO-APROVADO');
+    const orientacao = plannerCall().brandContext.split('ORIENTAÇÃO')[1] ?? '';
+    expect(orientacao).toContain('CONTEXTO-DA-REUNIAO');
+    expect(orientacao).toContain('NÃO é texto da peça');
+    expect(plannerCall().brandContext.split('ORIENTAÇÃO')[0]).not.toContain('CONTEXTO-DA-REUNIAO');
+  });
+
+  it('(a) sem ficha: o mesmo vale com quebra de linha do Windows (CRLF) no briefing', async () => {
+    const bruto = ['[APROVADO]', 'TITULO-APROVADO', '[INTERNO]', 'VALOR-DO-CONTRATO', 'LINHA-DOIS-INTERNA'].join('\r\n');
+    await gerar(bruto, `Apresentação de teste\r\n${bruto}`);
+    const tudo = JSON.stringify([vi.mocked(runPlanner).mock.calls, h.prompts]);
+    expect(tudo).not.toContain('VALOR-DO-CONTRATO');
+    expect(tudo).not.toContain('LINHA-DOIS-INTERNA');
+  });
+
+  it('sem ficha: texto sem NENHUMA marca continua valendo como aprovado, byte a byte (copy e briefing)', async () => {
+    const livre = 'Título livre\r\n\r\n  Texto com   espaços\ne [colchetes] no meio.\n';
+    const brief = 'Apresentação de teste\r\n' + livre;
+    await gerar(livre, brief);
+    expect(plannerCall().sourceCopy).toBe(livre);
+    expect(plannerCall().brief).toBe(brief);
+    expect(wsOf('error')).toHaveLength(0);
+  });
+
+  it('(b) sem ficha e SEM texto aprovado: para e pede o texto, em vez de deixar o modelo inventar', async () => {
+    await rodarSemTexto();
+
+    const erro = wsOf('error');
+    expect(erro).toHaveLength(1);
+    expect(String(erro[0]!.args[1])).toContain('só gera com texto aprovado');
+    expect(h.modelCalls).toBe(0);
+    expect(vi.mocked(runPlanner)).not.toHaveBeenCalled();
+    expect(h.postCreates).toHaveLength(0);
+    expect(h.session.phase).toBe('listening'); // a pessoa manda o texto e segue na mesma conversa
+  });
+
+  it('(b) sem ficha e só fala/contexto/interno (nada aprovado): para e pede o texto', async () => {
+    await runPipeline({ sessionId: S, brief: 'Apresentação de teste', format: 'presentation', postId: POST, sourceCopy: '[FALA] só falado\n[CONTEXTO] só contexto\n[INTERNO] só interno' });
+    expect(String(wsOf('error')[0]!.args[1])).toContain('só gera com texto aprovado');
+    expect(vi.mocked(runPlanner)).not.toHaveBeenCalled();
+    expect(h.modelCalls).toBe(0);
+  });
+
+  it('sem ficha, com o roteiro já aprovado (copy por slide) e sem sourceCopy: gera', async () => {
+    vi.mocked(runPlanner).mockResolvedValue(roteiro(() => '') as never);
+    await runPipeline({
+      sessionId: S, brief: 'Apresentação de teste', format: 'presentation', postId: POST,
+      approvedSkeleton: roteiro((i) => `Slide ${i + 1}`) as never,
+    });
+    expect(wsOf('error')).toHaveLength(0);
+    expect(h.modelCalls).toBeGreaterThan(0);
+  });
+
+  it('sem ficha: o texto do slide é conferido contra o aprovado (a trava vale para todo projeto)', async () => {
+    vi.mocked(runPlanner).mockResolvedValue(roteiro((i) => `Decisões conscientes constroem negócios sólidos ${i + 1}`) as never);
+    await runPipeline({ sessionId: S, brief: 'Apresentação de teste', format: 'presentation', postId: POST, sourceCopy: 'texto aprovado' });
+    const devs = h.session.pendingReview.deviations as Array<{ severity: string }>;
+    expect(devs.some((d) => d.severity === 'critical')).toBe(true);
+    expect(wsOf('notify')[0]!.args[1]).toMatchObject({ kind: 'needs_review' });
+  });
+
+  it('banco sem a tabela da ficha: a geração não cai e segue com o cérebro global (sem ficha)', async () => {
+    h.profileLookupFails = true;
+    await gerar('texto aprovado');
+    expect(wsOf('error')).toHaveLength(0);
+    expect(plannerCall().brandContext).toContain(GLOBAL);
+  });
+
+  it('ficha inválida no banco é ignorada: o projeto segue sem ficha, com o cérebro global', async () => {
+    h.savedProfile = { palette: 'isto não é uma paleta' };
+    await gerar('texto aprovado');
+    expect(wsOf('error')).toHaveLength(0);
+    expect(plannerCall().brandContext).toContain(GLOBAL);
+    expect(plannerCall().brandContext).toContain('contexto da marca');
+  });
+
+  it('(c) saída de emergência: DESIGNER_BRAIN_GLOBAL=off devolve o comportamento anterior no projeto sem ficha', async () => {
+    process.env.DESIGNER_BRAIN_GLOBAL = 'off';
+    vi.mocked(runPlanner).mockResolvedValue(roteiro(() => '') as never);
+    await rodarSemTexto(); // antes gerava sem texto aprovado, sem cérebro
+
+    expect(wsOf('error')).toHaveLength(0);
+    expect(h.modelCalls).toBeGreaterThan(0);
+    expect(plannerCall().brandContext).toBe('contexto da marca');
+    expect(h.prompts[0]!.sys).not.toContain(GLOBAL);
+    expect(promptOf(1)).toContain('Diretrizes: DIRETRIZ-LEGADA');
+    const resolver = vi.mocked(resolveSlideImages).mock.calls[0]![0] as { allowGeneratedGraphics?: boolean; onlyProvidedAssets?: boolean };
+    expect(resolver.allowGeneratedGraphics).toBeUndefined();
+    expect(resolver.onlyProvidedAssets).toBeFalsy();
+    expect(h.synced[0].content.finalGate).toBeUndefined();
+  });
+
+  it('(c) saída de emergência: o briefing de projeto sem ficha não é mexido (o texto interno só sai com o cérebro global)', async () => {
+    process.env.DESIGNER_BRAIN_GLOBAL = 'off';
+    process.env.DESIGNER_BRAIN_BRANDS = 'marca-sem-ficha';
+    const bruto = '[APROVADO]\nTITULO-APROVADO\n[INTERNO]\nVALOR-DO-CONTRATO';
+    const brief = `Apresentação de teste\n${bruto}`;
+    h.agentPrompt = 'MEMORIA-DO-CADASTRO';
+    await gerar(bruto, brief);
+    expect(plannerCall().brief).toBe(brief);
+  });
+
+  it('(c) saída de emergência: com ela, o slug em DESIGNER_BRAIN_BRANDS ainda liga o cérebro sem ficha', async () => {
+    process.env.DESIGNER_BRAIN_GLOBAL = 'off';
+    process.env.DESIGNER_BRAIN_BRANDS = 'marca-sem-ficha';
+    h.agentPrompt = 'MEMORIA-DO-CADASTRO';
+    await gerar('texto aprovado');
+    expect(plannerCall().brandContext).toContain(GLOBAL);
+    expect(plannerCall().brandContext).toContain('MEMORIA-DO-CADASTRO');
+  });
+
+  it('(c) saída de emergência: com ela, projeto sem memória nenhuma em DESIGNER_BRAIN_BRANDS continua dando erro visível', async () => {
+    process.env.DESIGNER_BRAIN_GLOBAL = 'off';
+    process.env.DESIGNER_BRAIN_BRANDS = 'marca-sem-ficha';
+    await gerar('texto aprovado');
+    expect(String(wsOf('error')[0]!.args[1])).toContain('não tem memória de projeto');
+    expect(h.modelCalls).toBe(0);
+  });
+
+  it('(c) saída de emergência: projeto COM ficha continua com o cérebro (ela nunca é desligada)', async () => {
+    process.env.DESIGNER_BRAIN_GLOBAL = 'off';
+    h.savedProfile = { essence: 'ESSENCIA-DA-FICHA' };
+    await gerar('texto aprovado');
+    expect(plannerCall().brandContext).toContain('ESSENCIA-DA-FICHA');
+  });
+
+  it('(d) COM ficha: o resultado é o mesmo com o cérebro global ligado ou desligado (mesmas camadas, mesma ordem)', async () => {
+    h.savedProfile = {
+      essence: 'ESSENCIA-DA-FICHA',
+      palette: [{ hex: '#123456', name: 'Azul ficha' }],
+      neverDo: ['NUNCA-DA-FICHA'],
+    };
+    const novaSessao = () => {
+      h.session = {
+        id: S, brandSlug: 'marca-com-ficha', userId: 'u1', phase: 'ready', workerStatus: 'running', reviewMode: 'auto',
+        messages: [], currentDesign: [], folderId: null, createdAt: 0, updatedAt: 0,
+      };
+      h.prompts.length = 0; h.wsCalls.length = 0; h.postUpdates.length = 0; h.synced.length = 0; h.modelCalls = 0;
+      vi.mocked(runPlanner).mockClear(); vi.mocked(resolveSlideImages).mockClear();
+    };
+    const instantaneo = () => ({
+      planner: vi.mocked(runPlanner).mock.calls[0]![0] as { brandContext: string },
+      artistas: h.prompts.map((p) => [p.sys, p.user]),
+      resolver: vi.mocked(resolveSlideImages).mock.calls[0]![0],
+      avisos: avisos(),
+      gate: (h.postUpdates.at(-1)!.data.content as { finalGate?: unknown }).finalGate ?? null,
+    });
+
+    novaSessao();
+    await gerar('texto aprovado');
+    const ligado = instantaneo();
+
+    process.env.DESIGNER_BRAIN_GLOBAL = 'off';
+    novaSessao();
+    await gerar('texto aprovado');
+    const desligado = instantaneo();
+
+    expect(ligado.planner.brandContext).toContain('ESSENCIA-DA-FICHA');
+    expect(ligado).toEqual(desligado);
+  });
+
+  it('(d) COM ficha e sem texto aprovado: para e pede o texto, como antes', async () => {
+    h.savedProfile = { essence: 'X' };
+    await rodarSemTexto();
+    expect(String(wsOf('error')[0]!.args[1])).toContain('só gera com texto aprovado');
+    expect(vi.mocked(runPlanner)).not.toHaveBeenCalled();
+  });
+
+  it('(d) COM ficha: o briefing NÃO é alterado (o texto interno só é retirado do briefing em projeto sem ficha)', async () => {
+    h.savedProfile = { essence: 'X' };
+    const bruto = '[APROVADO]\nTITULO-APROVADO\n[INTERNO]\nVALOR-DO-CONTRATO';
+    const brief = `Apresentação de teste\n${bruto}`;
+    await gerar(bruto, brief);
+    expect(plannerCall().brief).toBe(brief);
+    expect(plannerCall().sourceCopy).toBe('TITULO-APROVADO');
   });
 });

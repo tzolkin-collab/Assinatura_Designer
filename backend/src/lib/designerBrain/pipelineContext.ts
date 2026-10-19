@@ -61,6 +61,13 @@ export interface PipelineBrainInput {
   projectName?: string;
   /** Camada do desdobramento/collab: só o que muda em relação à base. */
   collab?: CollabLayer | null;
+  /**
+   * Cérebro global: projeto sem ficha, sem "Instruções do agente" e sem seed NÃO é erro. Este texto (o
+   * resumo do cadastro: diretrizes, cores, fontes) ocupa o lugar da memória do projeto e a falta da
+   * memória vira pendência. Nada é inventado: é só o que o cadastro já tem. Sem ele, a falta de memória
+   * continua sendo erro de configuração (`DesignerBrainSetupError`).
+   */
+  fallbackMemory?: string;
   /** Blocos de texto com status. Só os de orientação (apoio, fala, contexto) entram aqui; o texto aprovado segue pelo planner. */
   textBlocks?: TextBlock[];
   format: 'presentation' | 'carousel';
@@ -76,13 +83,18 @@ export interface PipelineBrainContext {
 }
 
 export function buildPipelineBrainContext(input: PipelineBrainInput): PipelineBrainContext {
-  const memory = resolveProjectMemory(
+  let memory = resolveProjectMemory(
     input.brand.slug,
     input.brand.agentPrompt,
     input.profile,
     input.projectName ?? input.brand.name,
   );
-  if (!memory) throw new DesignerBrainSetupError(input.brand.slug);
+  let memoryMissing = false;
+  if (!memory) {
+    if (!input.fallbackMemory?.trim()) throw new DesignerBrainSetupError(input.brand.slug);
+    memory = input.fallbackMemory.trim();
+    memoryMissing = true;
+  }
 
   // O documento tem 3 modos (apresentação, imagem avulsa, e-book A4); carrossel não tem
   // modo próprio. Cada lâmina do carrossel é uma imagem avulsa com proporção definida.
@@ -112,6 +124,7 @@ export function buildPipelineBrainContext(input: PipelineBrainInput): PipelineBr
     ]
       .filter(Boolean)
       .join('\n\n'),
-    pending: assembled.pending,
+    // O resumo do cadastro não é a memória do projeto: a ficha (ou o texto do agente) continua por definir.
+    pending: memoryMissing ? ['Memória do projeto-base (ficha do projeto)', ...assembled.pending] : assembled.pending,
   };
 }
