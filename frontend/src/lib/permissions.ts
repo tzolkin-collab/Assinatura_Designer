@@ -20,7 +20,7 @@ export type BrandAction =
   | 'generate'
   /** Exportar para o Canva. */
   | 'export'
-  /** Alterar configurações da marca (branding, agente, referências). */
+  /** Alterar configurações da marca (branding, agente, mídia, equipe). */
   | 'edit-settings'
   /** Convidar, remover e mudar papel de membros. */
   | 'manage-team'

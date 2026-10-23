@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { ArrowRight, Brain, Check, Circle, Eye, Image as ImageIcon, Palette, Plus, Users } from 'lucide-react';
+import { ArrowRight, Brain, Check, Circle, Image as ImageIcon, Palette, Plus, Users } from 'lucide-react';
 import NewCollabModal from '@/components/Collab/NewCollabModal';
 import { useBrandPermissions } from '@/hooks/useBrandPermissions';
 import { api } from '@/lib/api';
@@ -48,19 +48,17 @@ export default function ProjectOverviewPage() {
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState<ProjectProfileResponse | null>(null);
   const [assets, setAssets] = useState<LibraryAsset[] | null>(null);
-  const [refsCount, setRefsCount] = useState<number | null>(null);
   const [allBrands, setAllBrands] = useState<ProjectBrand[]>([]);
   const [recent, setRecent] = useState<RecentPost[]>([]);
   const [parentProfile, setParentProfile] = useState<ProjectProfileResponse | null>(null);
   const [collabOpen, setCollabOpen] = useState(false);
 
   const load = useCallback(async () => {
-    // Cada bloco falha sozinho: um erro nas referências não derruba a página inteira.
-    const [b, p, a, r, all, rec] = await Promise.allSettled([
+    // Cada bloco falha sozinho: um erro numa das consultas não derruba a página inteira.
+    const [b, p, a, all, rec] = await Promise.allSettled([
       api.get<ProjectBrand>(`/brands/${slug}`),
       api.get<ProjectProfileResponse>(`/brands/${slug}/profile`),
       api.get<unknown>(`/brands/${slug}/assets`),
-      api.get<unknown>(`/settings/${slug}/referencias`),
       api.get<unknown>('/brands'),
       api.get<unknown>(`/brands/${slug}/posts?recent=6`),
     ]);
@@ -72,7 +70,6 @@ export default function ProjectOverviewPage() {
     }
     setProfile(p.status === 'fulfilled' ? p.value : null);
     setAssets(a.status === 'fulfilled' ? asList<LibraryAsset>(a.value) : null);
-    setRefsCount(r.status === 'fulfilled' ? asList<unknown>(r.value).length : null);
     setAllBrands(all.status === 'fulfilled' ? asList<ProjectBrand>(all.value) : []);
     setRecent(rec.status === 'fulfilled' ? asList<RecentPost>(rec.value) : []);
     // Desdobramento não tem ficha própria: o estado dele é o da base de onde herda.
@@ -188,7 +185,7 @@ export default function ProjectOverviewPage() {
                 <div>
                   <h3 className={styles.cardTitle}>Herdado de {parent?.name ?? 'o projeto-base'}</h3>
                   <p className={styles.cardDesc}>
-                    Identidade, fotos, referências e regras vêm do projeto-base. Para mudar, edite a base.
+                    Identidade, fotos e regras vêm do projeto-base. Para mudar, edite a base.
                   </p>
                 </div>
               </div>
@@ -291,21 +288,6 @@ export default function ProjectOverviewPage() {
               ) : (
                 <span className={styles.chip}>Biblioteca indisponível</span>
               )}
-            </div>
-          </Link>
-
-          <Link href={`/${slug}/configuracoes/referencias`} className={styles.configCard}>
-            <div className={styles.cardHead}>
-              <span className={styles.cardIcon}><Eye size={20} /></span>
-              <div>
-                <h3 className={styles.cardTitle}>Referências</h3>
-                <p className={styles.cardDesc}>Marcas e inspirações que o agente analisa.</p>
-              </div>
-            </div>
-            <div className={styles.chips}>
-              <span className={styles.chip}>
-                {refsCount === null ? 'Indisponível' : `${refsCount} ${refsCount === 1 ? 'referência' : 'referências'}`}
-              </span>
             </div>
           </Link>
 

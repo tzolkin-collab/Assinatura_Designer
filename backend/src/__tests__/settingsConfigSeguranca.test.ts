@@ -36,35 +36,40 @@ describe('PUT /api/settings/:slug/config — campos de custo e logoUrl', () => {
 
   describe('B2: teto de custo de IA só muda por OWNER/ADMIN', () => {
     it('EDITOR não liga ignoreAiCostLimit (403, nada gravado)', async () => {
-      comPapel('EDITOR', { ignoreAiCostLimit: false, autoResearchEnabled: false, autoResearchInterval: 14 });
+      comPapel('EDITOR', { ignoreAiCostLimit: false });
       const res = await put({ ignoreAiCostLimit: true });
       expect(res.status).toBe(403);
       expect(prismaMock.brandConfig.upsert).not.toHaveBeenCalled();
     });
 
-    it('EDITOR não liga a pesquisa automática nem muda o intervalo', async () => {
-      comPapel('EDITOR', { ignoreAiCostLimit: false, autoResearchEnabled: false, autoResearchInterval: 14 });
-      expect((await put({ autoResearchEnabled: true })).status).toBe(403);
-      expect((await put({ autoResearchInterval: 1 })).status).toBe(403);
-      expect(prismaMock.brandConfig.upsert).not.toHaveBeenCalled();
+    it('a pesquisa automática foi removida: autoResearch* no corpo é ignorado e nunca chega ao banco', async () => {
+      comPapel('EDITOR', { ignoreAiCostLimit: false });
+      const res = await put({ colors: ['#000000'], autoResearchEnabled: true, autoResearchInterval: 1 });
+      expect(res.status).toBe(200);
+      expect(prismaMock.brandConfig.upsert).toHaveBeenCalledTimes(1);
+      const arg = prismaMock.brandConfig.upsert.mock.calls[0]![0] as { update: object; create: object };
+      for (const campo of ['autoResearchEnabled', 'autoResearchInterval']) {
+        expect(arg.update).not.toHaveProperty(campo);
+        expect(arg.create).not.toHaveProperty(campo);
+      }
     });
 
     it('EDITOR salva o branding reenviando os mesmos valores (a tela de Branding faz isso)', async () => {
-      comPapel('EDITOR', { ignoreAiCostLimit: true, autoResearchEnabled: false, autoResearchInterval: 14 });
-      const res = await put({ colors: ['#000000'], ignoreAiCostLimit: true, autoResearchEnabled: false, autoResearchInterval: 14 });
+      comPapel('EDITOR', { ignoreAiCostLimit: true });
+      const res = await put({ colors: ['#000000'], ignoreAiCostLimit: true });
       expect(res.status).toBe(200);
       expect(prismaMock.brandConfig.upsert).toHaveBeenCalledTimes(1);
     });
 
-    it('EDITOR sem config prévia: o padrão (false/false/14) também passa', async () => {
+    it('EDITOR sem config prévia: o padrão (false) também passa', async () => {
       comPapel('EDITOR', null);
       const res = await put({ colors: ['#000000'], ignoreAiCostLimit: false });
       expect(res.status).toBe(200);
     });
 
     it.each(['OWNER', 'ADMIN'] as const)('%s muda o teto de custo', async (role) => {
-      comPapel(role, { ignoreAiCostLimit: false, autoResearchEnabled: false, autoResearchInterval: 14 });
-      const res = await put({ ignoreAiCostLimit: true, autoResearchEnabled: true, autoResearchInterval: 7 });
+      comPapel(role, { ignoreAiCostLimit: false });
+      const res = await put({ ignoreAiCostLimit: true });
       expect(res.status).toBe(200);
       expect(prismaMock.brandConfig.upsert).toHaveBeenCalledTimes(1);
     });

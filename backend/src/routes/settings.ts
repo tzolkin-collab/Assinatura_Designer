@@ -2,7 +2,6 @@ import { Router, Response, NextFunction } from 'express';
 import bcrypt from 'bcrypt';
 import { S3Client } from '@aws-sdk/client-s3';
 import crypto from 'crypto';
-import multer from 'multer';
 import { config } from '../config.js';
 import type { Prisma, BrandRole } from '@prisma/client';
 import prisma from '../lib/prisma.js';
@@ -15,29 +14,9 @@ import { normalizarLogoParaFundoEscuro } from '../lib/logoTransparency.js';
 import { normalizarParaFormulario } from '../lib/brandGuidelines.js';
 import { config as appConfig } from '../config.js';
 import { AuthRequest } from '../middleware/auth.js';
-import { z } from 'zod';
-import { isPublicHttpUrl, isPublicHttpUrlResolved } from '../lib/validate.js';
-import { analyzeReferenceBackground, analyzeReferenceWithUploadedImage } from '../lib/referenceSync.js';
+import { isPublicHttpUrl } from '../lib/validate.js';
 
 export const settingsRouter = Router();
-
-const uploadReferenceImage = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
-
-const referenciaSchema = z.object({
-  name: z.string({ required_error: 'Reference name is required' }).trim().min(1, 'Reference name is required'),
-  analysisUrl: z
-    .string({ required_error: 'Reference URL is required for analysis' })
-    .trim()
-    .min(1, 'Reference URL is required for analysis'),
-  sourceType: z.string().optional(),
-  autoSyncEnabled: z.boolean().optional(),
-  autoSyncInterval: z.number().optional(),
-});
-
-const referenciaSyncSettingsSchema = z.object({
-  autoSyncEnabled: z.boolean().optional(),
-  autoSyncInterval: z.number().optional(),
-});
 
 const s3 = new S3Client({
   region: 'auto',
@@ -82,22 +61,19 @@ settingsRouter.get('/:slug/config', async (req: AuthRequest, res: Response, next
 settingsRouter.put('/:slug/config', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {
     const { id: brandId, role } = await assertBrandAccess(req.params.slug as string, req.user?.userId, EDITORS);
-    const { agentPrompt, primaryFonts, colors, guidelines, logoUrl, presentationConfig, autoResearchEnabled, autoResearchInterval, ignoreAiCostLimit } = req.body;
+    const { agentPrompt, primaryFonts, colors, guidelines, logoUrl, presentationConfig, ignoreAiCostLimit } = req.body;
 
-    // Teto de custo de IA e pesquisa automática movem gasto da marca: só quem administra decide.
+    // O teto de custo de IA move gasto da marca: só quem administra decide.
     // A tela de Branding reenvia o valor atual a cada salvamento, então um EDITOR pode salvar com
     // o campo igual ao que já está; mudar o valor é que exige OWNER/ADMIN (recusado, não ignorado).
     if (!ADMIN_ROLES.includes(role)) {
       const atual = await prisma.brandConfig.findUnique({
         where: { brandId },
-        select: { ignoreAiCostLimit: true, autoResearchEnabled: true, autoResearchInterval: true },
+        select: { ignoreAiCostLimit: true },
       });
-      const mudou =
-        (ignoreAiCostLimit !== undefined && !!ignoreAiCostLimit !== (atual?.ignoreAiCostLimit ?? false)) ||
-        (autoResearchEnabled !== undefined && !!autoResearchEnabled !== (atual?.autoResearchEnabled ?? false)) ||
-        (autoResearchInterval !== undefined && Number(autoResearchInterval) !== (atual?.autoResearchInterval ?? 14));
+      const mudou = ignoreAiCostLimit !== undefined && !!ignoreAiCostLimit !== (atual?.ignoreAiCostLimit ?? false);
       if (mudou) {
-        throw createError(403, 'Só o dono ou o administrador da marca altera o limite de custo de IA e a pesquisa automática.');
+        throw createError(403, 'Só o dono ou o administrador da marca altera o limite de custo de IA.');
       }
     }
 
@@ -121,7 +97,7 @@ settingsRouter.put('/:slug/config', async (req: AuthRequest, res: Response, next
       where: { brandId },
       update: {
         agentPrompt, primaryFonts, colors, guidelines, logoUrl: logoFinal, presentationConfig: normalizedPresentationConfig,
-        autoResearchEnabled, autoResearchInterval, ignoreAiCostLimit,
+        ignoreAiCostLimit,
       },
       create: {
         brandId,
@@ -132,8 +108,6 @@ settingsRouter.put('/:slug/config', async (req: AuthRequest, res: Response, next
         logoUrl: logoFinal,
         presentationConfig: normalizedPresentationConfig,
         ignoreAiCostLimit: !!ignoreAiCostLimit,
-        autoResearchEnabled: !!autoResearchEnabled,
-        autoResearchInterval: autoResearchInterval ? Number(autoResearchInterval) : 14,
       },
     });
 
@@ -174,164 +148,6 @@ settingsRouter.put('/:slug/config', async (req: AuthRequest, res: Response, next
     res.json({ data: config });
   } catch (error) {
     next(error);
-  }
-});
-
-// ── References ──
-
-settingsRouter.get('/:slug/referencias', async (req: AuthRequest, res: Response, next: NextFunction) => {
-  try {
-    const brandId = await getBrandId(req.params.slug as string, req.user?.userId, ANY_MEMBER);
-    const refs = await prisma.reference.findMany({
-      where: { brandId },
-      orderBy: { updatedAt: 'desc' },
-    });
-    res.json({ data: refs });
-  } catch (error) {
-    next(error);
-  }
-});
-
-settingsRouter.post('/:slug/referencias', async (req: AuthRequest, res: Response, next: NextFunction) => {
-  try {
-    const slug = req.params.slug as string;
-    const brandId = await getBrandId(slug, req.user?.userId);
-    const parsed = referenciaSchema.safeParse(req.body);
-    if (!parsed.success) throw createError(400, parsed.error.errors[0]?.message ?? 'Corpo da requisição inválido');
-    const { name, analysisUrl, sourceType, autoSyncEnabled, autoSyncInterval } = parsed.data;
-
-    // Guard de SSRF: só http(s) público. Fica fora do zod porque é mais que formato
-    // de URL — resolve o host e barra IPs privados/loopback.
-    if (!isPublicHttpUrl(analysisUrl)) throw createError(400, 'URL inválida ou não permitida (apenas http(s) público)');
-
-    let validSourceType: 'WEBSITE' | 'INSTAGRAM' = sourceType === 'INSTAGRAM' ? 'INSTAGRAM' : 'WEBSITE';
-    if (analysisUrl.toLowerCase().includes('instagram.com')) {
-      validSourceType = 'INSTAGRAM';
-    }
-
-    const ref = await prisma.reference.create({
-      data: { 
-        name, 
-        analysisUrl, 
-        brandId, 
-        status: 'PENDING', 
-        insights: 0, 
-        sourceType: validSourceType,
-        autoSyncEnabled: !!autoSyncEnabled,
-        autoSyncInterval: autoSyncInterval ? Number(autoSyncInterval) : 14
-      },
-    });
-
-    // Respond immediately, analyze in background
-    res.status(201).json({ data: ref });
-
-    analyzeReferenceBackground(ref.id, slug, name, analysisUrl, validSourceType).catch(console.error);
-  } catch (error) {
-    next(error);
-  }
-});
-
-
-
-settingsRouter.patch('/:slug/referencias/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
-  try {
-    const slug = req.params.slug as string;
-    const brandId = await getBrandId(slug, req.user?.userId);
-    const id = req.params.id as string;
-    const parsed = referenciaSyncSettingsSchema.safeParse(req.body);
-    if (!parsed.success) throw createError(400, parsed.error.errors[0]?.message ?? 'Corpo da requisição inválido');
-    const { autoSyncEnabled, autoSyncInterval } = parsed.data;
-
-    const ref = await prisma.reference.findFirst({ where: { id, brandId } });
-    if (!ref) throw createError(404, 'Reference not found');
-
-    const updated = await prisma.reference.update({
-      where: { id },
-      data: {
-        autoSyncEnabled: autoSyncEnabled !== undefined ? autoSyncEnabled : ref.autoSyncEnabled,
-        autoSyncInterval: autoSyncInterval !== undefined ? autoSyncInterval : ref.autoSyncInterval,
-      }
-    });
-
-    res.json({ data: updated });
-  } catch (error) {
-    next(error);
-  }
-});
-
-settingsRouter.post('/:slug/referencias/:id/sync', async (req: AuthRequest, res: Response, next: NextFunction) => {
-  try {
-    const slug = req.params.slug as string;
-    const brandId = await getBrandId(slug, req.user?.userId);
-    const id = req.params.id as string;
-
-    const ref = await prisma.reference.findFirst({ where: { id, brandId } });
-    if (!ref) throw createError(404, 'Reference not found');
-    if (!ref.analysisUrl) throw createError(400, 'Referência sem URL de análise configurada');
-
-    const updated = await prisma.reference.update({
-      where: { id },
-      data: { status: 'PENDING' }
-    });
-
-    res.json({ data: updated, message: 'Sync started' });
-
-    analyzeReferenceBackground(ref.id, slug, ref.name, ref.analysisUrl, ref.sourceType).catch(console.error);
-  } catch (error) {
-    next(error);
-  }
-});
-
-// POST /api/settings/:slug/referencias/:id/upload-imagem — upload manual de um
-// print de verdade (Instagram bloqueia captura automática; isto contorna sem
-// depender de nenhum scraper de terceiro, funciona sempre).
-settingsRouter.post(
-  '/:slug/referencias/:id/upload-imagem',
-  uploadReferenceImage.single('file'),
-  async (req: AuthRequest, res: Response, next: NextFunction) => {
-    try {
-      const slug = req.params.slug as string;
-      const brandId = await getBrandId(slug, req.user?.userId);
-      const id = req.params.id as string;
-      const file = req.file;
-      if (!file) throw createError(400, 'Nenhuma imagem enviada.');
-      if (!file.mimetype.startsWith('image/')) throw createError(400, 'O arquivo precisa ser uma imagem.');
-
-      const ref = await prisma.reference.findFirst({ where: { id, brandId } });
-      if (!ref) throw createError(404, 'Reference not found');
-      if (!ref.analysisUrl) throw createError(400, 'Referência sem URL de análise configurada');
-
-      const updated = await prisma.reference.update({
-        where: { id },
-        data: { status: 'PENDING' },
-      });
-
-      res.json({ data: updated, message: 'Análise com imagem enviada iniciada' });
-
-      analyzeReferenceWithUploadedImage(
-        ref.id, slug, ref.name, ref.analysisUrl, ref.sourceType,
-        file.buffer.toString('base64'), file.mimetype,
-      ).catch(console.error);
-    } catch (error) {
-      next(error);
-    }
-  },
-);
-
-
-
-settingsRouter.delete('/:slug/referencias/:id', async (req: AuthRequest, res: Response, next: NextFunction) => {
-  try {
-    const slug = req.params.slug as string;
-    const brandId = await getBrandId(slug, req.user?.userId);
-    const id = req.params.id as string;
-    // Escopa a exclusão à marca do usuário — antes qualquer dono de marca podia
-    // deletar referências de marcas alheias passando só o id (cross-tenant).
-    const result = await prisma.reference.deleteMany({ where: { id, brandId } });
-    if (result.count === 0) throw createError(404, 'Reference not found');
-    res.json({ message: 'Reference deleted' });
-  } catch (error) {
-    return next(error);
   }
 });
 

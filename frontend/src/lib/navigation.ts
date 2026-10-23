@@ -3,7 +3,6 @@ import {
   Bot,
   BookOpen,
   Brain,
-  Eye,
   Factory,
   FolderKanban,
   GalleryHorizontalEnd,
@@ -77,12 +76,6 @@ export const BRAND_SETTINGS: SettingsSection[] = [
     label: 'Branding',
     description: 'Identidade visual: cores, tipografia (Google Fonts) e diretrizes da marca.',
     icon: Palette,
-  },
-  {
-    key: 'referencias',
-    label: 'Referências',
-    description: 'Marcas de referência analisadas pelo agente.',
-    icon: Eye,
   },
   {
     key: 'equipe',

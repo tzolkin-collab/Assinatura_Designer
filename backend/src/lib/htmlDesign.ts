@@ -71,14 +71,6 @@ export interface GenerateHtmlDesignInput {
       imageryStyle?: string;
       notes?: string;
     };
-    /** Referências visuais analisadas (Benchmarking) — arquétipo/tom/paleta/insights. */
-    references?: Array<{
-      name: string;
-      archetype?: string | null;
-      toneOfVoice?: string | null;
-      palette?: string[];
-      insightsText?: string | null;
-    }>;
     /** Regras/preferências que a IA aprendeu no chat desta marca (ex.: "não gosto de
      *  azul"), gravadas via skill updateBrandMemory. Chave livre → valor livre. */
     learnedPreferences?: Record<string, unknown>;
@@ -298,17 +290,6 @@ export function presentationConfigBlock(pc: GenerateHtmlDesignInput['brand']['pr
   return `Preferências de design desta marca (siga à risca):\n${lines.map((l) => `- ${l}`).join('\n')}`;
 }
 
-export function referencesBlock(references: GenerateHtmlDesignInput['brand']['references']): string {
-  if (!references || references.length === 0) return '';
-  const lines = references.slice(0, 4).map((r) => {
-    const descriptors = [r.archetype, r.toneOfVoice].filter(Boolean).join(' · ');
-    const palette = r.palette?.length ? ` | paleta: ${r.palette.join(', ')}` : '';
-    const insight = r.insightsText ? ` | ${r.insightsText.slice(0, 150)}` : '';
-    return `- ${r.name}${descriptors ? ` (${descriptors})` : ''}${palette}${insight}`;
-  });
-  return `Referências visuais analisadas desta marca (inspire-se, não copie):\n${lines.join('\n')}`;
-}
-
 export function learnedPreferencesBlock(prefs: Record<string, unknown> | undefined): string {
   if (!prefs || Object.keys(prefs).length === 0) return '';
   const lines = Object.entries(prefs).map(([key, value]) => `- ${key}: ${typeof value === 'string' ? value : JSON.stringify(value)}`);
@@ -453,7 +434,7 @@ ${logoBackgroundRule(Boolean(input.brand.logoVariants?.length))}
 - SLIDE SEM IMAGEM É UM RESULTADO VÁLIDO, e é o caso MAIS COMUM: numa apresentação boa, a maioria dos slides não tem foto. Layouts como list-3-columns, process-flow e comparison vivem de tipografia, forma e cor. Se nenhuma imagem foi fornecida, resolva com um COMPONENTE ESTRUTURAL da lista abaixo — não com espaço vazio e não com enchimento. NUNCA tape um vazio com logo ampliado, ícone repetido ou imagem de outro slide.
 - PREENCHA O QUADRO. O componente escolhido deve ocupar a largura útil do slide. Um bloco de conteúdo espremido em 60% da largura, com o restante vazio, é ERRO de composição — ou o componente cresce, ou a tipografia cresce, ou o layout muda.
 - Marque editáveis com data-editable="true" e data-role="headline|subtitle|body|cta|image".
-- NUNCA invente dado factual da empresa que não foi fornecido acima (telefone, e-mail, endereço, site, CNPJ, nome de produto específico, texto institucional de rodapé). Use SOMENTE o nome da marca, o logo e o que estiver em Diretrizes/Instruções do agente/Referências. Se o layout pedir uma info de contato que não veio nesses campos, prefira um CTA genérico ("Fale conosco", "Saiba mais", "Acesse o link na bio") a inventar um número ou endereço que pareça real.
+- NUNCA invente dado factual da empresa que não foi fornecido acima (telefone, e-mail, endereço, site, CNPJ, nome de produto específico, texto institucional de rodapé). Use SOMENTE o nome da marca, o logo e o que estiver em Diretrizes/Instruções do agente. Se o layout pedir uma info de contato que não veio nesses campos, prefira um CTA genérico ("Fale conosco", "Saiba mais", "Acesse o link na bio") a inventar um número ou endereço que pareça real.
 
 DESENHO VETORIAL: para diagrama geométrico (círculos que se cruzam, gráfico de barras, linha do
 tempo, medidor, seta de fluxo), desenhe <svg> INLINE no próprio HTML, com viewBox e sem width/height
@@ -550,7 +531,6 @@ ${b.logoUrl ? `Logo: ${b.logoUrl}` : ''}
 ${b.logoVariants?.length ? `Logos oficiais (variantes; escolha pela cor do fundo do slide):\n${b.logoVariants.map((v) => `- ${v.label}: ${v.url}`).join('\n')}` : ''}
 ${assetsBlock(b.assetUrls)}
 ${presentationConfigBlock(b.presentationConfig)}
-${referencesBlock(b.references)}
 ${learnedPreferencesBlock(b.learnedPreferences)}
 ${skeletonPrompt}
 ${renderStyleBible(bible)}${refBlock}

@@ -690,7 +690,6 @@ async function runPipelineInner(
         guidelinesLength: brand?.guidelines?.length,
         agentPromptLength: brand?.agentPrompt?.length,
         logoUrlLength: brand?.logoUrl?.length,
-        referencesCount: brand?.references?.length,
         visualMoodboardCount: (params.attachmentImages ?? []).filter((image) => image.role === 'style-reference').length,
       });
 
@@ -763,7 +762,6 @@ async function runPipelineInner(
             // marca — o artista as trata igual, prefere a inventar foto de banco.
             assetUrls: [...contentAssets, ...(photoRuleOn ? onlyProvidedAssets(brand.assetUrls) : brand.assetUrls)],
             presentationConfig: brand.presentationConfig ?? undefined,
-            references: brand.references,
             // Com o cérebro ligado a memória do projeto é a do cadastro: o que o chat
             // "aprendeu" não a reescreve (isolamento entre projetos).
             learnedPreferences: designerBrainOn ? undefined : learnedPreferences,

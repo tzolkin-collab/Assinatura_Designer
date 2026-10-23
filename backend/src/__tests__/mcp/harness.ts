@@ -151,7 +151,6 @@ export function buildHarness(options: HarnessOptions = {}) {
       slug: b.slug,
       name: b.name,
       config: b.config ?? null,
-      refs: [],
       assets: [],
     };
   }) as never);

@@ -278,7 +278,7 @@ export default function BrandbookUploaderModal({
             </p>
 
             <details className={styles.promptGuide}>
-              <summary>💡 Ver Guia de Prompts de IA para Benchmarking & Criação de Assets</summary>
+              <summary>💡 Ver Guia de Prompts de IA para Criação de Assets</summary>
               <div className={styles.promptGuideContent}>
                 <p><strong>Prompt Base para Midjourney / DALL-E 3 / Recraft v3:</strong></p>
                 <code>

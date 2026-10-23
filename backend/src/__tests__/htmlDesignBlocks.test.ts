@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { assetsBlock, presentationConfigBlock, referencesBlock, learnedPreferencesBlock } from '../lib/htmlDesign';
+import { assetsBlock, presentationConfigBlock, learnedPreferencesBlock } from '../lib/htmlDesign';
 
 describe('assetsBlock', () => {
   it('vazio/undefined não gera bloco', () => {
@@ -51,37 +51,6 @@ describe('presentationConfigBlock', () => {
     expect(block).toContain('clean');
     expect(block).not.toContain('paleta aprovada');
     expect(block).not.toContain('undefined');
-  });
-});
-
-describe('referencesBlock', () => {
-  it('undefined ou array vazio não gera bloco', () => {
-    expect(referencesBlock(undefined)).toBe('');
-    expect(referencesBlock([])).toBe('');
-  });
-
-  it('inclui nome, arquétipo/tom, paleta e um recorte do insight', () => {
-    const block = referencesBlock([
-      {
-        name: 'Concorrente X',
-        archetype: 'O Criador',
-        toneOfVoice: 'Autoridade Direta',
-        palette: ['#FF0000', '#00FF00'],
-        insightsText: 'Usa muito espaço em branco e tipografia serifada em títulos grandes.',
-      },
-    ]);
-    expect(block).toContain('Concorrente X');
-    expect(block).toContain('O Criador');
-    expect(block).toContain('Autoridade Direta');
-    expect(block).toContain('#FF0000, #00FF00');
-    expect(block).toContain('espaço em branco');
-  });
-
-  it('capa em 4 referências mesmo recebendo mais', () => {
-    const refs = Array.from({ length: 6 }, (_, i) => ({ name: `Ref ${i}` }));
-    const block = referencesBlock(refs);
-    expect(block).toContain('Ref 3');
-    expect(block).not.toContain('Ref 4');
   });
 });
 

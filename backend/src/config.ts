@@ -205,11 +205,6 @@ export const config = {
   // Unsplash a gerar mais uma foto por IA. 0 = nunca usa esse gatilho (só a
   // autoverificação de qualidade decide).
   aiPhotoFallbackUsageRatio: parseFloat(process.env.AI_PHOTO_FALLBACK_USAGE_RATIO || '0.8'),
-  // ── Apify (benchmarking do Instagram) ──
-  // Instagram bloqueia screenshot headless (Microlink etc.) — sem isto, a análise
-  // de referência do Instagram nunca via a imagem de verdade, só um fallback fraco
-  // de Google Search grounding. Free tier da Apify: $5/mês, sem cartão.
-  apifyApiToken: process.env.APIFY_API_TOKEN || '',
 } as const;
 
 /** URI Redis pode conter usuário/senha; logs mostram apenas host e porta. */
