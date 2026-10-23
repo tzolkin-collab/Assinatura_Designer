@@ -200,9 +200,9 @@ Para manter o controle financeiro do contrato, o Designer Assinatura possui cont
 `,
   },
   {
-    slug: 'documentacao-tecnica',
+    slug: 'documentacao-tecnica-completa',
     emoji: '🛠️',
-    title: 'Documentação Técnica',
+    title: 'Documentação Técnica (versão completa)',
     description: 'Guia arquitetural, modelo de dados, segurança RBAC, agentes de IA, otimização e integração Canva.',
     markdown: `# Documentação Técnica — Designer Assinatura
 
