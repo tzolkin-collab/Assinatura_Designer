@@ -2,7 +2,7 @@ import prisma from '../prisma.js';
 import { logger } from '../logger.js';
 import { collabDetailsSchema, type CollabDetails } from '../brandCollab.js';
 import { brandProfileSchema, renderProjectMemory, type BrandProfileData } from '../brandProfile.js';
-import { isDesignerBrainEnabled } from './enabled.js';
+import { isBrainOnWithoutProfile } from './enabled.js';
 import type { BrainAsset, CollabLayer } from './types.js';
 
 /**
@@ -56,12 +56,34 @@ function collabAssets(details: CollabDetails): BrainAsset[] {
   return out;
 }
 
+/** A leitura da ficha FALHOU (banco fora, erro inesperado): não dá para saber se o projeto tem ficha. */
+export class BrainLayersReadError extends Error {
+  constructor(readonly brandSlug: string, readonly cause: unknown) {
+    super(`Não foi possível ler a ficha do projeto "${brandSlug}": ${cause instanceof Error ? cause.message : String(cause)}`);
+    this.name = 'BrainLayersReadError';
+  }
+}
+
 /**
- * `null` = a marca não tem ficha salva (nem ela nem a base): o cérebro fica desligado, como antes.
- * Se a leitura falhar (tabela sem migration, banco fora) a geração segue sem o cérebro, com aviso
- * no log: uma camada opcional não pode derrubar a geração.
+ * Banco com migrations parciais: Prisma P2021 (a tabela não existe) ou P2022 (a coluna não existe). Os
+ * dois dizem a mesma coisa, que a migration da ficha ainda não foi aplicada por inteiro neste banco.
  */
-export async function loadBrainLayers(brandSlug: string): Promise<BrainLayers | null> {
+function isPartialMigration(err: unknown): boolean {
+  const code = typeof err === 'object' && err !== null ? (err as { code?: unknown }).code : undefined;
+  return code === 'P2021' || code === 'P2022';
+}
+
+/**
+ * `null` = a marca não tem ficha salva (nem ela nem a base). Isso NÃO desliga o cérebro: ele é global
+ * e a marca segue com as camadas globais e a memória que o `resolveProjectMemory` achar.
+ *
+ * Falha de leitura NÃO é "sem ficha": um projeto que TEM ficha não pode seguir em silêncio como se não
+ * tivesse. Aqui ela vira `BrainLayersReadError`, e quem gera (o pipeline) para com erro visível. A única
+ * exceção é tabela ou coluna inexistente (P2021/P2022, banco com migrations parciais): aí não existe ficha
+ * alguma para perder, então vale como "sem ficha", com aviso no log (nível warn), para não quebrar toda
+ * geração enquanto a migration não é aplicada. Qualquer outro erro continua parando a geração.
+ */
+export async function loadBrainLayersStrict(brandSlug: string): Promise<BrainLayers | null> {
   const slug = brandSlug.trim().toLowerCase();
   let row;
   try {
@@ -76,11 +98,15 @@ export async function loadBrainLayers(brandSlug: string): Promise<BrainLayers | 
       },
     });
   } catch (err) {
-    logger.warn('Não foi possível ler a ficha do projeto: geração segue sem ela', {
-      brandSlug,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return null;
+    if (isPartialMigration(err)) {
+      logger.warn('Tabela ou coluna da ficha não existe (migration não aplicada ou parcial): projeto tratado como sem ficha', {
+        brandSlug,
+        code: (err as { code?: string }).code,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return null;
+    }
+    throw new BrainLayersReadError(brandSlug, err);
   }
   if (!row) return null;
 
@@ -112,17 +138,33 @@ export async function loadBrainLayers(brandSlug: string): Promise<BrainLayers | 
   };
 }
 
+/**
+ * Versão tolerante, para quem só LÊ a ficha sem gerar nada (as tools MCP e o chat, que só decidem se o
+ * cérebro está ativo): se a leitura falhar devolve `null` com aviso no log, como sempre fez. Quem GERA
+ * a peça usa `loadBrainLayersStrict`, que não engole a falha.
+ */
+export async function loadBrainLayers(brandSlug: string): Promise<BrainLayers | null> {
+  try {
+    return await loadBrainLayersStrict(brandSlug);
+  } catch (err) {
+    if (!(err instanceof BrainLayersReadError)) throw err;
+    logger.warn('Não foi possível ler a ficha do projeto: seguindo sem ela', { brandSlug, error: err.message });
+    return null;
+  }
+}
+
 /** Compatível com quem só quer a ficha do projeto. */
 export async function loadSavedProfileBySlug(brandSlug: string): Promise<BrandProfileData | null> {
   return (await loadBrainLayers(brandSlug))?.projectProfile ?? null;
 }
 
 /**
- * O cérebro está ativo para a marca quando ela (ou a base dela) tem ficha salva.
- * `DESIGNER_BRAIN_BRANDS` continua valendo como retaguarda até as marcas piloto (a Amanda)
- * existirem como ficha no banco.
+ * O cérebro está ativo para a marca. Por padrão (cérebro global) SEMPRE, com ou sem ficha. Só na
+ * saída de emergência (`DESIGNER_BRAIN_GLOBAL=off`) volta a depender de ficha salva (da marca ou da
+ * base) ou de o slug estar em `DESIGNER_BRAIN_BRANDS`. O pipeline usa a mesma regra
+ * (`isBrainOnWithoutProfile`) em vez de uma cópia, para a API e o worker nunca divergirem.
  */
 export async function isBrainActiveForBrand(brandSlug: string): Promise<boolean> {
-  if (isDesignerBrainEnabled(brandSlug)) return true;
+  if (isBrainOnWithoutProfile(brandSlug)) return true;
   return (await loadBrainLayers(brandSlug)) !== null;
 }

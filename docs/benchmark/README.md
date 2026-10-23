@@ -106,5 +106,5 @@ Medição de 15/10/2026: lotes do GPT dela 0,12 a 0,47; decks da Amanda no Desig
 
 ## Teste de aceite do cérebro (`backend/scripts/aceiteCerebro.ts`)
 
-Roda os cenários t1, t3, t4, t4b, t6 e gpt1 direto no pipeline. Grava um deck de verdade e custa cerca de US$ 0,40.
+Roda os cenários t1, t3, t4, t4b, t6 e gpt1 direto no pipeline. Grava um deck de verdade e custa cerca de US$ 0,40. O cérebro é global (padrão); para o cenário sem cérebro passe `sem-cerebro` como 2º argumento (define `DESIGNER_BRAIN_GLOBAL=off`). Apagar `DESIGNER_BRAIN_BRANDS` não desliga mais nada.
 

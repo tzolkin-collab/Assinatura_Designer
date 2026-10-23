@@ -173,6 +173,8 @@ export const savePresentationTool: McpToolDefinition<typeof inputSchema, typeof 
     if (!textChecked) {
       warnings.push('Sem `approvedText`: o texto da arte NÃO foi conferido. Envie o texto aprovado de cada slide para a checagem rodar.');
     }
+    // Aqui o aviso depende de a marca ter ficha (`layers`). O pipeline interno trata todo projeto como cérebro
+    // ligado (cérebro global); este MCP segue com o comportamento de antes.
     if (layers && !textChecked) {
       warnings.push('Esta marca usa o cérebro do Designer: sem texto aprovado a peça não pode ser tratada como final.');
     }

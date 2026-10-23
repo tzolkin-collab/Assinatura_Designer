@@ -51,16 +51,16 @@ nos projetos, e a identidade de um projeto nunca contamina outro.
 
 | ☐ | Item | Objetivo | Pedido |
 |---|---|---|---|
-| ◐ | Prompt global persistente | Regras fixas que valem para todos os projetos, sem repetir em cada um | Guardar o §3.1 como instrução fixa, separada dos projetos. **Feito:** texto literal em `lib/designerBrain/prompts.ts`, ligado ao planner, ao artista e ao reviewer **atrás do flag por marca** (ver "Como ligar"). **Falta:** edição de slide e ferramentas de edição do chat |
+| ◐ | Prompt global persistente | Regras fixas que valem para todos os projetos, sem repetir em cada um | Guardar o §3.1 como instrução fixa, separada dos projetos. **Feito:** texto literal em `lib/designerBrain/prompts.ts`, ligado ao planner, ao artista e ao reviewer em **todo projeto**, com ou sem ficha (cérebro global, ver seção D.1). **Falta:** edição de slide e ferramentas de edição do chat |
 | ☐ | Projeto-base | Cada marca ter sua memória isolada | Campos independentes: plataforma de marca, manual visual, logo, fonte, paleta, fotos, elementos |
 | ☐ | Collab / desdobramento | Herdar a base e guardar só o que muda | Tipo (interno/parceria), contexto, logo e manual do parceiro, % de protagonismo |
 | ◐ | Seleção de modo | Cada tipo de peça ter regras próprias | Escolher entre apresentação 16:9, imagem avulsa e e-book A4. **Feito:** regras dos 3 modos no módulo. **Falta:** seletor na UI e tipo de post do e-book A4 |
 | ◐ | Galeria de fotos reais | A IA só usar foto fornecida | Biblioteca por projeto + anexos por demanda. **Feito:** a biblioteca da marca já é a fonte, e o editor ganhou a aba **Fotos** (colocar, trocar, enquadrar, remover; só foto da biblioteca; cada troca vira versão). **Falta:** biblioteca por projeto (hoje é por marca) e o artista "ver" a foto |
 | ◐ | Editor: trocar foto depois | A foto entrar depois sem refazer a arte | **Feito (com o cérebro ligado):** o artista reserva a área como `data-photo-slot`; o editor troca a foto sem IA. Validado com geração real e uma foto de teste. **Falta:** editar texto direto, mover/redimensionar, reordenar slides |
-| ◐ | Sem foto, sem pessoa gerada | Nunca fabricar rosto nem stock | Reservar área limpa na arte, sem texto técnico dentro dela. **Feito:** regra §5.1 anexada quando há foto ou área fotográfica. **Feito (só com o flag ligado):** o resolver não gera foto nem busca Unsplash, "regenerar" não faz nada, e o chat deixa de oferecer IA/Remix/Unsplash. **12/10:** a regra agora é **ativada ou confirmada no chat** antes da primeira geração da conversa e vale em qualquer projeto, com ou sem ficha: só foto real fornecida, sem Unsplash nem "Remix IA", área reservada quando falta foto. **Falta:** exercitar com geração real num projeto sem ficha (a Assinatura) |
+| ◐ | Sem foto, sem pessoa gerada | Nunca fabricar rosto nem stock | Reservar área limpa na arte, sem texto técnico dentro dela. **Feito:** regra §5.1 anexada quando há foto ou área fotográfica. **Feito (cérebro global, em todo projeto):** com a regra de foto real valendo, o resolver não gera foto nem busca Unsplash, "regenerar" não faz nada, e o chat deixa de oferecer IA/Remix/Unsplash. **12/10:** a regra agora é **ativada ou confirmada no chat** antes da primeira geração da conversa e vale em qualquer projeto, com ou sem ficha: só foto real fornecida, sem Unsplash nem "Remix IA", área reservada quando falta foto. **Falta:** exercitar com geração real num projeto sem ficha (a Assinatura) |
 | ◐ | Status do texto | Texto visível ≠ fala, contexto ou interno | Campo por bloco: aprovado, em revisão, apoio, fala, contexto, interno, não exibir. **Feito:** regra em código (`interno` e `não exibir` nunca chegam ao modelo). **Falta:** campo no briefing e na UI |
 | ◐ | Amanda como piloto | Validar o sistema com um projeto completo | Carregar a memória do §11. **Feito:** memória em `seeds/amandaCoelho.ts`. **Falta:** projeto-base no banco, ativos e fotos |
-| ◐ | Montagem do prompt | Camadas na ordem certa | global → projeto → collab → modo → foto → ativos → briefing → checklist. **Feito:** `assembleDesignerBrain` (função pura, 21 testes) e chamado no pipeline para marcas com o flag. **Falta:** briefing e ativos entrarem pelo montador (hoje o pipeline os entrega por caminho próprio) |
+| ◐ | Montagem do prompt | Camadas na ordem certa | global → projeto → collab → modo → foto → ativos → briefing → checklist. **Feito:** `assembleDesignerBrain` (função pura, 21 testes) e chamado no pipeline em todo projeto (cérebro global; só a saída de emergência `DESIGNER_BRAIN_GLOBAL=off` volta a exigir ficha ou slug em `DESIGNER_BRAIN_BRANDS`). **Falta:** briefing e ativos entrarem pelo montador (hoje o pipeline os entrega por caminho próprio) |
 | ◐ | Revisão antes de "final" | Não entregar peça com erro ou invenção | Checar texto, quantidade, acentos, logo, cores, margens, fotos. **Feito (com o cérebro ligado):** checagem em código do texto aprovado contra cada slide (palavras faltando ou a mais, com acento), que reprova o deck e alimenta o ajuste; e a geração **para** quando não há texto aprovado. **Falta:** quantidade fechada, logo, cores, margens e foto |
 | ☐ | Galeria de projetos | Trocar "galeria de marcas" por projetos | Nova home e página interna do projeto, conforme os mockups do documento |
 
@@ -118,7 +118,7 @@ Origem: `docs/ACABAMENTOS-DESIGNER.md` (21/09) e `docs/PLANO-CONSOLIDACAO.md` (2
 
 | ☐ | Item | Objetivo | Pedido |
 |---|---|---|---|
-| ◐ | Remover geração de pessoa e stock | Alinhar à regra de foto real | Bloqueado nas marcas com o flag (seção D.1). Nas demais o `imageResolver` ainda gera foto, usa Unsplash e "Remix IA": só mudam se a regra passar a valer para todos |
+| ◐ | Remover geração de pessoa e stock | Alinhar à regra de foto real | Bloqueado em todo projeto, com ou sem ficha (cérebro global, seção D.1): o `imageResolver` não gera foto, não usa Unsplash e não oferece "Remix IA". Só a saída de emergência (`DESIGNER_BRAIN_GLOBAL=off`) devolve o caminho antigo, e mesmo nela só para projeto sem ficha, fora de `DESIGNER_BRAIN_BRANDS` e sem a regra ativada no chat |
 | ☐ | Planner pedindo imagem de pessoa | Não pedir o que não pode ser gerado | `imageHint` inclui "pessoa, equipe, depoimento" |
 | ☐ | Checklist pré-geração do chat | Não perguntar "IA / Remix / Unsplash" | Substituir pelos templates de briefing do §12 |
 | ◐ | Uso de fonte própria (`.ttf/.otf/.woff/.woff2`) | Usar Queens e Aeonik de verdade | **Construído (12/10):** a fonte marcada como "Arquivo oficial enviado" na ficha vira `@font-face` no preview (rota pública com CORS), no revisor e nas exportações; o artista usa o nome exato e o aviso de substituição some para ela. Conferido com render real: com o arquivo sai a fonte, sem ele cai na genérica. **Falta:** os arquivos da Gabriela (licença comercial) e o PPTX só leva o nome da fonte |
@@ -128,14 +128,14 @@ Origem: `docs/ACABAMENTOS-DESIGNER.md` (21/09) e `docs/PLANO-CONSOLIDACAO.md` (2
 
 ---
 
-## D.1 Como ligar o cérebro para um caso específico
+## D.1 Como o cérebro liga (e a saída de emergência)
 
-O cérebro é opt-in por marca. **Padrão: desligado em todas**, e a geração segue exatamente como antes.
+O cérebro é **global: ligado em todo projeto, com ou sem ficha salva**. Regras globais, regra de foto real, trava de texto aprovado, status por bloco e revisão final valem sempre; a ficha só acrescenta a camada do projeto.
 
-1. Defina a variável de ambiente no backend (e no worker): `DESIGNER_BRAIN_BRANDS=amanda-coelho` (slugs separados por vírgula).
-2. A marca precisa existir com esse slug, com **cores e fontes** cadastradas (elas continuam vindo da configuração da marca, inclusive o carregamento de fonte).
-3. A memória do projeto vem de **"Instruções do agente"** da marca. Se estiver vazia, usa o seed do repositório (`seeds/index.ts`, hoje só `amanda-coelho`). Sem nenhuma das duas, a geração **falha com mensagem clara**, em vez de seguir com as regras erradas.
-4. Para desligar: tirar o slug da lista.
+1. A marca precisa existir com **cores e fontes** cadastradas (elas continuam vindo da configuração da marca, inclusive o carregamento de fonte).
+2. A memória do projeto vem, nesta ordem, da **ficha salva**, de **"Instruções do agente"** da marca e do seed do repositório (`seeds/index.ts`, hoje só `amanda-coelho`). Sem nenhuma das três, a geração **não falha**: usa o resumo do cadastro (diretrizes, cores, fontes) no lugar da memória e avisa a pendência "Memória do projeto-base (ficha do projeto)". A IA não preenche nada que falte.
+3. **Saída de emergência:** `DESIGNER_BRAIN_GLOBAL=off` (também `0`, `false`, `no`) no backend e no worker devolve o comportamento anterior, em que o cérebro só liga com ficha salva ou com o slug em `DESIGNER_BRAIN_BRANDS` (slugs separados por vírgula). Nesse modo, marca sem ficha e fora da lista segue pelo caminho antigo, e uma marca da lista sem memória nenhuma volta a falhar com mensagem clara. **Uma exceção não volta atrás:** se a leitura da ficha falhar (banco fora, erro inesperado), a geração AINDA PARA com erro visível, também com `off`. Só tabela ou coluna inexistente (Prisma P2021/P2022, banco com migrations parciais) segue como sem ficha, com aviso no log.
+4. `DESIGNER_BRAIN_BRANDS` só tem efeito com a saída de emergência ligada; com o cérebro global (padrão), apagá-la ou preenchê-la não muda nada.
 
 **O que muda quando ligado:** o artista, o planner e o reviewer recebem global + memória + modo + regra de foto + revisão no lugar das diretrizes legadas; o resolver não gera foto nem usa Unsplash; o chat não oferece IA/Remix/Unsplash; o que o chat "aprendeu" não reescreve a memória.
 

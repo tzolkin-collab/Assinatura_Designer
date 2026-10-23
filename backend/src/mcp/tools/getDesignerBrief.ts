@@ -84,8 +84,10 @@ export const getDesignerBriefTool: McpToolDefinition<typeof inputSchema, typeof 
     const [brand, layers] = await Promise.all([resolveBrandContext(grant.slug), loadBrainLayers(grant.slug)]);
     const profile = layers?.projectProfile ?? null;
 
-    // Cérebro em camadas (global → projeto → collab → modo → foto → revisão). Sem memória de projeto o
-    // pipeline interno também não liga o cérebro: o fallback é o resumo de marca, como no legado.
+    // Cérebro em camadas (global → projeto → collab → modo → foto → revisão). Sem memória de projeto (sem ficha,
+    // sem "Instruções do agente" e sem seed) este brief cai no resumo de marca, como no legado. Já o pipeline
+    // interno, com o cérebro global ligado (padrão), liga o cérebro em todo projeto e usa o resumo do cadastro
+    // como memória, com a pendência avisada: o comportamento deste MCP é outro, e não foi alterado.
     let rules: string;
     let pending: string[] = [];
     let brainActive = false;

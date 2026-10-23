@@ -11,10 +11,10 @@ export {
 } from './prompts.js';
 export { AMANDA_COELHO_MEMORY } from './seeds/amandaCoelho.js';
 export { PROJECT_MEMORY_SEEDS } from './seeds/index.js';
-export { designerBrainBrands, isDesignerBrainEnabled } from './enabled.js';
-export { isBrainActiveForBrand, loadBrainLayers, loadSavedProfileBySlug } from './savedProfile.js';
+export { designerBrainBrands, isBrainOnWithoutProfile, isDesignerBrainEnabled, isGlobalBrainEnabled } from './enabled.js';
+export { BrainLayersReadError, isBrainActiveForBrand, loadBrainLayers, loadBrainLayersStrict, loadSavedProfileBySlug } from './savedProfile.js';
 export type { BrainLayers } from './savedProfile.js';
-export { parseCopyBlocks } from './copyBlocks.js';
+export { BRIEF_MESSAGE_SEPARATOR, briefForBrain, parseCopyBlocks, withoutWithheldText } from './copyBlocks.js';
 export { profileStyleReferences, type StyleReference } from './styleReferences.js';
 export { REFERENCE_ASSET_TAGS } from './referenceTags.js';
 export {

@@ -1,3 +1,4 @@
+import { isGlobalBrainEnabled } from './enabled.js';
 import { isWithheld } from './textStatus.js';
 import type { TextBlock, TextStatus } from './types.js';
 
@@ -89,4 +90,58 @@ export function parseCopyBlocks(source: string | undefined): ParsedCopy {
       withheld: blocks.filter((b) => isWithheld(b.status)).length,
     },
   };
+}
+
+/** Linha que a Fábrica coloca entre uma mensagem da pessoa e a próxima ao montar o briefing da conversa. */
+export const BRIEF_MESSAGE_SEPARATOR = '[Nova solicitação de edição]:';
+
+/**
+ * Tira de um texto livre (o briefing da conversa, que carrega a mensagem colada inteira) os BLOCOS
+ * [INTERNO] e [NÃO EXIBIR]. O parser já os tira da copy; sem isto o mesmo texto chegava ao planner e ao
+ * artista pelo briefing.
+ *
+ * Remove o BLOCO marcado, com a mesma regra do parser (a marca numa linha própria, ou com o texto na
+ * mesma linha, e o bloco vai até a próxima marca de qualquer status), e não mais o trecho por substring
+ * em todo o briefing: palavra curta, ou repetida em outro lugar, não é mais apagada. O bloco também
+ * termina no separador entre mensagens, para o pedido seguinte da pessoa não ser engolido.
+ *
+ * Sem nenhuma marca (ou sem bloco interno), devolve o texto original, byte a byte. As demais linhas,
+ * inclusive o fim de linha do Windows, ficam como vieram.
+ *
+ * Limitações que sobram: uma instrução SEM marca escrita logo depois de um [INTERNO], na mesma mensagem,
+ * pertence ao bloco e sai junto (a copy já se comporta assim); marca no meio da linha não é reconhecida;
+ * e o mesmo conteúdo repetido, sem marca, em outra mensagem não é removido.
+ */
+export function withoutWithheldText(text: string): string {
+  if (!text.includes('[')) return text;
+  const out: string[] = [];
+  let skipping = false;
+  let removed = false;
+  for (const raw of text.split('\n')) {
+    const line = raw.endsWith('\r') ? raw.slice(0, -1) : raw;
+    if (line.trim() === BRIEF_MESSAGE_SEPARATOR) {
+      skipping = false;
+      out.push(raw);
+      continue;
+    }
+    const m = MARKER_LINE.exec(line);
+    const status = m ? statusOf(m[1]!) : null;
+    if (m && status) skipping = isWithheld(status);
+    if (skipping) {
+      removed = true;
+      continue;
+    }
+    out.push(raw);
+  }
+  return removed ? out.join('\n') : text;
+}
+
+/**
+ * PONTO ÚNICO da limpeza do briefing no cérebro global. Vale para TODO projeto com o cérebro global
+ * ligado, com ou sem ficha: o chat a aplica antes de planejar e enfileirar, e o pipeline a repete (é
+ * idempotente) para o briefing do planner, do artista e do trace. Com a saída de emergência
+ * (`DESIGNER_BRAIN_GLOBAL=off`) devolve o briefing exatamente como veio.
+ */
+export function briefForBrain(brief: string, globalOn: boolean = isGlobalBrainEnabled()): string {
+  return globalOn ? withoutWithheldText(brief) : brief;
 }

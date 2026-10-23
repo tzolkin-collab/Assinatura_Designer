@@ -80,6 +80,9 @@ vi.mock('../agents/brain/skills.js', () => ({
 }));
 
 import { initBrainHandlers, reconnectSession } from '../agents/brain/index';
+import prisma from '../lib/prisma';
+import { logger } from '../lib/logger';
+import { hasApprovedText } from '../lib/designerBrain/index';
 import { setAdviceStore, submitAdvice, listAdvice } from '../lib/advice';
 import { setInterruptStore } from '../lib/interrupt';
 import { createMemoryAdviceStore, createMemoryInterruptStore } from './helpers/memoryLiveControl';
@@ -235,12 +238,19 @@ describe('orientações consumidas pelo cérebro', () => {
     expect(tokens()).toContain('aprovado automaticamente');
   });
 
-  describe('regra de foto real: ativada ou confirmada no chat antes de gerar', () => {
+  // Estes testes descrevem o chat ANTES do cérebro global ("projeto sem as regras do Designer"). Assumiam o
+  // cérebro desligado por padrão, o que deixou de ser verdade: rodam com a saída de emergência
+  // DESIGNER_BRAIN_GLOBAL=off, o que também prova que ela devolve o comportamento anterior. O padrão (cérebro
+  // global ligado em todo projeto) é coberto no describe seguinte.
+  describe('regra de foto real: ativada ou confirmada no chat antes de gerar (saída de emergência DESIGNER_BRAIN_GLOBAL=off)', () => {
     const original = process.env.DESIGNER_BRAIN_BRANDS;
-    beforeEach(() => { delete h.session.photoRule; delete process.env.DESIGNER_BRAIN_BRANDS; });
+    const originalGlobal = process.env.DESIGNER_BRAIN_GLOBAL;
+    beforeEach(() => { delete h.session.photoRule; delete process.env.DESIGNER_BRAIN_BRANDS; process.env.DESIGNER_BRAIN_GLOBAL = 'off'; });
     afterEach(() => {
       if (original === undefined) delete process.env.DESIGNER_BRAIN_BRANDS;
       else process.env.DESIGNER_BRAIN_BRANDS = original;
+      if (originalGlobal === undefined) delete process.env.DESIGNER_BRAIN_GLOBAL;
+      else process.env.DESIGNER_BRAIN_GLOBAL = originalGlobal;
     });
 
     it('projeto sem as regras do Designer: a primeira geração PARA e pergunta se ativa', async () => {
@@ -375,15 +385,71 @@ describe('orientações consumidas pelo cérebro', () => {
     });
   });
 
-  describe('status por bloco (marca com cérebro ligado)', () => {
+  describe('cérebro global (padrão): projeto SEM ficha tem as mesmas regras no chat', () => {
+    const keys = ['DESIGNER_BRAIN_BRANDS', 'DESIGNER_BRAIN_GLOBAL'] as const;
+    const originais = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+    beforeEach(() => { delete h.session.photoRule; for (const k of keys) delete process.env[k]; });
+    afterEach(() => {
+      for (const k of keys) {
+        if (originais[k] === undefined) delete process.env[k];
+        else process.env[k] = originais[k];
+      }
+    });
+    const pedido = (t: string) => texto(`${t} [GENERATE_IMAGE:{"prompt":"mulher sorrindo numa mesa de escritório","id":"img1"}]`);
+
+    it('a primeira geração PARA e pede para CONFIRMAR a regra de foto real (não "ativar")', async () => {
+      h.streams.push(texto('Vou criar [DISPATCH:presentation]'));
+      await send('cria uma apresentação');
+
+      expect(h.enqueued).toHaveLength(0);
+      expect(h.session.activeQuestion.question).toContain('confirmo a regra de foto real');
+      expect(h.session.activeQuestion.options[0].label).toBe('Confirmar regra de foto real');
+    });
+
+    it('a nota do chat traz a regra de foto real E a trava de texto aprovado', async () => {
+      h.streams.push(texto('Ok!'));
+      await send('oi');
+      const sys = h.streamCalls[0]!.systemInstruction;
+      expect(sys).toContain('Regra desta conversa: fotografia real');
+      expect(sys).toContain('NÃO dispare a geração sem o texto aprovado');
+    });
+
+    it('[GENERATE_IMAGE] é recusado, sem a pessoa ter ativado nada', async () => {
+      const { generatePhotoBuffer } = await import('../lib/imageResolver.js');
+      vi.mocked(generatePhotoBuffer).mockClear();
+      h.streams.push(pedido('Vou mostrar.'));
+      await send('gera uma imagem de um cachorro');
+      await new Promise((r) => setTimeout(r, 20));
+      expect(generatePhotoBuffer).not.toHaveBeenCalled();
+      expect(wsOf('emit').some((c) => c.args[1] === 'image:proposal:error')).toBe(true);
+    });
+
+    it('saída de emergência (DESIGNER_BRAIN_GLOBAL=off): o chat volta a ser o de antes (a ferramenta gera, a nota não aparece)', async () => {
+      process.env.DESIGNER_BRAIN_GLOBAL = 'off';
+      const { generatePhotoBuffer } = await import('../lib/imageResolver.js');
+      vi.mocked(generatePhotoBuffer).mockClear();
+      h.streams.push(texto('Ok!'));
+      await send('oi');
+      expect(h.streamCalls[0]!.systemInstruction).not.toContain('Regra desta conversa: fotografia real');
+      h.streams.push(pedido('Vou mostrar.'));
+      await send('gera uma imagem de um cachorro');
+      await new Promise((r) => setTimeout(r, 20));
+      expect(generatePhotoBuffer).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('status por bloco (cérebro global, projeto sem ficha)', () => {
     const original = process.env.DESIGNER_BRAIN_BRANDS;
+    const originalGlobal = process.env.DESIGNER_BRAIN_GLOBAL;
+    beforeEach(() => { delete process.env.DESIGNER_BRAIN_BRANDS; delete process.env.DESIGNER_BRAIN_GLOBAL; });
     afterEach(() => {
       if (original === undefined) delete process.env.DESIGNER_BRAIN_BRANDS;
       else process.env.DESIGNER_BRAIN_BRANDS = original;
+      if (originalGlobal === undefined) delete process.env.DESIGNER_BRAIN_GLOBAL;
+      else process.env.DESIGNER_BRAIN_GLOBAL = originalGlobal;
     });
 
     it('o planner recebe só o texto aprovado; o texto com as marcas segue intacto para o pipeline', async () => {
-      process.env.DESIGNER_BRAIN_BRANDS = h.session.brandSlug;
       const planner = await import('../agents/planner/index');
       vi.mocked(planner.runPlanner).mockResolvedValueOnce([{ order: 1, title: 'Abertura', goal: 'g', layout_type: 'title-hero', copy: 'TITULO' }]);
       h.session.reviewMode = 'auto';
@@ -399,8 +465,20 @@ describe('orientações consumidas pelo cérebro', () => {
       expect(h.enqueued[0].sourceCopy).toContain('FALA-SECRETA'); // o pipeline usa como orientação
     });
 
+    it('saída de emergência: sem ficha e sem o slug na lista, o texto com as marcas segue inteiro ao planner (como antes)', async () => {
+      process.env.DESIGNER_BRAIN_GLOBAL = 'off';
+      const planner = await import('../agents/planner/index');
+      vi.mocked(planner.runPlanner).mockResolvedValueOnce([{ order: 1, title: 'Abertura', goal: 'g', layout_type: 'title-hero', copy: 'TITULO' }]);
+      h.session.reviewMode = 'auto';
+      h.streams.push(texto('Vou criar agora [DISPATCH:presentation]'));
+
+      await send(['[APROVADO]', 'TITULO', '[INTERNO]', 'VALOR-INTERNO', 'Texto de apoio longo. '.repeat(60)].join('\n'));
+
+      const enviado = vi.mocked(planner.runPlanner).mock.calls.at(-1)![0] as { sourceCopy?: string };
+      expect(enviado.sourceCopy).toContain('VALOR-INTERNO');
+    });
+
     it('tudo marcado como fala/contexto: não gera e pede o texto aprovado', async () => {
-      process.env.DESIGNER_BRAIN_BRANDS = h.session.brandSlug;
       h.streams.push(texto('Vou criar agora [DISPATCH:presentation]'));
 
       await send('[FALA]\n' + 'Só falado, sem texto de slide. '.repeat(60));
@@ -408,6 +486,276 @@ describe('orientações consumidas pelo cérebro', () => {
       expect(h.enqueued).toHaveLength(0);
       expect(tokens()).toContain('marcado como fala, contexto, apoio ou interno');
       expect(h.session.phase).toBe('listening');
+    });
+  });
+
+  describe('cérebro global: o texto interno e a regeneração, pelo caminho do chat', () => {
+    const original = process.env.DESIGNER_BRAIN_BRANDS;
+    const originalGlobal = process.env.DESIGNER_BRAIN_GLOBAL;
+    beforeEach(() => { delete process.env.DESIGNER_BRAIN_BRANDS; delete process.env.DESIGNER_BRAIN_GLOBAL; });
+    afterEach(() => {
+      if (original === undefined) delete process.env.DESIGNER_BRAIN_BRANDS;
+      else process.env.DESIGNER_BRAIN_BRANDS = original;
+      if (originalGlobal === undefined) delete process.env.DESIGNER_BRAIN_GLOBAL;
+      else process.env.DESIGNER_BRAIN_GLOBAL = originalGlobal;
+      vi.mocked(prisma.brand.findUnique).mockReset();
+      vi.mocked(prisma.brand.findUnique).mockResolvedValue(null as never);
+    });
+
+    const bruto = '[APROVADO]\nTITULO\n[INTERNO]\nVALOR-INTERNO\n[NÃO EXIBIR]\nSEGREDO-DO-CLIENTE\n' + 'Texto de apoio longo. '.repeat(60);
+    const roteiro1 = [{ order: 1, title: 'Abertura', goal: 'g', layout_type: 'title-hero', copy: 'TITULO' }];
+    const comFicha = () => vi.mocked(prisma.brand.findUnique).mockResolvedValue({
+      name: 'Marca', kind: 'PROJECT', collab: null, profile: { data: { essence: 'ESSENCIA' } }, parent: null,
+    } as never);
+
+    it('(a) sem ficha, modo automático: o texto de [INTERNO]/[NÃO EXIBIR] não chega ao runPlanner nem à fila', async () => {
+      const planner = await import('../agents/planner/index');
+      vi.mocked(planner.runPlanner).mockResolvedValueOnce(roteiro1);
+      h.session.reviewMode = 'auto';
+      h.streams.push(texto('Vou criar agora [DISPATCH:presentation]'));
+
+      await send(bruto);
+
+      const chamada = vi.mocked(planner.runPlanner).mock.calls.at(-1)![0] as { brief: string; sourceCopy?: string };
+      expect(chamada.brief).toContain('TITULO');
+      expect(JSON.stringify(chamada)).not.toContain('VALOR-INTERNO');
+      expect(JSON.stringify(chamada)).not.toContain('SEGREDO-DO-CLIENTE');
+      expect(h.enqueued).toHaveLength(1);
+      expect(h.enqueued[0].brief).toContain('TITULO');
+      expect(h.enqueued[0].brief).not.toContain('VALOR-INTERNO');
+      expect(h.enqueued[0].brief).not.toContain('SEGREDO-DO-CLIENTE');
+      // A copy segue com as marcas: o pipeline as usa (fala/contexto como orientação) e limpa o resto.
+      expect(h.enqueued[0].sourceCopy).toContain('VALOR-INTERNO');
+    });
+
+    it('(a) sem ficha, modo manual: o pendingPlan e a fila, depois de aprovar o roteiro, também vêm sem o texto interno', async () => {
+      const planner = await import('../agents/planner/index');
+      vi.mocked(planner.runPlanner).mockResolvedValueOnce(roteiro1);
+      h.streams.push(texto('Vou criar agora [DISPATCH:presentation]'));
+
+      await send(bruto);
+
+      const chamada = vi.mocked(planner.runPlanner).mock.calls.at(-1)![0] as { brief: string };
+      expect(chamada.brief).not.toContain('VALOR-INTERNO');
+      expect(h.session.pendingPlan.brief).toContain('TITULO');
+      expect(h.session.pendingPlan.brief).not.toContain('VALOR-INTERNO');
+      expect(h.session.pendingPlan.brief).not.toContain('SEGREDO-DO-CLIENTE');
+      expect(h.enqueued).toHaveLength(0);
+
+      await send('Aprovar roteiro e gerar');
+
+      expect(h.enqueued).toHaveLength(1);
+      expect(h.enqueued[0].brief).not.toContain('VALOR-INTERNO');
+      expect(h.enqueued[0].brief).not.toContain('SEGREDO-DO-CLIENTE');
+    });
+
+    it('(a) texto sem NENHUMA marca passa byte a byte pelo planner, pelo pendingPlan e pela fila', async () => {
+      const planner = await import('../agents/planner/index');
+      vi.mocked(planner.runPlanner).mockResolvedValueOnce(roteiro1);
+      h.streams.push(texto('Vou criar agora [DISPATCH:presentation]'));
+      const livre = 'Título livre\r\n\r\n  Texto com   espaços e [colchetes] no meio.\n' + 'Mais texto corrido. '.repeat(60);
+
+      await send(livre);
+
+      const chamada = vi.mocked(planner.runPlanner).mock.calls.at(-1)![0] as { brief: string };
+      expect(chamada.brief).toBe(livre.trim());
+      expect(h.session.pendingPlan.brief).toBe(livre.trim());
+    });
+
+    it('(a) COM ficha, modo automático: o texto de [INTERNO]/[NÃO EXIBIR] também não chega ao runPlanner nem à fila', async () => {
+      comFicha();
+      const planner = await import('../agents/planner/index');
+      vi.mocked(planner.runPlanner).mockResolvedValueOnce(roteiro1);
+      h.session.reviewMode = 'auto';
+      h.streams.push(texto('Vou criar agora [DISPATCH:presentation]'));
+
+      await send(bruto);
+
+      const chamada = vi.mocked(planner.runPlanner).mock.calls.at(-1)![0] as { brief: string };
+      expect(chamada.brief).toContain('TITULO');
+      expect(JSON.stringify(chamada.brief)).not.toContain('VALOR-INTERNO');
+      expect(JSON.stringify(chamada.brief)).not.toContain('SEGREDO-DO-CLIENTE');
+      expect(h.enqueued).toHaveLength(1);
+      expect(h.enqueued[0].brief).toContain('TITULO');
+      expect(h.enqueued[0].brief).not.toContain('VALOR-INTERNO');
+      expect(h.enqueued[0].brief).not.toContain('SEGREDO-DO-CLIENTE');
+    });
+
+    it('(a) COM ficha, modo manual: o pendingPlan e a fila, depois de aprovar o roteiro, vêm sem o texto interno', async () => {
+      comFicha();
+      const planner = await import('../agents/planner/index');
+      vi.mocked(planner.runPlanner).mockResolvedValueOnce(roteiro1);
+      h.streams.push(texto('Vou criar agora [DISPATCH:presentation]'));
+
+      await send(bruto);
+
+      expect(h.session.pendingPlan.brief).toContain('TITULO');
+      expect(h.session.pendingPlan.brief).not.toContain('VALOR-INTERNO');
+      expect(h.session.pendingPlan.brief).not.toContain('SEGREDO-DO-CLIENTE');
+      await send('Aprovar roteiro e gerar');
+      expect(h.enqueued[0].brief).not.toContain('VALOR-INTERNO');
+      expect(h.enqueued[0].brief).not.toContain('SEGREDO-DO-CLIENTE');
+    });
+
+    it('(a) sem copy colada (fluxo direto), o [INTERNO] de uma mensagem curta também não vai para a fila, com e sem ficha', async () => {
+      for (const ficha of [false, true]) {
+        h.enqueued.length = 0;
+        h.session.messages.length = 0;
+        if (ficha) comFicha();
+        h.streams.push(texto('Vou criar agora [DISPATCH:presentation]'));
+
+        await send('Faça 3 slides.\n[INTERNO]\nORCAMENTO-SECRETO');
+
+        expect(h.enqueued).toHaveLength(1);
+        expect(h.enqueued[0].brief).toContain('Faça 3 slides.');
+        expect(h.enqueued[0].brief).not.toContain('ORCAMENTO-SECRETO');
+      }
+    });
+
+    it('(e) briefing SEM nenhuma marca passa byte a byte também COM ficha (planner, pendingPlan e fila)', async () => {
+      comFicha();
+      const planner = await import('../agents/planner/index');
+      vi.mocked(planner.runPlanner).mockResolvedValueOnce(roteiro1);
+      h.streams.push(texto('Vou criar agora [DISPATCH:presentation]'));
+      const livre = 'Título livre\r\n\r\n  Texto com   espaços e [colchetes] no meio.\n' + 'Mais texto corrido. '.repeat(60);
+
+      await send(livre);
+
+      expect((vi.mocked(planner.runPlanner).mock.calls.at(-1)![0] as { brief: string }).brief).toBe(livre.trim());
+      expect(h.session.pendingPlan.brief).toBe(livre.trim());
+      await send('Aprovar roteiro e gerar');
+      expect(h.enqueued[0].brief).toBe(livre.trim());
+    });
+
+    it('(d) saída de emergência (DESIGNER_BRAIN_GLOBAL=off), sem ficha: o briefing segue sem alteração', async () => {
+      process.env.DESIGNER_BRAIN_GLOBAL = 'off';
+      process.env.DESIGNER_BRAIN_BRANDS = 'marca';
+      const planner = await import('../agents/planner/index');
+      vi.mocked(planner.runPlanner).mockResolvedValueOnce(roteiro1);
+      h.streams.push(texto('Vou criar agora [DISPATCH:presentation]'));
+
+      await send(bruto);
+
+      expect((vi.mocked(planner.runPlanner).mock.calls.at(-1)![0] as { brief: string }).brief).toBe(bruto.trim());
+      expect(h.session.pendingPlan.brief).toBe(bruto.trim());
+    });
+
+    it('(c) regenerar tudo depois de recusar o resultado, sem ficha: enfileira com a copy e o roteiro aprovado, e a trava de texto aprovado não para', async () => {
+      const planner = await import('../agents/planner/index');
+      vi.mocked(planner.runPlanner).mockResolvedValueOnce(roteiro1);
+      h.session.reviewMode = 'auto';
+      h.streams.push(texto('Vou criar agora [DISPATCH:presentation]'));
+      await send(bruto);
+      expect(h.enqueued).toHaveLength(1);
+
+      await h.handlers.get('review:decline')!(S, 'u1', { reason: 'Não gostei do fundo' });
+
+      expect(h.enqueued).toHaveLength(2);
+      const regeneracao = h.enqueued[1];
+      expect(regeneracao.brief).toBe('Não gostei do fundo');
+      expect(regeneracao.sourceCopy).toContain('TITULO');
+      expect(regeneracao.approvedSkeleton).toEqual(roteiro1);
+      // A trava do pipeline (a mesma função) deixa passar: há texto aprovado.
+      expect(hasApprovedText({ sourceCopy: regeneracao.sourceCopy, approvedSkeleton: regeneracao.approvedSkeleton })).toBe(true);
+    });
+
+    it('(c) regenerar tudo sem roteiro aprovado guardado: leva a copy da sessão e o pipeline replaneja a partir dela', async () => {
+      h.session.messages.push({ role: 'user', content: bruto, timestamp: 1 });
+
+      await h.handlers.get('review:decline')!(S, 'u1', { reason: 'refaz' });
+
+      expect(h.enqueued).toHaveLength(1);
+      expect(h.enqueued[0].sourceCopy).toContain('TITULO');
+      expect(h.enqueued[0].approvedSkeleton).toBeUndefined();
+      expect(hasApprovedText({ sourceCopy: h.enqueued[0].sourceCopy })).toBe(true);
+    });
+
+    it('(c) regenerar tudo, COM ficha, também leva a copy e o roteiro aprovado', async () => {
+      comFicha();
+      const planner = await import('../agents/planner/index');
+      vi.mocked(planner.runPlanner).mockResolvedValueOnce(roteiro1);
+      h.session.reviewMode = 'auto';
+      h.streams.push(texto('Vou criar agora [DISPATCH:presentation]'));
+      await send(bruto);
+
+      await h.handlers.get('review:decline')!(S, 'u1', { reason: 'refaz' });
+
+      expect(h.enqueued[1].sourceCopy).toContain('TITULO');
+      expect(h.enqueued[1].approvedSkeleton).toEqual(roteiro1);
+    });
+
+    it('(c) regenerar depois de APROVAR O ROTEIRO À MÃO (modo manual): o roteiro é gravado na aprovação e reaproveitado na regeneração', async () => {
+      const planner = await import('../agents/planner/index');
+      vi.mocked(planner.runPlanner).mockResolvedValueOnce(roteiro1);
+      h.streams.push(texto('Vou criar agora [DISPATCH:presentation]'));
+      await send(bruto);
+      // Roteiro só proposto: ainda não vale como aprovado.
+      expect(h.session.pendingPlan.skeleton).toEqual(roteiro1);
+      expect(h.session.lastApprovedSkeleton ?? null).toBeNull();
+
+      await send('Aprovar roteiro e gerar');
+      expect(h.session.lastApprovedSkeleton).toEqual(roteiro1);
+      expect(h.enqueued).toHaveLength(1);
+      expect(h.enqueued[0].approvedSkeleton).toEqual(roteiro1);
+
+      await h.handlers.get('review:decline')!(S, 'u1', { reason: 'Não gostei do fundo' });
+
+      expect(h.enqueued).toHaveLength(2);
+      const regeneracao = h.enqueued[1];
+      expect(regeneracao.brief).toBe('Não gostei do fundo');
+      expect(regeneracao.approvedSkeleton).toEqual(roteiro1);
+      expect(regeneracao.sourceCopy).toContain('TITULO');
+      expect(hasApprovedText({ sourceCopy: regeneracao.sourceCopy, approvedSkeleton: regeneracao.approvedSkeleton })).toBe(true);
+    });
+
+    it('(c) geração nova SEM copy (fluxo direto) ZERA o roteiro aprovado guardado, e a regeneração seguinte não o reaproveita', async () => {
+      // Sobrou o roteiro de uma geração anterior, de outra copy.
+      h.session.lastApprovedSkeleton = roteiro1;
+      h.streams.push(texto('Vou criar agora [DISPATCH:presentation]'));
+
+      await send('Faça 3 slides sobre o lançamento.');
+
+      expect(h.session.lastApprovedSkeleton).toBeNull();
+      expect(h.enqueued).toHaveLength(1);
+      expect(h.enqueued[0].approvedSkeleton).toBeUndefined();
+
+      await h.handlers.get('review:decline')!(S, 'u1', { reason: 'refaz' });
+
+      expect(h.enqueued).toHaveLength(2);
+      expect(h.enqueued[1].approvedSkeleton).toBeUndefined();
+    });
+
+    it('(c) planner indisponível (geração direta de contingência): o roteiro aprovado guardado é ZERADO e a regeneração replaneja com a copy', async () => {
+      const planner = await import('../agents/planner/index');
+      vi.mocked(planner.runPlanner).mockRejectedValueOnce(new Error('planner fora do ar'));
+      const erroLog = vi.spyOn(logger, 'error').mockImplementation(() => {});
+      // Sobrou o roteiro de uma geração anterior, de OUTRA copy.
+      h.session.lastApprovedSkeleton = [{ order: 1, title: 'Outra copy', goal: 'g', layout_type: 'title-hero', copy: 'TEXTO-VELHO' }];
+      h.streams.push(texto('Vou criar agora [DISPATCH:presentation]'));
+
+      await send(bruto);
+
+      expect(h.enqueued).toHaveLength(1);
+      expect(h.enqueued[0].approvedSkeleton).toBeUndefined();
+      expect(h.enqueued[0].sourceCopy).toContain('TITULO');
+      expect(h.session.lastApprovedSkeleton).toBeNull();
+
+      await h.handlers.get('review:decline')!(S, 'u1', { reason: 'refaz' });
+
+      expect(h.enqueued).toHaveLength(2);
+      expect(h.enqueued[1].approvedSkeleton).toBeUndefined();
+      expect(JSON.stringify(h.enqueued[1])).not.toContain('TEXTO-VELHO');
+      expect(h.enqueued[1].sourceCopy).toContain('TITULO');
+      erroLog.mockRestore();
+    });
+
+    it('(c) saída de emergência, sem ficha: a regeneração segue como antes (só brief e formato)', async () => {
+      process.env.DESIGNER_BRAIN_GLOBAL = 'off';
+      h.session.messages.push({ role: 'user', content: bruto, timestamp: 1 });
+
+      await h.handlers.get('review:decline')!(S, 'u1', { reason: 'refaz' });
+
+      expect(h.enqueued).toEqual([{ sessionId: S, brief: 'refaz', format: 'presentation' }]);
     });
   });
 
