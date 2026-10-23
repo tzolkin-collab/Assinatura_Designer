@@ -30,7 +30,7 @@ Corrigir o que existe · integrar o MCP já construído · o que a Gabi pediu e 
 | 1 | Slide sem foto | [x] passou (critério de teste) | |
 | 2 | Slide com foto real | [ ] não rodado (a Amanda tem 0 fotos reais) | P01 |
 | 3 | Contexto fora da arte | [x] passou (critério de teste) | |
-| 4 | Excesso de texto | [ ] parcial: texto preservado, **sem aviso visível** | P03 |
+| 4 | Excesso de texto | [x] texto preservado, com aviso no finalGate | P03 |
 | 5 | Continuidade (lote 2) | [ ] não rodado | P06 |
 | 6 | Isolamento de identidade | [x] passou (critério de teste) | |
 | 7 | E-book A4 | [ ] **não existe; adiado a 02/11** | P05 |
@@ -40,7 +40,7 @@ Corrigir o que existe · integrar o MCP já construído · o que a Gabi pediu e 
 
 - [ ] **Resultado real do lote 1 dela:** gerar o lote e comparar slide a slide com `docs/benchmark/lote1-gabriela/brief.txt` (paleta `#410C1C`, `#8E242E`, `#D8E9F3`, `#FCF9EB`; Queens nos títulos e Aeonik no apoio; um arquétipo de composição por slide; texto exato; sem sombra, degradê, círculos, "estética de template"; foto só se anexada, senão área reservada). → P02
 - [ ] **Variedade de composição:** hoje 0,05 a 0,18 contra 0,12 a 0,47 do GPT dela (métrica grosseira). → P02
-- [ ] **Aviso quando o texto não cabe** como nota no `finalGate`. → P03
+- [x] **Aviso quando o texto não cabe** como nota no `finalGate`. → P03
 - [ ] Fotos reais da Amanda carregadas e Teste 2 rodado. → P01
 - [ ] Fontes Queens e Aeonik aplicadas, sem substituição silenciosa (a licença de uso comercial segue sem confirmação formal). → P01
 - [ ] **Briefing por campos** (#119) verificado de ponta a ponta com a IA: o `[INTERNO]` não chega ao artista, com e sem ficha. → P06
