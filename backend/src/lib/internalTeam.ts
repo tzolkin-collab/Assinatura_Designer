@@ -12,10 +12,12 @@
 
 import prisma from './prisma.js';
 import { logger } from './logger.js';
+import { rootAdminDbEmail } from './rootAdmin.js';
 
 export async function ensureInternalTeamMemberships(): Promise<void> {
+  // O login root (lib/rootAdmin.ts) fica fora da regra: não vira membro de marca nenhuma.
   const [users, brands, existing] = await Promise.all([
-    prisma.user.findMany({ select: { id: true, role: true } }),
+    prisma.user.findMany({ where: { email: { not: rootAdminDbEmail() } }, select: { id: true, role: true } }),
     prisma.brand.findMany({ select: { id: true } }),
     prisma.brandMember.findMany({ select: { userId: true, brandId: true } }),
   ]);

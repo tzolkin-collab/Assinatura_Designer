@@ -7,6 +7,7 @@ import { createError } from '../middleware/errorHandler.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { ensureInternalTeamMemberships } from '../lib/internalTeam.js';
 import { hashInviteToken } from '../lib/invites.js';
+import { isRootAdminLogin, rootAdminDbEmail, verifyRootAdminPassword } from '../lib/rootAdmin.js';
 import { z } from 'zod';
 import { parseBody } from '../lib/validate.js';
 import { encryptToken } from '../lib/tokenCrypto.js';
@@ -187,6 +188,21 @@ authRouter.post('/invite/:token/accept', rateLimit({ windowSec: 3600, max: 10, k
 authRouter.post('/login', rateLimit({ windowSec: 900, max: config.isDev ? 200 : 10, keyPrefix: 'login' }), async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { email, password } = parseBody(loginSchema, req.body);
+
+    // Login root definido por .env (ver lib/rootAdmin.ts). Nome certo com senha errada recusa aqui mesmo,
+    // sem cair na busca por e-mail.
+    if (isRootAdminLogin(email)) {
+      if (!(await verifyRootAdminPassword(password))) throw createError(401, 'Invalid credentials');
+      const root = await prisma.user.upsert({
+        where: { email: rootAdminDbEmail() },
+        update: { role: 'ADMIN' },
+        create: { email: rootAdminDbEmail(), name: 'rootSystem', role: 'ADMIN' },
+        select: { id: true, email: true, name: true, role: true },
+      });
+      ensureInternalTeamMemberships().catch(() => {});
+      const rootToken = jwt.sign({ userId: root.id, role: root.role }, config.jwtSecret, { expiresIn: '7d' });
+      return res.json({ data: { user: root, token: rootToken } });
+    }
 
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user || !user.password) {
