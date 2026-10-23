@@ -8,7 +8,8 @@ Levar os cinco PRs abertos para `main` na ordem decidida (D13), resolvendo o con
 
 ## Contexto
 - Ordem: **#122** (remove Tenants, nota 9,0), **#120** (login `rootSystem`, desligado por padrão), **#123** (remove pesquisa de concorrentes, nota 8,4), **#124** (cérebro global, nota 8,4). #121 (slug da documentação, trivial) pode entrar a qualquer momento.
-- Todos estavam `MERGEABLE` com CI verde em 23/10, mas **cada merge muda a base do próximo**; reconfira antes de cada um.
+- Todos estavam `MERGEABLE` em 23/10. **Os únicos checks do GitHub são do Vercel (preview): não existe CI que rode os testes.** O "verde" dos testes vem das suítes que o PO rodou localmente em 19/10 (o corpo do #122 diz "relato do worker"; o registro do PO diz que ele rodou). **Rode `tsc` e a suíte você mesmo antes de cada merge.** Cada merge muda a base do próximo; reconfira antes de cada um.
+- **Tarefa no Core:** "[Designer] Junção dos PRs #121, #122, #120, #123 e #124 em main (ordem D13)". Atualize os pacotes ao mergear.
 - **Conflito esperado:** #123 × #124 em `backend/src/__tests__/pipelineAdviceInterrupt.test.ts` (`pipeline.ts` e `.env.example` mesclam sozinhos).
 - Branch atual do repositório local: `feat/root-system-login`, em sincronia com o remoto. Alterações locais não commitadas (`.claude/launch.json`, `hashRootAdminPassword.ts`, `docsContent.ts`, `.claude/workflows/`, `docs/po/`, `docs/handoffs/`, `handoff.md`, `docs/aceite/`) **não** devem entrar nos PRs por acidente.
 - A alteração local em `docsContent.ts` parece ser a mesma correção do #121: confira antes de commitar para não duplicar.

@@ -16,7 +16,8 @@ Descobrir se o Designer chega perto da variedade que a Gabi obtém no ChatGPT qu
 
 ## Passos
 1. Peça autorização. Rode `aceiteCerebro.ts gpt1` (1 deck), renderize os slides em PNG e meça com `medirVariedade.cjs`.
-2. Compare com a mediana do GPT dela (~0,25) e com a linha de base da Amanda. Diga o que a métrica **não** mede.
+2. **O resultado não é o número.** Olhe cada slide gerado contra o `brief.txt` dela, item por item, e registre uma tabela: paleta (os 4 hex), fonte (Queens/Aeonik), composição (um arquétipo diferente por slide, sem repetir divisão nem posição de título em slides consecutivos), texto exato, foto (área reservada quando não há arquivo), proibições (sem sombra, degradê, círculos, "template"). Cada célula: atende / não atende / não verifiquei, com o slide.
+3. Compare o número com a mediana do GPT dela (~0,25) e com a linha de base da Amanda. Diga o que a métrica **não** mede.
 3. Decida pelo resultado, sem implementar ainda:
    - variedade **subiu** → falta um campo de **direção de composição por slide** na entrada e no planner;
    - **não subiu** → o limite está no artista e na ficha → propor uma **biblioteca de composições da marca**.
