@@ -437,32 +437,6 @@ settingsRouter.delete('/connections/:provider', async (req: AuthRequest, res: Re
   }
 });
 
-// ── GET /api/settings/tenants ──
-settingsRouter.get('/tenants', async (req: AuthRequest, res: Response, next: NextFunction) => {
-  try {
-    if (req.user?.role !== 'ADMIN') {
-      throw createError(403, 'Acesso exclusivo para administradores');
-    }
-
-    const brands = await prisma.brand.findMany({
-      include: {
-        members: {
-          select: {
-            role: true,
-            user: { select: { id: true, name: true, email: true } },
-          },
-        },
-        _count: { select: { posts: true, folders: true } },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    res.json({ data: brands });
-  } catch (error) {
-    next(error);
-  }
-});
-
 // ── GET /api/settings/billing ──
 settingsRouter.get('/billing', async (req: AuthRequest, res: Response, next: NextFunction) => {
   try {

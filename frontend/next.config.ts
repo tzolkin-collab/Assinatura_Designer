@@ -10,6 +10,16 @@ const nextConfig: NextConfig = {
       },
     ],
   },
+  // A antiga tela "Gestão de Tenants" foi removida; o endereço cai nas Configurações gerais.
+  async redirects() {
+    return [
+      {
+        source: '/configuracoes/tenants',
+        destination: '/configuracoes',
+        permanent: false,
+      },
+    ];
+  },
 };
 
 export default nextConfig;
