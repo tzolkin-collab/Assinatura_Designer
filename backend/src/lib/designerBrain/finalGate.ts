@@ -23,6 +23,29 @@ export interface FinalGateInput {
   fontNotice?: string | null;
   /** Pendências do cérebro (§13): informação obrigatória que faltou no cadastro. */
   brainPending?: string[];
+  /** Slides onde o texto não coube com folga (1-based). */
+  overflowSlides?: number[];
+  /** Aviso pronto de overflow/estouro de texto (alternativa a overflowSlides). */
+  overflowNotice?: string | null;
+}
+
+/** Formata a nota de decisão editorial quando o texto não coube com folga (§3.1 item 6, §7.1). */
+export function formatOverflowNotice(slideNumbers: number[]): string {
+  const slides = [...new Set(slideNumbers)].sort((a, b) => a - b);
+  if (slides.length === 0) return '';
+  const onde = slides.length === 1 ? `no slide ${slides[0]}` : `nos slides ${slides.join(', ')}`;
+  return `O texto não coube com folga ${onde}: decida se prefere cortar trechos, dividir em mais slides ou diminuir o texto.`;
+}
+
+/** Extrai os índices de slide (1-based) com estouro a partir dos desvios do revisor. */
+export function extractOverflowSlides(
+  deviations?: Array<{ type?: string; description?: string; slideIndex: number }>,
+): number[] {
+  if (!deviations || deviations.length === 0) return [];
+  const matches = deviations.filter(
+    (d) => d.type === 'overflow' || /overflow|estouro|comprimido|não coube|nao coube|cortad[oa]/i.test(d.description ?? ''),
+  );
+  return [...new Set(matches.map((d) => d.slideIndex + 1))].sort((a, b) => a - b);
 }
 
 export function computeFinalGate(input: FinalGateInput): FinalGate {
@@ -38,6 +61,11 @@ export function computeFinalGate(input: FinalGateInput): FinalGate {
   }
   for (const p of input.brainPending ?? []) notes.push(`Falta definir: ${p}.`);
   if (input.fontNotice) notes.push(input.fontNotice.replace(/\*\*/g, ''));
+  if (input.overflowSlides && input.overflowSlides.length > 0) {
+    notes.push(formatOverflowNotice(input.overflowSlides));
+  } else if (input.overflowNotice) {
+    notes.push(input.overflowNotice);
+  }
 
   return { blocking, notes };
 }

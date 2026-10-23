@@ -14,6 +14,7 @@ const h = vi.hoisted(() => {
     modelCalls: 0,
     onModelCall: null as null | ((n: number) => Promise<void> | void),
     reviewerBriefs: [] as string[],
+    reviewerDeviations: [] as any[],
     onReviewer: null as null | (() => Promise<void> | void),
     onImages: null as null | (() => Promise<void> | void),
     closedRuns: [] as Array<{ runId: string; params: any }>,
@@ -89,7 +90,7 @@ vi.mock('../agents/reviewer/index.js', () => ({
   runHtmlReviewer: vi.fn(async (_design: unknown, _ctx: string, brief: string) => {
     h.reviewerBriefs.push(brief);
     await h.onReviewer?.();
-    return { approved: true, score: 90, deviations: [], feedback: 'ok' };
+    return { approved: true, score: 90, deviations: h.reviewerDeviations ?? [], feedback: 'ok' };
   }),
 }));
 
@@ -185,6 +186,7 @@ beforeEach(() => {
   h.prompts.length = 0;
   h.contentsSeen.length = 0;
   h.reviewerBriefs.length = 0;
+  h.reviewerDeviations = [];
   h.closedRuns.length = 0;
   h.postUpdates.length = 0;
   h.postCreates.length = 0;
@@ -831,6 +833,19 @@ describe('cérebro global (padrão): projeto sem ficha passa pelo mesmo cérebro
     vi.mocked(runPlanner).mockResolvedValue(roteiro((i) => `Slide ${i + 1}`) as never);
     await runPipeline({ sessionId: S, brief, format: 'presentation', postId: POST, sourceCopy });
   }
+
+  it('quando o revisor aponta overflow de texto, entra como nota no finalGate com opções editoriais', async () => {
+    h.reviewerDeviations = [
+      { type: 'overflow', slideIndex: 1, description: 'texto muito longo para o espaço', fix: 'reduzir ou cortar' },
+    ];
+    await gerar('texto aprovado');
+
+    const gate = (h.postUpdates.at(-1)!.data.content as { finalGate?: { notes: string[]; blocking: string[] } }).finalGate;
+    expect(gate?.notes.some((n) => n.includes('no slide 2') && n.includes('cortar trechos, dividir em mais slides ou diminuir o texto'))).toBe(true);
+    expect(avisos()).toContain('no slide 2');
+    expect(avisos()).toContain('cortar trechos, dividir em mais slides ou diminuir o texto');
+    expect(gate?.blocking).toEqual([]);
+  });
 
   it('sem ficha: planner e artista recebem as camadas globais, a regra de foto real e o resumo do cadastro (nada inventado)', async () => {
     await gerar('texto aprovado');

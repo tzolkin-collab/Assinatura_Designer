@@ -33,6 +33,8 @@ export {
   canBeDelivered,
   computeFinalGate,
   draftRefusal,
+  extractOverflowSlides,
+  formatOverflowNotice,
   readFinalGate,
   withServerOwnedFinalGate,
 } from './finalGate.js';

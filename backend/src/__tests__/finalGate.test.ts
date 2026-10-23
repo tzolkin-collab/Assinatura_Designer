@@ -8,6 +8,8 @@ import {
   computeFinalGate,
   readFinalGate,
   withServerOwnedFinalGate,
+  formatOverflowNotice,
+  extractOverflowSlides,
 } from '../lib/designerBrain/finalGate';
 
 vi.mock('jsonwebtoken', () => ({
@@ -66,6 +68,35 @@ describe('computeFinalGate', () => {
     expect(withServerOwnedFinalGate({ a: 1 }, stored)).toEqual({ a: 1, finalGate: stored.finalGate });
     expect(withServerOwnedFinalGate({ finalGate: { blocking: [], notes: [] } }, stored)).toEqual({ finalGate: stored.finalGate });
     expect(withServerOwnedFinalGate({ finalGate: { blocking: ['forjada'] } }, { kind: 'x' })).toEqual({});
+  });
+  it('aviso de overflow de texto gera nota explicativa com opções editoriais sem bloquear', () => {
+    const g = computeFinalGate({
+      hasInReview: false,
+      generatedCount: 3,
+      overflowSlides: [2, 3],
+    });
+    expect(g.blocking).toEqual([]);
+    expect(g.notes).toHaveLength(1);
+    expect(g.notes[0]).toContain('nos slides 2, 3');
+    expect(g.notes[0]).toContain('cortar trechos, dividir em mais slides ou diminuir o texto');
+    expect(canBeDelivered({ finalGate: g })).toBe(true);
+  });
+
+  it('formatOverflowNotice trata slide único e múltiplos', () => {
+    expect(formatOverflowNotice([])).toBe('');
+    expect(formatOverflowNotice([1])).toContain('no slide 1');
+    expect(formatOverflowNotice([3, 1])).toContain('nos slides 1, 3');
+  });
+
+  it('extractOverflowSlides detecta deviations de overflow por tipo e texto', () => {
+    const devs = [
+      { type: 'visual', description: 'cor clara', slideIndex: 0 },
+      { type: 'overflow', description: 'texto vazando da margem', slideIndex: 1 },
+      { type: 'content', description: 'texto comprimido para caber no container', slideIndex: 2 },
+    ] as any;
+    expect(extractOverflowSlides(devs)).toEqual([2, 3]);
+    expect(extractOverflowSlides([])).toEqual([]);
+    expect(extractOverflowSlides(undefined)).toEqual([]);
   });
 });
 

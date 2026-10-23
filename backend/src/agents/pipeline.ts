@@ -9,6 +9,7 @@ import {
   correctTextDivergences,
   fontSubstitutionNotice,
   computeFinalGate,
+  extractOverflowSlides,
   hasApprovedText,
   isBrainOnWithoutProfile,
   isGlobalBrainEnabled,
@@ -1126,11 +1127,13 @@ ${aviso}
       // Pendências objetivas (§13 passo 8): o que o cadastro não definiu ou não bateu, dito à pessoa.
       // A fonte e o texto em revisão já têm aviso próprio acima; aqui entram as demais.
       if (designerBrainOn && design.slides.length > 0) {
+        const overflowSlides = extractOverflowSlides(reviewResult?.deviations);
         const gate = computeFinalGate({
           hasInReview: false,
           requestedCount,
           generatedCount: design.slides.length,
           brainPending,
+          overflowSlides,
         });
         if (gate.notes.length > 0) {
           ws.token(sessionId, `\n\n**Pendências:**\n${gate.notes.map((n) => `- ${n}`).join('\n')}\n`);
@@ -1199,14 +1202,21 @@ ${aviso}
     // Porta de "final" (§2, §4.1, §13): pendências objetivas e o que impede a entrega. É gravada pelo
     // servidor; publicar e exportar a conferem. Só marcas com o cérebro ligado têm porta.
     if (designerBrainOn) {
+      const overflowSlides = extractOverflowSlides(reviewResult?.deviations);
       const gate = computeFinalGate({
         hasInReview: copy?.hasInReview ?? false,
         requestedCount,
         generatedCount: Array.isArray(envelope.slides) ? envelope.slides.length : slideCount,
         fontNotice: fontNoticeText,
         brainPending,
+        overflowSlides,
       });
-      if (gate.blocking.length > 0 || gate.notes.length > 0) contentToSave.finalGate = gate;
+      if (gate.blocking.length > 0 || gate.notes.length > 0) {
+        contentToSave.finalGate = gate;
+        if (currentPages[0] && typeof currentPages[0] === 'object') {
+          (currentPages[0] as Record<string, unknown>).finalGate = gate;
+        }
+      }
     }
 
     // Quais assets da Biblioteca de Mídia entraram de fato no deck — pra mostrar
@@ -1300,6 +1310,7 @@ ${aviso}
     await updateSession(sessionId, { 
       phase: 'done', 
       workerStatus: 'done',
+      currentDesign: currentPages,
       activeQuestion: {
         id: randomUUID(),
         kind: 'generic',
