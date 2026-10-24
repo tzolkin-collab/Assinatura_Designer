@@ -8,15 +8,15 @@
 
 A produção roda o build de 16/10. O `main` inclui o MCP completo (20 ferramentas, trava de rascunho) **e** os PRs #120 a #124, entre eles o **cérebro global (#124), que não foi testado com decks reais**.
 
-- [ ] Escolher: **(a)** subir o `main` inteiro, aceitando o #124 sem teste de geração; ou **(b)** subir um corte só com o MCP. Registrar a escolha.
+- [x] Escolher: **(a)** subir o `main` inteiro, aceitando o #124 sem teste de geração; ou **(b)** subir um corte só com o MCP. **Decisão do Gustavo em 24/10/2026: opção (a)**, `main` inteiro com o #124, sem teste de geração (saída de emergência: `DESIGNER_BRAIN_GLOBAL=off`).
 - [ ] Se (a): `DESIGNER_BRAIN_GLOBAL` com o mesmo valor na API **e** no worker, ambos reiniciados. Saída de emergência: `DESIGNER_BRAIN_GLOBAL=off`.
 - [ ] Sem a chave Gemini nova, **a geração do app (Fábrica) continua falhando** em produção. Não afeta o MCP.
 
 ## 1. Antes de subir
 
 - [ ] Backup do banco.
-- [ ] `pnpm db:status`: nenhuma migration pendente (o container roda `prisma migrate deploy` ao iniciar).
-- [ ] Redis **6.2 ou maior** (o MCP usa `GETDEL`). 🟡 não confirmado.
+- [ ] `pnpm db:status` (rodar dentro de `backend/`, que é onde o script existe): nenhuma migration pendente (o container roda `prisma migrate deploy` ao iniciar).
+- [ ] Versão do Redis anotada. O código do MCP **não usa `GETDEL`**: o consumo de uso único é `MULTI GET + DEL` (`backend/src/mcp/store.ts`, `takeOnce`), que serve a partir do Redis 2.6.12. O "6.2 ou maior" do manual `docs/MCP-DESIGNER.md` está desatualizado. 🟡 Outros usos do Redis no app (fila, limite de taxa) não foram conferidos.
 - [ ] `RedisMcpStore` nunca foi exercitado contra Redis real (só emulação em memória): este é o primeiro contato.
 - [ ] Senhas das contas do seed trocadas (pendência de 16/10, 🟡 não sei se foi feita).
 - [ ] Suíte do conector verde no commit que vai subir:
@@ -49,7 +49,7 @@ cd backend; node node_modules/typescript/bin/tsc --noEmit; node node_modules/vit
 
 ## 4. Conectar o agente
 
-- Claude: Configurações > Conectores > personalizado > `https://<PUBLIC_BASE_URL>/mcp`.
+- Claude: Configurações > Conectores > personalizado > `<PUBLIC_BASE_URL>/mcp` (o `PUBLIC_BASE_URL` já começa com `https://`; ex.: `https://api.exemplo.com/mcp`).
 - ChatGPT: modo desenvolvedor > Conectores > Criar.
 - [ ] Tela de consentimento mostra **quem pede** (`client.name`, host do redirect) e **o que será liberado**.
 - [ ] 1º teste com escopo mínimo (`designer.read`); escrita no 2º; exportar só depois.
@@ -63,18 +63,18 @@ cd backend; node node_modules/typescript/bin/tsc --noEmit; node node_modules/vit
 | 2 | `get_brand_kit` | kit da marca de teste | [ ] |
 | 3 | `get_designer_brief` | brief com texto aprovado | [ ] |
 | 4 | `save_presentation`, 2 slides, com `approvedText` e um texto divergente | `issues` acusa a divergência; peça fica `DRAFT` | [ ] |
-| 5 | `save_presentation` corrigido | `READY`, devolve `versionId` | [ ] |
-| 6 | `update_slide` | slide muda; versão criada | [ ] |
-| 7 | `restore_version` | volta ao estado anterior | [ ] |
+| 5 | `save_presentation` corrigido, **com o `postId` do passo 4** | `READY`, `created: false`; `versionId` preenchido (a versão de antes). Sem `postId` criaria outra peça e `versionId` viria vazio | [ ] |
+| 6 | `update_slide` | slide muda; a resposta traz `versionNote` (não traz `versionId`); `list_versions` mostra a versão nova | [ ] |
+| 7 | `list_versions` + `restore_version` (com o `versionId` de antes do passo 6) | volta ao estado anterior; devolve `restoredVersionId` | [ ] |
 | 8 | `upload_asset` + `get_photo_slots` + `set_slide_photo` | foto no slide | [ ] |
 | 9 | `export_file` (PDF) + `get_export_status` | link de download | [ ] |
 | 10 | `export_to_canva` + `get_canva_export_status` (com Canva conectado) | design criado | [ ] |
-| 11 | Peça com texto "em revisão": `export_file` | **recusado** | [ ] |
-| 12 | Conexão sem escopo de escrita: `save_presentation` | **recusado** | [ ] |
-| 13 | Marca fora da conexão: `get_design` de outra marca | **recusado** | [ ] |
+| 11 | Peça com texto "em revisão": `export_file` | **recusado** (`draft_not_final`). Só dá para testar com um deck **que já exista** com `content.finalGate.blocking` (gerado pelo app). Peça salva pelo MCP nunca tem essa trava; sem deck assim, marcar **não verificável** | [ ] |
+| 12 | Conexão sem escopo de escrita: `save_presentation` | **recusado** com HTTP 403 `insufficient_scope` (o agente pode mostrar como erro do conector) | [ ] |
+| 13 | Marca fora da conexão: `get_design` de outra marca | **recusado** com "Marca indisponível para esta conexão..." (igual a marca inexistente) | [ ] |
 | 14 | `get_integrations_status` | status sem token | [ ] |
 
-Para cada falha: a ferramenta, a mensagem exata, o ajuste feito.
+Para cada falha: a ferramenta, a mensagem exata, o ajuste feito. **Kit de preenchimento, comandos prontos e prompt para o agente: [MCP-EVIDENCIAS.md](MCP-EVIDENCIAS.md).**
 
 ## 6. Limites do teste (dizer no relatório)
 
