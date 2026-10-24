@@ -88,3 +88,13 @@ Para cada falha: a ferramenta, a mensagem exata, o ajuste feito.
 - [ ] Um agente real completou o roteiro; **registrado no Core** com o que falhou e o ajuste feito.
 - [ ] Rollback conhecido: `MCP_ENABLED=false` e reiniciar (as rotas somem, 404). Revogar uma conexão: `DELETE /api/mcp/connections/:id`.
 - [ ] A Gabi avisada de que o MCP existe como extensão fora do contrato (depende do envio do aviso, P15; fora deste teste).
+
+## 8. Ponto de revisão (24/10/2026): geração de imagem e vídeo pelo agente
+
+Hoje o MCP não tem ferramenta de geração: o agente desenha o HTML e só usa fotos reais da biblioteca (`list_assets`). Decisão do Gustavo, **a revisar**:
+
+- O agente passa a poder usar **todas as galerias** (bibliotecas das marcas, Drive, Canva) e o **Nano Banana** (geração de imagem do Gemini), e o **editor de vídeo do Gemini**, quando precisar.
+- **Regra de aviso e custo:** antes de usar qualquer geração paga, o agente **avisa que vai usar** e **busca os valores** (custo estimado e gasto do mês da marca, ver `get_ai_usage` / teto de R$ 200) e só segue com a confirmação.
+- **Conflito a resolver na revisão:** as regras do Designer proíbem pessoa ou foto gerada por IA (`rules` do `get_designer_brief`, regra de foto real, D7). O Nano Banana só pode entrar onde a ficha da marca permitir (ex.: elementos gráficos, fundos), nunca pessoas, e a peça deve marcar a origem.
+- **Pendente de construir (fora do escopo atual, lotes 2 a 4 e novas ferramentas):** ferramenta de geração, ferramenta de custo (`get_ai_usage`), acesso às galerias de todas as marcas (hoje a conexão enxerga 5 marcas por papel) e chave Gemini nova com teto próprio.
+- Até lá, o agente **não gera imagem**: usa só ativos reais e áreas reservadas.
