@@ -98,3 +98,27 @@ Hoje o MCP não tem ferramenta de geração: o agente desenha o HTML e só usa f
 - **Conflito a resolver na revisão:** as regras do Designer proíbem pessoa ou foto gerada por IA (`rules` do `get_designer_brief`, regra de foto real, D7). O Nano Banana só pode entrar onde a ficha da marca permitir (ex.: elementos gráficos, fundos), nunca pessoas, e a peça deve marcar a origem.
 - **Pendente de construir (fora do escopo atual, lotes 2 a 4 e novas ferramentas):** ferramenta de geração, ferramenta de custo (`get_ai_usage`), acesso às galerias de todas as marcas (hoje a conexão enxerga 5 marcas por papel) e chave Gemini nova com teto próprio.
 - Até lá, o agente **não gera imagem**: usa só ativos reais e áreas reservadas.
+
+## 9. Ponto de revisão (24/10/2026): sessão de navegador para o agente acompanhar o front
+
+**Problema:** o editor exige login e o agente não digita senha. Resultado: ao testar via MCP, o agente não vê a peça renderizada (aconteceu no teste de 24/10: salvou, mas não conseguiu abrir o editor).
+
+**Pedido do Gustavo:** uma **ferramenta MCP** em que o agente se autentica com o **token OAuth do próprio conector** (o que o Gustavo concede na tela de consentimento) e recebe um **token de sessão do front** que **expira sozinho em 2 horas** (ou é morto antes), para passar pela tela de login e acompanhar no navegador.
+
+**Desenho proposto (a validar na revisão; não construído):**
+
+| Ponto | Proposta |
+| --- | --- |
+| Ferramenta | `start_frontend_session` (devolve a URL de entrada e a hora de expiração) e `end_frontend_session` (mata antes das 2 h). |
+| Autenticação | O bearer do conector que já chega ao `/mcp`. Sem token válido, sem sessão. |
+| Escopo novo | `designer.preview`, na tela de consentimento, desligado por padrão. Quem concede é o Gustavo. |
+| Duração | 2 horas fixas, sem renovação deslizante. Revogar a conexão em `/api/mcp/connections` também mata as sessões abertas. |
+| Papel | O mesmo da conexão, nunca maior. Sugestão: **somente leitura** no front (ver sem editar), por ser acompanhamento. |
+| Entrega | A ferramenta devolve um **código de uso único** de vida curta (ex.: 60 s) que o front troca por cookie de sessão. O token **nunca vai na URL** de forma reutilizável nem para o log. |
+| Marcas | Só as marcas autorizadas na conexão. |
+| Rastro | Registrar quem pediu, quando, de qual conexão, e quando foi usada e encerrada (mesmo registro de chamadas do MCP). |
+| Limites | Uma sessão ativa por conexão; limite de taxa na ferramenta. |
+
+**Riscos a decidir:** quem tem o token de sessão **é** o usuário no front durante 2 h; por isso o escopo separado, a leitura apenas, o uso único do código e o encerramento ao revogar a conexão. O agente continua **proibido de digitar senha**: este fluxo substitui isso por credencial emitida pelo próprio Designer.
+
+**Fora do escopo atual** (não é lote 1 a 1C): exige mudança no backend (ferramenta e troca de código), no front (rota de troca e cookie) e no consentimento. Não construir sem decisão do Gustavo.
