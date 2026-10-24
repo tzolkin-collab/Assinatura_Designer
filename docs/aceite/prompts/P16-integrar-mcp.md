@@ -20,10 +20,10 @@ O MCP **já está construído** e em `main`: **20 ferramentas**, lotes 1A a 1C, 
 
 ## Passos
 1. **Preparar** (leitura): conferir `docs/MCP-DESIGNER.md`, `backend/.env.example` e o `Dockerfile` contra o checklist do Core. Corrigir no `.env.example` a referência a `docs/MCP-CHATGPT.md` (não existe; o certo é `docs/MCP-DESIGNER.md`) e listar `MCP_CLIENT_PRESETS` e `MCP_ALLOW_ANY_HTTPS_REDIRECT`.
-2. **Antes de subir:** backup do banco; `pnpm db:status` (esperado: nenhuma pendente; o container roda `prisma migrate deploy` ao iniciar); Redis **6.2 ou maior** (o MCP usa `GETDEL`; 🟡 não confirmado); senhas das contas do seed trocadas (pendência de 16/10; 🟡 não sei se foi feita).
+2. **Antes de subir:** backup do banco; `pnpm db:status` (esperado: nenhuma pendente; o container roda `prisma migrate deploy` ao iniciar); Redis **2.6.12 ou maior** (o MCP usa `MULTI` GET+DEL, não `GETDEL`; `backend/src/mcp/store.ts`); senhas das contas do seed trocadas (pendência de 16/10; 🟡 não sei se foi feita).
 3. **Variáveis:** `MCP_ENABLED=true`, `PUBLIC_BASE_URL` (https, sem caminho), `FRONTEND_URL` e `CORS_ORIGIN`, `MCP_CLIENT_PRESETS=chatgpt,claude`, **`MCP_ALLOW_LOCALHOST_REDIRECT=false`** e **`MCP_ALLOW_ANY_HTTPS_REDIRECT=false`**, `R2_*` e `CANVA_*`.
 4. **Depois de subir:** `GET /.well-known/oauth-protected-resource` e `/.well-known/oauth-authorization-server` respondem; `POST /mcp` sem token dá **401 com `WWW-Authenticate`**; `/mcp/consent` abre; sem aviso de loopback no log.
-5. **Conectar** (Gustavo): Claude (Configurações > Conectores > personalizado > `https://<PUBLIC_BASE_URL>/mcp`) ou ChatGPT (modo desenvolvedor > Conectores > Criar). **Marca de teste, não a da Gabi**; escopo mínimo primeiro, escrita depois, exportar só no segundo teste.
+5. **Conectar** (Gustavo): Claude (Configurações > Conectores > personalizado > `<PUBLIC_BASE_URL>/mcp`) ou ChatGPT (modo desenvolvedor > Conectores > Criar). **Marca de teste, não a da Gabi**; escopo mínimo primeiro, escrita depois, exportar só no segundo teste.
 6. **Roteiro** (dados de teste): `list_brands`, `get_brand_kit`, `get_designer_brief` (só marcas autorizadas) → `save_presentation` com 2 slides e `approvedText` (a conferência acusa divergência) → `update_slide` e `restore_version` → `upload_asset` + `set_slide_photo` → `export_file` (PDF) + `get_export_status` → `export_to_canva` (com Canva conectado) → peça com texto "em revisão": `export_file` **recusa** → sem escopo de escrita, `save_presentation` é recusado.
 
 ## Aceite

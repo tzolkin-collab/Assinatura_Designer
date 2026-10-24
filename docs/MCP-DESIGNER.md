@@ -1,6 +1,6 @@
 # Designer IA como servidor MCP (qualquer agente)
 
-> **Status:** servidor OAuth 2.1 + transporte MCP + autorização por marca + **6 ferramentas** (5 de leitura, 1 de escrita),
+> **Status:** servidor OAuth 2.1 + transporte MCP + autorização por marca + **20 ferramentas** (lotes 1A a 1C: leitura, escrita e exportação; ver a tabela em [Ferramentas](#ferramentas)),
 > agnóstico de agente. **Não verificado contra nenhum agente real** (ChatGPT, Claude, Gemini Spark): tudo foi provado com o
 > cliente oficial do SDK do MCP e com testes automatizados (ver [Verificação](#verificação)). A tela de consentimento do
 > frontend e o "modo MCP" da Fábrica (preview sem chat) são a próxima etapa.
@@ -42,7 +42,7 @@ escopo reduzível e marcas escolhidas pelo usuário.
 4. **Autenticação:** OAuth. O ChatGPT descobre o resto sozinho (metadados `.well-known`), registra-se por DCR e abre o
    navegador na tela de consentimento do Designer (`FRONTEND_URL/mcp/consent?request=…`). O usuário faz login no app,
    escolhe as marcas e aprova.
-5. Depois de conectado, o modelo enxerga `list_brands` e `get_brand_kit`.
+5. Depois de conectado, o modelo enxerga as 20 ferramentas (conforme os escopos aprovados), entre elas `list_brands` e `get_brand_kit`.
 
 > Enquanto a tela `/mcp/consent` do frontend não existir (próxima etapa), o consentimento pode ser feito direto pela API —
 > veja o passo a passo do Inspector abaixo.
@@ -88,7 +88,7 @@ https://chatgpt.com/connector/oauth/{id}                  # legado, por callback
 `{id}` casa **um** segmento `[A-Za-z0-9_-]{1,128}`. Qualquer outra diferença (porta, query, barra final, subdomínio,
 `http`, `..`, `%2f`) é recusada. A URI candidata também precisa estar em forma canônica (`new URL(x).href === x`).
 
-Requisito de infra: **Redis ≥ 6.2** (o módulo usa `GETDEL`). Reaproveita o Redis que o app já tem (`REDIS_URL`).
+Requisito de infra: **Redis ≥ 2.6.12** (o módulo usa `MULTI` GET+DEL e `SET ... EX ... NX`; não usa `GETDEL`, que exigiria 6.2). Reaproveita o Redis que o app já tem (`REDIS_URL`).
 
 ## Fluxo OAuth (o que acontece de fato)
 
@@ -235,7 +235,7 @@ não consegue esquecer de checar a marca.
 | **Registro (DCR)** | `redirect_uri` na allowlist exata (impede receber código em domínio do atacante); só clientes **públicos** com PKCE (sem `client_secret` para vazar); teto de clientes; `client_name` limpo de caracteres de controle/bidi, cortado em 100 e **sempre** devolvido escapado. |
 | **/authorize** | PKCE **S256 obrigatório** (SDK rejeita `plain` e ausência; formato do challenge conferido); `resource` diferente do nosso ⇒ `invalid_target`; **não emite código** — só estaciona o pedido. |
 | **Consentimento** | Único lugar onde nasce um código, e só por POST autenticado (JWT) do usuário; papel do usuário conferido por marca; pedido de uso único e atômico (duas aprovações simultâneas ⇒ um código só). CSRF não se aplica: o JWT vai em header, nunca em cookie. |
-| **Código de autorização** | 256 bits, 5 min, **uso único** (GETDEL), vinculado a client_id + redirect_uri + code_challenge + resource + usuário + marcas; reapresentado ⇒ `invalid_grant` **e revoga o que foi emitido com ele**. |
+| **Código de autorização** | 256 bits, 5 min, **uso único** (`MULTI` GET+DEL), vinculado a client_id + redirect_uri + code_challenge + resource + usuário + marcas; reapresentado ⇒ `invalid_grant` **e revoga o que foi emitido com ele**. |
 | **/token** | PKCE conferido pelo SDK (verifier errado ⇒ `invalid_grant`; formato 43–128 conferido por nós); `redirect_uri` idêntica à do `/authorize`; `resource` conferido; só os 2 grants suportados. |
 | **Tokens** | Opacos, 256 bits, **só o SHA-256 vai ao Redis** (nem token nem código aparecem em Redis ou logs — há teste varrendo isso). Access: 1 h. Refresh: 30 d, **rotativo de uso único**; reuso de um refresh já consumido (ou apresentado por outro cliente) ⇒ **revoga a família inteira**. |
 | **/mcp (por requisição)** | `Origin` validado quando presente (sem Origin = servidor a servidor, normal); bearer do SDK com audiência (`expectedResource`) + verifier nosso (hash, expiração, família viva, audiência); `401` com `WWW-Authenticate` (`resource_metadata`, `scope`); `403 insufficient_scope` para ferramenta cujo escopo o token não cobre (inclusive dentro de lote); o token **nunca** é repassado a outro serviço nem aparece em log. |
@@ -267,8 +267,8 @@ escrita exige `designer.write` e papel EDITOR+ na marca, conferido a cada chamad
   segredo com `!==`, sem tempo constante.
 - **Stateless.** Um `McpServer` + transport por requisição, resposta em JSON. Sem sessão para perder num deploy; cada
   requisição carrega o próprio token.
-- **Sem Lua no Redis.** O uso único usa só comandos atômicos por si (`GETDEL`, `SET NX`); a tombstone de reuso do código é
-  gravada **antes** do `GETDEL` para não perder a detecção de reuso numa corrida.
+- **Sem Lua no Redis.** O uso único usa só comandos atômicos por si (`MULTI` GET+DEL, `SET NX`; `GETDEL` foi descartado por exigir Redis ≥ 6.2, o requisito atual é 2.6.12); a tombstone de reuso do código é
+  gravada **antes** do consumo (GET+DEL) para não perder a detecção de reuso numa corrida.
 - **Rate limit nosso, não o do SDK.** O do SDK é em memória por processo; o do app é Redis e já é usado no login.
 
 ## Armazenamento (Redis, atrás de `McpOAuthStore`)
@@ -305,14 +305,15 @@ conteúdo.** Falha ao gravar vira aviso no log e não derruba a chamada. A API d
 - **Armazenamento em Redis.** Códigos, tokens, famílias e registros vivem em Redis: um flush/perda do Redis desconecta todo mundo
   (o ChatGPT reconecta pelo OAuth) e apaga o histórico de chamadas. A interface permite migrar para Postgres.
 - **`RedisMcpStore` não foi exercitado contra um Redis real** (não havia Redis nem Docker no ambiente de desenvolvimento): os
-  testes rodam o store real sobre uma emulação em memória (`memoryRedis.ts`) dos comandos usados (`SET EX [NX]`, `GETDEL`,
+  testes rodam o store real sobre uma emulação em memória (`memoryRedis.ts`) dos comandos usados (`SET EX [NX]`, `MULTI` GET+DEL,
   `EXPIRE`, `SADD/SREM/SMEMBERS`, `ZADD/ZREMRANGEBYSCORE/ZCARD`, `LPUSH/LTRIM/LRANGE`).
-- **Janela de corrida no reuso de refresh:** entre o `GETDEL` e a gravação da tombstone (microssegundos) um reuso
+- **Janela de corrida no reuso de refresh:** entre o consumo (GET+DEL) e a gravação da tombstone (microssegundos) um reuso
   simultâneo é tratado como "inválido" em vez de "reuso" — o segundo uso falha do mesmo jeito, só a revogação em cascata
   deixa de disparar. O mesmo vale para um reuso que chegue antes de a família do primeiro uso existir.
 - **Consent phishing.** Quem tem conta no ChatGPT pode iniciar o fluxo e mandar o link de consentimento a um membro da
   equipe. A tela precisa mostrar com destaque **quem pede** (`client.name`, `client.redirectHost`) e **o que será liberado**;
   só membros logados aprovam.
+- **`save_presentation` não grava `content.finalGate`.** Só o pipeline do app grava esse campo (`agents/pipeline.ts` ~1215); a peça criada por MCP não o recebe, então a trava de rascunho do export (`confirmarRascunho`) não se aplica a ela.
 - **Refresh deslizante:** cada rotação renova 30 dias; não há teto absoluto de vida da conexão (o usuário/admin revoga em
   `/api/mcp/connections`).
 - **Corpo de `/mcp` até 15 MB** (era 1 MB): `upload_asset` leva a imagem em base64 (10 MB decodificados são ~13,4 MB) e um deck de
@@ -334,10 +335,10 @@ foram confirmados no servidor real contra a marca `amanda-coelho`.
 |---|---|---|---|
 | B1 ✅ | `lib/logoTransparency.ts` `fetch(logoUrl)`, chamado por `PUT /settings/:slug/config` (qualquer EDITOR) | URL do usuário buscada pelo servidor **sem** `isPublicHttpUrlResolved`, sem limite de tamanho e sem timeout: SSRF para rede interna/metadata e leitura inteira em memória. | Validar com `isPublicHttpUrlResolved`, `redirect: 'error'`, timeout e teto de bytes; só aceitar host do R2 da própria marca. |
 | B2 ✅ | `PUT /settings/:slug/config` aceita `ignoreAiCostLimit`, `autoResearch*` de um EDITOR | Quem edita o branding desliga o teto de custo de IA da marca. | Exigir OWNER/ADMIN para esses três campos; ignorar o resto do corpo por EDITOR (hoje o corpo não tem schema). |
-| B3 | `save_presentation` não chama `snapshotPost` | O agente sobrescreve o trabalho do usuário sem versão; `PUT /posts/:id` e o cérebro já fazem snapshot. Sem isso não há como desfazer. | `snapshotPost(postId, { source: 'AI' })` antes do `update`; devolver `versionId` na resposta. |
-| B4 | `save_presentation` grava `status: 'READY'` mesmo com `issues` | Peça com texto divergente aparece como pronta na Galeria. | Gravar `DRAFT` (ou marcador `needsReview`) enquanto houver `issues`; `READY` só limpa. |
+| B3 ✅ | (RESOLVIDO: `savePresentation.ts` congela a versão com `snapshotPost` antes de sobrescrever e devolve `versionId`) `save_presentation` não chamava `snapshotPost` | O agente sobrescreve o trabalho do usuário sem versão; `PUT /posts/:id` e o cérebro já fazem snapshot. Sem isso não há como desfazer. | `snapshotPost(postId, { source: 'AI' })` antes do `update`; devolver `versionId` na resposta. |
+| B4 ✅ | (RESOLVIDO: grava `DRAFT` quando há `issues`) `save_presentation` gravava `status: 'READY'` mesmo com `issues` | Peça com texto divergente aparece como pronta na Galeria. | Gravar `DRAFT` (ou marcador `needsReview`) enquanto houver `issues`; `READY` só limpa. |
 | B5 | Sem teto por usuário/marca de peças criadas por MCP | 240 chamadas/min x 30 slides x 60 KB: o banco cresce sem limite e nada alerta. | Teto diário de criações por conexão e por marca; erro `quota_exceeded` legível ao agente. |
-| B6 | `content.mcp.userId` vive dentro do `content` que o editor regrava | O dono da peça é um campo de JSON editável pelo cliente web; uma regravação que o omita tira o agente da própria peça, e um EDITOR pode forjá-lo. | Coluna própria (`Post.createdVia`, `createdById` já existe) em vez de JSON; o `PUT` preserva/ignora o campo. |
+| B6 (mitigado, não resolvido como proposto) | Mitigado por `lib/mcpOwnership.ts` + `routes/posts.ts` (o servidor preserva `content.mcp`), sem coluna própria. `content.mcp.userId` vive dentro do `content` que o editor regrava | O dono da peça é um campo de JSON editável pelo cliente web; uma regravação que o omita tira o agente da própria peça, e um EDITOR pode forjá-lo. | Coluna própria (`Post.createdVia`, `createdById` já existe) em vez de JSON; o `PUT` preserva/ignora o campo. |
 
 ### Configurações duplicadas (fonte de verdade)
 
@@ -413,7 +414,7 @@ Pré-requisitos: Redis local e a API rodando em dev. **Não** aponte para o Redi
 
    Abra no navegador o `data.redirectUrl` devolvido: o Inspector recebe o `code` e conclui a troca por token.
 
-4. Em **Tools**: *List Tools* mostra `list_brands` e `get_brand_kit`; rode `list_brands` e depois `get_brand_kit` com um `brandSlug`
+4. Em **Tools**: *List Tools* mostra as 20 ferramentas (conforme o escopo); entre elas `list_brands` e `get_brand_kit`; rode `list_brands` e depois `get_brand_kit` com um `brandSlug`
    da lista. Peça uma marca fora da aprovada: a resposta é a recusa genérica.
 
 > **Não verificado:** o Inspector (a versão atual no npm é a 2.x) **não foi executado** ao escrever este guia — não havia cópia local e
@@ -443,5 +444,5 @@ backend/src/mcp/
 ├── auth/             provider (OAuth), clientsStore (DCR), consent (API do usuário), router (metadados + SDK),
 │                     origin, redirectUris, crypto, constants
 └── tools/            types, registry (escopo + marca + erro + registro), authorization, htmlContract, designs,
-                      list_brands, get_brand_kit, get_designer_brief, list_designs, get_design, save_presentation
+                      as 20 ferramentas (list_brands, get_brand_kit, ..., save_presentation; lista em tools/index.ts)
 ```
