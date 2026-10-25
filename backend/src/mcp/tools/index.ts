@@ -8,6 +8,7 @@ import { getIntegrationsStatusTool } from './integrationsStatus.js';
 import { listAssetsTool } from './listAssets.js';
 import { listBrandsTool } from './listBrands.js';
 import { listDesignsTool } from './listDesigns.js';
+import { endFrontendSessionTool, startFrontendSessionTool } from './frontendSession.js';
 import { getPhotoSlotsTool, setSlidePhotoTool } from './photoSlots.js';
 import { savePresentationTool } from './savePresentation.js';
 import { updateSlideTool } from './updateSlide.js';
@@ -26,7 +27,8 @@ import { createVersionTool, listVersionsTool, restoreVersionTool } from './versi
  *    get_brand_profile, list_assets, list_versions, get_photo_slots, get_integrations_status;
  *  - escrita (`designer.write`): save_presentation, update_slide, create_version, restore_version,
  *    set_slide_photo, upload_asset;
- *  - saída (`designer.export`): export_file, get_export_status, export_to_canva, get_canva_export_status.
+ *  - saída (`designer.export`): export_file, get_export_status, export_to_canva, get_canva_export_status;
+ *  - navegador somente leitura (`designer.preview`): start_frontend_session, end_frontend_session.
  *
  * O plano completo (52 ferramentas, escopos e ordem) está em docs/MCP-DESIGNER-PLANO-FERRAMENTAS.md.
  */
@@ -52,4 +54,6 @@ export const MCP_TOOLS: readonly McpToolDefinition<any, any>[] = [
   getExportStatusTool,
   exportToCanvaTool,
   getCanvaExportStatusTool,
+  startFrontendSessionTool,
+  endFrontendSessionTool,
 ];

@@ -9,6 +9,7 @@ import {
 import { logger } from '../../lib/logger.js';
 import { EDIT_ALL_SCOPE, type McpScope } from '../config.js';
 import type { McpCallEvent, McpCallLog } from '../store.js';
+import type { PreviewService } from '../preview.js';
 import { resolveBrandGrants } from './authorization.js';
 import { ToolUserError, type McpCallContext, type McpToolDefinition } from './types.js';
 
@@ -35,6 +36,7 @@ export interface RegistryDeps {
   resourceMetadataUrl: string;
   /** Origem do frontend (para montar o link do preview/editor devolvido ao agente). */
   frontendOrigin?: string;
+  preview?: PreviewService;
   now?: () => number;
 }
 
@@ -93,6 +95,7 @@ async function runTool(tool: AnyTool, args: Record<string, unknown>, extra: Extr
       grants,
       canEditAll: auth.scopes.includes(EDIT_ALL_SCOPE),
       frontendOrigin: deps.frontendOrigin,
+      preview: deps.preview,
     };
 
     if (tool.brandArg) {

@@ -1,6 +1,7 @@
 import type { BrandRole } from '@prisma/client';
 import type { z } from 'zod';
 import type { McpScope } from '../config.js';
+import type { PreviewService } from '../preview.js';
 
 /**
  * Contrato de uma ferramenta MCP do Designer.
@@ -32,6 +33,8 @@ export interface McpCallContext {
   brand?: BrandGrant;
   /** Origem do frontend, para links de preview/editor. */
   frontendOrigin?: string;
+  /** Sessão de navegador somente leitura (start/end_frontend_session). Ausente = recurso não montado. */
+  preview?: PreviewService;
 }
 
 /** Anotações que o ChatGPT usa para decidir quando pedir confirmação ao usuário. */

@@ -12,6 +12,7 @@ import { MCP_SCOPES, READ_SCOPE, type McpConfig } from './config.js';
 import { createOriginGuard, isAllowedOrigin } from './auth/origin.js';
 import type { DesignerOAuthProvider } from './auth/provider.js';
 import type { McpLimits } from './limits.js';
+import type { PreviewService } from './preview.js';
 import type { McpCallLog } from './store.js';
 import { MCP_TOOLS } from './tools/index.js';
 import { registerTools, toolScopeIndex } from './tools/registry.js';
@@ -47,6 +48,7 @@ export function createMcpServer(deps: {
   callLog: McpCallLog;
   resourceMetadataUrl: string;
   frontendOrigin?: string;
+  preview?: PreviewService;
   tools?: readonly AnyTool[];
 }): McpServer {
   const server = new McpServer(
@@ -62,6 +64,7 @@ export function createMcpServer(deps: {
     callLog: deps.callLog,
     resourceMetadataUrl: deps.resourceMetadataUrl,
     frontendOrigin: deps.frontendOrigin,
+    preview: deps.preview,
   });
   return server;
 }
@@ -76,6 +79,7 @@ export function createMcpEndpointRouter(deps: {
   provider: DesignerOAuthProvider;
   callLog: McpCallLog;
   limits: McpLimits;
+  preview?: PreviewService;
   tools?: readonly AnyTool[];
 }): Router {
   const { config, provider, callLog, limits } = deps;
@@ -171,6 +175,7 @@ export function createMcpEndpointRouter(deps: {
       callLog,
       resourceMetadataUrl: config.resourceMetadataUrl,
       frontendOrigin: config.frontendUrl.origin,
+      preview: deps.preview,
       tools,
     });
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });

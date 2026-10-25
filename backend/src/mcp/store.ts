@@ -85,6 +85,42 @@ export interface RefreshTokenRecord {
   clientId: string;
 }
 
+/**
+ * Sessão de navegador somente leitura (`designer.preview`). Três registros, todos pelo HASH do segredo:
+ *  - código de entrada (uso único, ~60 s): vai na URL que a ferramenta devolve;
+ *  - sessão: o segredo do cookie (`mcpv_...`), vale até `expiresAt` (2 h FIXAS contadas do pedido, sem renovação);
+ *  - ponteiro da conexão: UMA sessão ativa por família. Código e sessão só valem enquanto a `gen` deles é a do ponteiro,
+ *    então dois pedidos em corrida terminam com UM vencedor, sem lock.
+ */
+export interface PreviewCodeRecord {
+  familyId: string;
+  userId: string;
+  clientId: string;
+  gen: string;
+  createdAt: number;
+  /** ms: fim da sessão que este código abre. */
+  expiresAt: number;
+}
+
+export interface PreviewSessionRecord {
+  familyId: string;
+  userId: string;
+  clientId: string;
+  gen: string;
+  createdAt: number;
+  usedAt: number;
+  expiresAt: number;
+}
+
+export interface PreviewPointer {
+  gen: string;
+  codeHash: string;
+  /** Preenchido quando o código é trocado por cookie. */
+  sessionHash?: string;
+  startedAt: number;
+  expiresAt: number;
+}
+
 export type ConsumeResult<T> =
   | { status: 'ok'; record: T }
   /** O segredo já foi consumido antes: reuso. `familyId` é a família a revogar. */
@@ -126,6 +162,18 @@ export interface McpOAuthStore {
   saveRefreshToken(tokenHash: string, record: RefreshTokenRecord): Promise<void>;
   getRefreshToken(tokenHash: string): Promise<RefreshTokenRecord | undefined>;
   consumeRefreshToken(tokenHash: string): Promise<ConsumeResult<RefreshTokenRecord>>;
+
+  // ── Sessão de navegador somente leitura (designer.preview) ──
+  savePreviewCode(codeHash: string, record: PreviewCodeRecord, ttlSec: number): Promise<void>;
+  /** Atômico e de uso único: de duas trocas simultâneas do mesmo código, só uma recebe o registro. */
+  consumePreviewCode(codeHash: string): Promise<PreviewCodeRecord | undefined>;
+  deletePreviewCode(codeHash: string): Promise<void>;
+  savePreviewSession(tokenHash: string, record: PreviewSessionRecord, ttlSec: number): Promise<void>;
+  getPreviewSession(tokenHash: string): Promise<PreviewSessionRecord | undefined>;
+  deletePreviewSession(tokenHash: string): Promise<void>;
+  setPreviewPointer(familyId: string, pointer: PreviewPointer, ttlSec: number): Promise<void>;
+  getPreviewPointer(familyId: string): Promise<PreviewPointer | undefined>;
+  deletePreviewPointer(familyId: string): Promise<void>;
 }
 
 /** Um evento por `tools/call`. Enxuto de propósito: SEM argumentos nem conteúdo retornado. */
@@ -135,6 +183,8 @@ export interface McpCallEvent {
   clientId: string;
   tool: string;
   brandSlug?: string;
+  /** Conexão (família) de onde veio, nos eventos da sessão de navegador (`frontend_session.*`). */
+  familyId?: string;
   ok: boolean;
   /** Código curto do erro (ex.: `brand_unavailable`), nunca a mensagem nem o stack. */
   errorCode?: string;
@@ -200,6 +250,9 @@ const key = {
   refresh: (h: string) => `${P}rt:${h}`,
   refreshUsed: (h: string) => `${P}rt-used:${h}`,
   calls: (scopeKey: string) => `${P}calls:${scopeKey}`,
+  previewCode: (h: string) => `${P}pvc:${h}`,
+  previewSession: (h: string) => `${P}pvs:${h}`,
+  previewPointer: (familyId: string) => `${P}pvp:${familyId}`,
 };
 
 function parse<T>(raw: string | null): T | undefined {
@@ -372,6 +425,44 @@ export class RedisMcpStore implements McpOAuthStore, McpCallLog {
     }
     const usedBy = await this.redis.get(key.refreshUsed(tokenHash));
     return usedBy ? { status: 'reused', familyId: usedBy } : { status: 'missing' };
+  }
+
+  // ── Sessão de navegador somente leitura ──
+
+  async savePreviewCode(codeHash: string, record: PreviewCodeRecord, ttlSec: number): Promise<void> {
+    await this.redis.set(key.previewCode(codeHash), JSON.stringify(record), 'EX', Math.max(1, Math.ceil(ttlSec)));
+  }
+
+  async consumePreviewCode(codeHash: string): Promise<PreviewCodeRecord | undefined> {
+    return parse<PreviewCodeRecord>(await this.takeOnce(key.previewCode(codeHash)));
+  }
+
+  async deletePreviewCode(codeHash: string): Promise<void> {
+    await this.redis.del(key.previewCode(codeHash));
+  }
+
+  async savePreviewSession(tokenHash: string, record: PreviewSessionRecord, ttlSec: number): Promise<void> {
+    await this.redis.set(key.previewSession(tokenHash), JSON.stringify(record), 'EX', Math.max(1, Math.ceil(ttlSec)));
+  }
+
+  async getPreviewSession(tokenHash: string): Promise<PreviewSessionRecord | undefined> {
+    return parse<PreviewSessionRecord>(await this.redis.get(key.previewSession(tokenHash)));
+  }
+
+  async deletePreviewSession(tokenHash: string): Promise<void> {
+    await this.redis.del(key.previewSession(tokenHash));
+  }
+
+  async setPreviewPointer(familyId: string, pointer: PreviewPointer, ttlSec: number): Promise<void> {
+    await this.redis.set(key.previewPointer(familyId), JSON.stringify(pointer), 'EX', Math.max(1, Math.ceil(ttlSec)));
+  }
+
+  async getPreviewPointer(familyId: string): Promise<PreviewPointer | undefined> {
+    return parse<PreviewPointer>(await this.redis.get(key.previewPointer(familyId)));
+  }
+
+  async deletePreviewPointer(familyId: string): Promise<void> {
+    await this.redis.del(key.previewPointer(familyId));
   }
 
   // ── Registro de chamadas ──

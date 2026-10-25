@@ -1,9 +1,13 @@
-import express, { type Express, type RequestHandler } from 'express';
+import express, { type Express, type NextFunction, type Request, type RequestHandler, type Response } from 'express';
 import { config as appConfig } from '../config.js';
 import { redis } from '../lib/redis.js';
 import { logger } from '../lib/logger.js';
 import { requireAuth } from '../middleware/auth.js';
-import { loadMcpConfig, type McpConfigLoad } from './config.js';
+import { setPreviewAuthenticator } from '../middleware/previewSession.js';
+import { rateLimit } from '../middleware/rateLimit.js';
+import { createError } from '../middleware/errorHandler.js';
+import { loadMcpConfig, READ_SCOPE, type McpConfigLoad } from './config.js';
+import { resolveBrandGrants } from './tools/authorization.js';
 import { mcpApiErrorHandler } from './auth/apiErrors.js';
 import { createConsentRouter } from './auth/consent.js';
 import { DEFAULT_LIMITS, type McpLimits } from './limits.js';
@@ -43,6 +47,8 @@ export function mountMcp(app: Express, options: MountMcpOptions): { mounted: boo
     });
 
   if (!loaded.enabled) {
+    // Desligado: nenhum token `mcpv_` vale, mesmo que um módulo anterior tenha registrado o serviço (testes).
+    setPreviewAuthenticator(null);
     if (loaded.misconfigured) {
       logger.error('MCP: módulo NÃO montado — configuração inválida', { reason: loaded.reason });
     } else {
@@ -60,6 +66,43 @@ export function mountMcp(app: Express, options: MountMcpOptions): { mounted: boo
   const limits: McpLimits = { ...DEFAULT_LIMITS, ...options.limits };
   const runtime = createMcpRuntime({ config, store, callLog: store, limits, now: options.now, tools: options.tools });
 
+  setPreviewAuthenticator(runtime.preview);
+
+  // Troca do código de entrada da sessão de navegador (designer.preview) pelo token de sessão. É a ÚNICA rota do conector
+  // sem JWT: a credencial é o próprio código (256 bits, uso único, ~60 s). Vem ANTES do mount autenticado de /api/mcp.
+  const exchangePreview: RequestHandler = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      res.setHeader('Cache-Control', 'no-store');
+      const code = (req.body as { code?: unknown } | undefined)?.code;
+      // Mesma resposta para código ausente, malformado, usado, vencido ou de sessão substituída.
+      const invalid = () => createError(401, 'Código inválido, já usado ou vencido. Peça um novo link ao agente.', 'MCP_PREVIEW_CODE_INVALID');
+      if (typeof code !== 'string' || !/^[A-Za-z0-9_-]{32,128}$/.test(code)) throw invalid();
+      const session = await runtime.preview.exchange(code);
+      if (!session) throw invalid();
+      const info = await runtime.preview.authenticate(session.token);
+      const grants = info
+        ? await resolveBrandGrants({ userId: info.userId, brandIds: info.brandIds, brandMode: info.brandMode, scope: READ_SCOPE })
+        : [];
+      res.json({
+        data: {
+          token: session.token,
+          expiresAt: new Date(session.expiresAt).toISOString(),
+          brands: grants.map((g) => ({ slug: g.slug, name: g.name })),
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  };
+  app.post(
+    '/api/mcp/preview/exchange',
+    options.apiCors,
+    express.json({ limit: '2kb' }),
+    rateLimit({ windowSec: 10 * 60, max: 30, keyPrefix: `${limits.keyPrefix}-preview-exchange` }),
+    exchangePreview,
+    mcpApiErrorHandler,
+  );
+
   // Protocolo na raiz (metadados .well-known, /authorize, /token, /register, /revoke, /mcp).
   app.use(runtime.protocolRouter);
   // API do usuário (consentimento e conexões): JWT do app no header, como o resto da API.
@@ -68,7 +111,7 @@ export function mountMcp(app: Express, options: MountMcpOptions): { mounted: boo
     options.apiCors,
     express.json({ limit: '100kb' }),
     requireAuth,
-    createConsentRouter({ store, config, provider: runtime.provider, limits, now: options.now }),
+    createConsentRouter({ store, config, provider: runtime.provider, limits, preview: runtime.preview, now: options.now }),
     // Depois do roteador: falha de infra (Redis, Prisma) vira mensagem genérica, sem eco do erro.
     mcpApiErrorHandler,
   );
