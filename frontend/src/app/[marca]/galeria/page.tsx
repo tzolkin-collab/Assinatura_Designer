@@ -4,7 +4,7 @@ import { useParams } from 'next/navigation';
 import PageHeader from '@/components/ui/PageHeader';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
-import { ArrowLeft, Download, FileDown, Loader2, Maximize2, X, Folder, FolderPlus, ChevronRight, ChevronDown, Plus, Trash2, LayoutGrid, List, Sparkles, MessageSquareText, ExternalLink, Edit3, FolderInput, PenLine, Send, Presentation, Image as LucideImage, Globe, Check, Copy } from 'lucide-react';
+import { Download, FileDown, Loader2, Maximize2, X, Folder, FolderPlus, ChevronRight, ChevronDown, Plus, Trash2, LayoutGrid, List, Sparkles, MessageSquareText, ExternalLink, Edit3, FolderInput, PenLine, Send, Presentation, Image as LucideImage, Globe, Check, Copy, Search } from 'lucide-react';
 import Link from 'next/link';
 import Image from 'next/image';
 import styles from './brand-galeria.module.css';
@@ -35,6 +35,19 @@ function formatPostType(type: string) {
 
 function postMatchesPreviewImage(post: Post, previewImage: string): boolean {
   return post.previewUrl === previewImage || !!(post.content && typeof post.content === 'object' && ((post.content as Record<string, unknown>).dataUrl === previewImage || (post.content as Record<string, unknown>).url === previewImage));
+}
+
+function pluralSlides(n: number) {
+  return `${n} ${n === 1 ? 'slide' : 'slides'}`;
+}
+
+/** "24 ago" no ano corrente, "24 ago 2025" nos anteriores. */
+function formatDay(iso: string) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  const month = d.toLocaleDateString('pt-BR', { month: 'short' }).split('.').join('');
+  return `${d.getDate()} ${month}${sameYear ? '' : ` ${d.getFullYear()}`}`;
 }
 
 function formatChatTimestamp(timestamp: number) {
@@ -285,6 +298,7 @@ export default function BrandGaleriaPage() {
   const [draggedFolderId, setDraggedFolderId] = useState<string | null>(null);
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
 
+  const [query, setQuery] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [activeBundle, setActiveBundle] = useState<'PRESENTATION' | 'DESIGNS'>('PRESENTATION');
   const [activeFormat, setActiveFormat] = useState<'all' | '1:1' | '3:4' | '4:5' | '16:9' | '9:16'>('all');
@@ -569,8 +583,17 @@ export default function BrandGaleriaPage() {
     const ratioTag = getAspectRatioTag(dimensions.width, dimensions.height);
     const matchesFormat = activeFormat === 'all' || ratioTag === activeFormat || ratioTag === 'unknown';
 
-    return matchesFolder && matchesBundle && matchesFormat;
+    const q = query.trim().toLowerCase();
+    const matchesQuery = !q || (post.name ?? '').toLowerCase().includes(q);
+
+    return matchesFolder && matchesBundle && matchesFormat && matchesQuery;
   });
+
+  const presentationCount = posts.filter(p => p.type === 'PRESENTATION').length;
+  const designCount = posts.length - presentationCount;
+  const inBundle = (p: Post) => (activeBundle === 'PRESENTATION' ? p.type === 'PRESENTATION' : p.type !== 'PRESENTATION');
+  const bundleTotal = posts.filter(inBundle).length;
+  const unassignedTotal = posts.filter(p => inBundle(p) && !p.folderId).length;
 
 
   const handleDownload = (e: React.MouseEvent, url: string, filename: string) => {
@@ -733,51 +756,14 @@ export default function BrandGaleriaPage() {
         />
       )}
 
-      <Link href="/galeria" className={styles.backLink}>
-        <ArrowLeft size={16} />
-        Voltar
-      </Link>
-
       <div className={styles.pageTop}>
         <PageHeader
-          title={brand?.name ?? marca}
-          description="Histórico de artes e criativos gerados para esta marca."
+          title="Galeria"
+          description={`Artes e apresentações geradas para ${brand?.name ?? marca}.`}
         />
 
         <div className={styles.toolbar}>
           <AiSpendBadge slug={slug} />
-          {brand?.members && (
-            <div className={styles.teamAvatars}>
-              {brand.members.slice(0, 3).map(m => (
-                <div key={m.user.id} className={styles.avatar} title={`${m.user.name} (${m.role})`}>
-                  {m.user.name.charAt(0).toUpperCase()}
-                </div>
-              ))}
-              {brand.members.length > 3 && (
-                <div className={styles.avatarMore}>+{brand.members.length - 3}</div>
-              )}
-              <Link href={`/${slug}/configuracoes/equipe`} className={styles.inviteBtn} title="Convidar para a Equipe">
-                <Plus size={14} />
-              </Link>
-            </div>
-          )}
-
-          <div className={styles.viewToggle}>
-          <button 
-            className={`${styles.toggleBtn} ${viewMode === 'list' ? styles.toggleBtnActive : ''}`}
-            onClick={() => setViewMode('list')}
-            title="Visualização em Lista"
-          >
-            <List size={18} />
-          </button>
-          <button 
-            className={`${styles.toggleBtn} ${viewMode === 'grid' ? styles.toggleBtnActive : ''}`}
-            onClick={() => setViewMode('grid')}
-            title="Visualização em Grade"
-          >
-            <LayoutGrid size={18} />
-          </button>
-          </div>
           <Link href={`/${slug}/fabrica`}>
             <Button size="sm">
               <Sparkles size={14} />
@@ -787,54 +773,87 @@ export default function BrandGaleriaPage() {
         </div>
       </div>
 
-      <div className={styles.foldersContainer}>
-        <div className={styles.foldersHeader}>
-          <h3 className={styles.foldersTitle}>Pastas do Projeto</h3>
-          <Button size="sm" onClick={() => openFolderModal(null)} disabled={!canEdit} title={canEdit ? undefined : hint}>
-            <Plus size={14} />
-            Criar Pasta
-          </Button>
-        </div>
-
-        <div className={styles.bundleTabs}>
+      <div className={styles.controls}>
+        <div className={styles.bundleTabs} role="tablist" aria-label="Tipo de material">
           <button
             type="button"
+            role="tab"
+            aria-selected={activeBundle === 'PRESENTATION'}
             className={`${styles.bundleTab} ${activeBundle === 'PRESENTATION' ? styles.bundleTabActive : ''}`}
             onClick={() => setActiveBundle('PRESENTATION')}
           >
             <Presentation size={16} />
             Apresentações
+            <span className={styles.tabCount}>{presentationCount}</span>
           </button>
           <button
             type="button"
+            role="tab"
+            aria-selected={activeBundle === 'DESIGNS'}
             className={`${styles.bundleTab} ${activeBundle === 'DESIGNS' ? styles.bundleTabActive : ''}`}
             onClick={() => setActiveBundle('DESIGNS')}
           >
             <LayoutGrid size={16} />
             Designs
+            <span className={styles.tabCount}>{designCount}</span>
           </button>
         </div>
 
-        {activeBundle === 'DESIGNS' && (
-          <div className={styles.formatFilters}>
-            {(['all', '1:1', '3:4', '4:5', '16:9', '9:16'] as const).map((fmt) => (
-              <button
-                key={fmt}
-                type="button"
-                className={`${styles.formatChip} ${activeFormat === fmt ? styles.formatChipActive : ''}`}
-                onClick={() => setActiveFormat(fmt)}
-              >
-                {fmt === 'all' ? 'Todos' :
-                 fmt === '1:1' ? '1:1 · Quadrado' :
-                 fmt === '3:4' ? '3:4 · Retrato' :
-                 fmt === '4:5' ? '4:5 · iPhone' :
-                 fmt === '16:9' ? '16:9 · Paisagem' :
-                 '9:16 · Story'}
-              </button>
-            ))}
+        <div className={styles.controlsEnd}>
+          <label className={styles.search}>
+            <Search size={15} aria-hidden="true" />
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Buscar pelo nome"
+              aria-label="Buscar artes pelo nome"
+            />
+          </label>
+          <div className={styles.viewToggle} role="group" aria-label="Modo de visualização">
+            <button
+              type="button"
+              className={`${styles.toggleBtn} ${viewMode === 'list' ? styles.toggleBtnActive : ''}`}
+              onClick={() => setViewMode('list')}
+              aria-pressed={viewMode === 'list'}
+              title="Visualização em lista"
+            >
+              <List size={18} />
+            </button>
+            <button
+              type="button"
+              className={`${styles.toggleBtn} ${viewMode === 'grid' ? styles.toggleBtnActive : ''}`}
+              onClick={() => setViewMode('grid')}
+              aria-pressed={viewMode === 'grid'}
+              title="Visualização em grade"
+            >
+              <LayoutGrid size={18} />
+            </button>
           </div>
-        )}
+        </div>
+      </div>
 
+      {activeBundle === 'DESIGNS' && (
+        <div className={styles.formatFilters}>
+          {(['all', '1:1', '3:4', '4:5', '16:9', '9:16'] as const).map((fmt) => (
+            <button
+              key={fmt}
+              type="button"
+              className={`${styles.formatChip} ${activeFormat === fmt ? styles.formatChipActive : ''}`}
+              onClick={() => setActiveFormat(fmt)}
+            >
+              {fmt === 'all' ? 'Todos' :
+               fmt === '1:1' ? '1:1 · Quadrado' :
+               fmt === '3:4' ? '3:4 · Retrato' :
+               fmt === '4:5' ? '4:5 · iPhone' :
+               fmt === '16:9' ? '16:9 · Paisagem' :
+               '9:16 · Story'}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div className={styles.foldersContainer}>
         <div className={styles.foldersGrid}>
           <div
             className={`${styles.folderCard} ${activeFolder === null ? styles.folderCardActive : ''} ${dragOverFolderId === 'root' ? styles.folderCardDragOver : ''}`}
@@ -844,8 +863,8 @@ export default function BrandGaleriaPage() {
             onDrop={(e) => handleDrop(e, 'root')}
             title="Arraste uma pasta para cá para tirá-la de dentro de outra"
           >
-            <Folder size={16} />
-            <span className={styles.folderName}>Todas as Artes</span>
+            <span className={styles.folderName}>Todas</span>
+            <span className={styles.folderCount}>{bundleTotal}</span>
           </div>
           <div
             className={`${styles.folderCard} ${activeFolder === 'unassigned' ? styles.folderCardActive : ''} ${dragOverFolderId === 'unassigned' ? styles.folderCardDragOver : ''}`}
@@ -854,14 +873,26 @@ export default function BrandGaleriaPage() {
             onDragLeave={() => setDragOverFolderId(null)}
             onDrop={(e) => handleDrop(e, 'unassigned')}
           >
-            <Folder size={16} />
-            <span className={styles.folderName}>Sem Pasta</span>
+            <span className={styles.folderName}>Sem pasta</span>
+            <span className={styles.folderCount}>{unassignedTotal}</span>
           </div>
+          <button
+            type="button"
+            className={styles.newFolderBtn}
+            onClick={() => openFolderModal(null)}
+            disabled={!canEdit}
+            title={canEdit ? undefined : hint}
+          >
+            <FolderPlus size={14} />
+            Nova pasta
+          </button>
         </div>
 
-        <div className={styles.folderTree}>
-          {renderFolderTree(null, 0)}
-        </div>
+        {folders.length > 0 && (
+          <div className={styles.folderTree}>
+            {renderFolderTree(null, 0)}
+          </div>
+        )}
       </div>
 
       {loading ? (
@@ -871,7 +902,9 @@ export default function BrandGaleriaPage() {
       ) : posts.length === 0 ? (
         <div className={styles.empty}>Nenhum post gerado ainda. Vá até a Fábrica para criar!</div>
       ) : filteredPosts.length === 0 ? (
-        <div className={styles.empty}>Nenhuma arte encontrada nesta pasta.</div>
+        <div className={styles.empty}>
+          {query.trim() ? `Nenhuma arte com “${query.trim()}” no nome.` : 'Nenhuma arte encontrada nesta pasta.'}
+        </div>
       ) : viewMode === 'grid' ? (
         <div className={`${styles.grid} ${activeBundle === 'PRESENTATION' ? styles.gridPresentations : styles.gridDesigns}`}>
           {filteredPosts.map((post, index) => {
@@ -920,39 +953,49 @@ export default function BrandGaleriaPage() {
                         <span className={styles.thumbStatus}>Sem preview</span>
                       </div>
                     )}
-                    {htmlContent && post.status !== 'FAILED' && post.status !== 'GENERATING' && (
-                      <span className={styles.slideCount}>
-                        {post.slideCount ?? htmlContent.slides.length} slides
-                      </span>
-                    )}
                   </div>
                   
                   <div className={styles.postBody}>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', width: '100%' }}>
-                      {renamingPostId === post.id ? (
-                        <form onSubmit={(e) => handleRenamePost(e, post.id)} style={{ width: '100%' }} onClick={(e) => e.stopPropagation()}>
-                          <input 
-                            type="text" 
-                            value={newPostName} 
-                            onChange={(e) => setNewPostName(e.target.value)} 
-                            autoFocus 
-                            style={{ width: '100%', padding: '4px', fontSize: '14px', borderRadius: '4px', border: '1px solid var(--color-border)' }}
-                            onBlur={() => setRenamingPostId(null)}
-                          />
-                        </form>
-                      ) : (
-                        <h4 className={styles.postTitle} style={{ margin: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-                          <span>{post.name || `Arte ${post.id.split('-')[0]}`}</span>
-                          <button 
-                            onClick={(e) => { e.stopPropagation(); setRenamingPostId(post.id); setNewPostName(post.name || ''); }} 
-                            style={{ background: 'none', border: 'none', color: 'var(--color-text-tertiary)', cursor: 'pointer', padding: 0 }}
-                            title="Renomear"
-                          >
-                            <Edit3 size={12} />
-                          </button>
+                    {renamingPostId === post.id ? (
+                      <form onSubmit={(e) => handleRenamePost(e, post.id)} style={{ width: '100%' }} onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="text"
+                          value={newPostName}
+                          onChange={(e) => setNewPostName(e.target.value)}
+                          autoFocus
+                          aria-label="Novo nome"
+                          className={styles.renameInput}
+                          onBlur={() => setRenamingPostId(null)}
+                        />
+                      </form>
+                    ) : (
+                      <div className={styles.postTitleRow}>
+                        <h4 className={`${styles.postTitle} ${post.name ? '' : styles.postTitleMuted}`} title={post.name || undefined}>
+                          {post.name || `${formatPostType(post.type)} sem nome`}
                         </h4>
+                        {canEdit && (
+                          <button
+                            type="button"
+                            className={styles.renameBtn}
+                            onClick={(e) => { e.stopPropagation(); setRenamingPostId(post.id); setNewPostName(post.name || ''); }}
+                            title="Renomear"
+                            aria-label={`Renomear ${post.name || 'esta arte'}`}
+                          >
+                            <Edit3 size={14} />
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    <div className={styles.postMeta}>
+                      {htmlContent && post.status !== 'FAILED' && post.status !== 'GENERATING' && (
+                        <span>{pluralSlides(post.slideCount ?? htmlContent.slides.length)}</span>
                       )}
-                      <span className={styles.postDate}>{new Date(post.createdAt).toLocaleDateString()}</span>
+                      <span>{formatDay(post.createdAt)}</span>
+                      {post.publicSlug && (
+                        <span className={styles.postLive} title="Tem link público ativo">
+                          <Globe size={12} aria-hidden="true" /> No ar
+                        </span>
+                      )}
                     </div>
                   </div>
               </div>
@@ -1026,7 +1069,7 @@ export default function BrandGaleriaPage() {
                         </form>
                       ) : (
                         <span style={{ fontWeight: 500, color: 'var(--color-text)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          {post.name || `Arte ${post.id.split('-')[0]}`}
+                          {post.name || `${formatPostType(post.type)} sem nome`}
                           <button onClick={(e) => { e.stopPropagation(); setRenamingPostId(post.id); setNewPostName(post.name || ''); }} style={{ background: 'none', border: 'none', color: 'var(--color-text-secondary)', cursor: 'pointer', padding: 0 }}>
                             <Edit3 size={14} />
                           </button>
@@ -1035,7 +1078,7 @@ export default function BrandGaleriaPage() {
                       <div className={styles.listMeta}>
                         <span>{formatPostType(post.type)}</span>
                         <span>•</span>
-                        <span>{new Date(post.createdAt).toLocaleDateString()}</span>
+                        <span>{formatDay(post.createdAt)}</span>
                         <span>•</span>
                         <span
                           className={styles.postStatus}
@@ -1047,13 +1090,13 @@ export default function BrandGaleriaPage() {
                         {post.createdBy && (
                           <>
                             <span>•</span>
-                            <span title={post.createdBy.email}>👤 {post.createdBy.name.split(' ')[0]}</span>
+                            <span title={post.createdBy.email}>por {post.createdBy.name.split(' ')[0]}</span>
                           </>
                         )}
                         {htmlContent && (
                           <>
                             <span>•</span>
-                            <span>{post.slideCount ?? htmlContent.slides.length} slides</span>
+                            <span>{pluralSlides(post.slideCount ?? htmlContent.slides.length)}</span>
                           </>
                         )}
                       </div>
