@@ -160,11 +160,17 @@ corrigir e tentar de novo. A decisão que passa consome o pedido (uso único, at
 | `designer.write` | criar peças e atualizar **as que a própria conexão criou** (e **inclui** leitura) | EDITOR+ |
 | `designer.edit_all` | além disso, **sobrescrever qualquer apresentação ou carrossel** das marcas autorizadas (e **inclui** escrita e leitura) | EDITOR+ |
 | `designer.export` | **exportar** uma peça (PDF, ZIP de PNGs, PPTX, HTML) e enviá-la ao Canva do usuário. **Independente**: não inclui leitura nem escrita e não é incluído por elas | qualquer membro (Canva: EDITOR+, conferido na ferramenta) |
+| `designer.preview` | abrir o Designer **num navegador, SOMENTE LEITURA**, por 2 h (`start_frontend_session`). **Independente** e **desligado por padrão**; o token ainda precisa de `designer.read` para chegar ao `/mcp` | qualquer membro (a sessão nunca passa de leitura, qualquer que seja o papel) |
 
 `designer.export` é uma saída do Designer (o arquivo vira um link, o Canva recebe um design) e consome servidor, por isso
 tem escopo próprio e limite de taxa. Na tela de consentimento é um quadro à parte, **desmarcado** por padrão ("Permitir
 exportar peças"); o token traz `designer.export` junto do escopo de acesso escolhido, e a lista de conexões mostra
 "· pode exportar". Sem ele, as quatro ferramentas continuam listadas, mas a chamada é recusada com `insufficient_scope`.
+
+`designer.preview` é um quadro à parte na tela de consentimento ("Navegador (somente leitura)"), **desmarcado** por padrão.
+Só entra no token se quem decide o marcar: um cliente que não manda `scope` pede todos os escopos, e o servidor **tira**
+`designer.preview` quando a decisão chega sem lista de escopos (`auth/consent.ts`). Sem ele, as duas ferramentas
+`*_frontend_session` ficam listadas, mas a chamada é recusada com `403 insufficient_scope`.
 
 `designer.edit_all` é opcional e só existe se o cliente o pedir no `/authorize`; o usuário pode rebaixá-lo na tela para
 `designer.write` ou leitura. Antes de sobrescrever uma peça que não é da conexão, `save_presentation` congela a versão
@@ -218,6 +224,10 @@ topo do descritor **e** em `_meta.securitySchemes`, como pede o Apps SDK.
 | `get_export_status(brandSlug, postId, jobId)` | `designer.export` | Andamento: `queued`, `running` (slides prontos/total), `done` (com `downloadUrl`) ou `failed`. Só quem pediu o job o vê. O link só chega se for do nosso storage; falha do worker vira frase genérica (o detalhe vai para o log). |
 | `export_to_canva(brandSlug, postId, mode?, slide?, confirmarRascunho?)` | `designer.export` | Envia a peça para o Canva **do usuário** que conectou (`png`, um design por slide ou um para o deck; ou `pptx`, editável). Exige Canva conectado e papel **EDITOR+** na marca. Assíncrono, mesmo limite de taxa. Mesma trava de rascunho do `export_file`. |
 | `get_canva_export_status(brandSlug, postId, jobId)` | `designer.export` | Andamento do envio ao Canva e, pronto, o link do design. Só quem pediu o job o vê. |
+| `start_frontend_session()` | `designer.preview` | Devolve a URL de entrada (`<front>/mcp/entrar#code=...`), a hora de expiração (2 h) e as marcas visíveis. O código vale ~60 s e uma vez só. **Cada chamada encerra a sessão anterior da conexão.** Limite: 6 pedidos por 10 min por conexão. |
+| `end_frontend_session()` | `designer.preview` | Encerra a sessão da conexão (link e cookie param de valer). Idempotente: `ended=false` se não havia sessão. |
+
+Total: **22 ferramentas** (20 + as duas de sessão de navegador).
 
 Todas as chamadas terminam em segundos (não há geração longa do nosso lado), o que evita o limite de ~60 s que os clientes
 costumam impor a uma chamada de ferramenta.
@@ -226,6 +236,38 @@ costumam impor a uma chamada de ferramenta.
 `scope`, `annotations`, `brandArg` se recebe marca, `handler`) e listá-lo em `tools/index.ts`. Escopo, autorização por
 marca, tratamento de erro e registro de chamada são aplicados **uma vez** em `tools/registry.ts` — a ferramenta nova
 não consegue esquecer de checar a marca.
+
+## Sessão de navegador somente leitura (`designer.preview`)
+
+O editor exige login e o agente não digita senha. Em vez disso o Designer emite uma credencial própria, restrita:
+
+1. `start_frontend_session` (token do conector com `designer.preview`) cria um **código de uso único** (256 bits, só o hash vai
+   ao Redis, vida de 60 s) e devolve `<FRONTEND_URL>/mcp/entrar#code=<código>`. O código vai no **fragmento**: não chega ao
+   servidor, ao Vercel nem ao `Referer`, então não cai em log de acesso.
+2. A página `/mcp/entrar` (pública no middleware do Next) lê o fragmento, **apaga da barra de endereço antes de qualquer rede**,
+   e faz `POST /api/mcp/preview/exchange {code}` (sem JWT, limite 30/10 min por IP). O consumo é atômico (`MULTI GET+DEL`):
+   em corrida só uma troca vence. Qualquer falha (usado, vencido, inventado, sessão substituída, conexão revogada) devolve a
+   mesma resposta `401 MCP_PREVIEW_CODE_INVALID`.
+3. A resposta traz um **token opaco `mcpv_...`** (não é JWT; só o hash fica no Redis) que a página guarda como o `auth_token`
+   do login (localStorage + cookie `SameSite=Strict`, `max-age` até o fim da sessão) e redireciona para `/galeria`.
+4. O `requireAuth` reconhece `mcpv_` e aplica `middleware/previewSession.ts`: **lista permitida** de rotas, só `GET/HEAD`
+   (qualquer outro método: `403 MCP_PREVIEW_READ_ONLY`). Passam: `auth/me`, `brands` (lista filtrada), `brands/:slug`
+   (`posts`, `profile`, `memory`, `assets`), `settings/:slug/config`, `folders/:slug`, `posts/:id` (`versions`, `photo-slots`).
+   Todo o resto é 403: exportação, Google/Canva/Asana, equipe, cobrança, gasto de IA, notificações, `/api/mcp/*`. Rota nova
+   nasce proibida. O papel da requisição é `MCP_PREVIEW` (nunca o papel global do usuário) e `myRole` sai como `VIEWER`,
+   então a interface esconde os controles de edição.
+5. **Marcas:** a marca da rota (por slug, ou pela marca do post) precisa estar entre as da conexão (aprovadas ∩ associação de
+   agora); fora disso, 404. Perder a marca derruba o acesso na requisição seguinte.
+6. **Fim da sessão:** 2 h **fixas** (usar não renova), `end_frontend_session`, novo `start_frontend_session` na mesma
+   conexão (**decisão: encerrar a anterior, não recusar**, para um agente travado não prender a conexão por 2 h; em corrida
+   vale a última geração gravada) ou revogar a conexão (`DELETE /api/mcp/connections/:id` encerra a sessão; além disso a
+   sessão exige a família viva a cada requisição). Há uma sessão ativa por conexão.
+7. **Rastro** (mesma lista `mcp:calls:user:<id>`): a chamada `start_frontend_session` e eventos `frontend_session.started`,
+   `.used` e `.ended` (`errorCode` = `ended_by_agent`, `replaced`, `revoked` ou `expired`) com `familyId` (a conexão). Sessão
+   que vence sem ninguém usar o token não gera `.ended`; o `expiresAt` do `.started` diz quando acabou.
+
+Chaves no Redis: `mcp:pvc:<hash>` (código, 60 s), `mcp:pvs:<hash>` (sessão, até 2 h + 5 min de folga para registrar o
+vencimento), `mcp:pvp:<familyId>` (ponteiro: a "geração" válida da conexão). Sem variável de ambiente nova.
 
 ## Modelo de segurança — o que cada camada garante
 
@@ -289,12 +331,20 @@ coberto por `__tests__/mcp/store.test.ts`). **Nenhuma migration nesta etapa.**
 
 ### Registro de chamadas (base dos "Registros")
 
+(A sessão de navegador acrescenta eventos `frontend_session.*` com `familyId`; ver a seção própria.)
+
 A cada `tools/call` grava-se um evento enxuto, na lista da **marca** (ou do **usuário**, para ferramentas sem marca e para
 recusas de marca): `{ ts, userId, clientId, tool, brandSlug?, ok, errorCode?, durationMs }`. **Sem argumentos nem
 conteúdo.** Falha ao gravar vira aviso no log e não derruba a chamada. A API de leitura é a próxima etapa
 (`McpCallLog.listCalls` já existe). Além disso, todo `tools/call` sai no logger estruturado (`mcp.tool_call`).
 
 ## Limitações conhecidas
+
+- **Sessão de navegador:** o cookie `auth_token` é gravado por JavaScript (como o login normal), então não é `HttpOnly`; a
+  API não o lê (usa o header `Authorization`), por isso o cookie sozinho não autoriza escrita nem CSRF. Quem tem o token
+  **é** o usuário, em leitura, por até 2 h. Abrir o link num navegador que já tem login troca o login pela sessão de leitura.
+  A lista permitida foi montada lendo as rotas e os `api.get` do front; **telas que chamem uma rota fora dela mostram erro 403**
+  (ex.: equipe, notificações, cobrança) até alguém decidir listá-las.
 
 - **CIMD (Client ID Metadata Documents) não implementado.** O ChatGPT prefere CIMD mas continua aceitando DCR
   (`registration_endpoint`), que está implementado. O SDK 1.x não tem CIMD **no servidor**, e fazer à mão traria: busca de URL
