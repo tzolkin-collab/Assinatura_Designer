@@ -9,6 +9,7 @@ import { rateLimit } from '../../middleware/rateLimit.js';
 import {
   isMcpScope,
   normalizeScopes,
+  PREVIEW_SCOPE,
   ROLES_FOR_SCOPE,
   WRITE_SCOPE,
   type McpConfig,
@@ -19,6 +20,7 @@ import { TTL } from './constants.js';
 import { escapeHtml, randomSecret, sha256Hex } from './crypto.js';
 import type { DesignerOAuthProvider } from './provider.js';
 import type { McpLimits } from '../limits.js';
+import type { PreviewService } from '../preview.js';
 
 /**
  * Consentimento do usuário e gestão das conexões — a API que a tela do frontend usa.
@@ -54,6 +56,8 @@ interface ConsentDeps {
   config: McpConfig;
   provider: DesignerOAuthProvider;
   limits: McpLimits;
+  /** Para encerrar a sessão de navegador do agente quando a conexão é revogada. */
+  preview?: PreviewService;
   now?: () => number;
 }
 
@@ -162,7 +166,10 @@ export function createConsentRouter(deps: ConsentDeps): Router {
 
         // ── approve ──
         // Escopos: por padrão o que o cliente pediu; o usuário pode reduzir, nunca ampliar.
-        let granted: McpScope[] = pending.scopes;
+        // `designer.preview` (sessão de navegador) é DESLIGADO por padrão: só entra quando quem decide o lista em `scopes`.
+        // Sem lista, vale o que o cliente pediu MENOS o preview (um cliente sem `scope` pede tudo, e isso não pode ligá-lo).
+        let granted: McpScope[] = pending.scopes.filter((s) => s !== PREVIEW_SCOPE);
+        if (granted.length === 0) throw createError(400, 'Selecione ao menos um escopo.', 'MCP_BAD_SCOPE');
         if (body.scopes) {
           const wanted = body.scopes.filter(isMcpScope);
           // Decisão do dono do produto (usuário): a tela de consentimento deixa liberar qualquer escopo
@@ -288,9 +295,19 @@ export function createConsentRouter(deps: ConsentDeps): Router {
 
   router.delete('/connections/:familyId', async (req: AuthRequest, res: Response, next: NextFunction) => {
     try {
-      const revoked = await provider.revokeFamilyOfUser(req.params.familyId as string, req.user!.userId);
+      const familyId = req.params.familyId as string;
+      const userId = req.user!.userId;
+      const family = await store.getFamily(familyId);
+      const revoked = await provider.revokeFamilyOfUser(familyId, userId);
       // Conexão inexistente e conexão de outro usuário respondem igual.
       if (!revoked) throw createError(404, 'Conexão não encontrada.', 'MCP_CONNECTION_NOT_FOUND');
+      // Revogar encerra a sessão de navegador aberta por esta conexão. Mesmo que isto falhe, a sessão já morreu:
+      // `PreviewService.authenticate` exige a família viva a cada requisição.
+      try {
+        await deps.preview?.endForFamily(familyId, { userId, clientId: family?.clientId ?? '' }, 'revoked');
+      } catch (err) {
+        logger.warn('mcp.preview_end_failed', { error: err instanceof Error ? err.message : String(err) });
+      }
       res.json({ data: { revoked: true } });
     } catch (error) {
       next(error);

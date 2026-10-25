@@ -16,7 +16,7 @@ import { DEFAULT_CLIENT_PRESETS, resolveClientPresets } from './clients.js';
  */
 
 /** Escopos OAuth do Designer. `designer.write` INCLUI leitura (ver `normalizeScopes`). */
-export const MCP_SCOPES = ['designer.read', 'designer.write', 'designer.edit_all', 'designer.export'] as const;
+export const MCP_SCOPES = ['designer.read', 'designer.write', 'designer.edit_all', 'designer.export', 'designer.preview'] as const;
 export type McpScope = (typeof MCP_SCOPES)[number];
 
 export const READ_SCOPE: McpScope = 'designer.read';
@@ -33,6 +33,13 @@ export const EDIT_ALL_SCOPE: McpScope = 'designer.edit_all';
  * consentimento o pede à parte. Consome servidor (renderiza no chromium), então as ferramentas têm limite de taxa.
  */
 export const EXPORT_SCOPE: McpScope = 'designer.export';
+/**
+ * Sessão de navegador SOMENTE LEITURA para o agente ver o editor e a galeria renderizados (`start_frontend_session`).
+ * Independente como o export: não implica leitura nem escrita (o token precisa de `designer.read` de qualquer forma, é o
+ * piso de /mcp). É DESLIGADO por padrão: a tela de consentimento o oferece à parte e `consent.ts` nunca o inclui quando
+ * quem decide não lista os escopos. Não existe `designer.preview` de escrita: a sessão que ele abre nunca escreve.
+ */
+export const PREVIEW_SCOPE: McpScope = 'designer.preview';
 
 /** Quais marcas a conexão enxerga: as escolhidas no consentimento ou todas as do usuário, a cada chamada. */
 export type BrandMode = 'selected' | 'all';
@@ -50,6 +57,8 @@ export const ROLES_FOR_SCOPE: Record<McpScope, BrandRole[]> = {
   // Exportar arquivo vale para qualquer membro (como `GET/POST /posts/:id/export-file`, ANY_MEMBER). A exportação para o Canva
   // exige EDITOR e isso é conferido na própria ferramenta, como na rota (EDITORS).
   'designer.export': ['OWNER', 'ADMIN', 'EDITOR', 'VIEWER'],
+  // Só leitura no front: qualquer membro ve o que o papel dele já deixa ver. Nunca maior que o papel da conexão.
+  'designer.preview': ['OWNER', 'ADMIN', 'EDITOR', 'VIEWER'],
 };
 
 export function isMcpScope(value: string): value is McpScope {

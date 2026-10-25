@@ -9,6 +9,7 @@ import { createMcpEndpointRouter } from './server.js';
 import type { McpLimits } from './limits.js';
 import type { McpCallLog, McpOAuthStore } from './store.js';
 import type { McpToolDefinition } from './tools/types.js';
+import { PreviewService } from './preview.js';
 
 /**
  * Rotas de PROTOCOLO do conector: metadados .well-known, /authorize, /token,
@@ -41,6 +42,7 @@ const protocolErrorHandler: ErrorRequestHandler = (err, _req, res, next) => {
 
 export interface McpRuntime {
   provider: DesignerOAuthProvider;
+  preview: PreviewService;
   protocolRouter: Router;
 }
 
@@ -56,14 +58,15 @@ export function createMcpRuntime(deps: {
 
   const clientsStore = new DesignerClientsStore(store, config.redirectPolicy, config.maxClients);
   const provider = new DesignerOAuthProvider({ store, config, clientsStore, now: deps.now });
+  const preview = new PreviewService(store, callLog, deps.now);
 
   const protocolRouter = Router();
   // O request context (id de correlação + log de acesso) só nas rotas do conector. Montado
   // na raiz inteira ele rodaria duas vezes nas demais rotas (o app tem o próprio).
   protocolRouter.use(['/mcp', '/authorize', '/token', '/register', '/revoke', '/.well-known'], requestContext);
   protocolRouter.use(createOAuthRouter({ config, provider, limits }));
-  protocolRouter.use(createMcpEndpointRouter({ config, provider, callLog, limits, tools: deps.tools }));
+  protocolRouter.use(createMcpEndpointRouter({ config, provider, callLog, limits, preview, tools: deps.tools }));
   protocolRouter.use(protocolErrorHandler);
 
-  return { provider, protocolRouter };
+  return { provider, preview, protocolRouter };
 }

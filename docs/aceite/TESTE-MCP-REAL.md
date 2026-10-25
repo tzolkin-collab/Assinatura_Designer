@@ -2,11 +2,11 @@
 
 > Decisão de 24/10/2026: o único teste real do aceite é o do **MCP com um agente real** (Claude ou ChatGPT). Pelo MCP o agente desenha sozinho, então **nenhuma chamada passa pelo Gemini do servidor**: a chave Gemini nova não bloqueia este teste.
 > Roteiro de origem: [prompts/P16-integrar-mcp.md](prompts/P16-integrar-mcp.md). Referência técnica: [../MCP-DESIGNER.md](../MCP-DESIGNER.md). Marque `[x]` só com evidência (comando, resposta, print).
-> **Quem executa o deploy e conecta o agente é o Gustavo.** Marca de teste, **nunca a da Gabi**. Não construir ferramentas novas (lotes 2 a 4 estão fora).
+> **Quem executa o deploy e conecta o agente é o Gustavo.** Marca de teste, **nunca a da Gabi**. Não construir ferramentas novas (lotes 2 a 4 estão fora; a sessão de navegador, item 9, já está implementada: ver 5.1).
 
 ## 0. Decisão antes de subir
 
-A produção roda o build de 16/10. O `main` inclui o MCP completo (20 ferramentas, trava de rascunho) **e** os PRs #120 a #124, entre eles o **cérebro global (#124), que não foi testado com decks reais**.
+A produção roda o build de 16/10. O `main` inclui o MCP completo (22 ferramentas, trava de rascunho, sessão de navegador somente leitura) **e** os PRs #120 a #124, entre eles o **cérebro global (#124), que não foi testado com decks reais**.
 
 - [ ] Escolher: **(a)** subir o `main` inteiro, aceitando o #124 sem teste de geração; ou **(b)** subir um corte só com o MCP. Registrar a escolha.
 - [ ] Se (a): `DESIGNER_BRAIN_GLOBAL` com o mesmo valor na API **e** no worker, ambos reiniciados. Saída de emergência: `DESIGNER_BRAIN_GLOBAL=off`.
@@ -75,6 +75,22 @@ cd backend; node node_modules/typescript/bin/tsc --noEmit; node node_modules/vit
 | 14 | `get_integrations_status` | status sem token | [ ] |
 
 Para cada falha: a ferramenta, a mensagem exata, o ajuste feito.
+
+### 5.1 Item 9: sessão de navegador somente leitura (IMPLEMENTADO, ainda não testado com agente real)
+
+Total de ferramentas: **22** (`start_frontend_session`, `end_frontend_session` são as novas; escopo `designer.preview`, desligado por padrão).
+Na tela de consentimento marque "Navegador (somente leitura)". Sem variável nova.
+
+| # | Passo | Esperado | Resultado |
+| --- | --- | --- | --- |
+| 15 | Conexão SEM o quadro marcado: `start_frontend_session` | recusado (`insufficient_scope`) | [ ] |
+| 16 | Conexão com o quadro: `start_frontend_session` | URL `.../mcp/entrar#code=...`, validade 2 h, marcas da conexão | [ ] |
+| 17 | Abrir a URL em até 60 s num navegador | cai na galeria; editor abre em modo leitura (sem botões de edição) | [ ] |
+| 18 | Abrir a mesma URL de novo | "link incompleto ou já foi aberto" | [ ] |
+| 19 | Tentar salvar/apagar/exportar na tela | 403, nada muda | [ ] |
+| 20 | Marca fora da conexão pelo endereço | não encontrada | [ ] |
+| 21 | `end_frontend_session`, recarregar a tela | volta ao login | [ ] |
+| 22 | Revogar a conexão em Integrações com sessão aberta | a tela cai para o login | [ ] |
 
 ## 6. Limites do teste (dizer no relatório)
 

@@ -232,7 +232,8 @@ brandsRouter.get('/', async (req: Request, res: Response, next: NextFunction) =>
   try {
     const { userId } = (req as AuthRequest).user!;
     const brands = await prisma.brand.findMany({
-      where: { members: { some: { userId } } },
+      // Sessão do agente (designer.preview): só as marcas da conexão.
+      where: { members: { some: { userId } }, ...((req as AuthRequest).preview ? { id: { in: (req as AuthRequest).preview!.brandIds } } : {}) },
       orderBy: { updatedAt: 'desc' },
       include: {
         _count: { select: { posts: true } },
@@ -243,7 +244,8 @@ brandsRouter.get('/', async (req: Request, res: Response, next: NextFunction) =>
     const mapped = brands.map(b => ({
       ...b,
       logoUrl: b.config?.logoUrl,
-      myRole: b.members.find(m => m.userId === userId)?.role,
+      // Sessão do agente é só leitura: a tela se comporta como Leitor e esconde os controles de edição.
+      myRole: (req as AuthRequest).preview ? 'VIEWER' : b.members.find(m => m.userId === userId)?.role,
       user: b.members.find(m => m.role === 'OWNER')?.user
     }));
     res.json({ data: mapped });
@@ -295,7 +297,7 @@ brandsRouter.get('/:slug', async (req: Request, res: Response, next: NextFunctio
     
     // Inject current user role
     const myMembership = brand.members.find(m => m.userId === userId);
-    res.json({ data: { ...brand, myRole: myMembership?.role } });
+    res.json({ data: { ...brand, myRole: (req as AuthRequest).preview ? 'VIEWER' : myMembership?.role } });
   } catch (error) {
     next(error);
   }

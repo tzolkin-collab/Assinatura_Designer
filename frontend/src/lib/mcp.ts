@@ -35,6 +35,7 @@ export const READ_SCOPE = 'designer.read';
 export const WRITE_SCOPE = 'designer.write';
 export const EDIT_ALL_SCOPE = 'designer.edit_all';
 export const EXPORT_SCOPE = 'designer.export';
+export const PREVIEW_SCOPE = 'designer.preview';
 
 const ENTITIES: Record<string, string> = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'", '&#x27;': "'" };
 
@@ -79,10 +80,16 @@ export function canExport(scopes: readonly string[]): boolean {
   return scopes.includes(EXPORT_SCOPE);
 }
 
+/** Sessão de navegador do agente (só leitura): escopo à parte, desligado por padrão. */
+export function canPreview(scopes: readonly string[]): boolean {
+  return scopes.includes(PREVIEW_SCOPE);
+}
+
 /** "Só ver", "Ver e salvar peças" ou "Ver e editar todas as peças", com " · pode exportar" quando vale: o que o agente pode fazer, em palavras. */
 export function describeAccess(scopes: readonly string[]): string {
   const base = canEditAll(scopes) ? 'Ver e editar todas as peças' : canWrite(scopes) ? 'Ver e salvar peças' : 'Só ver';
-  return canExport(scopes) ? `${base} · pode exportar` : base;
+  const withExport = canExport(scopes) ? `${base} · pode exportar` : base;
+  return canPreview(scopes) ? `${withExport} · abre o Designer no navegador (só leitura)` : withExport;
 }
 
 const ROLE_LABEL: Record<ConsentBrand['role'], string> = {

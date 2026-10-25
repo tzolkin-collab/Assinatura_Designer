@@ -43,7 +43,7 @@ describe('escopos pedidos no /authorize', () => {
     const res = await authorize(h.app, authorizeQuery(await newClientId(), challenge, { scope: '' }));
     const requestId = requestIdFromLocation(res.headers.location);
     const view = await request(h.app).get(`/api/mcp/consent/${requestId}`).set(h.asUser('user-1'));
-    expect(view.body.data.scopes).toEqual(['designer.read', 'designer.write', 'designer.edit_all', 'designer.export']);
+    expect(view.body.data.scopes).toEqual(['designer.read', 'designer.write', 'designer.edit_all', 'designer.export', 'designer.preview']);
   });
 
   it('espaços extras no scope não viram escopo inválido', async () => {
@@ -67,7 +67,7 @@ describe('escopos pedidos no /authorize', () => {
     const { challenge } = pkcePair();
     const res = await authorize(h.app, authorizeQuery(await newClientId(), challenge, { scope: 'offline_access' }));
     const view = await request(h.app).get(`/api/mcp/consent/${requestIdFromLocation(res.headers.location)}`).set(h.asUser('user-1'));
-    expect(view.body.data.scopes).toEqual(['designer.read', 'designer.write', 'designer.edit_all', 'designer.export']);
+    expect(view.body.data.scopes).toEqual(['designer.read', 'designer.write', 'designer.edit_all', 'designer.export', 'designer.preview']);
   });
 });
 
