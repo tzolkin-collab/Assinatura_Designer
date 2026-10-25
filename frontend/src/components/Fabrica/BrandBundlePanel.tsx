@@ -86,7 +86,7 @@ export default function BrandBundlePanel({ slug }: BrandBundlePanelProps) {
         title="Ver referências de marca usadas pela IA"
       >
         <Sparkles size={12} className={s.triggerIcon} />
-        <span className={s.triggerLabel}>Referências de Marca</span>
+        <span className={s.triggerLabel}>Referências</span>
         {open ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
       </button>
 

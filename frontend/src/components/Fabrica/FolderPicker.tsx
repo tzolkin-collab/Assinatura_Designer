@@ -152,26 +152,26 @@ export default function FolderPicker({ marca, sessionId, disabled }: FolderPicke
   const arvore = achatarArvore(folders);
 
   return (
-    <div ref={boxRef} style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 6, padding: '0 4px 6px', fontSize: 12 }}>
-      <span style={{ color: 'var(--color-text-muted, #6b7280)' }}>Salvar em:</span>
+    <div ref={boxRef} style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
 
       <button
         type="button"
         onClick={() => setAberto((v) => !v)}
         disabled={disabled || !pronto}
-        title={pronto ? 'Escolher a pasta onde este design vai nascer' : 'Aguardando a sessão iniciar'}
+        title={pronto ? 'Salvar em: escolher a pasta onde este design vai nascer' : 'Aguardando a sessão iniciar'}
+        aria-label={`Salvar em: ${selecionada ? selecionada.name : 'sem pasta'}`}
         style={{
           display: 'flex', alignItems: 'center', gap: 6,
-          background: 'transparent',
-          border: '1px solid var(--color-border, rgba(0,0,0,0.12))',
-          borderRadius: 999, padding: '3px 10px',
+          background: 'var(--color-surface)',
+          border: '1px solid var(--color-border-hover)',
+          borderRadius: 999, height: 30, padding: '0 12px',
           cursor: disabled || !pronto ? 'not-allowed' : 'pointer',
           opacity: disabled || !pronto ? 0.5 : 1,
-          fontSize: 12, color: 'inherit',
+          fontSize: 13, fontWeight: 500, color: 'var(--color-text-secondary)',
         }}
       >
         <Folder size={13} />
-        <span>{selecionada ? selecionada.name : 'Sem pasta'}</span>
+        <span style={{ color: 'var(--color-text)' }}>{selecionada ? selecionada.name : 'Sem pasta'}</span>
         {salvando ? <Loader2 size={12} className="animate-spin" /> : <ChevronDown size={12} />}
       </button>
 
@@ -180,7 +180,7 @@ export default function FolderPicker({ marca, sessionId, disabled }: FolderPicke
       {aberto && (
         <div
           style={{
-            position: 'absolute', bottom: '100%', left: 60, marginBottom: 6,
+            position: 'absolute', bottom: '100%', left: 0, marginBottom: 6,
             minWidth: 220, maxHeight: 280, overflowY: 'auto',
             background: '#fff', color: '#1f2937',
             border: '1px solid rgba(0,0,0,0.08)', borderRadius: 10,

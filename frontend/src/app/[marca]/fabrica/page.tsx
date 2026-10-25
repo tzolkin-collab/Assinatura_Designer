@@ -17,6 +17,7 @@ const ArtifactPanel = dynamic(() => import('@/components/Fabrica/ArtifactPanel')
 import { RealtimePreview } from '@/components/Fabrica/RealtimePreview';
 const AiSpendBadge = dynamic(() => import('@/components/AiUsage/AiSpendBadge'), { ssr: false });
 import { ChatMessageRow } from '@/components/Fabrica/ChatMessageRow';
+import SlideThumb from '@/components/DesignDocument/SlideThumb';
 import BriefingPanel from '@/components/Fabrica/BriefingPanel';
 import { composeBriefing, EMPTY_BRIEFING, isBriefingEmpty, type Briefing } from '@/lib/briefing';
 import BrandBundlePanel from '@/components/Fabrica/BrandBundlePanel';
@@ -568,7 +569,7 @@ export default function FabricaPage() {
             </button>
             <div className={s.connectionBadge} role="status" title={connected ? 'Conectado' : 'Reconectando...'}>
               <span className={`${s.connectionDot} ${connected ? s.connectionOnline : s.connectionOffline}`} />
-              <span className={s.connectionLabel}>{connected ? 'Online' : 'Reconectando...'}</span>
+              {!connected && <span className={s.connectionLabel}>Reconectando...</span>}
             </div>
           </div>
         </div>
@@ -584,9 +585,6 @@ export default function FabricaPage() {
         >
           {displayMessages.length === 0 ? (
             <div className={s.emptyState}>
-              <div className={s.emptyIcon}>
-                <Sparkles size={22} />
-              </div>
               <p className={s.emptyTitle}>O que você quer criar?</p>
               <p className={s.emptySubtitle}>
                 Descreva a peça — apresentação, carrossel, proposta — e o agente conduz o processo.
@@ -825,15 +823,17 @@ export default function FabricaPage() {
               </div>
             )}
 
+            <div className={s.optionsRow}>
             {/* Referências que a IA vai usar na geração — visíveis ANTES de
                 gerar, junto dos demais controles de pré-envio (destino, anexo). */}
-            <BrandBundlePanel slug={marca} />
+              <BrandBundlePanel slug={marca} />
 
             {/* Destino do deck, escolhido ANTES de gerar — sem isto ele nascia solto
                 na raiz e só era achado caçando na galeria. */}
-            <FolderPicker marca={marca} sessionId={sessionId} disabled={busy || !canGenerate} />
+              <FolderPicker marca={marca} sessionId={sessionId} disabled={busy || !canGenerate} />
 
-            <BriefingPanel value={briefing} onChange={setBriefing} disabled={busy || !canGenerate} />
+              <BriefingPanel value={briefing} onChange={setBriefing} disabled={busy || !canGenerate} />
+            </div>
 
             <div className={`${s.inputBar} ${!canGenerate ? s.inputBarDisabled : ''}`}>
               <button
@@ -976,10 +976,10 @@ export default function FabricaPage() {
                   </button>
                 </div>
               ) : (
-                <>
-                  <p className={s.previewEmptyTitle}>Preview em tempo real</p>
-                  <p className={s.previewEmptyHint}>O design aparece aqui durante a geração</p>
-                </>
+                <div className={s.previewGhost}>
+                  <p className={s.previewEmptyTitle}>A arte aparece aqui</p>
+                  <p className={s.previewEmptyHint}>Cada slide entra no preview assim que fica pronto, enquanto o resto ainda é gerado.</p>
+                </div>
               )}
             </div>
           </div>
@@ -1024,14 +1024,15 @@ export default function FabricaPage() {
                   <span className={s.slideSkeletonLabel}>Gerando slide {safeSlide + 1}…</span>
                 </div>
               ) : isHtmlDesign ? (
-                <HtmlSlideRenderer
-                  // key força remount por slide: dispara a transição de entrada
-                  // (fade/scale) do CSS a cada slide novo em vez de um "pop" instantâneo.
-                  key={`slide-${safeSlide}`}
-                  content={currentDesign[0] as unknown as HtmlDesignPostContent}
-                  activeSlide={safeSlide}
-                  hideNav
-                />
+                <div className={s.slideFrame} key={`slide-${safeSlide}`}>
+                  <HtmlSlideRenderer
+                    // key no quadro força remount por slide: dispara a transição de entrada
+                    // (fade/scale) do CSS a cada slide novo em vez de um "pop" instantâneo.
+                    content={currentDesign[0] as unknown as HtmlDesignPostContent}
+                    activeSlide={safeSlide}
+                    hideNav
+                  />
+                </div>
               ) : null}
             </div>
 
@@ -1054,18 +1055,27 @@ export default function FabricaPage() {
               </div>
             )}
 
-            {/* Thumbnail strip */}
+            {/* Faixa de miniaturas: o slide de verdade; o que ainda não chegou é um espaço reservado */}
             {slideCount > 1 && (
               <div className={s.thumbStrip}>
-                {Array.from({ length: slideCount }).map((_, i) => (
-                  <button
-                    key={i}
-                    className={`${s.thumb} ${i === safeSlide ? s.thumbActive : ''}`}
-                    onClick={() => setPreviewSlide(i)}
-                  >
-                    {i + 1}
-                  </button>
-                ))}
+                {Array.from({ length: slideCount }).map((_, i) => {
+                  const pronto = isHtmlDesign && htmlDesignContent?.slides?.[i];
+                  return (
+                    <button
+                      key={i}
+                      type="button"
+                      className={`${s.thumb} ${i === safeSlide ? s.thumbActive : ''}`}
+                      onClick={() => setPreviewSlide(i)}
+                      aria-label={`Slide ${i + 1}`}
+                      aria-current={i === safeSlide ? 'true' : undefined}
+                    >
+                      {pronto && htmlDesignContent
+                        ? <SlideThumb content={htmlDesignContent} index={i} className={s.thumbFrame} />
+                        : <span className={s.thumbPending} />}
+                      <span className={s.thumbNum}>{i + 1}</span>
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>
