@@ -7,6 +7,7 @@ import { getApiErrorMessage } from '@/lib/api';
 import {
   EDIT_ALL_SCOPE,
   EXPORT_SCOPE,
+  PREVIEW_SCOPE,
   READ_SCOPE,
   WRITE_SCOPE,
   formatRemaining,
@@ -29,6 +30,8 @@ function ConsentContent() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [access, setAccess] = useState<Access>('read');
   const [allowExport, setAllowExport] = useState(false);
+  // Desligado por padrão: só liga se a pessoa marcar.
+  const [allowPreview, setAllowPreview] = useState(false);
   const [allBrands, setAllBrands] = useState(false);
   const [sending, setSending] = useState<'approve' | 'deny' | null>(null);
   const [leaving, setLeaving] = useState(false);
@@ -105,7 +108,7 @@ function ConsentContent() {
     try {
       const accessScope =
         access === 'edit_all' && wantsEditAll ? EDIT_ALL_SCOPE : access !== 'read' && wantsWrite ? WRITE_SCOPE : READ_SCOPE;
-      const scopes = decision === 'approve' ? [accessScope, ...(allowExport ? [EXPORT_SCOPE] : [])] : undefined;
+      const scopes = decision === 'approve' ? [accessScope, ...(allowExport ? [EXPORT_SCOPE] : []), ...(allowPreview ? [PREVIEW_SCOPE] : [])] : undefined;
       const { redirectUrl } = await mcpApi.decideConsent(requestId, {
         decision,
         ...(decision === 'approve'
@@ -284,6 +287,21 @@ function ConsentContent() {
                 O agente pode gerar PDF, imagens, PPTX ou HTML de uma peça e receber um link para baixar, e enviar a peça
                 para o Canva (só em marcas onde você é editor ou mais). É à parte de ver e salvar: sem isto, ele não exporta.
                 Há um limite de pedidos por minuto.
+              </span>
+            </span>
+          </label>
+        </fieldset>
+
+        <fieldset className={styles.group}>
+          <legend>Navegador (somente leitura)</legend>
+          <label className={styles.option}>
+            <input type="checkbox" checked={allowPreview} onChange={(e) => setAllowPreview(e.target.checked)} />
+            <span className={styles.optionText}>
+              <span>Permitir que o agente abra o Designer num navegador, só para ver</span>
+              <span className={styles.optionHint}>
+                O agente recebe um link de uso único e vê o editor e a galeria das marcas marcadas acima, sem senha. Não
+                edita, não exporta e não apaga nada. A sessão acaba sozinha em 2 horas, ou antes se ele a encerrar ou se
+                você revogar a conexão. Vem desligado: marque só se quiser.
               </span>
             </span>
           </label>

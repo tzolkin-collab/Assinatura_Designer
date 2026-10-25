@@ -13,6 +13,8 @@ const PUBLIC_PREFIXES = [
   '/convite',
   '/apresentacao',
   '/icon.svg',
+  // Entrada da sessão de leitura do agente: o código de uso único vem no fragmento (#code=), a página troca por token.
+  '/mcp/entrar',
 ];
 
 // Palavras reservadas de primeiro segmento que NÃO são slugs de marca.
