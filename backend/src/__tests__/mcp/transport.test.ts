@@ -70,7 +70,7 @@ describe('autenticação (401 com WWW-Authenticate)', () => {
     expect(res.status).toBe(401);
     const header = res.headers['www-authenticate'];
     // Formato EXATO do doc de auth do ChatGPT, e sem `error` (nenhuma credencial foi enviada).
-    expect(header).toBe(`Bearer resource_metadata="${METADATA_URL}", scope="designer.read designer.write designer.edit_all designer.export"`);
+    expect(header).toBe(`Bearer resource_metadata="${METADATA_URL}", scope="designer.read designer.write designer.edit_all designer.export designer.preview"`);
     // O metadata que o header aponta realmente existe e descreve o recurso certo.
     const meta = await request(h.app).get(new URL(METADATA_URL).pathname);
     expect(meta.body.resource).toBe(RESOURCE);
@@ -217,6 +217,7 @@ describe('descoberta (initialize / tools/list)', () => {
     const tools = res.body.result.tools as Array<Record<string, any>>;
     expect(tools.map((t) => t.name).sort()).toEqual([
       'create_version',
+      'end_frontend_session',
       'export_file',
       'export_to_canva',
       'get_brand_kit',
@@ -234,6 +235,7 @@ describe('descoberta (initialize / tools/list)', () => {
       'restore_version',
       'save_presentation',
       'set_slide_photo',
+      'start_frontend_session',
       'update_slide',
       'upload_asset',
     ]);
@@ -253,6 +255,9 @@ describe('descoberta (initialize / tools/list)', () => {
         // Saída do Designer: openWorldHint verdadeiro (o arquivo vira um link, o Canva recebe um design).
         export_file: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
         export_to_canva: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
+        // Sessão de navegador somente leitura (designer.preview): muda estado do servidor, mas não escreve em peça nenhuma.
+        start_frontend_session: { destructiveHint: false, idempotentHint: false },
+        end_frontend_session: { destructiveHint: false, idempotentHint: true },
       };
       const exportReads = ['get_export_status', 'get_canva_export_status'];
       const isExport = tool.name.includes('export');
@@ -265,7 +270,8 @@ describe('descoberta (initialize / tools/list)', () => {
       });
       expect(exportReads.every((n) => !(n in writeHints))).toBe(true);
       // Doc do Apps SDK: securitySchemes no descritor + espelho em _meta.
-      const scopes = [isExport ? 'designer.export' : writes ? 'designer.write' : 'designer.read'];
+      const isPreview = tool.name.endsWith('_frontend_session');
+      const scopes = [isPreview ? 'designer.preview' : isExport ? 'designer.export' : writes ? 'designer.write' : 'designer.read'];
       expect(tool.securitySchemes).toEqual([{ type: 'oauth2', scopes }]);
       expect(tool._meta.securitySchemes).toEqual([{ type: 'oauth2', scopes }]);
       expect(tool.inputSchema.type).toBe('object');

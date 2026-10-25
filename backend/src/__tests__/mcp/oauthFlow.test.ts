@@ -45,7 +45,7 @@ describe('metadados', () => {
     expect(res.body.token_endpoint).toBe(`${ISSUER}/token`);
     expect(res.body.registration_endpoint).toBe(`${ISSUER}/register`);
     expect(res.body.revocation_endpoint).toBe(`${ISSUER}/revoke`);
-    expect(res.body.scopes_supported).toEqual(['designer.read', 'designer.write', 'designer.edit_all', 'designer.export']);
+    expect(res.body.scopes_supported).toEqual(['designer.read', 'designer.write', 'designer.edit_all', 'designer.export', 'designer.preview']);
     // CIMD não é implementado: não pode ser anunciado.
     expect(res.body.client_id_metadata_document_supported).toBeUndefined();
   });
@@ -57,7 +57,7 @@ describe('metadados', () => {
       expect(res.status).toBe(200);
       expect(res.body.resource).toBe(RESOURCE);
       expect(res.body.authorization_servers).toEqual([ISSUER]);
-      expect(res.body.scopes_supported).toEqual(['designer.read', 'designer.write', 'designer.edit_all', 'designer.export']);
+      expect(res.body.scopes_supported).toEqual(['designer.read', 'designer.write', 'designer.edit_all', 'designer.export', 'designer.preview']);
     },
   );
 
@@ -258,7 +258,7 @@ describe('/authorize', () => {
     const res = await authorize(h.app, query);
     const requestId = requestIdFromLocation(res.headers.location);
     const view = await request(h.app).get(`/api/mcp/consent/${requestId}`).set(h.asUser('user-1'));
-    expect(view.body.data.scopes).toEqual(['designer.read', 'designer.write', 'designer.edit_all', 'designer.export']);
+    expect(view.body.data.scopes).toEqual(['designer.read', 'designer.write', 'designer.edit_all', 'designer.export', 'designer.preview']);
   });
 });
 
