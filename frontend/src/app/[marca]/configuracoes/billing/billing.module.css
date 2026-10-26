@@ -18,9 +18,11 @@
   margin-bottom: var(--space-6);
 }
 .monthSelect {
+  width: auto;
+  min-width: 200px;
   padding: var(--space-2) var(--space-4);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border-hover);
+  border-radius: var(--radius-md);
   background: var(--color-surface);
   color: var(--color-text);
   font-size: var(--text-sm);
@@ -41,28 +43,25 @@
   margin-bottom: var(--space-6);
 }
 .kpi {
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-xl);
-  padding: var(--space-5);
+  border-top: 1px solid var(--color-border);
+  padding: var(--space-4) 0 0;
 }
 .kpiLabel {
-  font-size: var(--text-xs);
-  color: var(--color-text-tertiary);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
 }
 .kpiValue {
-  font-size: var(--text-2xl);
-  font-weight: 700;
+  font-size: var(--text-3xl);
+  font-weight: 600;
+  letter-spacing: -0.02em;
   color: var(--color-text);
   margin-top: var(--space-2);
   font-variant-numeric: tabular-nums;
 }
 .kpiSub {
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
   color: var(--color-text-secondary);
-  margin-top: var(--space-2);
+  margin-top: var(--space-1);
 }
 
 /* Tabela */

@@ -1,7 +1,10 @@
 /* Painel do artefato (lado direito da Fábrica): barra de ferramentas, faixa do Canva e diálogo de hospedagem. */
 .root {
-  position: absolute;
-  inset: 0;
+  /* No fluxo do painel de preview, abaixo da barra de aprovação e do cartão de notificação.
+     Com position:absolute + inset:0 ele cobria os dois: o modo Auto/Manual e os pedidos de
+     aprovação ficavam escondidos atrás do artefato assim que existia uma arte. */
+  position: relative;
+  flex: 1 1 0;
   display: flex;
   flex-direction: column;
   min-height: 0;

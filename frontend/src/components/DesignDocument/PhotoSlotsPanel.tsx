@@ -29,12 +29,19 @@ interface PhotoSlotsPanelProps {
   slideHtml: string;
   /** Chamado com o slide SANITIZADO devolvido pelo servidor. */
   onApplied: (slideIndex: number, slide: SlideCode) => void;
+  /** Slide sem espaço de foto: leva a pessoa ao pedido de IA já escrito (cria um espaço vazio). */
+  onPedirEspaco?: () => void;
 }
 
 const muted = 'var(--color-text-muted, #6b7280)';
 const border = '1px solid var(--color-border, rgba(0,0,0,0.12))';
 
 const isPhoto = (a: BrandAsset) => a.fileType.startsWith('image/');
+
+// Origens que costumam ser foto de verdade (enviada ou importada); identidade e brandbook (paleta, fontes,
+// moodboard) vêm depois na lista. Imagem gerada por IA não entra: a regra do painel é foto real.
+const ORIGEM_FOTO = new Set(['upload', 'drive', 'canva', 'asana']);
+const ordemOrigem = (a: BrandAsset) => (ORIGEM_FOTO.has(a.source ?? '') ? 0 : 1);
 
 interface Framing { mode: 'manual' | 'kept' | 'auto' | 'center'; faceVisible?: number | null }
 
@@ -50,7 +57,7 @@ export function framingNotice(f: Framing | undefined): string | null {
   return null;
 }
 
-export default function PhotoSlotsPanel({ postId, marca, slideIndex, slideHtml, onApplied }: PhotoSlotsPanelProps) {
+export default function PhotoSlotsPanel({ postId, marca, slideIndex, slideHtml, onApplied, onPedirEspaco }: PhotoSlotsPanelProps) {
   const { assets, loading: carregandoBiblioteca, uploading, error: erroBiblioteca, upload } = useBrandAssets(marca);
   const [slots, setSlots] = useState<PhotoSlot[] | null>(null);
   const [escolhendo, setEscolhendo] = useState<string | null>(null); // slot com o seletor aberto
@@ -98,10 +105,13 @@ export default function PhotoSlotsPanel({ postId, marca, slideIndex, slideHtml, 
   }, [upload, aplicar]);
 
   if (slots === null && !erro) {
-    return <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: muted }}><Loader2 size={13} /> Lendo o slide…</div>;
+    return <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: muted }}><Loader2 size={13} className="animate-spin" /> Lendo o slide…</div>;
   }
 
-  const fotos = assets.filter(isPhoto);
+  const emUso = new Set((slots ?? []).map((s) => s.src).filter(Boolean));
+  const fotos = assets
+    .filter((a) => isPhoto(a) && (a.source !== 'ai-generated' || emUso.has(a.url)))
+    .sort((a, b) => ordemOrigem(a) - ordemOrigem(b));
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -110,13 +120,27 @@ export default function PhotoSlotsPanel({ postId, marca, slideIndex, slideHtml, 
         Só entram fotos reais da biblioteca da marca. Nada é gerado por IA, e cada troca cria uma versão que dá para restaurar.
       </p>
 
+      {ocupado && (
+        <div role="status" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, background: 'var(--color-brand-light, #fff4ed)', borderRadius: 8, padding: '8px 10px' }}>
+          <Loader2 size={14} className="animate-spin" />
+          <span>Aplicando a foto no slide… o enquadramento é calculado pelo assunto, pode levar alguns segundos.</span>
+        </div>
+      )}
       {erro && <div style={{ fontSize: 12, color: '#b91c1c', background: '#fef2f2', borderRadius: 8, padding: '6px 10px' }}>{erro}</div>}
       {aviso && <div role="status" style={{ fontSize: 12, background: 'var(--color-bg-secondary, #f3f4f6)', borderRadius: 8, padding: '6px 10px' }}>{aviso}</div>}
 
       {slots && slots.length === 0 && (
         <p style={{ fontSize: 12.5, color: muted, margin: 0 }}>
-          Este slide não tem espaço reservado para foto. Se ele precisa de uma, peça no chat: &quot;adicione uma área de foto à direita&quot;.
+          Este slide não tem espaço reservado para foto.
         </p>
+      )}
+      {slots && slots.length === 0 && onPedirEspaco && (
+        <div>
+          <button type="button" onClick={onPedirEspaco}
+            style={{ fontSize: 12.5, padding: '6px 12px', borderRadius: 8, border, background: 'transparent', cursor: 'pointer' }}>
+            Pedir à IA um espaço de foto
+          </button>
+        </div>
       )}
 
       {slots?.map((s) => {
@@ -138,7 +162,7 @@ export default function PhotoSlotsPanel({ postId, marca, slideIndex, slideHtml, 
                 <div style={{ fontSize: 13, fontWeight: 500 }}>Foto {s.slot}</div>
                 <div style={{ fontSize: 11.5, color: muted }}>{s.hasPhoto ? 'Com foto' : 'Vazio, esperando uma foto'}</div>
               </div>
-              {busy && <Loader2 size={14} />}
+              {busy && <Loader2 size={14} className="animate-spin" />}
             </div>
 
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -157,7 +181,7 @@ export default function PhotoSlotsPanel({ postId, marca, slideIndex, slideHtml, 
             {escolhendo === s.slot && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: uploading ? 'wait' : 'pointer', color: 'var(--color-brand, #FF6B35)' }}>
-                  {uploading ? <Loader2 size={12} /> : <Upload size={12} />} Enviar uma foto nova
+                  {uploading ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />} Enviar uma foto nova
                   <input type="file" accept="image/*" hidden disabled={uploading || busy}
                     onChange={(e) => { void enviarFoto(s.slot, e.target.files?.[0]); e.target.value = ''; }} />
                 </label>
@@ -166,7 +190,7 @@ export default function PhotoSlotsPanel({ postId, marca, slideIndex, slideHtml, 
                 {!carregandoBiblioteca && fotos.length === 0 && (
                   <div style={{ fontSize: 12, color: muted }}>A biblioteca da marca ainda não tem fotos. Envie uma acima.</div>
                 )}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(72px, 1fr))', gap: 6, maxHeight: 220, overflowY: 'auto' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(72px, 1fr))', gap: 6, maxHeight: 220, overflowY: 'auto', opacity: busy ? 0.5 : 1, transition: 'opacity 120ms' }} aria-busy={busy}>
                   {fotos.map((a) => {
                     const atual = a.url === s.src;
                     return (

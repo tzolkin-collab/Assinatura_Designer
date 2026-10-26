@@ -301,6 +301,18 @@ textarea:disabled {
   to { transform: rotate(360deg); }
 }
 
+/* Ícone de carregamento girando. O projeto não tem Tailwind: as classes "animate-spin" espalhadas pelo código
+   não existiam, e todo spinner era um ícone parado (parecia que nada estava acontecendo). */
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-spin {
+    animation-duration: 2.5s;
+  }
+}
+
 /* Alvo de toque dos links "Voltar" das telas de marca (cada módulo CSS tem o seu .backLink de 21px de altura). */
 @media (pointer: coarse), (max-width: 768px) {
   [class*="backLink"] {

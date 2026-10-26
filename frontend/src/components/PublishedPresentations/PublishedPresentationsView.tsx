@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import {
-  AlertTriangle, Check, Copy, ExternalLink, Info, Loader2, MonitorPlay, Pencil, RefreshCw, Search, X,
+  AlertTriangle, Check, Copy, ExternalLink, Loader2, Pencil, RefreshCw, Search, X,
 } from 'lucide-react';
 import CoverFrame from './CoverFrame';
 import UnpublishDialog from './UnpublishDialog';
@@ -85,26 +85,16 @@ export default function PublishedPresentationsView({ slug, posts, loading, error
         <div>
           <h1 className={styles.title}>Apresentações publicadas</h1>
           <p className={styles.subtitle}>
-            Páginas públicas com link: qualquer pessoa com o endereço acessa, sem login.
+            Qualquer pessoa com o endereço acessa, sem login. O link mostra sempre a <strong>versão mais recente</strong>:
+            o que você altera no editor já está no ar.
           </p>
         </div>
         {!loading && posts.length > 0 && (
           <span className={styles.count} aria-label={`${posts.length} publicadas`}>
-            <MonitorPlay size={14} aria-hidden="true" />
             {posts.length} {posts.length === 1 ? 'publicada' : 'publicadas'}
           </span>
         )}
       </header>
-
-      {!loading && posts.length > 0 && (
-        <p className={styles.note}>
-          <Info size={15} aria-hidden="true" />
-          <span>
-            O endereço público sempre mostra a <strong>versão mais recente</strong> da arte: o que você
-            altera no editor já está no ar, sem precisar publicar de novo.
-          </span>
-        </p>
-      )}
 
       {error && (
         <div className={styles.errorBox} role="alert">
@@ -175,7 +165,6 @@ export default function PublishedPresentationsView({ slug, posts, loading, error
       ) : posts.length === 0 ? (
         error ? null : (
           <div className={styles.empty}>
-            <div className={styles.emptyIcon}><MonitorPlay size={26} aria-hidden="true" /></div>
             <h2 className={styles.emptyTitle}>Nenhuma apresentação publicada ainda</h2>
             <p className={styles.emptyText}>
               Publique uma apresentação para gerar um link que qualquer pessoa abre no navegador,

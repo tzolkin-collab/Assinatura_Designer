@@ -60,7 +60,7 @@ export default function BillingPage() {
             <div className={styles.kpi}>
               <div className={styles.kpiLabel}>Custo total do mês</div>
               <div className={styles.kpiValue}>{formatCost(billing.totals.cost)}</div>
-              {billing.totals.cost.total > 0 && (
+              {billing.totals.cost.total > 0 && billing.taxRate > 0 && (
                 <div className={styles.kpiSub}>
                   Gasto {formatMoney(billing.totals.cost.base, billing.totals.cost.currency)}
                   {billing.taxRate > 0 && (

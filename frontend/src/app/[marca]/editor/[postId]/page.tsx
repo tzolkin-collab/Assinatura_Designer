@@ -11,16 +11,17 @@
 // posts migrados para html-design em 2026-07-18) foram removidos — o histórico
 // vive no git e nos PostVersions.
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import {
-  ArrowLeft, Check, ChevronDown, Clock, Crosshair, Download, History, ImagePlus, Loader2,
-  MessageSquareText, Presentation, RotateCcw, Sparkles, X,
+  ArrowLeft, Check, ChevronDown, ChevronLeft, ChevronRight, Clock, Crosshair, Download, History, ImagePlus,
+  Loader2, MessageSquareText, Presentation, RotateCcw, Sparkles, X,
 } from 'lucide-react';
 import { api, getApiErrorMessage } from '@/lib/api';
 import Button from '@/components/ui/Button';
 import styles from './editorPost.module.css';
 import HtmlSlideRenderer from '@/components/DesignDocument/HtmlSlideRenderer';
+import SlideThumb from '@/components/DesignDocument/SlideThumb';
 import SlideCodeEditor, { type SlideCode } from '@/components/DesignDocument/SlideCodeEditor';
 import PhotoSlotsPanel from '@/components/DesignDocument/PhotoSlotsPanel';
 import GenerationCostChip from '@/components/GenerationCost/GenerationCostChip';
@@ -74,6 +75,21 @@ function formatDate(iso: string): string {
 }
 
 type Painel = 'ia' | 'fotos' | 'codigo' | 'versoes';
+
+const TIPO_LABEL: Record<string, string> = {
+  PRESENTATION: 'Apresentação',
+  CAROUSEL: 'Carrossel',
+  SINGLE_IMAGE: 'Imagem',
+};
+
+// Pedidos comuns, um toque: preenchem a caixa (não enviam), para a pessoa ajustar antes de aplicar.
+const SUGESTOES: Array<{ label: string; texto: string }> = [
+  { label: 'Título maior', texto: 'Deixa o título maior' },
+  { label: 'Texto mais curto', texto: 'Resume o texto, mantendo só o essencial' },
+  { label: 'Mais respiro', texto: 'Dá mais espaço entre os elementos e nas margens' },
+  { label: 'Mais contraste', texto: 'Aumenta o contraste entre o texto e o fundo' },
+  { label: 'Fundo na cor da marca', texto: 'Troca o fundo para a cor principal da marca' },
+];
 
 // ── Página ────────────────────────────────────────────────────────────────────
 
@@ -166,7 +182,30 @@ export default function EditorPage() {
     if (painel === 'versoes') void carregarVersoes();
   }, [painel, carregarVersoes]);
 
+  const instrucaoRef = useRef<HTMLTextAreaElement>(null);
+
   const slideCount = content?.slides.length ?? 0;
+  const irPara = useCallback((i: number) => {
+    setActiveSlide(Math.min(Math.max(i, 0), Math.max(0, slideCount - 1)));
+  }, [slideCount]);
+
+  // Setas trocam de slide, menos quando a pessoa está digitando.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+      setActiveSlide((cur) => Math.min(Math.max(cur + (e.key === 'ArrowRight' ? 1 : -1), 0), Math.max(0, slideCount - 1)));
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [slideCount]);
+
+  const usarSugestao = (texto: string) => {
+    setInstrucao(texto);
+    instrucaoRef.current?.focus();
+  };
   const safeSlide = Math.min(activeSlide, Math.max(0, slideCount - 1));
   const canvasW = content?.width ?? 1080;
   const canvasH = content?.height ?? 1080;
@@ -243,7 +282,7 @@ export default function EditorPage() {
   if (carregando) {
     return (
       <div className={styles.center}>
-        <span className={styles.loading}><Loader2 size={16} /> Carregando design…</span>
+        <span className={styles.loading}><Loader2 size={16} className="animate-spin" /> Carregando design…</span>
       </div>
     );
   }
@@ -275,16 +314,21 @@ export default function EditorPage() {
     </button>
   );
 
+  const tituloPost = post?.name?.trim() || `${TIPO_LABEL[post?.type ?? ''] ?? 'Design'} sem nome`;
+  const semNome = !post?.name?.trim();
+
   return (
     <div className={styles.page}>
       <header className={styles.topbar}>
         <button type="button" onClick={() => router.push(`/${marca}/galeria`)} className={styles.back}>
           <ArrowLeft size={15} /> Galeria
         </button>
-        <div className={styles.title}>{post?.name?.trim() || `Design ${postId.slice(0, 8)}`}</div>
-        <span className={styles.meta}>
-          {slideCount} slide{slideCount > 1 ? 's' : ''} · {canvasW}×{canvasH}
-        </span>
+        <div className={styles.titleBlock}>
+          <div className={[styles.title, semNome ? styles.titleMuted : ''].join(' ')} title={tituloPost}>{tituloPost}</div>
+          <span className={styles.meta}>
+            {slideCount} slide{slideCount > 1 ? 's' : ''} · {canvasW}×{canvasH}
+          </span>
+        </div>
 
         <div className={styles.actions}>
           <GenerationCostChip postId={postId} refreshKey={custoKey} />
@@ -295,10 +339,10 @@ export default function EditorPage() {
               disabled={exportando !== null}
               aria-haspopup="menu"
               aria-expanded={menuBaixar}
-              className={styles.btn}
+              className={styles.btnPrimary}
             >
               {exportando
-                ? <><Loader2 size={14} /> {exportando.formato.toUpperCase()} {exportando.done}/{exportando.total}</>
+                ? <><Loader2 size={14} className="animate-spin" /> {exportando.formato.toUpperCase()} {exportando.done}/{exportando.total}</>
                 : <><Download size={14} /> Baixar <ChevronDown size={13} /></>}
             </button>
             {menuBaixar && (
@@ -328,13 +372,14 @@ export default function EditorPage() {
 
       {erro && <div className={styles.alert} role="alert">{erro}</div>}
 
-      <div className={styles.body}>
-        <div className={styles.stage}>
-          <div className={styles.stageTools}>
+      <div className={[styles.body, slideCount > 1 ? '' : styles.bodySolo].join(' ')}>
+        <main className={styles.stage}>
+          <div className={styles.stageBar}>
             <button
               type="button"
               onClick={() => setInspecionando(v => !v)}
               title="Clique em um elemento do slide para mirar a edição de IA nele"
+              aria-pressed={inspecionando}
               className={[styles.btn, inspecionando ? styles.btnActive : ''].join(' ')}
             >
               <Crosshair size={14} /> {inspecionando ? 'Clique em um elemento do slide…' : 'Selecionar elemento'}
@@ -342,34 +387,50 @@ export default function EditorPage() {
             {alvo && !inspecionando && (
               <span className={styles.target}>alvo: <code className={styles.code}>{alvo.identifier}</code></span>
             )}
-          </div>
-          <div
-            className={[styles.canvas, inspecionando ? styles.canvasInspecting : ''].join(' ')}
-            style={{ aspectRatio: `${canvasW} / ${canvasH}` }}
-          >
-            <HtmlSlideRenderer content={content} activeSlide={safeSlide} onSlideChange={setActiveSlide} hideNav inspectorMode={inspecionando} />
-          </div>
-          {slideCount > 1 && (
-            <div className={styles.strip}>
-              {content.slides.map((_, i) => (
-                <button
-                  key={i}
-                  type="button"
-                  onClick={() => setActiveSlide(i)}
-                  aria-label={`Slide ${i + 1}`}
-                  aria-current={i === safeSlide}
-                  className={[styles.slideBtn, i === safeSlide ? styles.slideBtnActive : ''].join(' ')}
-                >
-                  {i + 1}
+            {slideCount > 1 && (
+              <div className={styles.pager} role="group" aria-label="Navegar entre slides">
+                <button type="button" className={styles.iconBtn} onClick={() => irPara(safeSlide - 1)} disabled={safeSlide === 0} aria-label="Slide anterior">
+                  <ChevronLeft size={16} />
                 </button>
-              ))}
+                <span className={styles.pagerCount} aria-live="polite">{safeSlide + 1} / {slideCount}</span>
+                <button type="button" className={styles.iconBtn} onClick={() => irPara(safeSlide + 1)} disabled={safeSlide >= slideCount - 1} aria-label="Próximo slide">
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div className={styles.canvasArea}>
+            <div
+              className={[styles.canvas, inspecionando ? styles.canvasInspecting : ''].join(' ')}
+              style={{ aspectRatio: `${canvasW} / ${canvasH}`, ['--ar' as string]: canvasW / canvasH }}
+            >
+              <HtmlSlideRenderer content={content} activeSlide={safeSlide} onSlideChange={setActiveSlide} hideNav inspectorMode={inspecionando} />
             </div>
-          )}
-        </div>
+          </div>
+        </main>
+
+        {slideCount > 1 && (
+          <nav className={styles.rail} aria-label="Slides do deck">
+            {content.slides.map((_, i) => (
+              <button
+                key={i}
+                type="button"
+                onClick={() => setActiveSlide(i)}
+                aria-label={`Slide ${i + 1}`}
+                aria-current={i === safeSlide ? 'true' : undefined}
+                className={[styles.thumb, i === safeSlide ? styles.thumbActive : ''].join(' ')}
+              >
+                <SlideThumb content={content} index={i} className={styles.thumbFrame} />
+                <span className={styles.thumbNum}>{i + 1}</span>
+              </button>
+            ))}
+          </nav>
+        )}
 
         <div className={styles.panel}>
           <div className={styles.tabs} role="tablist">
-            {aba('ia', 'Editar com IA', Sparkles)}
+            {aba('ia', 'Editar', Sparkles)}
             {aba('fotos', espacosDeFoto > 0 ? `Fotos (${espacosDeFoto})` : 'Fotos', ImagePlus)}
             {aba('codigo', 'Código', MessageSquareText)}
             {aba('versoes', 'Versões', History)}
@@ -378,11 +439,9 @@ export default function EditorPage() {
           <div className={styles.panelBody}>
             {painel === 'ia' && (
               <div className={styles.stack}>
-                <div className={styles.heading}>Editar slide {safeSlide + 1} com IA</div>
-                <p className={styles.hint}>
-                  Mesma edição do chat da Fábrica: a IA altera só o que você pedir e preserva o resto do slide. Cada edição cria uma versão.
-                  {!alvo && ' Dica: use "Selecionar elemento" no preview para mirar a edição.'}
-                </p>
+                <div className={styles.heading}>Slide {safeSlide + 1}: o que mudar?</div>
+                <p className={styles.hint}>A IA altera só o que você pedir e guarda uma versão a cada edição.</p>
+
                 {alvo && (
                   <div className={styles.targetBar}>
                     <Crosshair size={14} style={{ flexShrink: 0, color: 'var(--color-brand)' }} />
@@ -395,36 +454,58 @@ export default function EditorPage() {
                     </button>
                   </div>
                 )}
+
+                {erroEdicao && <div className={styles.alertInline} role="alert">{erroEdicao}</div>}
+
+                <div className={styles.composer}>
+                  <textarea
+                    ref={instrucaoRef}
+                    className={styles.textarea}
+                    value={instrucao}
+                    onChange={(e) => setInstrucao(e.target.value)}
+                    onKeyDown={(e) => {
+                      // Enter quebra linha. Numa caixa de 3 linhas, enviar no Enter
+                      // disparava a edição no meio de uma frase.
+                      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void editarComIA(); }
+                    }}
+                    placeholder={alvo ? 'O que fazer com este elemento?' : 'Descreva a mudança, ex.: "troca o fundo para o verde da marca"'}
+                    aria-label="Instrução para a IA"
+                    rows={3}
+                    disabled={editando}
+                  />
+                  <div className={styles.composerBar}>
+                    <span className={styles.fine}>
+                      {typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform) ? '⌘' : 'Ctrl'}+Enter aplica
+                    </span>
+                    <button type="button" className={styles.apply} onClick={() => void editarComIA()} disabled={editando || !instrucao.trim()}>
+                      {editando ? <><Loader2 size={14} className="animate-spin" /> Editando…</> : <><Sparkles size={14} /> Aplicar no slide</>}
+                    </button>
+                  </div>
+                </div>
+
+                <div className={styles.suggestions} role="group" aria-label="Sugestões de edição">
+                  {SUGESTOES.map((sug) => (
+                    <button key={sug.label} type="button" className={styles.chip} disabled={editando} onClick={() => usarSugestao(sug.texto)}>
+                      {sug.label}
+                    </button>
+                  ))}
+                </div>
+
+                {!alvo && (
+                  <p className={styles.fine}>
+                    Para mirar um elemento, use <strong>Selecionar elemento</strong> acima do slide.
+                  </p>
+                )}
+
                 {editLog.length > 0 && (
-                  <div className={styles.stack} style={{ gap: 4 }}>
-                    <div className={styles.fine}>
-                      A IA recebe estas edições como contexto — dá para dizer &quot;agora um pouco menos&quot;.
-                    </div>
+                  <div className={styles.logBlock}>
+                    <div className={styles.logTitle}>Pedidos já aplicados</div>
                     {editLog.map((m, i) => (
-                      <div key={i} className={styles.log}><Check size={12} /> {m}</div>
+                      <div key={i} className={styles.log}><Check size={12} /> <span>{m}</span></div>
                     ))}
+                    <div className={styles.fine}>A IA recebe esses pedidos como contexto: dá para dizer &quot;agora um pouco menos&quot;.</div>
                   </div>
                 )}
-                {erroEdicao && <div className={styles.alert} role="alert">{erroEdicao}</div>}
-                <textarea
-                  className={styles.textarea}
-                  value={instrucao}
-                  onChange={(e) => setInstrucao(e.target.value)}
-                  onKeyDown={(e) => {
-                    // Enter agora quebra linha. Numa textarea de 3 linhas, enviar
-                    // no Enter disparava a edição no meio de uma frase.
-                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void editarComIA(); }
-                  }}
-                  placeholder='Ex: "deixa o título maior", "troca o fundo para o verde da marca", "resume o parágrafo"'
-                  rows={3}
-                  disabled={editando}
-                />
-                <Button onClick={() => void editarComIA()} disabled={editando || !instrucao.trim()}>
-                  {editando ? 'Editando…' : 'Aplicar no slide'}
-                </Button>
-                <span className={styles.fine}>
-                  Enter quebra linha · {typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform) ? '⌘' : 'Ctrl'}+Enter aplica
-                </span>
               </div>
             )}
 
@@ -436,6 +517,10 @@ export default function EditorPage() {
                 slideIndex={safeSlide}
                 slideHtml={content.slides[safeSlide].html}
                 onApplied={aplicarSlide}
+                onPedirEspaco={() => {
+                  setInstrucao('Adicione ao lado do texto uma área de foto vazia (data-photo-slot), sem alterar nenhum texto do slide.');
+                  setPainel('ia');
+                }}
               />
             )}
 
@@ -472,7 +557,7 @@ export default function EditorPage() {
                         disabled={restaurando !== null}
                         title="Restaurar esta versão (o estado atual vira versão antes)"
                       >
-                        {restaurando === v.id ? <Loader2 size={13} /> : <RotateCcw size={13} />} Restaurar
+                        {restaurando === v.id ? <Loader2 size={13} className="animate-spin" /> : <RotateCcw size={13} />} Restaurar
                       </button>
                     </div>
                   ))}
@@ -483,7 +568,7 @@ export default function EditorPage() {
 
           <div className={styles.footnote}>
             <Presentation size={13} />
-            Para edição visual completa, baixe o PPTX e abra no Canva/PowerPoint — o texto continua editável.
+            <span>Para edição visual completa, baixe o PPTX e abra no Canva ou PowerPoint. O texto continua editável.</span>
           </div>
         </div>
       </div>

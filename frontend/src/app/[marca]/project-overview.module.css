@@ -1,51 +1,27 @@
 /* Visão geral do projeto. Sem cartões: blocos separados por linha fina, listas em linhas,
-   estado dito em texto (cor só no que exige atenção). */
+   estado dito em texto (cor só no que exige atenção). Duas colunas: o que a pessoa faz (materiais,
+   desdobramentos) à esquerda; o estado da marca (ficha, identidade, fotos) em uma coluna lateral. */
 .page {
   display: flex;
   flex-direction: column;
-  gap: var(--space-10);
+  gap: var(--space-8);
   padding-bottom: var(--space-12);
-  max-width: 1040px;
+  max-width: 1160px;
 }
 
-/* ── As camadas, no topo ──────────────────────────────────────────────────── */
-.stepper {
-  display: flex;
-  align-items: stretch;
-  gap: 0;
-  flex-wrap: wrap;
-  border-bottom: 1px solid var(--color-border);
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-10);
+  align-items: start;
 }
 
-.step {
+.main,
+.aside {
   display: flex;
   flex-direction: column;
-  padding: var(--space-3) var(--space-5) var(--space-3) 0;
-  margin-right: var(--space-5);
-  margin-bottom: -1px;
-  border-bottom: 2px solid transparent;
-  color: var(--color-text-tertiary);
-  font-size: var(--text-sm);
-  line-height: 1.25;
-  min-width: 140px;
-}
-
-.stepCurrent {
-  color: var(--color-text);
-  border-bottom-color: var(--color-brand-fill);
-}
-
-.stepName {
-  font-weight: 600;
-}
-
-.stepHint {
-  font-size: var(--text-xs);
-  color: var(--color-text-tertiary);
-}
-
-.stepArrow {
-  display: none;
+  gap: var(--space-10);
+  min-width: 0;
 }
 
 /* ── Título e ações ───────────────────────────────────────────────────────── */
@@ -55,6 +31,8 @@
   align-items: flex-end;
   gap: var(--space-4);
   flex-wrap: wrap;
+  padding-bottom: var(--space-6);
+  border-bottom: 1px solid var(--color-border);
 }
 
 .title {
@@ -107,7 +85,7 @@
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
-  height: 36px;
+  height: 40px;
   padding: 0 var(--space-4);
   border-radius: var(--radius-md);
   font-size: var(--text-sm);
@@ -147,17 +125,28 @@
   cursor: not-allowed;
 }
 
+.btnPrimary:focus-visible,
+.btnGhost:focus-visible,
+.recentItem:focus-visible,
+.pendingItem:focus-visible,
+.linkMore:focus-visible,
+.sectionLink:focus-visible,
+.how summary:focus-visible {
+  outline: 2px solid var(--color-brand-fill);
+  outline-offset: 2px;
+}
+
 /* ── Seções ───────────────────────────────────────────────────────────────── */
 .sectionHead {
   display: flex;
   align-items: baseline;
   gap: var(--space-3);
-  margin: 0 0 var(--space-4);
+  margin: 0 0 var(--space-3);
   flex-wrap: wrap;
 }
 
 .sectionTitle {
-  font-size: var(--text-xl);
+  font-size: var(--text-lg);
   font-weight: 600;
   margin: 0;
 }
@@ -167,286 +156,22 @@
   color: var(--color-text-secondary);
 }
 
-a.sectionNote:hover {
-  color: var(--color-brand);
-}
-
-/* ── Configuração do projeto: grade de blocos com fio em cima ─────────────── */
-.configGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  column-gap: var(--space-8);
-  row-gap: var(--space-6);
-}
-
-.configGrid + .configGrid {
-  margin-top: var(--space-6);
-}
-
-.configCard {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-3);
-  padding-top: var(--space-4);
-  border-top: 1px solid var(--color-border);
-  text-decoration: none;
-  color: inherit;
-  transition: border-color var(--transition-fast);
-}
-
-a.configCard:hover {
-  border-top-color: var(--color-text);
-  color: inherit;
-}
-
-.cardHead {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-3);
-}
-
-.cardIcon {
-  width: 20px;
-  height: 20px;
-  color: var(--color-text-secondary);
-  display: grid;
-  place-items: center;
-  flex-shrink: 0;
-  margin-top: 2px;
-}
-
-.cardTitle {
-  font-size: var(--text-base);
-  font-weight: 600;
-  margin: 0 0 2px;
-}
-
-.cardDesc {
-  font-size: var(--text-sm);
-  color: var(--color-text-secondary);
-  margin: 0;
-  line-height: var(--leading-normal);
-}
-
-.chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-1) var(--space-2);
-  margin-top: auto;
-}
-
-.chip {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-1);
-  padding: 1px 8px;
-  border-radius: var(--radius-sm);
-  font-size: var(--text-xs);
-  font-weight: 500;
-  border: 1px solid var(--color-border-hover);
-  color: var(--color-text-secondary);
-}
-
-.chipOk {
-  color: var(--color-success);
-  border-color: color-mix(in srgb, var(--color-success) 40%, transparent);
-}
-
-.chipWarn {
-  color: var(--color-brand);
-  border-color: color-mix(in srgb, var(--color-brand-fill) 50%, transparent);
-}
-
-.cardNote {
-  font-size: var(--text-sm);
-  color: var(--color-brand);
-  margin: 0;
-}
-
-.miniList {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  font-size: var(--text-sm);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.miniList a {
-  color: inherit;
-  text-decoration: none;
-}
-
-.miniList a:hover {
-  text-decoration: underline;
-}
-
-.linkMore {
-  display: inline-flex;
-  align-items: center;
-  align-self: flex-start;
-  gap: var(--space-1);
-  white-space: nowrap;
-  font-size: var(--text-sm);
-  font-weight: 600;
-  color: var(--color-text);
-  text-decoration: none;
-  margin-top: auto;
-}
-
-.linkMore:hover {
-  color: var(--color-brand);
-}
-
-/* ── Lógica da criação: passos numerados lado a lado ──────────────────────── */
-.logic {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  column-gap: var(--space-6);
-  row-gap: var(--space-5);
-  align-items: stretch;
-  counter-reset: passo;
-}
-
-.logicBox {
-  counter-increment: passo;
-  padding-top: var(--space-4);
-  border-top: 1px solid var(--color-border);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-}
-
-.logicBox::before {
-  content: counter(passo);
-  font-size: var(--text-xs);
-  font-weight: 600;
-  color: var(--color-brand);
-}
-
-.logicBox strong {
-  font-size: var(--text-base);
-}
-
-.logicBox span {
-  font-size: var(--text-sm);
-  color: var(--color-text-secondary);
-  line-height: var(--leading-normal);
-}
-
-.logicTag {
-  align-self: flex-start;
-  margin-top: auto;
-  padding-top: var(--space-2);
-  font-size: var(--text-xs);
-  font-weight: 600;
-  color: var(--color-text-tertiary);
-}
-
-.logicResult {
-  border-top-color: var(--color-text);
-}
-
-.summary {
-  padding-top: var(--space-4);
-  border-top: 1px solid var(--color-border);
-  font-size: var(--text-sm);
-  line-height: var(--leading-normal);
-  color: var(--color-text-secondary);
-}
-
-.summary strong {
-  color: var(--color-text);
-}
-
-.summary ol {
-  margin: var(--space-2) 0 0;
-  padding-left: var(--space-5);
-  list-style: decimal;
-}
-
-/* ── Pendências da ficha ──────────────────────────────────────────────────── */
-.pendingList {
-  display: flex;
-  flex-direction: column;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  border-top: 1px solid var(--color-border);
-}
-
-.pendingItem {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-3) 0;
-  border-bottom: 1px solid var(--color-border);
-  font-size: var(--text-base);
-}
-
-.badgeRequired,
-.badgeOptional {
+.sectionLink {
   margin-left: auto;
-  font-size: var(--text-xs);
-  font-weight: 600;
-}
-
-.badgeRequired {
-  color: var(--color-error);
-}
-
-.badgeOptional {
-  color: var(--color-text-tertiary);
-}
-
-/* ── Desdobramentos ativos e materiais recentes ───────────────────────────── */
-.cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  column-gap: var(--space-8);
-  row-gap: var(--space-5);
-}
-
-.collabCard {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  padding-top: var(--space-4);
-  border-top: 1px solid var(--color-border);
-  text-decoration: none;
-  color: inherit;
-  transition: border-color var(--transition-fast);
-}
-
-.collabCard:hover {
-  border-top-color: var(--color-text);
-  color: inherit;
-}
-
-.collabName {
-  font-size: var(--text-lg);
-  font-weight: 600;
-  margin: 0;
-}
-
-.collabInherits {
-  font-size: var(--text-sm);
-  color: var(--color-text-secondary);
-}
-
-.empty {
-  padding: var(--space-5);
-  border: 1px dashed var(--color-border-hover);
-  border-radius: var(--radius-md);
-  font-size: var(--text-base);
-  color: var(--color-text-secondary);
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: var(--space-4);
-  flex-wrap: wrap;
+  gap: 2px;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  text-decoration: none;
 }
 
+.sectionLink:hover {
+  color: var(--color-brand);
+}
+
+/* ── Listas em linhas: materiais e desdobramentos ─────────────────────────── */
 .recent {
   display: flex;
   flex-direction: column;
@@ -459,12 +184,12 @@ a.configCard:hover {
 .recentItem {
   display: flex;
   align-items: center;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-1);
+  gap: var(--space-4);
+  min-height: 60px;
+  padding: var(--space-3) var(--space-2);
   border-bottom: 1px solid var(--color-border);
   text-decoration: none;
   color: inherit;
-  font-size: var(--text-base);
   transition: background-color var(--transition-fast);
 }
 
@@ -473,10 +198,288 @@ a.configCard:hover {
   color: inherit;
 }
 
-.recentWhen {
-  margin-left: auto;
+.recentIcon {
+  flex-shrink: 0;
+  color: var(--color-text-tertiary);
+}
+
+.recentText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.recentName {
+  font-size: var(--text-base);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recentMeta {
   font-size: var(--text-sm);
   color: var(--color-text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recentChevron {
+  flex-shrink: 0;
+  color: var(--color-text-tertiary);
+  transition: color var(--transition-fast), transform var(--transition-fast);
+}
+
+.recentItem:hover .recentChevron {
+  color: var(--color-text);
+  transform: translateX(2px);
+}
+
+.postState {
+  flex-shrink: 0;
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.postState_bad {
+  color: var(--color-error);
+}
+
+.postState_warn {
+  color: var(--color-brand);
+}
+
+.postState_muted {
+  color: var(--color-text-tertiary);
+}
+
+.empty {
+  padding: var(--space-5);
+  border: 1px dashed var(--color-border-hover);
+  border-radius: var(--radius-md);
+  font-size: var(--text-base);
+  color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+/* ── Ficha da marca ───────────────────────────────────────────────────────── */
+.meter {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+}
+
+.meterValue {
+  font-size: var(--text-3xl);
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.meterLabel {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.bar {
+  height: 4px;
+  margin: var(--space-3) 0 var(--space-4);
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-full);
+  overflow: hidden;
+}
+
+.bar span {
+  display: block;
+  height: 100%;
+  background: var(--color-brand-fill);
+  border-radius: inherit;
+}
+
+.pending {
+  display: flex;
+  flex-direction: column;
+  margin: 0 0 var(--space-3);
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--color-border);
+}
+
+.pendingItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: 44px;
+  padding: var(--space-2) var(--space-1);
+  border-bottom: 1px solid var(--color-border);
+  font-size: var(--text-sm);
+  text-decoration: none;
+  color: var(--color-text);
+  transition: background-color var(--transition-fast);
+}
+
+.pendingItem:hover {
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+}
+
+.badgeRequired,
+.badgeOptional {
+  flex-shrink: 0;
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.badgeRequired {
+  color: var(--color-error);
+}
+
+.badgeOptional {
+  color: var(--color-text-tertiary);
+}
+
+.note {
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  line-height: var(--leading-normal);
+  margin: 0 0 var(--space-3);
+}
+
+.noteWarn {
+  font-size: var(--text-sm);
+  color: var(--color-brand);
+  line-height: var(--leading-normal);
+  margin: 0 0 var(--space-3);
+}
+
+.counts {
+  font-size: var(--text-base);
+  color: var(--color-text-secondary);
+  margin: 0 0 var(--space-2);
+}
+
+.counts strong {
+  color: var(--color-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-2);
+  margin-bottom: var(--space-3);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  border: 1px solid var(--color-border-hover);
+  color: var(--color-text-secondary);
+}
+
+.chipOk {
+  color: var(--color-success);
+  border-color: color-mix(in srgb, var(--color-success) 40%, transparent);
+}
+
+.chipMissing {
+  color: var(--color-text-tertiary);
+  border-style: dashed;
+}
+
+.linkMore {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  white-space: nowrap;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text);
+  text-decoration: none;
+}
+
+.linkMore:hover {
+  color: var(--color-brand);
+}
+
+/* ── Como o material é montado: referência recolhida ──────────────────────── */
+.how {
+  border-top: 1px solid var(--color-border);
+  padding-top: var(--space-4);
+}
+
+.how summary {
+  cursor: pointer;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  list-style: none;
+}
+
+.how summary::-webkit-details-marker {
+  display: none;
+}
+
+.how summary::before {
+  content: '+';
+  display: inline-block;
+  width: 1.2em;
+}
+
+.how[open] summary::before {
+  content: '–';
+}
+
+.how summary:hover {
+  color: var(--color-text);
+}
+
+.layers {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--space-5) var(--space-6);
+  margin: var(--space-4) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.layers li {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding-top: var(--space-3);
+  border-top: 2px solid var(--color-border);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  line-height: var(--leading-normal);
+}
+
+.layers li strong {
+  color: var(--color-text);
+  font-size: var(--text-base);
+}
+
+.layers .layerCurrent {
+  border-top-color: var(--color-brand-fill);
+}
+
+.layerHere {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--color-brand);
 }
 
 .state {
@@ -484,24 +487,33 @@ a.configCard:hover {
   color: var(--color-text-secondary);
 }
 
-/* Quatro camadas em duas linhas de grade ficavam com o sublinhado só numa coluna: em tela estreita
-   viram uma faixa de uma linha que rola para o lado. */
+@media (min-width: 1100px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr) 320px;
+    gap: var(--space-12);
+  }
+
+  .aside {
+    position: sticky;
+    top: var(--space-6);
+  }
+}
+
 @media (max-width: 640px) {
-  .stepper {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    scrollbar-width: none;
+  .titleRow {
+    align-items: flex-start;
   }
 
-  .stepper::-webkit-scrollbar {
-    display: none;
+  .actions {
+    width: 100%;
+    flex-direction: column-reverse;
   }
 
-  .step {
-    flex: 0 0 auto;
-    min-width: 0;
-    white-space: nowrap;
-    margin-right: var(--space-4);
-    padding-right: var(--space-2);
+  .actions > * {
+    justify-content: center;
+  }
+
+  .recentItem {
+    min-height: 64px;
   }
 }

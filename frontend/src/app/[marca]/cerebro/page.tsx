@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { Lock } from 'lucide-react';
+import { Check, Lock } from 'lucide-react';
 import { useBrandPermissions } from '@/hooks/useBrandPermissions';
 import { api, ApiError } from '@/lib/api';
 import { asList, projectStatus, type ProjectProfileResponse } from '@/lib/projectOverview';
@@ -44,6 +44,24 @@ const GLOBAL_RULES = [
   'Foto real é regra absoluta: só as fornecidas. Sem foto, a área fica reservada, e o sistema nunca gera pessoa.',
   'O texto não é reduzido até ficar ilegível. Excesso de conteúdo é sinalizado, não cortado em silêncio.',
   'Antes de dar uma peça como final, há revisão de texto, fonte, cor, logo, margens e imagens.',
+];
+
+/** Índice lateral: mesma ordem das seções abaixo. `required` espelha o que o servidor cobra. */
+const SECTION_INDEX: Array<{ id: string; title: string; required?: boolean }> = [
+  { id: 'essence', title: 'Essência e posicionamento', required: true },
+  { id: 'writingDirection', title: 'Tom e direção de escrita' },
+  { id: 'palette', title: 'Paleta', required: true },
+  { id: 'typography', title: 'Tipografia', required: true },
+  { id: 'logo', title: 'Logo e assinatura' },
+  { id: 'visualManual', title: 'Manual visual', required: true },
+  { id: 'artDirection', title: 'Direção de arte', required: true },
+  { id: 'realPhoto', title: 'Fotografia real' },
+  { id: 'graphicElements', title: 'Elementos gráficos' },
+  { id: 'neverDo', title: 'O que nunca fazer', required: true },
+  { id: 'approvalCriterion', title: 'Critério de aprovação', required: true },
+  { id: 'brandCodes', title: 'Códigos que não podem sumir' },
+  { id: 'variation', title: 'O que pode variar e o que precisa ficar' },
+  { id: 'collabRules', title: 'Regras de collab' },
 ];
 
 const FONT_SOURCES: Array<{ value: FontSource | ''; label: string }> = [
@@ -118,7 +136,7 @@ function Section({
         {pending ? (
           <span className={[styles.tag, required ? styles.tagRequired : ''].join(' ')}>{required ? 'Obrigatório' : 'Recomendado'}</span>
         ) : (
-          <span className={[styles.tag, styles.tagDone].join(' ')}>Preenchido</span>
+          <span className={[styles.tag, styles.tagDone].join(' ')}><Check size={12} aria-hidden="true" /> Preenchido</span>
         )}
       </div>
       <p className={styles.hint}>{hint}</p>
@@ -256,6 +274,7 @@ export default function CerebroPage() {
   const status = projectStatus(result.completeness);
   const pendingKeys = new Set(result.completeness.pending.map((p) => p.key));
   const disabled = readOnly || saving;
+  const pendingCount = SECTION_INDEX.filter((x) => pendingKeys.has(x.id)).length;
   // A seção das notas antigas existe se a ficha CARREGADA tinha notas: não some enquanto a pessoa edita.
   const hadLegacyNotes = Boolean((result.profile as unknown as BrandProfile).legacyNotes?.trim());
 
@@ -264,13 +283,8 @@ export default function CerebroPage() {
       <div className={styles.header}>
         <h1>Cérebro da IA</h1>
         <p>
-          As regras fixas do Designer valem para todos os projetos. Esta ficha guarda o que é só deste projeto: como a marca pensa, escreve e aparece.
+          Esta ficha guarda o que é só deste projeto: como a marca pensa, escreve e aparece.
           O que ficar em branco continua pendente, e a IA não preenche por conta própria.
-        </p>
-        <p>
-          <strong>Todo projeto já é gerado com as regras fixas do Designer</strong>, com ou sem ficha: só com texto aprovado e só com foto real fornecida.
-          <strong> Ao salvar, o Designer passa a usar esta ficha como a memória do projeto</strong>. Enquanto não houver ficha salva, usa o que o projeto já tem
-          cadastrado, e o que faltar fica pendente.
         </p>
       </div>
 
@@ -298,13 +312,64 @@ export default function CerebroPage() {
       {saveError && <div className={[styles.notice, styles.noticeError].join(' ')} role="alert">{saveError}</div>}
       {savedAt && !dirty && !saveError && <div className={[styles.notice, styles.noticeOk].join(' ')}>Ficha salva.</div>}
 
-      {!readOnly && (
-        <div className={styles.importBox}>
-          <h2>Importar de um manual de marca</h2>
-          <p className={styles.hint}>
-            Envie o manual (PDF, imagens, .md, .txt ou .html). A IA lê e propõe o rascunho da ficha, citando o trecho de onde tirou cada item. Só campos vazios são
-            preenchidos e nada é salvo até você apertar &quot;Salvar ficha&quot;. Logo e manual visual não vêm do manual: escolha na biblioteca.
-          </p>
+      <div className={styles.layout}>
+        <nav className={styles.rail} aria-label="Seções da ficha">
+          <p className={styles.railTitle}>{pendingCount === 0 ? 'Ficha completa' : `${pendingCount} pendentes`}</p>
+          <ul>
+            {SECTION_INDEX.map((x) => {
+              const pending = pendingKeys.has(x.id);
+              return (
+                <li key={x.id}>
+                  <a href={`#${x.id}`} className={styles.railLink}>
+                    <span
+                      className={[
+                        styles.railMark,
+                        pending ? (x.required ? styles.railMarkRequired : styles.railMarkPending) : styles.railMarkDone,
+                      ].join(' ')}
+                      aria-hidden="true"
+                    >
+                      {!pending && <Check size={14} strokeWidth={2.5} />}
+                    </span>
+                    <span>{x.title}</span>
+                    <span className={styles.srOnly}>{pending ? (x.required ? ' (obrigatório, pendente)' : ' (recomendado, pendente)') : ' (preenchido)'}</span>
+                  </a>
+                </li>
+              );
+            })}
+          </ul>
+        </nav>
+
+        <div className={styles.content}>
+          <div className={styles.fold}>
+            <details className={styles.foldItem}>
+              <summary>Como o Designer usa esta ficha</summary>
+              <div className={styles.foldBody}>
+                <p className={styles.hint}>
+                  <strong>Todo projeto já é gerado com as regras fixas do Designer</strong>, com ou sem ficha: só com texto aprovado e só com foto real fornecida.
+                  <strong> Ao salvar, o Designer passa a usar esta ficha como a memória do projeto.</strong> Enquanto não houver ficha salva, usa o que o projeto já tem
+                  cadastrado, e o que faltar fica pendente.
+                </p>
+              </div>
+            </details>
+
+            <details className={styles.foldItem}>
+              <summary><Lock size={13} aria-hidden="true" /> Regras fixas do Designer <span className={styles.foldMeta}>iguais para todos os projetos</span></summary>
+              <div className={styles.foldBody}>
+                <ul className={styles.globalList}>
+                  {GLOBAL_RULES.map((r) => <li key={r}>{r}</li>)}
+                </ul>
+                <p className={styles.hint}>Só a equipe técnica altera.</p>
+              </div>
+            </details>
+
+            {!readOnly && (
+              <details className={styles.foldItem} open={Boolean(importResult || importError || importing) || undefined}>
+                <summary>Importar de um manual de marca</summary>
+                <div className={styles.foldBody}>
+                  <p className={styles.hint}>
+                    Envie o manual (PDF, imagens, .md, .txt ou .html). A IA lê e propõe o rascunho da ficha, citando o trecho de onde tirou cada item. Só campos vazios são
+                    preenchidos e nada é salvo até você apertar &quot;Salvar ficha&quot;. Logo e manual visual não vêm do manual: escolha na biblioteca.
+                  </p>
           <div className={styles.importActions}>
             <input
               ref={manualInputRef}
@@ -381,16 +446,10 @@ export default function CerebroPage() {
               )}
             </>
           )}
-        </div>
-      )}
-
-      <div className={styles.globalBox}>
-        <h2><Lock size={14} /> Regras globais do Designer</h2>
-        <span className={styles.lock}>Fixas e iguais para todos os projetos. Só a equipe técnica altera.</span>
-        <ul>
-          {GLOBAL_RULES.map((r) => <li key={r}>{r}</li>)}
-        </ul>
-      </div>
+                </div>
+              </details>
+            )}
+          </div>
 
       <Section id="essence" title="Essência e posicionamento" required pending={pendingKeys.has('essence')}
         hint="Quem é a marca, o que pensa, fala e defende; personalidade; a sensação que a peça deve transmitir.">
@@ -536,6 +595,8 @@ export default function CerebroPage() {
           <textarea className={styles.textarea} value={form.legacyNotes} disabled={disabled} onChange={(e) => set('legacyNotes', e.target.value)} />
         </Section>
       )}
+        </div>
+      </div>
     </div>
   );
 }

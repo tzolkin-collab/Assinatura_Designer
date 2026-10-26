@@ -51,7 +51,7 @@ export function brandNav(marca: string): NavDef[] {
     { label: 'Galeria', icon: GalleryHorizontalEnd, href: `/${marca}/galeria` },
     { label: 'Fábrica', icon: Factory, href: `/${marca}/fabrica` },
     { label: 'Editor', icon: PenTool, href: `/${marca}/editor` },
-    { label: 'Apresentações publicadas', icon: MonitorPlay, href: `/${marca}/apresentacoes` },
+    { label: 'Publicadas', icon: MonitorPlay, href: `/${marca}/apresentacoes` },
   ];
 }
 

@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { ArrowRight, Brain, Check, Circle, Image as ImageIcon, Palette, Plus, Users } from 'lucide-react';
+import { ChevronRight, Images, Image as ImageIcon, MonitorPlay, Plus } from 'lucide-react';
 import NewCollabModal from '@/components/Collab/NewCollabModal';
 import { useBrandPermissions } from '@/hooks/useBrandPermissions';
 import { api } from '@/lib/api';
@@ -31,12 +31,25 @@ interface RecentPost {
   updatedAt?: string;
 }
 
-const STEPS = [
-  { name: 'Designer', hint: 'Regras globais' },
-  { name: 'Projeto-base', hint: 'Regras específicas' },
-  { name: 'Collab / desdobramento', hint: 'Camada opcional' },
-  { name: 'Criação', hint: 'Briefing do material' },
+const LAYERS = [
+  { name: 'Designer', hint: 'Regras globais, sempre ativas: fidelidade ao texto, foto real, hierarquia e revisão.' },
+  { name: 'Projeto-base', hint: 'Identidade, público, produtos e contexto do projeto.' },
+  { name: 'Collab / desdobramento', hint: 'Camada opcional: parceiro, contexto e nível de protagonismo.' },
+  { name: 'Criação', hint: 'O briefing que você define a cada material: tipo, objetivo, tópicos e inspirações.' },
 ];
+
+const POST_TYPE: Record<string, { label: string; Icon: typeof MonitorPlay }> = {
+  PRESENTATION: { label: 'Apresentação', Icon: MonitorPlay },
+  CAROUSEL: { label: 'Carrossel', Icon: Images },
+  SINGLE_IMAGE: { label: 'Imagem', Icon: ImageIcon },
+};
+
+// Material pronto não precisa de rótulo: só o que exige atenção ou ainda está em andamento.
+const POST_STATUS: Record<string, { label: string; tone: 'warn' | 'bad' | 'muted' }> = {
+  FAILED: { label: 'Falhou', tone: 'bad' },
+  GENERATING: { label: 'Gerando', tone: 'warn' },
+  DRAFT: { label: 'Rascunho', tone: 'muted' },
+};
 
 export default function ProjectOverviewPage() {
   const params = useParams();
@@ -113,33 +126,23 @@ export default function ProjectOverviewPage() {
     : collabStatus(parent?.name, parentProfile?.completeness);
   const identity = profile ? identityChecklist(profile.profile) : [];
   const lib = assets ? libraryTotals(assets) : null;
-  const requiredPending = profile?.completeness.pending.filter((p) => p.required).length ?? 0;
-  const currentStep = isBase ? 1 : 2;
+  const pending = profile
+    ? [...profile.completeness.pending].sort((x, y) => Number(y.required) - Number(x.required))
+    : [];
+  const currentLayer = isBase ? 1 : 2;
   const canGenerate = perms.can('generate');
   const canCreateCollab = isBase && perms.can('edit-settings');
+  const percent = profile?.completeness.percent;
 
   return (
     <div className={styles.page}>
-      {/* As 4 camadas: onde este projeto está */}
-      <div className={styles.stepper} aria-label="Camadas do Designer">
-        {STEPS.map((step, i) => (
-          <React.Fragment key={step.name}>
-            <div className={[styles.step, i === currentStep ? styles.stepCurrent : ''].join(' ')}>
-              <span className={styles.stepName}>{step.name}</span>
-              <span className={styles.stepHint}>{step.hint}</span>
-            </div>
-            {i < STEPS.length - 1 && <span className={styles.stepArrow}>›</span>}
-          </React.Fragment>
-        ))}
-      </div>
-
-      <div className={styles.titleRow}>
+      <header className={styles.titleRow}>
         <div>
           <h1 className={styles.title}>{brand.name}</h1>
           {status && (
             <div className={styles.status}>
               <span className={[styles.dot, status.tone === 'pending' ? styles.dotPending : ''].join(' ')} />
-              <span>{status.label} · {status.detail}</span>
+              <span>{isBase ? status.label : `${status.label} · ${status.detail}`}</span>
             </div>
           )}
           {parent && (
@@ -149,15 +152,6 @@ export default function ProjectOverviewPage() {
           )}
         </div>
         <div className={styles.actions}>
-          {canGenerate ? (
-            <Link href={`/${slug}/fabrica`} className={styles.btnPrimary}>
-              <Plus size={16} /> Nova apresentação
-            </Link>
-          ) : (
-            <button type="button" className={styles.btnPrimary} disabled title={perms.hint}>
-              <Plus size={16} /> Nova apresentação
-            </button>
-          )}
           {isBase && (
             <button
               type="button"
@@ -169,285 +163,250 @@ export default function ProjectOverviewPage() {
               <Plus size={16} /> Novo collab
             </button>
           )}
-        </div>
-      </div>
-
-      {/* Configuração do projeto */}
-      <section>
-        <div className={styles.sectionHead}>
-          <h2 className={styles.sectionTitle}>Configuração do projeto</h2>
-        </div>
-        {!isBase ? (
-          <div className={styles.configGrid}>
-            <Link href={parent ? `/${parent.slug}` : '/galeria'} className={styles.configCard}>
-              <div className={styles.cardHead}>
-                <span className={styles.cardIcon}><Brain size={20} /></span>
-                <div>
-                  <h3 className={styles.cardTitle}>Herdado de {parent?.name ?? 'o projeto-base'}</h3>
-                  <p className={styles.cardDesc}>
-                    Identidade, fotos e regras vêm do projeto-base. Para mudar, edite a base.
-                  </p>
-                </div>
-              </div>
-              <div className={styles.chips}>
-                {parentProfile && (
-                  <span className={[styles.chip, parentProfile.completeness.ready ? styles.chipOk : styles.chipWarn].join(' ')}>
-                    Ficha da base {parentProfile.completeness.percent}%
-                  </span>
-                )}
-              </div>
-              <span className={styles.linkMore}>
-                Abrir {parent?.name ?? 'o projeto-base'} <ArrowRight size={13} style={{ verticalAlign: 'middle' }} />
-              </span>
+          {canGenerate ? (
+            <Link href={`/${slug}/fabrica`} className={styles.btnPrimary}>
+              <Plus size={16} /> Nova apresentação
             </Link>
-            <div className={styles.configCard}>
-              <div className={styles.cardHead}>
-                <span className={styles.cardIcon}><Users size={20} /></span>
-                <div>
-                  <h3 className={styles.cardTitle}>Esta camada</h3>
-                  <p className={styles.cardDesc}>{collabKindLabel(kind)}: só o que muda em relação à base.</p>
-                </div>
-              </div>
-              <div className={styles.chips}>
-                {brand.collab?.partner?.name && <span className={styles.chip}>Parceiro: {brand.collab.partner.name}</span>}
-                {typeof brand.collab?.baseProtagonism === 'number' && (
-                  <span className={styles.chip}>Protagonismo da base {brand.collab.baseProtagonism}%</span>
+          ) : (
+            <button type="button" className={styles.btnPrimary} disabled title={perms.hint}>
+              <Plus size={16} /> Nova apresentação
+            </button>
+          )}
+        </div>
+      </header>
+
+      <div className={styles.layout}>
+        <div className={styles.main}>
+          {/* Materiais recentes: o que a pessoa volta aqui para encontrar */}
+          <section aria-labelledby="sec-recentes">
+            <div className={styles.sectionHead}>
+              <h2 id="sec-recentes" className={styles.sectionTitle}>Materiais recentes</h2>
+              {recent.length > 0 && (
+                <Link href={`/${slug}/galeria`} className={styles.sectionLink}>
+                  Abrir galeria <ChevronRight size={14} />
+                </Link>
+              )}
+            </div>
+            {recent.length > 0 ? (
+              <ul className={styles.recent}>
+                {recent.map((p) => {
+                  const type = POST_TYPE[p.type] ?? POST_TYPE.PRESENTATION;
+                  const state = p.status ? POST_STATUS[p.status] : undefined;
+                  return (
+                    <li key={p.id}>
+                      <Link href={`/${slug}/editor/${p.id}`} className={styles.recentItem}>
+                        <type.Icon size={18} className={styles.recentIcon} aria-hidden="true" />
+                        <span className={styles.recentText}>
+                          <span className={styles.recentName}>{p.name || 'Sem nome'}</span>
+                          <span className={styles.recentMeta}>
+                            {type.label}
+                            {p.updatedAt ? ` · ${timeAgo(p.updatedAt)}` : ''}
+                          </span>
+                        </span>
+                        {state && (
+                          <span className={[styles.postState, styles[`postState_${state.tone}`]].join(' ')}>{state.label}</span>
+                        )}
+                        <ChevronRight size={16} className={styles.recentChevron} aria-hidden="true" />
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <div className={styles.empty}>
+                <span>Nenhum material criado neste projeto ainda.</span>
+                {canGenerate && (
+                  <Link href={`/${slug}/fabrica`} className={styles.btnGhost}>
+                    <Plus size={16} /> Criar o primeiro
+                  </Link>
                 )}
               </div>
-              {brand.collab?.context && <p className={styles.cardDesc}>{brand.collab.context}</p>}
-            </div>
-          </div>
-        ) : (
-        <div className={styles.configGrid}>
-          <Link href={`/${slug}/cerebro`} className={styles.configCard}>
-            <div className={styles.cardHead}>
-              <span className={styles.cardIcon}><Brain size={20} /></span>
-              <div>
-                <h3 className={styles.cardTitle}>Cérebro da IA</h3>
-                <p className={styles.cardDesc}>Regras globais + regras específicas do projeto.</p>
-              </div>
-            </div>
-            <div className={styles.chips}>
-              {profile ? (
-                <>
-                  <span className={[styles.chip, profile.completeness.ready ? styles.chipOk : styles.chipWarn].join(' ')}>
-                    Ficha {profile.completeness.percent}%
-                  </span>
-                  {requiredPending > 0 && (
-                    <span className={[styles.chip, styles.chipWarn].join(' ')}>
-                      {requiredPending} {requiredPending === 1 ? 'pendente' : 'pendentes'}
-                    </span>
-                  )}
-                </>
-              ) : (
-                <span className={styles.chip}>Ficha indisponível</span>
-              )}
-            </div>
-            {profile?.derived && (
-              <p className={styles.cardDesc}>Ficha montada a partir dos campos atuais; ainda não foi salva.</p>
             )}
-          </Link>
+          </section>
 
-          <Link href={`/${slug}/configuracoes/branding`} className={styles.configCard}>
-            <div className={styles.cardHead}>
-              <span className={styles.cardIcon}><Palette size={20} /></span>
-              <div>
-                <h3 className={styles.cardTitle}>Identidade visual</h3>
-                <p className={styles.cardDesc}>Manual visual, paleta, tipografia, logos.</p>
-              </div>
-            </div>
-            <div className={styles.chips}>
-              {identity.map((item) => (
-                <span key={item.label} className={[styles.chip, item.ok ? styles.chipOk : ''].join(' ')}>
-                  {item.ok ? <Check size={13} /> : <Circle size={11} />} {item.label}
-                </span>
-              ))}
-            </div>
-          </Link>
-
-          <Link href={`/${slug}/configuracoes/midia`} className={styles.configCard}>
-            <div className={styles.cardHead}>
-              <span className={styles.cardIcon}><ImageIcon size={20} /></span>
-              <div>
-                <h3 className={styles.cardTitle}>Fotos e arquivos</h3>
-                <p className={styles.cardDesc}>Fotos reais, elementos gráficos e uploads.</p>
-              </div>
-            </div>
-            <p className={styles.cardNote}>Fotos reais são prioridade.</p>
-            <div className={styles.chips}>
-              {lib ? (
-                <>
-                  <span className={styles.chip}>{lib.images} {lib.images === 1 ? 'imagem' : 'imagens'}</span>
-                  <span className={styles.chip}>{lib.otherFiles} {lib.otherFiles === 1 ? 'arquivo' : 'arquivos'}</span>
-                  {lib.generated > 0 && (
-                    <span className={[styles.chip, styles.chipWarn].join(' ')} title="Imagens geradas pelo sistema não são fotos reais.">
-                      {lib.generated} geradas por IA
-                    </span>
-                  )}
-                </>
-              ) : (
-                <span className={styles.chip}>Biblioteca indisponível</span>
-              )}
-            </div>
-          </Link>
-
+          {/* Desdobramentos: só o projeto-base tem */}
           {isBase && (
-            <div className={styles.configCard}>
-              <div className={styles.cardHead}>
-                <span className={styles.cardIcon}><Users size={20} /></span>
-                <div>
-                  <h3 className={styles.cardTitle}>Desdobramentos e collabs</h3>
-                  <p className={styles.cardDesc}>Herdam a base e acrescentam parceiro, contexto e protagonismo.</p>
-                </div>
+            <section id="desdobramentos" aria-labelledby="sec-desdobramentos">
+              <div className={styles.sectionHead}>
+                <h2 id="sec-desdobramentos" className={styles.sectionTitle}>Desdobramentos</h2>
+                <span className={styles.sectionNote}>Herdam a identidade de {brand.name} e acrescentam parceiro, contexto ou objetivo.</span>
               </div>
               {children.length > 0 ? (
-                <ul className={styles.miniList}>
-                  {children.slice(0, 3).map((c) => (
-                    <li key={c.id}><Link href={`/${c.slug}`}>{c.name}</Link></li>
+                <ul className={styles.recent}>
+                  {children.map((c) => (
+                    <li key={c.id}>
+                      <Link href={`/${c.slug}`} className={styles.recentItem}>
+                        <span className={styles.recentText}>
+                          <span className={styles.recentName}>{c.name}</span>
+                          <span className={styles.recentMeta}>
+                            {[
+                              collabKindLabel(c.kind),
+                              c.collab?.partner?.name ? `Parceiro: ${c.collab.partner.name}` : null,
+                              typeof c.collab?.baseProtagonism === 'number' ? `Protagonismo ${c.collab.baseProtagonism}%` : null,
+                              c.updatedAt ? timeAgo(c.updatedAt) : null,
+                            ].filter(Boolean).join(' · ')}
+                          </span>
+                        </span>
+                        <ChevronRight size={16} className={styles.recentChevron} aria-hidden="true" />
+                      </Link>
+                    </li>
                   ))}
                 </ul>
               ) : (
-                <p className={styles.cardDesc}>Nenhum ainda.</p>
+                <div className={styles.empty}>
+                  <span>Nenhum desdobramento ainda.</span>
+                  {canCreateCollab && (
+                    <button type="button" className={styles.btnGhost} onClick={() => setCollabOpen(true)}>
+                      <Plus size={16} /> Novo collab
+                    </button>
+                  )}
+                </div>
               )}
-              <a href="#desdobramentos" className={styles.linkMore}>
-                Gerenciar collabs <ArrowRight size={13} style={{ verticalAlign: 'middle' }} />
-              </a>
-            </div>
+            </section>
           )}
-        </div>
-        )}
-      </section>
 
-      {/* O que falta na ficha: só o projeto-base tem ficha */}
-      {isBase && profile && profile.completeness.pending.length > 0 && (
-        <section>
-          <div className={styles.sectionHead}>
-            <h2 className={styles.sectionTitle}>O que falta na ficha</h2>
-            <span className={styles.sectionNote}>O sistema não inventa o que não foi informado.</span>
-          </div>
-          <ul className={styles.pendingList}>
-            {[...profile.completeness.pending]
-              .sort((x, y) => Number(y.required) - Number(x.required))
-              .map((p) => (
-                <li key={p.key} className={styles.pendingItem}>
-                  <Circle size={12} />
-                  <span>{p.label}</span>
-                  <span className={p.required ? styles.badgeRequired : styles.badgeOptional}>
-                    {p.required ? 'Obrigatório' : 'Recomendado'}
-                  </span>
+          {/* Como o material é montado: referência, não o centro da página */}
+          <details className={styles.how}>
+            <summary>Como o material é montado</summary>
+            <ol className={styles.layers}>
+              {LAYERS.map((layer, i) => (
+                <li key={layer.name} className={i === currentLayer ? styles.layerCurrent : undefined}>
+                  <strong>{layer.name}</strong>
+                  {i === currentLayer && <span className={styles.layerHere}>Você está aqui</span>}
+                  <span>{layer.hint}</span>
                 </li>
               ))}
-          </ul>
-        </section>
-      )}
-
-      {/* Lógica da criação */}
-      <section>
-        <div className={styles.sectionHead}>
-          <h2 className={styles.sectionTitle}>Lógica da criação</h2>
-          <span className={styles.sectionNote}>
-            O material combina as regras globais, as do projeto, o collab (quando houver) e o briefing.
-          </span>
-        </div>
-        <div className={styles.logic}>
-          <div className={styles.logicBox}>
-            <strong>Regras globais do Designer</strong>
-            <span>Fidelidade ao texto, foto real, hierarquia e revisão.</span>
-            <span className={styles.logicTag}>Sempre ativas</span>
-          </div>
-          <div className={styles.logicBox}>
-            <strong>Projeto-base {isBase ? brand.name : parent?.name ?? ''}</strong>
-            <span>Identidade, público, produtos e contexto.</span>
-            <span className={styles.logicTag}>Aplicadas a este projeto</span>
-          </div>
-          <div className={styles.logicBox}>
-            <strong>Camada collab / desdobramento</strong>
-            <span>Parceiro, contexto e nível de protagonismo.</span>
-            <span className={styles.logicTag}>Opcional</span>
-          </div>
-          <div className={styles.logicBox}>
-            <strong>Briefing da criação</strong>
-            <span>Tipo de material, objetivo, tópicos e inspirações.</span>
-            <span className={styles.logicTag}>Você define a cada criação</span>
-          </div>
-          <div className={[styles.logicBox, styles.logicResult].join(' ')}>
-            <strong>Material gerado</strong>
-            <span>A IA combina tudo e gera o material no estilo da marca.</span>
-          </div>
-          <div className={styles.summary}>
-            <strong>Resumo prático</strong>
-            <ol>
-              <li>O Designer guarda as regras fixas.</li>
-              <li>O projeto guarda a identidade-base.</li>
-              <li>O collab define parceiro e protagonismo.</li>
-              <li>A criação recebe só o briefing do material.</li>
             </ol>
-          </div>
+          </details>
         </div>
-      </section>
 
-      {/* Desdobramentos ativos */}
-      {isBase && (
-        <section id="desdobramentos">
-          <div className={styles.sectionHead}>
-            <h2 className={styles.sectionTitle}>Desdobramentos ativos</h2>
-            <span className={styles.sectionNote}>
-              Herdam a identidade-base de {brand.name} e acrescentam um parceiro, contexto ou objetivo específico.
-            </span>
-          </div>
-          {children.length > 0 ? (
-            <div className={styles.cards}>
-              {children.map((c) => (
-                <Link key={c.id} href={`/${c.slug}`} className={styles.collabCard}>
-                  <h3 className={styles.collabName}>{c.name}</h3>
-                  <span className={styles.collabInherits}>Herda de {brand.name}</span>
-                  <div className={styles.chips}>
-                    <span className={styles.chip}>{collabKindLabel(c.kind)}</span>
-                    {c.collab?.partner?.name && <span className={styles.chip}>Parceiro: {c.collab.partner.name}</span>}
-                    {typeof c.collab?.baseProtagonism === 'number' && (
-                      <span className={styles.chip}>Protagonismo {c.collab.baseProtagonism}%</span>
+        <aside className={styles.aside} aria-label="Ficha e biblioteca do projeto">
+          {isBase ? (
+            <>
+              {/* Ficha: o número que diz se a IA tem do que partir */}
+              <section aria-labelledby="sec-ficha">
+                <div className={styles.sectionHead}>
+                  <h2 id="sec-ficha" className={styles.sectionTitle}>Ficha da marca</h2>
+                </div>
+                {profile ? (
+                  <>
+                    <div className={styles.meter}>
+                      <span className={styles.meterValue}>{percent}%</span>
+                      <span className={styles.meterLabel}>
+                        {profile.completeness.ready ? 'Pronta para gerar' : 'Faltam dados para gerar bem'}
+                      </span>
+                    </div>
+                    <div
+                      className={styles.bar}
+                      role="progressbar"
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={percent}
+                      aria-label="Completude da ficha"
+                    >
+                      <span style={{ width: `${percent}%` }} />
+                    </div>
+                    {pending.length > 0 && (
+                      <ul className={styles.pending}>
+                        {pending.map((p) => (
+                          <li key={p.key}>
+                            <Link href={`/${slug}/cerebro`} className={styles.pendingItem}>
+                              <span>{p.label}</span>
+                              <span className={p.required ? styles.badgeRequired : styles.badgeOptional}>
+                                {p.required ? 'Obrigatório' : 'Recomendado'}
+                              </span>
+                            </Link>
+                          </li>
+                        ))}
+                      </ul>
                     )}
-                    {c.updatedAt && <span className={styles.chip}>Atualizado {timeAgo(c.updatedAt)}</span>}
-                  </div>
-                </Link>
-              ))}
-            </div>
-          ) : (
-            <div className={styles.empty}>
-              <span>Este projeto ainda não tem desdobramentos.</span>
-              {canCreateCollab && (
-                <button type="button" className={styles.btnGhost} onClick={() => setCollabOpen(true)}>
-                  <Plus size={16} /> Novo collab
-                </button>
-              )}
-            </div>
-          )}
-        </section>
-      )}
+                    {profile.derived && (
+                      <p className={styles.note}>Montada a partir dos campos atuais; ainda não foi salva.</p>
+                    )}
+                    <Link href={`/${slug}/cerebro`} className={styles.linkMore}>
+                      Abrir Cérebro da IA <ChevronRight size={14} />
+                    </Link>
+                  </>
+                ) : (
+                  <p className={styles.note}>Ficha indisponível no momento.</p>
+                )}
+              </section>
 
-      {/* Materiais recentes */}
-      <section>
-        <div className={styles.sectionHead}>
-          <h2 className={styles.sectionTitle}>Materiais recentes</h2>
-          <Link href={`/${slug}/galeria`} className={styles.sectionNote}>Ver todos</Link>
-        </div>
-        {recent.length > 0 ? (
-          <ul className={styles.recent}>
-            {recent.map((p) => (
-              <li key={p.id}>
-                <Link href={`/${slug}/editor/${p.id}`} className={styles.recentItem}>
-                  <span>{p.name || 'Sem nome'}</span>
-                  <span className={styles.recentWhen}>{timeAgo(p.updatedAt)}</span>
+              <section aria-labelledby="sec-identidade">
+                <div className={styles.sectionHead}>
+                  <h2 id="sec-identidade" className={styles.sectionTitle}>Identidade visual</h2>
+                </div>
+                <div className={styles.chips}>
+                  {identity.map((item) => (
+                    <span key={item.label} className={[styles.chip, item.ok ? styles.chipOk : styles.chipMissing].join(' ')}>
+                      {item.ok ? 'Tem' : 'Falta'} · {item.label}
+                    </span>
+                  ))}
+                </div>
+                <Link href={`/${slug}/configuracoes/branding`} className={styles.linkMore}>
+                  Editar identidade <ChevronRight size={14} />
                 </Link>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <div className={styles.empty}>
-            <span>Nenhum material criado neste projeto ainda.</span>
-          </div>
-        )}
-      </section>
+              </section>
+
+              <section aria-labelledby="sec-fotos">
+                <div className={styles.sectionHead}>
+                  <h2 id="sec-fotos" className={styles.sectionTitle}>Fotos e arquivos</h2>
+                </div>
+                {lib ? (
+                  <>
+                    <p className={styles.counts}>
+                      <strong>{lib.images}</strong> {lib.images === 1 ? 'imagem' : 'imagens'}
+                      <span aria-hidden="true"> · </span>
+                      <strong>{lib.otherFiles}</strong> {lib.otherFiles === 1 ? 'arquivo' : 'arquivos'}
+                    </p>
+                    {lib.generated > 0 && (
+                      <p className={styles.noteWarn}>
+                        {lib.generated} {lib.generated === 1 ? 'imagem foi gerada' : 'imagens foram geradas'} por IA. Fotos reais têm prioridade.
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <p className={styles.note}>Biblioteca indisponível no momento.</p>
+                )}
+                <Link href={`/${slug}/configuracoes/midia`} className={styles.linkMore}>
+                  Abrir biblioteca <ChevronRight size={14} />
+                </Link>
+              </section>
+            </>
+          ) : (
+            <>
+              <section aria-labelledby="sec-herdado">
+                <div className={styles.sectionHead}>
+                  <h2 id="sec-herdado" className={styles.sectionTitle}>Herdado de {parent?.name ?? 'o projeto-base'}</h2>
+                </div>
+                <p className={styles.note}>Identidade, fotos e regras vêm do projeto-base. Para mudar, edite a base.</p>
+                {parentProfile && (
+                  <p className={styles.counts}>
+                    Ficha da base: <strong>{parentProfile.completeness.percent}%</strong>
+                  </p>
+                )}
+                <Link href={parent ? `/${parent.slug}` : '/galeria'} className={styles.linkMore}>
+                  Abrir {parent?.name ?? 'o projeto-base'} <ChevronRight size={14} />
+                </Link>
+              </section>
+
+              <section aria-labelledby="sec-camada">
+                <div className={styles.sectionHead}>
+                  <h2 id="sec-camada" className={styles.sectionTitle}>Esta camada</h2>
+                </div>
+                <p className={styles.note}>{collabKindLabel(kind)}: só o que muda em relação à base.</p>
+                <div className={styles.chips}>
+                  {brand.collab?.partner?.name && <span className={styles.chip}>Parceiro: {brand.collab.partner.name}</span>}
+                  {typeof brand.collab?.baseProtagonism === 'number' && (
+                    <span className={styles.chip}>Protagonismo da base {brand.collab.baseProtagonism}%</span>
+                  )}
+                </div>
+                {brand.collab?.context && <p className={styles.note}>{brand.collab.context}</p>}
+              </section>
+            </>
+          )}
+        </aside>
+      </div>
 
       {collabOpen && (
         <NewCollabModal

@@ -1,7 +1,7 @@
 'use client';
 
 import { useId, useState } from 'react';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronUp } from 'lucide-react';
 import { filledFields, type Briefing } from '@/lib/briefing';
 import s from './BriefingPanel.module.css';
 
@@ -50,9 +50,9 @@ export default function BriefingPanel({ value, onChange, disabled }: Props) {
         aria-expanded={open}
         aria-controls={panelId}
       >
-        {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-        <span>Briefing da peça</span>
-        <span className={s.headCount}>{filled > 0 ? `${filled} de ${FIELDS.length} campos preenchidos` : 'opcional'}</span>
+        <span>Briefing</span>
+        {filled > 0 && <span className={s.headCount}>{filled}/{FIELDS.length}</span>}
+        {open ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
       </button>
       {open && (
         <div className={s.body} id={panelId}>

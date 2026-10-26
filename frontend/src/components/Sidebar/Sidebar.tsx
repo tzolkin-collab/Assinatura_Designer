@@ -191,7 +191,7 @@ export default function Sidebar() {
           {/* Brand context navigation */}
           {marca && (
             <div className={styles.navSection}>
-              <span className={styles.navSectionLabel}>{brandName ?? decodeURIComponent(marca)}</span>
+              <span className={[styles.navSectionLabel, styles.navSectionBrand].join(' ')} title={brandName ?? undefined}>{brandName ?? decodeURIComponent(marca)}</span>
               {[...brandNav(marca), brandSettingsItem(marca)].map((item) => (
                 <NavLink key={item.href} item={item} pathname={pathname} />
               ))}
