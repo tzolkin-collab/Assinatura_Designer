@@ -16,7 +16,7 @@ import { DEFAULT_CLIENT_PRESETS, resolveClientPresets } from './clients.js';
  */
 
 /** Escopos OAuth do Designer. `designer.write` INCLUI leitura (ver `normalizeScopes`). */
-export const MCP_SCOPES = ['designer.read', 'designer.write', 'designer.edit_all', 'designer.export', 'designer.preview'] as const;
+export const MCP_SCOPES = ['designer.read', 'designer.write', 'designer.edit_all', 'designer.export', 'designer.preview', 'designer.brand'] as const;
 export type McpScope = (typeof MCP_SCOPES)[number];
 
 export const READ_SCOPE: McpScope = 'designer.read';
@@ -41,6 +41,12 @@ export const EXPORT_SCOPE: McpScope = 'designer.export';
  */
 export const PREVIEW_SCOPE: McpScope = 'designer.preview';
 
+/**
+ * Alterar a FICHA da marca (Cérebro de IA): muda todas as peças futuras, então tem escopo próprio, independente (não
+ * implica leitura nem escrita de peças) e DESLIGADO por padrão no consentimento. Só EDITOR ou mais, como `PUT /profile`.
+ */
+export const BRAND_SCOPE: McpScope = 'designer.brand';
+
 /** Quais marcas a conexão enxerga: as escolhidas no consentimento ou todas as do usuário, a cada chamada. */
 export type BrandMode = 'selected' | 'all';
 
@@ -59,6 +65,7 @@ export const ROLES_FOR_SCOPE: Record<McpScope, BrandRole[]> = {
   'designer.export': ['OWNER', 'ADMIN', 'EDITOR', 'VIEWER'],
   // Só leitura no front: qualquer membro ve o que o papel dele já deixa ver. Nunca maior que o papel da conexão.
   'designer.preview': ['OWNER', 'ADMIN', 'EDITOR', 'VIEWER'],
+  'designer.brand': ['OWNER', 'ADMIN', 'EDITOR'],
 };
 
 export function isMcpScope(value: string): value is McpScope {

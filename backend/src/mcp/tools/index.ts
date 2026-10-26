@@ -13,6 +13,7 @@ import { getPhotoSlotsTool, setSlidePhotoTool } from './photoSlots.js';
 import { savePresentationTool } from './savePresentation.js';
 import { updateSlideTool } from './updateSlide.js';
 import { uploadAssetTool } from './uploadAsset.js';
+import { updateBrandProfileTool } from './updateBrandProfile.js';
 import { createVersionTool, listVersionsTool, restoreVersionTool } from './versions.js';
 
 /**
@@ -27,6 +28,7 @@ import { createVersionTool, listVersionsTool, restoreVersionTool } from './versi
  *    get_brand_profile, list_assets, list_versions, get_photo_slots, get_integrations_status;
  *  - escrita (`designer.write`): save_presentation, update_slide, create_version, restore_version,
  *    set_slide_photo, upload_asset;
+ *  - ficha da marca (`designer.brand`): update_brand_profile;
  *  - saída (`designer.export`): export_file, get_export_status, export_to_canva, get_canva_export_status;
  *  - navegador somente leitura (`designer.preview`): start_frontend_session, end_frontend_session.
  *
@@ -50,6 +52,7 @@ export const MCP_TOOLS: readonly McpToolDefinition<any, any>[] = [
   restoreVersionTool,
   setSlidePhotoTool,
   uploadAssetTool,
+  updateBrandProfileTool,
   exportFileTool,
   getExportStatusTool,
   exportToCanvaTool,

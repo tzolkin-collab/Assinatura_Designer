@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { getApiErrorMessage } from '@/lib/api';
 import {
+  BRAND_SCOPE,
   EDIT_ALL_SCOPE,
   EXPORT_SCOPE,
   PREVIEW_SCOPE,
@@ -32,6 +33,7 @@ function ConsentContent() {
   const [allowExport, setAllowExport] = useState(false);
   // Desligado por padrão: só liga se a pessoa marcar.
   const [allowPreview, setAllowPreview] = useState(false);
+  const [allowBrand, setAllowBrand] = useState(false);
   const [allBrands, setAllBrands] = useState(false);
   const [sending, setSending] = useState<'approve' | 'deny' | null>(null);
   const [leaving, setLeaving] = useState(false);
@@ -108,7 +110,7 @@ function ConsentContent() {
     try {
       const accessScope =
         access === 'edit_all' && wantsEditAll ? EDIT_ALL_SCOPE : access !== 'read' && wantsWrite ? WRITE_SCOPE : READ_SCOPE;
-      const scopes = decision === 'approve' ? [accessScope, ...(allowExport ? [EXPORT_SCOPE] : []), ...(allowPreview ? [PREVIEW_SCOPE] : [])] : undefined;
+      const scopes = decision === 'approve' ? [accessScope, ...(allowExport ? [EXPORT_SCOPE] : []), ...(allowPreview ? [PREVIEW_SCOPE] : []), ...(allowBrand ? [BRAND_SCOPE] : [])] : undefined;
       const { redirectUrl } = await mcpApi.decideConsent(requestId, {
         decision,
         ...(decision === 'approve'
@@ -287,6 +289,21 @@ function ConsentContent() {
                 O agente pode gerar PDF, imagens, PPTX ou HTML de uma peça e receber um link para baixar, e enviar a peça
                 para o Canva (só em marcas onde você é editor ou mais). É à parte de ver e salvar: sem isto, ele não exporta.
                 Há um limite de pedidos por minuto.
+              </span>
+            </span>
+          </label>
+        </fieldset>
+
+        <fieldset className={styles.group}>
+          <legend>Cérebro da IA</legend>
+          <label className={styles.option}>
+            <input type="checkbox" checked={allowBrand} onChange={(e) => setAllowBrand(e.target.checked)} />
+            <span className={styles.optionText}>
+              <span>Permitir que o agente altere o Cérebro da IA das marcas</span>
+              <span className={styles.optionHint}>
+                O agente pode mudar a ficha da marca (essência, paleta, fontes, logos, regras). Isso vale para TODAS as peças
+                futuras. A ficha anterior volta junto na resposta, então dá para desfazer. Só vale onde você é editor,
+                administrador ou dono. Vem desligado: marque só se quiser.
               </span>
             </span>
           </label>

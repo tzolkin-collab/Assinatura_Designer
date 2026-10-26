@@ -14,7 +14,7 @@ import { rateLimit } from '../middleware/rateLimit.js';
 import { parseBody, isPublicHttpUrl } from '../lib/validate.js';
 import { createCollabSchema, collabSlug } from '../lib/brandCollab.js';
 import { brandProfileSchema, profileCompleteness, profileFromLegacy, type BrandProfileData } from '../lib/brandProfile.js';
-import { enrichLogoFiles } from '../lib/logoEnrich.js';
+import { ProfileFilesError, saveBrandProfile } from '../lib/brandProfileStore.js';
 import { legacyContextOf, reviewLegacyNotes } from '../lib/legacyConflicts.js';
 import { extractProfileFromManual, plainTextFromHtml, PROFILE_IMPORT_RATE_LIMIT } from '../lib/profileExtraction.js';
 import type { BrandbookExtractionInputPart } from '../lib/brandbookExtraction.js';
@@ -478,31 +478,13 @@ brandsRouter.get('/:slug/profile', requireBrandRole(ANY_MEMBER), async (req: Bra
 brandsRouter.put('/:slug/profile', requireBrandRole(EDITORS), async (req: BrandRequest, res: Response, next: NextFunction) => {
   try {
     const brand = req.brand!;
-    const profile = parseBody(brandProfileSchema, req.body ?? {});
-
-    const arquivos = [
-      ...(profile.logo?.files ?? []).map((f) => f.url),
-      profile.visualManual?.imageUrl,
-      ...(profile.typography ?? []).flatMap((t) => [t.fileUrl, t.referenceImageUrl]),
-    ].filter((u): u is string => Boolean(u));
-    for (const url of new Set(arquivos)) {
-      const asset = await prisma.asset.findFirst({ where: { brandId: brand.id, url }, select: { id: true } });
-      if (!asset) throw createError(400, 'Logo, manual visual e fontes precisam estar na biblioteca do projeto.');
+    let profile = parseBody(brandProfileSchema, req.body ?? {});
+    try {
+      profile = await saveBrandProfile(brand.id, profile);
+    } catch (err) {
+      if (err instanceof ProfileFilesError) throw createError(400, err.message);
+      throw err;
     }
-
-    // Fundo exato e versão transparente dos logos: medidos aqui, nunca aceitos do cliente.
-    if (profile.logo?.files?.length) {
-      const atual = await prisma.brandProfile.findUnique({ where: { brandId: brand.id }, select: { data: true } });
-      const anterior = brandProfileSchema.safeParse(atual?.data);
-      profile.logo.files = await enrichLogoFiles(profile.logo.files, anterior.success ? (anterior.data.logo?.files ?? []) : []);
-    }
-
-    const data = profile as unknown as Prisma.InputJsonValue;
-    await prisma.brandProfile.upsert({
-      where: { brandId: brand.id },
-      create: { brandId: brand.id, data },
-      update: { data },
-    });
 
     res.json({
       data: {

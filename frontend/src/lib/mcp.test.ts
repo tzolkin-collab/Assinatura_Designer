@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canExport, canPreview, canWrite, describeAccess, formatRemaining, isLocalServerUrl, mcpServerUrl, plainText, roleLabel } from './mcp';
+import { canEditBrand, canExport, canPreview, canWrite, describeAccess, formatRemaining, isLocalServerUrl, mcpServerUrl, plainText, roleLabel } from './mcp';
 
 describe('plainText', () => {
   it('desfaz as entidades que o servidor escapou', () => {
@@ -56,6 +56,12 @@ describe('acesso em palavras', () => {
     expect(canPreview(['designer.read'])).toBe(false);
     expect(canPreview(['designer.read', 'designer.preview'])).toBe(true);
     expect(describeAccess(['designer.read', 'designer.preview'])).toBe('Só ver · abre o Designer no navegador (só leitura)');
+  });
+
+  it('alterar o Cérebro da IA é escopo à parte e aparece na descrição', () => {
+    expect(canEditBrand(['designer.write'])).toBe(false);
+    expect(canEditBrand(['designer.read', 'designer.brand'])).toBe(true);
+    expect(describeAccess(['designer.read', 'designer.brand'])).toBe('Só ver · pode alterar o Cérebro da IA');
   });
 
   it('papel e tempo restante', () => {
