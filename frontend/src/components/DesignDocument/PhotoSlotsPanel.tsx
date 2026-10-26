@@ -29,12 +29,19 @@ interface PhotoSlotsPanelProps {
   slideHtml: string;
   /** Chamado com o slide SANITIZADO devolvido pelo servidor. */
   onApplied: (slideIndex: number, slide: SlideCode) => void;
+  /** Slide sem espaço de foto: leva a pessoa ao pedido de IA já escrito (cria um espaço vazio). */
+  onPedirEspaco?: () => void;
 }
 
 const muted = 'var(--color-text-muted, #6b7280)';
 const border = '1px solid var(--color-border, rgba(0,0,0,0.12))';
 
 const isPhoto = (a: BrandAsset) => a.fileType.startsWith('image/');
+
+// Origens que costumam ser foto de verdade (enviada ou importada); identidade e brandbook (paleta, fontes,
+// moodboard) vêm depois na lista. Imagem gerada por IA não entra: a regra do painel é foto real.
+const ORIGEM_FOTO = new Set(['upload', 'drive', 'canva', 'asana']);
+const ordemOrigem = (a: BrandAsset) => (ORIGEM_FOTO.has(a.source ?? '') ? 0 : 1);
 
 interface Framing { mode: 'manual' | 'kept' | 'auto' | 'center'; faceVisible?: number | null }
 
@@ -50,7 +57,7 @@ export function framingNotice(f: Framing | undefined): string | null {
   return null;
 }
 
-export default function PhotoSlotsPanel({ postId, marca, slideIndex, slideHtml, onApplied }: PhotoSlotsPanelProps) {
+export default function PhotoSlotsPanel({ postId, marca, slideIndex, slideHtml, onApplied, onPedirEspaco }: PhotoSlotsPanelProps) {
   const { assets, loading: carregandoBiblioteca, uploading, error: erroBiblioteca, upload } = useBrandAssets(marca);
   const [slots, setSlots] = useState<PhotoSlot[] | null>(null);
   const [escolhendo, setEscolhendo] = useState<string | null>(null); // slot com o seletor aberto
@@ -101,7 +108,10 @@ export default function PhotoSlotsPanel({ postId, marca, slideIndex, slideHtml, 
     return <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: muted }}><Loader2 size={13} className="animate-spin" /> Lendo o slide…</div>;
   }
 
-  const fotos = assets.filter(isPhoto);
+  const emUso = new Set((slots ?? []).map((s) => s.src).filter(Boolean));
+  const fotos = assets
+    .filter((a) => isPhoto(a) && (a.source !== 'ai-generated' || emUso.has(a.url)))
+    .sort((a, b) => ordemOrigem(a) - ordemOrigem(b));
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -121,8 +131,16 @@ export default function PhotoSlotsPanel({ postId, marca, slideIndex, slideHtml, 
 
       {slots && slots.length === 0 && (
         <p style={{ fontSize: 12.5, color: muted, margin: 0 }}>
-          Este slide não tem espaço reservado para foto. Se ele precisa de uma, peça no chat: &quot;adicione uma área de foto à direita&quot;.
+          Este slide não tem espaço reservado para foto.
         </p>
+      )}
+      {slots && slots.length === 0 && onPedirEspaco && (
+        <div>
+          <button type="button" onClick={onPedirEspaco}
+            style={{ fontSize: 12.5, padding: '6px 12px', borderRadius: 8, border, background: 'transparent', cursor: 'pointer' }}>
+            Pedir à IA um espaço de foto
+          </button>
+        </div>
       )}
 
       {slots?.map((s) => {

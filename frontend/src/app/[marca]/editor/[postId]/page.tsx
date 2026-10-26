@@ -517,6 +517,10 @@ export default function EditorPage() {
                 slideIndex={safeSlide}
                 slideHtml={content.slides[safeSlide].html}
                 onApplied={aplicarSlide}
+                onPedirEspaco={() => {
+                  setInstrucao('Adicione ao lado do texto uma área de foto vazia (data-photo-slot), sem alterar nenhum texto do slide.');
+                  setPainel('ia');
+                }}
               />
             )}
 

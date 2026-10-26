@@ -11,6 +11,8 @@ export interface BrandAsset {
   sizeBytes: number;
   width?: number | null;
   height?: number | null;
+  /** Origem: upload, drive, canva, asana, branding, brandbook ou ai-generated. */
+  source?: string | null;
 }
 
 /**
