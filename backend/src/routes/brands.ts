@@ -15,6 +15,7 @@ import { parseBody, isPublicHttpUrl } from '../lib/validate.js';
 import { createCollabSchema, collabSlug } from '../lib/brandCollab.js';
 import { brandProfileSchema, profileCompleteness, profileFromLegacy, type BrandProfileData } from '../lib/brandProfile.js';
 import { enrichLogoFiles } from '../lib/logoEnrich.js';
+import { legacyContextOf, reviewLegacyNotes } from '../lib/legacyConflicts.js';
 import { extractProfileFromManual, plainTextFromHtml, PROFILE_IMPORT_RATE_LIMIT } from '../lib/profileExtraction.js';
 import type { BrandbookExtractionInputPart } from '../lib/brandbookExtraction.js';
 import type { Prisma } from '@prisma/client';
@@ -456,7 +457,14 @@ brandsRouter.get('/:slug/profile', requireBrandRole(ANY_MEMBER), async (req: Bra
       const config = await prisma.brandConfig.findUnique({ where: { brandId: brand.id } });
       profile = profileFromLegacy(config);
     }
-    res.json({ data: { profile, derived: !row, completeness: profileCompleteness(profile) } });
+    res.json({
+      data: {
+        profile,
+        derived: !row,
+        completeness: profileCompleteness(profile),
+        legacyConflicts: reviewLegacyNotes(profile.legacyNotes, legacyContextOf(profile)).conflicts,
+      },
+    });
   } catch (error) {
     next(error);
   }
@@ -496,7 +504,14 @@ brandsRouter.put('/:slug/profile', requireBrandRole(EDITORS), async (req: BrandR
       update: { data },
     });
 
-    res.json({ data: { profile, derived: false, completeness: profileCompleteness(profile) } });
+    res.json({
+      data: {
+        profile,
+        derived: false,
+        completeness: profileCompleteness(profile),
+        legacyConflicts: reviewLegacyNotes(profile.legacyNotes, legacyContextOf(profile)).conflicts,
+      },
+    });
   } catch (error) {
     next(error);
   }

@@ -8,6 +8,7 @@ import {
   loadBrainLayers,
   onlyProvidedAssets,
 } from '../../lib/designerBrain/index.js';
+import { describeLegacyConflict, legacyContextOf, reviewLegacyNotes } from '../../lib/legacyConflicts.js';
 import { PHOTO_SLOT_RULE, brainTextRule, describeLogoVariant, logoBackgroundRule } from '../../lib/htmlDesign.js';
 import { READ_SCOPE } from '../config.js';
 import { DESIGNER_WORKFLOW_CHECKLIST, HTML_OUTPUT_CONTRACT } from './htmlContract.js';
@@ -43,6 +44,7 @@ const outputSchema = {
   rulesTruncated: z.boolean(),
   brainActive: z.boolean(),
   pending: z.array(z.string()),
+  warnings: z.array(z.string()),
   htmlContract: z.string(),
   textRule: z.string(),
   photoSlotRule: z.string(),
@@ -146,6 +148,11 @@ export const getDesignerBriefTool: McpToolDefinition<typeof inputSchema, typeof 
     const provided = onlyProvidedAssets(brand.assetUrls).filter((a) => !logoUrls.has(a.url));
     const assets = provided.slice(0, MAX_ASSETS).map((a) => ({ name: a.name, url: a.url, source: a.source ?? null }));
 
+    // Notas de antes da ficha que contradizem a ficha ou as regras: já saem de `rules`; aqui o agente é avisado.
+    const warnings = profile?.legacyNotes
+      ? reviewLegacyNotes(profile.legacyNotes, legacyContextOf(profile)).conflicts.map(describeLegacyConflict)
+      : [];
+
     const hasLogo = Boolean(brand.logoUrl) || logoVariants.length > 0;
     const structured = {
       brand: { slug: grant.slug, name: brand.name },
@@ -154,6 +161,7 @@ export const getDesignerBriefTool: McpToolDefinition<typeof inputSchema, typeof 
       rulesTruncated,
       brainActive,
       pending,
+      warnings,
       htmlContract: HTML_OUTPUT_CONTRACT,
       textRule: brainTextRule(hasLogo),
       photoSlotRule: PHOTO_SLOT_RULE,
@@ -176,6 +184,7 @@ export const getDesignerBriefTool: McpToolDefinition<typeof inputSchema, typeof 
       '=== REGRAS DA MARCA E DO ESTÚDIO ===',
       rules,
       pending.length ? `\nO que falta saber (não invente): ${pending.join('; ')}` : '',
+      warnings.length ? `\nAvisos:\n${warnings.map((w) => `- ${w}`).join('\n')}` : '',
       '',
       '=== TEXTO NA ARTE ===',
       structured.textRule,

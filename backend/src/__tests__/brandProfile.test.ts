@@ -154,7 +154,22 @@ describe('renderProjectMemory', () => {
 
   it('as notas antigas aparecem no fim, separadas da ficha', () => {
     const txt = renderProjectMemory('X', { essence: 'a', legacyNotes: 'texto antigo' });
-    expect(txt.endsWith('OBSERVAÇÕES ANTERIORES À FICHA\ntexto antigo')).toBe(true);
+    expect(txt).toContain('OBSERVAÇÕES ANTERIORES À FICHA (não são regras');
+    expect(txt.endsWith('\ntexto antigo')).toBe(true);
+    expect(txt).not.toContain('TRECHOS DESCONSIDERADOS');
+  });
+
+  it('nota antiga que contradiz a ficha vira trecho desconsiderado, não regra', () => {
+    const txt = renderProjectMemory('X', {
+      essence: 'a',
+      palette: [{ hex: '#112233', role: 'Fundo' }],
+      legacyNotes: 'Use fotos do Unsplash.\nCor de destaque #7C5CFF.\nContraste WCAG sempre.',
+    } as never);
+    const [, descartados] = txt.split('TRECHOS DESCONSIDERADOS');
+    expect(descartados).toContain('Unsplash');
+    expect(descartados).toContain('#7C5CFF');
+    expect(txt.split('TRECHOS DESCONSIDERADOS')[0]).toContain('Contraste WCAG sempre.');
+    expect(txt.split('TRECHOS DESCONSIDERADOS')[0]).not.toContain('Unsplash');
   });
 });
 

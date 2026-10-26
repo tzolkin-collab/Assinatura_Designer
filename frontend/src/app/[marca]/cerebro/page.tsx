@@ -592,6 +592,17 @@ export default function CerebroPage() {
       {hadLegacyNotes && (
         <Section id="legacyNotes" title="Notas de antes da ficha" pending={false}
           hint="Diretrizes e instruções do agente que o projeto tinha antes. Ficam aqui até alguém reorganizá-las nos campos acima.">
+          {(result.legacyConflicts?.length ?? 0) > 0 && (
+            <div className={`${styles.notice} ${styles.noticeInfo}`} role="note">
+              <strong>A IA desconsidera {result.legacyConflicts!.length === 1 ? 'esta linha' : `estas ${result.legacyConflicts!.length} linhas`}</strong>
+              {' '}porque contradiz a ficha ou as regras do estúdio. Corrija ou apague no texto abaixo.
+              <ul>
+                {result.legacyConflicts!.map((c, i) => (
+                  <li key={i}>“{c.excerpt}” — {c.rule}</li>
+                ))}
+              </ul>
+            </div>
+          )}
           <textarea className={styles.textarea} value={form.legacyNotes} disabled={disabled} onChange={(e) => set('legacyNotes', e.target.value)} />
         </Section>
       )}

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { brandProfileSchema, profileCompleteness, profileFromLegacy, type BrandProfileData } from '../../lib/brandProfile.js';
+import { legacyContextOf, reviewLegacyNotes } from '../../lib/legacyConflicts.js';
 import prisma from '../../lib/prisma.js';
 import { READ_SCOPE } from '../config.js';
 import type { McpToolDefinition } from './types.js';
@@ -18,6 +19,8 @@ const outputSchema = {
     ready: z.boolean(),
     pending: z.array(z.object({ key: z.string(), label: z.string(), required: z.boolean() })),
   }),
+  /** Linhas das notas de antes da ficha que contradizem a ficha ou as regras globais (já desconsideradas no brief). */
+  legacyConflicts: z.array(z.object({ kind: z.string(), rule: z.string(), excerpt: z.string() })),
 };
 
 export const getBrandProfileTool: McpToolDefinition<typeof inputSchema, typeof outputSchema> = {
@@ -54,6 +57,7 @@ export const getBrandProfileTool: McpToolDefinition<typeof inputSchema, typeof o
       derived: !row,
       profile: profile as Record<string, unknown>,
       completeness,
+      legacyConflicts: reviewLegacyNotes(profile.legacyNotes, legacyContextOf(profile)).conflicts,
     };
     const text = [
       `Ficha de ${brand.name} (${brand.slug}): ${completeness.percent}% preenchida, ${completeness.ready ? 'pronta' : 'NÃO pronta'} para criar.${row ? '' : ' (derivada dos campos antigos; nada salvo)'}`,
