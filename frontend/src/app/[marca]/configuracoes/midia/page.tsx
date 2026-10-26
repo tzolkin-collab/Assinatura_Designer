@@ -10,7 +10,6 @@ import {
   Folder, FolderPlus, ChevronRight, ChevronDown, Edit3, X, Plus
 } from 'lucide-react';
 import PageHeader from '@/components/ui/PageHeader';
-import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import configStyles from '../configuracoes.module.css';
 import styles from './midia.module.css';
@@ -57,6 +56,8 @@ interface Asset {
   url: string;
   fileType: string;
   sizeBytes: number;
+  width?: number | null;
+  height?: number | null;
   source?: string;
   tags?: string[];
   folderId?: string | null;
@@ -477,6 +478,10 @@ export default function MidiaPage() {
 
   const [isBrandbookModalOpen, setIsBrandbookModalOpen] = useState(false);
   const busy = uploading || importando;
+  // Fontes e outros arquivos não têm miniatura: viravam uma parede de cartões em branco. Vão para uma lista
+  // compacta abaixo das imagens.
+  const imagens = filteredAssets.filter((a) => a.fileType.startsWith('image/'));
+  const arquivos = filteredAssets.filter((a) => !a.fileType.startsWith('image/'));
 
   return (
     <div>
@@ -488,7 +493,7 @@ export default function MidiaPage() {
       <div className={styles.headerRow}>
         <PageHeader
           title="Biblioteca de Mídia"
-          description="Imagens e vetores disponíveis para todos os usuários desta marca — enviados à mão, importados do Drive/Canva, ou gerados automaticamente pela Fábrica."
+          description="Arquivos que a IA e a equipe podem usar nas peças desta marca: enviados, importados ou gerados pela Fábrica."
         />
         <div className={styles.actions}>
           <input
@@ -499,39 +504,25 @@ export default function MidiaPage() {
             accept="image/*,font/*,.svg,.ttf,.otf,.woff,.woff2"
           />
           <Button
-            variant="secondary"
-            onClick={() => setIsBrandbookModalOpen(true)}
-            disabled={busy || !canManageAssets}
-          >
-            <Sparkles size={16} />
-            Adicionar Brandbook
-          </Button>
-          <Button
-            variant="secondary"
-            onClick={() => setPopupAberto('canva')}
-            disabled={busy || !canManageAssets}
-            title={canManageAssets ? undefined : hint}
-          >
-            <FileImage size={16} />
-            Importar do Canva
-          </Button>
-          <Button
-            variant="secondary"
-            onClick={() => setPopupAberto('drive')}
-            disabled={busy || !canManageAssets}
-            title={canManageAssets ? undefined : hint}
-          >
-            <HardDrive size={16} />
-            Importar do Drive
-          </Button>
-          <Button
             onClick={() => fileInputRef.current?.click()}
             disabled={busy || !canManageAssets}
             title={canManageAssets ? undefined : hint}
           >
             {uploading ? <Loader2 className="animate-spin" size={16} /> : <Upload size={16} />}
-            {uploading ? 'Enviando...' : 'Fazer Upload'}
+            {uploading ? 'Enviando...' : 'Enviar arquivos'}
           </Button>
+          <div className={styles.importGroup} role="group" aria-label="Importar de">
+            <span className={styles.importLabel}>Importar de</span>
+            <button type="button" className={styles.importBtn} onClick={() => setPopupAberto('canva')} disabled={busy || !canManageAssets} title={canManageAssets ? undefined : hint}>
+              <FileImage size={14} /> Canva
+            </button>
+            <button type="button" className={styles.importBtn} onClick={() => setPopupAberto('drive')} disabled={busy || !canManageAssets} title={canManageAssets ? undefined : hint}>
+              <HardDrive size={14} /> Drive
+            </button>
+            <button type="button" className={styles.importBtn} onClick={() => setIsBrandbookModalOpen(true)} disabled={busy || !canManageAssets} title={canManageAssets ? undefined : hint}>
+              <Sparkles size={14} /> Brandbook
+            </button>
+          </div>
         </div>
       </div>
 
@@ -650,7 +641,7 @@ export default function MidiaPage() {
             <p>{assets.length === 0 ? 'Nenhuma mídia encontrada na biblioteca da marca.' : 'Nenhum arquivo corresponde a este filtro.'}</p>
           </div>
         ) : (
-          filteredAssets.map((asset) => {
+          imagens.map((asset) => {
             const source = (asset.source ?? 'upload') as AssetSource;
             // Fonte nova vinda do backend não pode derrubar a página inteira —
             // sem entrada no mapa, cai no genérico em vez de estourar React Error 130.
@@ -669,66 +660,106 @@ export default function MidiaPage() {
                 }}
                 style={{ cursor: canManageAssets ? 'grab' : 'default' }}
               >
-                <Card variant="section" 
-                  padding="none" 
-                  className={styles.card}
-                >
+                <div className={styles.card}>
                   <div className={styles.thumb}>
-                  <span className={styles.sourceBadge}>
-                    <SourceIcon size={11} />
-                    {SOURCE_LABEL[source] ?? source}
-                  </span>
-                  {asset.fileType.startsWith('image/') ? (
-                    <img src={asset.url} alt={asset.name} className={styles.thumbImg} />
-                  ) : (
-                    <FileText size={32} style={{ color: 'var(--color-text-tertiary)' }} />
-                  )}
-                </div>
-                <div className={styles.cardBody}>
-                  <div className={styles.cardName} title={asset.name}>
-                    {asset.name}
-                  </div>
-                  <div className={styles.cardMeta}>
-                    <span>{formatSize(asset.sizeBytes)}</span>
-                    <span>{asset.fileType.split('/')[1]?.toUpperCase()}</span>
-                  </div>
-                  {extraTags.length > 0 && (
-                    <div className={styles.cardTags}>
-                      {extraTags.map((t) => (
-                        <span key={t} className={styles.cardTagPill}>#{t}</span>
-                      ))}
+                    {source !== 'upload' && (
+                      <span className={styles.sourceBadge}>
+                        <SourceIcon size={11} />
+                        {SOURCE_LABEL[source] ?? source}
+                      </span>
+                    )}
+                    {asset.fileType.startsWith('image/') ? (
+                      <img src={asset.url} alt={asset.name} className={`${styles.thumbImg} ${source === 'branding' || source === 'brandbook' ? styles.thumbImgFit : ''}`} loading="lazy" />
+                    ) : (
+                      <FileText size={32} style={{ color: 'var(--color-text-tertiary)' }} />
+                    )}
+                    <div className={styles.cardActions}>
+                      {source === 'ai-generated' && (
+                        <button
+                          type="button"
+                          onClick={() => handleExportCanva(asset.id)}
+                          disabled={exportandoCanva === asset.id || !canManageAssets}
+                          title={canManageAssets ? 'Criar um design no Canva com essa imagem' : hint}
+                          aria-label="Criar um design no Canva com essa imagem"
+                          className={styles.actionBtn}
+                        >
+                          {exportandoCanva === asset.id ? <Loader2 className="animate-spin" size={14} /> : <FileImage size={14} />}
+                        </button>
+                      )}
+                      {canManageAssets && (
+                        <button
+                          type="button"
+                          onClick={() => handleRemove(asset.id)}
+                          title="Excluir arquivo"
+                          aria-label={`Excluir ${asset.name}`}
+                          className={`${styles.actionBtn} ${styles.actionDanger}`}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
                     </div>
-                  )}
-                </div>
-
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  {source === 'ai-generated' && (
-                    <button
-                      onClick={() => handleExportCanva(asset.id)}
-                      disabled={exportandoCanva === asset.id || !canManageAssets}
-                      title={canManageAssets ? 'Criar um design no Canva com essa imagem' : hint}
-                      className={styles.removeBtn}
-                      style={{ color: '#00c4cc' }}
-                    >
-                      {exportandoCanva === asset.id ? <Loader2 className="animate-spin" size={14} /> : <FileImage size={14} />}
-                    </button>
-                  )}
-                  <button
-                    onClick={() => handleRemove(asset.id)}
-                    disabled={!canManageAssets}
-                    title={canManageAssets ? 'Excluir arquivo' : hint}
-                    className={styles.removeBtn}
-                    style={{ display: canManageAssets ? 'flex' : 'none' }}
-                  >
-                    <Trash2 size={14} />
-                  </button>
                   </div>
-                </Card>
+                  <div className={styles.cardBody}>
+                    <div className={styles.cardName} title={asset.name}>
+                      {asset.name}
+                    </div>
+                    <div className={styles.cardMeta}>
+                      {[
+                        asset.fileType.split('/')[1]?.replace('svg+xml', 'svg').toUpperCase(),
+                        asset.width && asset.height ? `${asset.width}×${asset.height}` : null,
+                        asset.sizeBytes > 0 ? formatSize(asset.sizeBytes) : null,
+                      ].filter(Boolean).join(' · ')}
+                    </div>
+                    {extraTags.length > 0 && (
+                      <div className={styles.cardTags}>
+                        {extraTags.map((t) => (
+                          <span key={t} className={styles.cardTagPill}>#{t}</span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
             );
           })
         )}
       </div>
+
+          {arquivos.length > 0 && (
+            <section className={styles.files} aria-label="Fontes e outros arquivos">
+              <h2 className={styles.filesTitle}>
+                Fontes e outros arquivos <span className={styles.filesCount}>{arquivos.length}</span>
+              </h2>
+              <ul className={styles.fileList}>
+                {arquivos.map((asset) => (
+                  <li
+                    key={asset.id}
+                    className={styles.fileRow}
+                    draggable={canManageAssets}
+                    onDragStart={() => setDraggedAssetId(asset.id)}
+                    onDragEnd={() => { setDraggedAssetId(null); setDragOverFolderId(null); }}
+                  >
+                    <FileText size={16} className={styles.fileIcon} aria-hidden="true" />
+                    <span className={styles.fileName} title={asset.name}>{asset.name}</span>
+                    <span className={styles.fileMeta}>
+                      {[asset.fileType.split('/')[1]?.toUpperCase(), asset.sizeBytes > 0 ? formatSize(asset.sizeBytes) : null].filter(Boolean).join(' · ')}
+                    </span>
+                    {canManageAssets && (
+                      <button
+                        type="button"
+                        className={styles.fileDelete}
+                        onClick={() => handleRemove(asset.id)}
+                        title="Excluir arquivo"
+                        aria-label={`Excluir ${asset.name}`}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
         </main>
       </div>
 
