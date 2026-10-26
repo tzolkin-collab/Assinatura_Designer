@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { httpsUrl } from './brandCollab.js';
+import { legacyContextOf, reviewLegacyNotes } from './legacyConflicts.js';
 
 // Ficha do projeto (Cérebro de IA, §10 "Modelo para cadastrar qualquer projeto").
 //
@@ -235,6 +236,26 @@ export function renderProjectMemory(name: string, profile: BrandProfileData): st
     profile.mayVary?.length ? `O QUE PODE VARIAR\n${profile.mayVary.map((v) => `- ${v}`).join('\n')}` : '',
     profile.mustKeep?.length ? `O QUE PRECISA FICAR\n${profile.mustKeep.map((v) => `- ${v}`).join('\n')}` : '',
     profile.collabRules?.trim() ? `REGRAS DE COLLAB\n${profile.collabRules.trim()}` : '',
-    profile.legacyNotes?.trim() ? `OBSERVAÇÕES ANTERIORES À FICHA\n${profile.legacyNotes.trim()}` : '',
+    renderLegacyNotes(profile),
   ].filter(Boolean).join('\n\n');
+}
+
+/**
+ * As notas de antes da ficha NÃO são regras: a ficha e as regras globais prevalecem. As linhas que as
+ * contradizem (banco de imagem, fonte ou cor fora da ficha, gerar pessoa) saem do texto e são listadas à parte,
+ * para o agente saber que existem e que foram desconsideradas, em vez de obedecê-las.
+ */
+function renderLegacyNotes(profile: BrandProfileData): string {
+  if (!profile.legacyNotes?.trim()) return '';
+  const { kept, conflicts } = reviewLegacyNotes(profile.legacyNotes, legacyContextOf(profile));
+  const parts = [
+    'OBSERVAÇÕES ANTERIORES À FICHA (não são regras: se contradisserem a ficha ou as regras acima, valem a ficha e as regras)',
+  ];
+  if (kept) parts.push(kept);
+  if (conflicts.length > 0) {
+    parts.push(
+      `TRECHOS DESCONSIDERADOS (contradizem a ficha ou as regras):\n${conflicts.map((c) => `- "${c.excerpt}" — ${c.rule}`).join('\n')}`,
+    );
+  }
+  return parts.join('\n');
 }

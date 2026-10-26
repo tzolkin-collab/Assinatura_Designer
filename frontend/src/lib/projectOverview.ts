@@ -24,6 +24,8 @@ export interface ProjectProfileResponse {
   profile: ProfileSummary;
   derived: boolean;
   completeness: ProfileCompleteness;
+  /** Linhas das notas antigas que contradizem a ficha ou as regras; a IA já as desconsidera. */
+  legacyConflicts?: Array<{ kind: string; rule: string; excerpt: string }>;
 }
 
 export type BrandKind = 'BASE' | 'INTERNAL' | 'PARTNERSHIP';

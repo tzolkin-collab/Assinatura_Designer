@@ -57,6 +57,7 @@ describe('get_designer_brief', () => {
     expect(s.palette).toEqual(['#112233', '#ffffff']);
     expect(s.logoUrl).toBe('https://cdn.example.test/a.svg');
     expect(s.rules).toBeTruthy();
+    expect(s.warnings).toEqual([]);
     expect(s.checklist.length).toBeGreaterThan(3);
   });
 
