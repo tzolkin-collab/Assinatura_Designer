@@ -54,7 +54,7 @@ Tudo em PowerShell (sem `&&`). Rode na raiz do repositório `designer`.
 | --- | --- | --- | --- | --- |
 | 2.1 | Árvore limpa e commit anotado | `git status --short; git log -1 --oneline` | só o que você espera; anote o commit na tabela da seção 0 | |
 | 2.2 | Backup do banco | no painel do banco | backup feito (anote data e hora) | |
-| 2.3 | Suíte do conector verde | `cd backend; node node_modules/typescript/bin/tsc --noEmit; node node_modules/vitest/vitest.mjs run src/__tests__/mcp` | tsc sem erro; testes todos passando (anote passou/falhou) | |
+| 2.3 | Suíte do conector verde | `cd backend; node node_modules/typescript/bin/tsc --noEmit; node node_modules/vitest/vitest.mjs run src/__tests__/mcp` | tsc sem erro; testes todos passando (anote passou/falhou) | tsc sem erro; vitest `src/__tests__/mcp` + `mcpOwnership`: 19 arquivos, 422 testes, todos passando (25/10/2026, frontend do PR #127 não afeta). ✅ |
 | 2.4 | Migrations | `cd backend; pnpm db:status` (consulta o banco do `.env` da sua máquina; só lê) | nenhuma pendente (o container roda `prisma migrate deploy` ao iniciar) | |
 | 2.5 | Versão do Redis | `redis-cli -u $env:REDIS_URL INFO server \| Select-String redis_version` (ou veja no painel) | qualquer versão atual; o MCP **não** usa `GETDEL` (só `MULTI GET+DEL`) | |
 | 2.6 | Senhas do seed trocadas | conferir no app | 🟡 pendência de 16/10, não se sabe se foi feita | |
@@ -178,9 +178,9 @@ Preencha "Resposta obtida" com a mensagem exata (cole o texto, sem token). "Ajus
 
 | # | Ferramenta | Entrada usada (dado de teste) | Resposta esperada | Resposta obtida | ok? | Ajuste feito |
 | --- | --- | --- | --- | --- | --- | --- |
-| 1 | `list_brands` | sem argumentos; conexão com só a marca de teste | só a marca de teste, com slug, nome e papel | | | |
-| 2 | `get_brand_kit` | `brandSlug` = marca de teste | cores, fontes, logo, diretrizes | | | |
-| 3 | `get_designer_brief` | `brandSlug`, `format`: `presentation` | regras da marca e do estúdio, canvas, contrato do HTML, fontes, paleta, arquivos reais | | | |
+| 1 | `list_brands` | sem argumentos; conexão com só a marca de teste | só a marca de teste, com slug, nome e papel | Devolveu 5 marcas com slug, nome e papel: amanda-coelho (EDITOR), assinatura (OWNER), farmacia-indiana (EDITOR), fernanda-coelho (EDITOR), tzolkin (EDITOR). | ⚠️ funciona, mas o esperado era só a marca de teste | A conexão libera **amanda-coelho** (marca da Gabi): ver seção 9. |
+| 2 | `get_brand_kit` | `brandSlug` = marca de teste | cores, fontes, logo, diretrizes | `brandSlug: tzolkin`: 5 cores (`#000000`, `#FFFFFF`, `#CCCCCC`, `#333333`, `#EEEEEE`), fontes Montserrat e Inter, `logoUrl`, diretrizes (JSON), visual (vibe, paleta aprovada, fotos, ousadia). | ✅ | |
+| 3 | `get_designer_brief` | `brandSlug`, `format`: `presentation` | regras da marca e do estúdio, canvas, contrato do HTML, fontes, paleta, arquivos reais | `brandSlug: tzolkin`, `pageCount: 2`: `rules`, canvas 1920×1080 (16:9), `htmlContract`, `textRule`, `photoSlotRule`, `checklist`, paleta, fontes (Montserrat/Inter), logo e 1 asset. `brainActive: true`, `pending: []`. | ⚠️ funciona, mas `rules` traz instruções que contradizem o resto do brief: seção 9 | |
 | 4 | `save_presentation` | 2 slides com `approvedText` da seção 1.2; slide 2 com `Sábado, 11h` de propósito | `created: true`, `issues` no slide 2, `status: DRAFT`, `postId` e `editorUrl` | | | |
 | 5 | `save_presentation` | `postId` do passo 4; slide 2 corrigido para `Sábado, 10h` | `created: false`, sem `issues`, `status: READY`, `versionId` preenchido | | | |
 | 6 | `update_slide` + `list_versions` | `postId`, `slide: 1`, só a cor de fundo, `approvedText` do slide 1 | slide muda; `versionNote`; nova versão em `list_versions` | | | |
@@ -190,10 +190,10 @@ Preencha "Resposta obtida" com a mensagem exata (cole o texto, sem token). "Ajus
 | 10 | `export_to_canva` + `get_canva_export_status` | `postId`, `mode: pptx` (Canva conectado) | design criado e link; ou ➖ se Canva desconectado | | | |
 | 11 | `export_file` | `postId` de deck **existente** com texto em revisão | recusa com o motivo (`draft_not_final`); ou ➖ se não houver esse deck | | | |
 | 12 | `save_presentation` | conexão **só leitura**, 1 slide mínimo | recusa HTTP 403 `insufficient_scope`; nenhuma peça criada | | | |
-| 13 | `get_design` | `brandSlug` fora da conexão (`marca-que-nao-existe`), `postId` uuid qualquer | "Marca indisponível para esta conexão..."; nada vazado | | | |
-| 14 | `get_integrations_status` | sem argumentos | sim/não por integração; **nenhum token** na resposta | | | |
+| 13 | `get_design` | `brandSlug` fora da conexão (`marca-que-nao-existe`), `postId` uuid qualquer | "Marca indisponível para esta conexão..."; nada vazado | Com `marca-que-nao-existe` e postId `00000000-0000-4000-8000-000000000000`: "Marca indisponível para esta conexão. Use list_brands para ver as marcas liberadas." | ✅ parcial | Só marca inexistente. Marca **existente fora da conexão** não é testável: esta conexão libera todas as 5. |
+| 14 | `get_integrations_status` | sem argumentos | sim/não por integração; **nenhum token** na resposta | `{"canva":{"connected":true,"expiresAt":"2026-07-22T15:27:32.452Z"},"google":{"connected":true},"asana":{"connected":true}}`. Nenhum token na resposta. | ✅ (sem token) ⚠️ Canva | `expiresAt` já passou (hoje é 25/10/2026): ver seção 9. |
 
-Resultado geral: ____ de 14 ok · ____ falharam · ____ não verificáveis.
+Resultado geral (parcial, só leitura, 25/10/2026): 2 ok sem ressalva (2, 14\*) · 1 ok parcial (13) · 2 ok com ressalva (1, 3) · 9 não executados nesta sessão (4 a 12). \*14 sem token, mas com o Canva vencido.
 
 ## 7. O que este teste NÃO prova (diga no relatório)
 - Não mede a qualidade visual da arte, nem compara com o lote 1 da Gabi.
@@ -234,7 +234,10 @@ O primeiro comando lista as conexões (cada uma com seu `id`); o segundo revoga 
 
 | Fase e passo | Ferramenta | Mensagem exata | Ajuste feito | Resolvido? |
 | --- | --- | --- | --- | --- |
-| | | | | |
+| Fase A, passo 1 | `list_brands` | (sem erro) a conexão devolve 5 marcas, incluindo `amanda-coelho` (EDITOR) | Não alterado. Refazer a conexão marcando **só a marca de teste**; sem isso o passo 13 de marca existente e a regra "nunca a da Gabi" não se cumprem. | ❌ aberto |
+| Fase A, passo 14 | `get_integrations_status` | `canva.connected: true` com `expiresAt: 2026-07-22T15:27:32.452Z` (data já vencida) | Não alterado. Reconectar o Canva em Configurações > Integrações antes do passo 10; o "conectado" não prova token válido. 🟡 HIPÓTESE: o passo 10 falha até a reconexão (não testado). | ❌ aberto |
+| Fase A, passo 3 | `get_designer_brief` | (sem erro) `rules` da marca tzolkin mistura instruções antigas com as globais: manda usar **fotos do Unsplash** (regra 4) e **Space Grotesk** (regra 7) e cores `#0A0E1A`/`#7C5CFF`, enquanto `htmlContract` e `photoSlotRule` proíbem banco de imagem e o kit/fontes/paleta da marca são Montserrat, Inter e preto e branco | Não alterado. O texto parece vir das diretrizes antigas da marca (`guidelines`/instruções do agente) e deve ser revisto na marca ou no brief. | ❌ aberto |
+| Fase A, passo 12 | `save_presentation` | não executado | Exige conexão só de leitura; a conexão atual não foi feita para isso. | ➖ não verificável |
 
 ## 10. Fechar no Core
 Registre no Core (tenant "Assinatura Marca Própria", contratação "Designer", tarefa "[Designer] Deploy do backend e teste do conector MCP (checklist)"): data e commit, o resultado geral da seção 6, as falhas da seção 9 com o ajuste, e os passos ➖ com o motivo. O Core cria o registro como "planejado": para registrar o que já ocorreu, faça uma segunda chamada com `status: done` e `ends_at`.
