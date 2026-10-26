@@ -98,7 +98,7 @@ export default function PhotoSlotsPanel({ postId, marca, slideIndex, slideHtml, 
   }, [upload, aplicar]);
 
   if (slots === null && !erro) {
-    return <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: muted }}><Loader2 size={13} /> Lendo o slide…</div>;
+    return <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: muted }}><Loader2 size={13} className="animate-spin" /> Lendo o slide…</div>;
   }
 
   const fotos = assets.filter(isPhoto);
@@ -110,6 +110,12 @@ export default function PhotoSlotsPanel({ postId, marca, slideIndex, slideHtml, 
         Só entram fotos reais da biblioteca da marca. Nada é gerado por IA, e cada troca cria uma versão que dá para restaurar.
       </p>
 
+      {ocupado && (
+        <div role="status" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, background: 'var(--color-brand-light, #fff4ed)', borderRadius: 8, padding: '8px 10px' }}>
+          <Loader2 size={14} className="animate-spin" />
+          <span>Aplicando a foto no slide… o enquadramento é calculado pelo assunto, pode levar alguns segundos.</span>
+        </div>
+      )}
       {erro && <div style={{ fontSize: 12, color: '#b91c1c', background: '#fef2f2', borderRadius: 8, padding: '6px 10px' }}>{erro}</div>}
       {aviso && <div role="status" style={{ fontSize: 12, background: 'var(--color-bg-secondary, #f3f4f6)', borderRadius: 8, padding: '6px 10px' }}>{aviso}</div>}
 
@@ -138,7 +144,7 @@ export default function PhotoSlotsPanel({ postId, marca, slideIndex, slideHtml, 
                 <div style={{ fontSize: 13, fontWeight: 500 }}>Foto {s.slot}</div>
                 <div style={{ fontSize: 11.5, color: muted }}>{s.hasPhoto ? 'Com foto' : 'Vazio, esperando uma foto'}</div>
               </div>
-              {busy && <Loader2 size={14} />}
+              {busy && <Loader2 size={14} className="animate-spin" />}
             </div>
 
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -157,7 +163,7 @@ export default function PhotoSlotsPanel({ postId, marca, slideIndex, slideHtml, 
             {escolhendo === s.slot && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, cursor: uploading ? 'wait' : 'pointer', color: 'var(--color-brand, #FF6B35)' }}>
-                  {uploading ? <Loader2 size={12} /> : <Upload size={12} />} Enviar uma foto nova
+                  {uploading ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />} Enviar uma foto nova
                   <input type="file" accept="image/*" hidden disabled={uploading || busy}
                     onChange={(e) => { void enviarFoto(s.slot, e.target.files?.[0]); e.target.value = ''; }} />
                 </label>
@@ -166,7 +172,7 @@ export default function PhotoSlotsPanel({ postId, marca, slideIndex, slideHtml, 
                 {!carregandoBiblioteca && fotos.length === 0 && (
                   <div style={{ fontSize: 12, color: muted }}>A biblioteca da marca ainda não tem fotos. Envie uma acima.</div>
                 )}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(72px, 1fr))', gap: 6, maxHeight: 220, overflowY: 'auto' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(72px, 1fr))', gap: 6, maxHeight: 220, overflowY: 'auto', opacity: busy ? 0.5 : 1, transition: 'opacity 120ms' }} aria-busy={busy}>
                   {fotos.map((a) => {
                     const atual = a.url === s.src;
                     return (

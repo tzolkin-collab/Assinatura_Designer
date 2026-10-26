@@ -282,7 +282,7 @@ export default function EditorPage() {
   if (carregando) {
     return (
       <div className={styles.center}>
-        <span className={styles.loading}><Loader2 size={16} /> Carregando design…</span>
+        <span className={styles.loading}><Loader2 size={16} className="animate-spin" /> Carregando design…</span>
       </div>
     );
   }
@@ -342,7 +342,7 @@ export default function EditorPage() {
               className={styles.btnPrimary}
             >
               {exportando
-                ? <><Loader2 size={14} /> {exportando.formato.toUpperCase()} {exportando.done}/{exportando.total}</>
+                ? <><Loader2 size={14} className="animate-spin" /> {exportando.formato.toUpperCase()} {exportando.done}/{exportando.total}</>
                 : <><Download size={14} /> Baixar <ChevronDown size={13} /></>}
             </button>
             {menuBaixar && (
@@ -478,7 +478,7 @@ export default function EditorPage() {
                       {typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform) ? '⌘' : 'Ctrl'}+Enter aplica
                     </span>
                     <button type="button" className={styles.apply} onClick={() => void editarComIA()} disabled={editando || !instrucao.trim()}>
-                      {editando ? <><Loader2 size={14} /> Editando…</> : <><Sparkles size={14} /> Aplicar no slide</>}
+                      {editando ? <><Loader2 size={14} className="animate-spin" /> Editando…</> : <><Sparkles size={14} /> Aplicar no slide</>}
                     </button>
                   </div>
                 </div>
@@ -553,7 +553,7 @@ export default function EditorPage() {
                         disabled={restaurando !== null}
                         title="Restaurar esta versão (o estado atual vira versão antes)"
                       >
-                        {restaurando === v.id ? <Loader2 size={13} /> : <RotateCcw size={13} />} Restaurar
+                        {restaurando === v.id ? <Loader2 size={13} className="animate-spin" /> : <RotateCcw size={13} />} Restaurar
                       </button>
                     </div>
                   ))}
