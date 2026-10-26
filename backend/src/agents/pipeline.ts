@@ -784,7 +784,7 @@ async function runPipelineInner(
             photoRule: photoRuleOn && !designerBrainOn,
             // Variantes oficiais do logo da ficha: o artista escolhe pela cor do fundo do slide.
             logoVariants: designerBrainOn && savedProfile?.logo?.files?.length
-              ? savedProfile.logo.files.map((f) => ({ url: f.url, label: f.label ?? 'Logo' }))
+              ? savedProfile.logo.files.map((f) => ({ url: f.url, label: f.label ?? 'Logo', bgHex: f.bgHex, ink: f.ink, transparentUrl: f.transparentUrl }))
               : undefined,
             logoUrl: brand.logoUrl,
             // Fotos anexadas pelo usuário no chat entram JUNTO com os assets da

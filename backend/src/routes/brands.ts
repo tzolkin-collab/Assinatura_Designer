@@ -14,6 +14,7 @@ import { rateLimit } from '../middleware/rateLimit.js';
 import { parseBody, isPublicHttpUrl } from '../lib/validate.js';
 import { createCollabSchema, collabSlug } from '../lib/brandCollab.js';
 import { brandProfileSchema, profileCompleteness, profileFromLegacy, type BrandProfileData } from '../lib/brandProfile.js';
+import { enrichLogoFiles } from '../lib/logoEnrich.js';
 import { extractProfileFromManual, plainTextFromHtml, PROFILE_IMPORT_RATE_LIMIT } from '../lib/profileExtraction.js';
 import type { BrandbookExtractionInputPart } from '../lib/brandbookExtraction.js';
 import type { Prisma } from '@prisma/client';
@@ -479,6 +480,13 @@ brandsRouter.put('/:slug/profile', requireBrandRole(EDITORS), async (req: BrandR
     for (const url of new Set(arquivos)) {
       const asset = await prisma.asset.findFirst({ where: { brandId: brand.id, url }, select: { id: true } });
       if (!asset) throw createError(400, 'Logo, manual visual e fontes precisam estar na biblioteca do projeto.');
+    }
+
+    // Fundo exato e versão transparente dos logos: medidos aqui, nunca aceitos do cliente.
+    if (profile.logo?.files?.length) {
+      const atual = await prisma.brandProfile.findUnique({ where: { brandId: brand.id }, select: { data: true } });
+      const anterior = brandProfileSchema.safeParse(atual?.data);
+      profile.logo.files = await enrichLogoFiles(profile.logo.files, anterior.success ? (anterior.data.logo?.files ?? []) : []);
     }
 
     const data = profile as unknown as Prisma.InputJsonValue;

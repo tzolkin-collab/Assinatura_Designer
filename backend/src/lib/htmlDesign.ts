@@ -53,7 +53,7 @@ export interface GenerateHtmlDesignInput {
      * desenhada. Quando existem, o artista escolhe a variante pelo fundo do slide, em vez de assumir um
      * único arquivo opaco de fundo branco.
      */
-    logoVariants?: Array<{ url: string; label: string }>;
+    logoVariants?: LogoVariantInfo[];
     /** Famílias cujo ARQUIVO o projeto enviou: o sistema as carrega de verdade, o artista as usa pelo nome exato. */
     ownFonts?: string[];
     logoUrl?: string | null;
@@ -358,9 +358,30 @@ export const PHOTO_SLOT_RULE = `ESPAÇO DE FOTO (para a foto poder entrar ou ser
  * Regra de fundo do logo. Sem variantes, assume que o arquivo pode ser opaco de fundo branco (o caso da
  * maioria das marcas). Com as variantes oficiais, cada arquivo traz o fundo da paleta: a escolha é pela cor.
  */
-export function logoBackgroundRule(hasVariants: boolean): string {
+/** Variante oficial do logo. `bgHex`, `ink` e `transparentUrl` são medidos pelo sistema ao salvar a ficha. */
+export interface LogoVariantInfo {
+  url: string;
+  label: string;
+  bgHex?: string;
+  ink?: string;
+  transparentUrl?: string;
+}
+
+/** Uma linha por variante: a URL e, quando medidos, o fundo exato e a versão transparente. */
+export function describeLogoVariant(v: LogoVariantInfo): string {
+  const extra = [
+    v.bgHex ? `fundo exato ${v.bgHex}` : '',
+    v.transparentUrl ? `versão transparente (tinta ${v.ink ?? 'da marca'}, serve sobre qualquer fundo): ${v.transparentUrl}` : '',
+  ].filter(Boolean);
+  return `- ${v.label}: ${v.url}${extra.length ? ` (${extra.join('; ')})` : ''}`;
+}
+
+const LOGO_EXACT_BG =
+  ' Cada variante traz o HEX EXATO do fundo do arquivo (bgHex): pinte a área do logo com esse HEX, não com a cor aproximada da paleta (um nível de diferença já aparece como linha no slide). Quando a variante tem versão transparente, ela serve sobre QUALQUER fundo: use-a só quando o contraste da tinta com o fundo do lugar for bom (nunca tinta sobre fundo da mesma cor).';
+
+export function logoBackgroundRule(hasVariants: boolean, exactBg = false): string {
   if (hasVariants) {
-    return '- LOGO (VARIANTES OFICIAIS): cada variante listada em "Logos oficiais" já traz o fundo da paleta para o qual foi desenhada (a tinta e o fundo estão no nome). Escolha a variante cujo FUNDO tem a mesma cor do lugar onde o logo fica no slide (a de fundo creme sobre uma área creme, a de fundo vinho sobre uma área vinho), de modo que o retângulo do arquivo se funda com o slide e pareça só a marca. Use a URL EXATA, no tamanho natural da proporção (nunca esticar nem deformar). NUNCA aplique filtro de inversão e NUNCA redesenhe o logo. Se nenhuma variante combina com o fundo do lugar, coloque o logo numa faixa ou cartão da cor do fundo da variante, ou omita-o naquele slide.';
+    return '- LOGO (VARIANTES OFICIAIS): cada variante listada em "Logos oficiais" já traz o fundo da paleta para o qual foi desenhada (a tinta e o fundo estão no nome). Escolha a variante cujo FUNDO tem a mesma cor do lugar onde o logo fica no slide (a de fundo creme sobre uma área creme, a de fundo vinho sobre uma área vinho), de modo que o retângulo do arquivo se funda com o slide e pareça só a marca. Use a URL EXATA, no tamanho natural da proporção (nunca esticar nem deformar). NUNCA aplique filtro de inversão e NUNCA redesenhe o logo. Se nenhuma variante combina com o fundo do lugar, coloque o logo numa faixa ou cartão da cor do fundo da variante, ou omita-o naquele slide.' + (exactBg ? LOGO_EXACT_BG : '');
   }
   return '- LOGO SOBRE FUNDO ESCURO: o arquivo do logo pode ser OPACO (fundo branco sólido em vez de transparente) — nesse caso ele vira um retângulo branco sobre fundo escuro, que é pior do que não ter logo. Não há como saber pelo URL. Portanto: coloque o logo sobre uma superfície CLARA. Se o slide tem fundo escuro, ou você posiciona o logo dentro de uma faixa/cartão claro do próprio layout, ou omite o logo naquele slide. NUNCA aplique filtro de inversão no logo: se o arquivo for transparente, o filtro apaga as cores da marca; se for opaco, não resolve nada.';
 }
@@ -430,7 +451,7 @@ QUALIDADE (nível "designer humano postaria sem retrabalho"):
 - Copy REAL em português (nunca "Texto", "Lorem", placeholders).
 - Visual: prefira gradientes CSS, formas geométricas e tipografia forte. Para fotos/logo, <img> com URLs https REAIS. Sem texto embutido em imagem. Se a URL do Logo não foi fornecida acima, NÃO adicione nenhum logo genérico nem placeholder quadrado. Apenas omita o logo da composição.
 - LOGO: como CABEÇALHO FIXO, discreto — mesmo canto, mesmo tamanho em todos os slides (altura entre 3% e 5% da altura do slide). Na CAPA ele pode ser maior e fazer parte da composição. O que é PROIBIDO é o logo virar elemento de preenchimento: ampliado para ocupar área vazia, centralizado no meio do slide, repetido, ou usado como marca d'água grande.
-${logoBackgroundRule(Boolean(input.brand.logoVariants?.length))}
+${logoBackgroundRule(Boolean(input.brand.logoVariants?.length), Boolean(input.brand.logoVariants?.some((v) => v.bgHex)))}
 - SLIDE SEM IMAGEM É UM RESULTADO VÁLIDO, e é o caso MAIS COMUM: numa apresentação boa, a maioria dos slides não tem foto. Layouts como list-3-columns, process-flow e comparison vivem de tipografia, forma e cor. Se nenhuma imagem foi fornecida, resolva com um COMPONENTE ESTRUTURAL da lista abaixo — não com espaço vazio e não com enchimento. NUNCA tape um vazio com logo ampliado, ícone repetido ou imagem de outro slide.
 - PREENCHA O QUADRO. O componente escolhido deve ocupar a largura útil do slide. Um bloco de conteúdo espremido em 60% da largura, com o restante vazio, é ERRO de composição — ou o componente cresce, ou a tipografia cresce, ou o layout muda.
 - Marque editáveis com data-editable="true" e data-role="headline|subtitle|body|cta|image".
@@ -528,7 +549,7 @@ Fontes sugeridas: ${b.primaryFonts.length ? b.primaryFonts.join(', ') : 'escolha
 ${b.designerBrain ? '' : `Diretrizes: ${b.guidelines || 'não definidas'}`}
 ${!b.designerBrain && b.agentPrompt ? `Instruções do agente: ${b.agentPrompt}` : ''}
 ${b.logoUrl ? `Logo: ${b.logoUrl}` : ''}
-${b.logoVariants?.length ? `Logos oficiais (variantes; escolha pela cor do fundo do slide):\n${b.logoVariants.map((v) => `- ${v.label}: ${v.url}`).join('\n')}` : ''}
+${b.logoVariants?.length ? `Logos oficiais (variantes; escolha pela cor do fundo do slide):\n${b.logoVariants.map(describeLogoVariant).join('\n')}` : ''}
 ${assetsBlock(b.assetUrls)}
 ${presentationConfigBlock(b.presentationConfig)}
 ${learnedPreferencesBlock(b.learnedPreferences)}

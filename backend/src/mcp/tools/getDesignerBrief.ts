@@ -8,7 +8,7 @@ import {
   loadBrainLayers,
   onlyProvidedAssets,
 } from '../../lib/designerBrain/index.js';
-import { PHOTO_SLOT_RULE, brainTextRule, logoBackgroundRule } from '../../lib/htmlDesign.js';
+import { PHOTO_SLOT_RULE, brainTextRule, describeLogoVariant, logoBackgroundRule } from '../../lib/htmlDesign.js';
 import { READ_SCOPE } from '../config.js';
 import { DESIGNER_WORKFLOW_CHECKLIST, HTML_OUTPUT_CONTRACT } from './htmlContract.js';
 import type { McpToolDefinition } from './types.js';
@@ -53,7 +53,15 @@ const outputSchema = {
     google: z.array(z.string()),
   }),
   logoUrl: z.string().nullable(),
-  logoVariants: z.array(z.object({ label: z.string(), url: z.string() })),
+  logoVariants: z.array(
+    z.object({
+      label: z.string(),
+      url: z.string(),
+      bgHex: z.string().optional(),
+      ink: z.string().optional(),
+      transparentUrl: z.string().optional(),
+    }),
+  ),
   logoRule: z.string(),
   assets: z.array(z.object({ name: z.string(), url: z.string(), source: z.string().nullable() })),
   assetsTotal: z.number(),
@@ -125,7 +133,13 @@ export const getDesignerBriefTool: McpToolDefinition<typeof inputSchema, typeof 
 
     // Logos oficiais da ficha (uma variante por cor de fundo): o agente escolhe pela cor do slide, como o
     // artista interno. Saem da lista de arquivos para não aparecerem duas vezes.
-    const logoVariants = (profile?.logo?.files ?? []).map((f) => ({ label: f.label ?? 'Logo', url: f.url }));
+    const logoVariants = (profile?.logo?.files ?? []).map((f) => ({
+      label: f.label ?? 'Logo',
+      url: f.url,
+      ...(f.bgHex ? { bgHex: f.bgHex } : {}),
+      ...(f.ink ? { ink: f.ink } : {}),
+      ...(f.transparentUrl ? { transparentUrl: f.transparentUrl } : {}),
+    }));
     const logoUrls = new Set(logoVariants.map((l) => l.url));
 
     // Só o que alguém FORNECEU (nunca o que o sistema gerou por IA): é a regra de foto real.
@@ -148,7 +162,7 @@ export const getDesignerBriefTool: McpToolDefinition<typeof inputSchema, typeof 
       fonts: { own, google },
       logoUrl: brand.logoUrl ?? null,
       logoVariants,
-      logoRule: logoBackgroundRule(logoVariants.length > 0),
+      logoRule: logoBackgroundRule(logoVariants.length > 0, logoVariants.some((l) => l.bgHex)),
       assets,
       assetsTotal: provided.length,
       assetsTruncated: provided.length > MAX_ASSETS,
@@ -183,7 +197,7 @@ export const getDesignerBriefTool: McpToolDefinition<typeof inputSchema, typeof 
       logoVariants.length
         ? [
             'Logos oficiais (variantes; escolha pela cor do fundo do slide):',
-            ...logoVariants.map((l) => `- ${l.label}: ${l.url}`),
+            ...logoVariants.map(describeLogoVariant),
             structured.logoRule,
           ].join('\n')
         : structured.logoUrl
