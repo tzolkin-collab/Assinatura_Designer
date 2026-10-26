@@ -3,11 +3,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Search, Plus, Filter, Loader2, X, Trash2, Edit3, Lock, Check, TriangleAlert } from 'lucide-react';
+import { Search, Plus, Loader2, X, Trash2, Edit3, Lock, Check, TriangleAlert } from 'lucide-react';
 import PageHeader from '@/components/ui/PageHeader';
 import Button from '@/components/ui/Button';
 import Input from '@/components/ui/Input';
-import Card from '@/components/ui/Card';
 import styles from './galeria.module.css';
 import { api } from '@/lib/api';
 import NewCollabModal from '@/components/Collab/NewCollabModal';
@@ -33,6 +32,32 @@ interface Brand {
   pendingRequest?: boolean;
 }
 
+/** Cor do texto legível sobre o fundo da marca (preto ou branco, pela luminância). */
+function inkOn(hex: string | undefined): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec((hex ?? '').trim());
+  if (!m) return '#ffffff';
+  const n = parseInt(m[1]!, 16);
+  const [r, g, b] = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => {
+    const c = v / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  }) as [number, number, number];
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.45 ? '#0a0a0a' : '#ffffff';
+}
+
+/** Capa da marca: o logo sobre a cor dela, ou só a cor quando não há logo (o nome está logo abaixo). */
+function BrandCover({ brand, locked }: { brand: Brand; locked?: boolean }) {
+  const bg = brand.color || '#171717';
+  return (
+    <div className={styles.cover} style={{ backgroundColor: bg, color: inkOn(bg) }}>
+      {brand.logoUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={brand.logoUrl} alt="" className={styles.coverLogo} />
+      ) : null}
+      {locked && <span className={styles.coverLock} aria-hidden="true"><Lock size={14} /></span>}
+    </div>
+  );
+}
+
 export default function GaleriaPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -56,7 +81,6 @@ export default function GaleriaPage() {
   
   // Filtros
   const [filterMode, setFilterMode] = useState<'my' | 'discover'>('my');
-  const [showFilterDropdown, setShowFilterDropdown] = useState(false);
   const [requestingAccessSlug, setRequestingAccessSlug] = useState<string | null>(null);
 
   // Apagar marca
@@ -176,8 +200,8 @@ export default function GaleriaPage() {
   return (
     <div>
       <PageHeader
-        title="Galeria de Projetos"
-        description="Cada projeto tem sua identidade; os desdobramentos herdam a do projeto-base."
+        title="Marcas"
+        description="Entre numa marca para criar e publicar. Os desdobramentos herdam a identidade do projeto-base."
         actions={
           <Link href="/onboarding">
             <Button size="sm">
@@ -210,39 +234,23 @@ export default function GaleriaPage() {
         </div>
       )}
 
-      {/* Search & Filters */}
+      {/* Busca e escopo */}
       <div className={styles.toolbar}>
         <div className={styles.searchWrapper}>
           <Input
-            placeholder="Buscar projetos..."
+            placeholder="Buscar marcas..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             icon={<Search size={16} />}
           />
         </div>
-        <div style={{ position: 'relative' }}>
-          <Button variant="secondary" size="sm" onClick={() => setShowFilterDropdown(!showFilterDropdown)}>
-            <Filter size={14} />
-            <span>Exibindo: {filterMode === 'my' ? 'Meus Projetos' : 'Descobrir Novos Projetos'}</span>
-          </Button>
-          {showFilterDropdown && (
-            <div className={styles.dropdownList} style={{ position: 'absolute', right: 0, top: '42px', zIndex: 'var(--z-dropdown)', minWidth: '200px', boxShadow: 'var(--shadow-lg)' }} onMouseDown={(e) => e.preventDefault()}>
-              <div 
-                className={styles.dropdownItem} 
-                onClick={() => { setFilterMode('my'); setShowFilterDropdown(false); }}
-                style={{ fontWeight: filterMode === 'my' ? 600 : 400 }}
-              >
-                Meus Projetos
-              </div>
-              <div 
-                className={styles.dropdownItem} 
-                onClick={() => { setFilterMode('discover'); setShowFilterDropdown(false); }}
-                style={{ fontWeight: filterMode === 'discover' ? 600 : 400 }}
-              >
-                Descobrir Projetos (Solicitar)
-              </div>
-            </div>
-          )}
+        <div className={styles.seg} role="group" aria-label="Escopo">
+          <button type="button" className={`${styles.segBtn} ${filterMode === 'my' ? styles.segBtnOn : ''}`} aria-pressed={filterMode === 'my'} onClick={() => setFilterMode('my')}>
+            Meus projetos
+          </button>
+          <button type="button" className={`${styles.segBtn} ${filterMode === 'discover' ? styles.segBtnOn : ''}`} aria-pressed={filterMode === 'discover'} onClick={() => setFilterMode('discover')}>
+            Descobrir
+          </button>
         </div>
       </div>
 
@@ -254,122 +262,103 @@ export default function GaleriaPage() {
       ) : (
         <>
           {Object.entries(groups).map(([ownerName, ownerBrands]) => (
-            <div key={ownerName} style={{ marginBottom: '32px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--color-border, rgba(0,0,0,0.1))', paddingBottom: '8px', marginBottom: '16px' }}>
-                <h3 style={{ fontSize: '15px', fontWeight: 600, color: 'var(--color-text-secondary, #666)' }}>
-                  Proprietário: <span style={{ color: 'var(--color-text, #111)' }}>{ownerName}</span>
-                </h3>
-                <span style={{ fontSize: '12px', background: 'var(--color-surface, #f5f5f5)', padding: '2px 8px', borderRadius: '12px', fontWeight: 500 }}>
-                  {ownerBrands.length} {ownerBrands.length === 1 ? 'projeto' : 'projetos'}
-                </span>
-              </div>
-              
+            <section key={ownerName} className={styles.group}>
+              {Object.keys(groups).length > 1 && (
+                <div className={styles.groupHead}>
+                  <h2 className={styles.groupName}>{ownerName}</h2>
+                  <span className={styles.groupCount}>
+                    {ownerBrands.length} {ownerBrands.length === 1 ? 'projeto' : 'projetos'}
+                  </span>
+                </div>
+              )}
+
               <div className={styles.grid}>
-                {ownerBrands.map((brand) => (
-                  <div key={brand.slug} className={styles.cardWrapper}>
-                    {filterMode === 'my' ? (
-                      <Link href={`/${brand.slug}`} className={styles.cardLink}>
-                        <Card hover padding="none">
-                          <div className={styles.cardBanner} style={{ backgroundColor: brand.color || '#171717', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', position: 'relative' }}>
-                            {brand.logoUrl ? (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img src={brand.logoUrl} alt={brand.name} style={{ width: '100%', height: '100%', objectFit: 'contain', padding: '16px' }} />
-                            ) : (
-                              <span className={styles.cardInitial}>{brand.name[0]}</span>
-                            )}
-                          </div>
+                {ownerBrands.map((brand) => {
+                  const posts = brand._count?.posts ?? 0;
+                  const podeDesdobrar = !brand.parentBrandId && (brand.myRole === 'OWNER' || brand.myRole === 'ADMIN' || brand.myRole === 'EDITOR');
+                  const filhos = collabsOf[brand.id] ?? [];
+                  return (
+                    <div key={brand.slug} className={styles.cardWrapper}>
+                      {filterMode === 'my' ? (
+                        <Link href={`/${brand.slug}`} className={styles.card}>
+                          <BrandCover brand={brand} />
                           <div className={styles.cardBody}>
                             <h3 className={styles.cardTitle}>{brand.name}</h3>
-                            <div className={styles.cardMeta}>
-                              <span>{brand._count?.posts || 0} {(brand._count?.posts || 0) === 1 ? 'post' : 'posts'}</span>
-                              <span className={styles.dot}>·</span>
-                              <span>{new Date(brand.updatedAt).toLocaleDateString('pt-BR')}</span>
-                            </div>
+                            <p className={styles.cardMeta}>
+                              {posts === 0 ? 'Nenhuma peça ainda' : `${posts} ${posts === 1 ? 'peça' : 'peças'}`}
+                            </p>
                           </div>
-                        </Card>
-                      </Link>
-                    ) : (
-                      <div className={styles.cardLink} style={{ cursor: 'default' }}>
-                        <Card padding="none">
-                          <div className={styles.cardBanner} style={{ backgroundColor: brand.color || '#171717', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', position: 'relative', opacity: 0.85 }}>
-                            {brand.logoUrl ? (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img src={brand.logoUrl} alt={brand.name} style={{ width: '100%', height: '100%', objectFit: 'contain', padding: '16px' }} />
-                            ) : (
-                              <span className={styles.cardInitial}>{brand.name[0]}</span>
-                            )}
-                            <div style={{ position: 'absolute', right: '12px', top: '12px', backgroundColor: 'rgba(0,0,0,0.6)', padding: '6px', borderRadius: '50%', color: '#fff' }}>
-                              <Lock size={14} />
-                            </div>
-                          </div>
+                        </Link>
+                      ) : (
+                        <div className={`${styles.card} ${styles.cardStatic}`}>
+                          <BrandCover brand={brand} locked />
                           <div className={styles.cardBody}>
                             <h3 className={styles.cardTitle}>{brand.name}</h3>
-                            <div style={{ marginTop: '12px' }}>
-                              {brand.pendingRequest ? (
-                                <button disabled style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', width: '100%', padding: '8px', fontSize: '13px', color: 'var(--color-text-secondary)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-md)', backgroundColor: '#f5f5f4', fontWeight: 600 }}>
-                                  <Check size={14} /> Solicitação Enviada
-                                </button>
-                              ) : (
-                                <button 
-                                  onClick={() => handleRequestAccess(brand.slug)}
-                                  disabled={requestingAccessSlug === brand.slug}
-                                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', width: '100%', padding: '8px', fontSize: '13px', color: '#fff', border: 'none', borderRadius: 'var(--radius-md)', backgroundColor: 'var(--color-accent)', cursor: 'pointer', fontWeight: 600 }}
-                                >
-                                  {requestingAccessSlug === brand.slug ? 'Enviando...' : 'Solicitar Acesso'}
-                                </button>
-                              )}
-                            </div>
+                            {brand.pendingRequest ? (
+                              <button type="button" disabled className={`${styles.requestBtn} ${styles.requestBtnDone}`}>
+                                <Check size={14} /> Solicitação enviada
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                className={styles.requestBtn}
+                                onClick={() => handleRequestAccess(brand.slug)}
+                                disabled={requestingAccessSlug === brand.slug}
+                              >
+                                {requestingAccessSlug === brand.slug ? 'Enviando...' : 'Solicitar acesso'}
+                              </button>
+                            )}
                           </div>
-                        </Card>
-                      </div>
-                    )}
+                        </div>
+                      )}
 
-                    {filterMode === 'my' && (
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', padding: '8px 4px 0' }}>
-                        {(collabsOf[brand.id] ?? []).map((c) => (
-                          <Link
-                            key={c.slug}
-                            href={`/${c.slug}/galeria`}
-                            title={c.kind === 'PARTNERSHIP' ? `Parceria${c.collab?.partner?.name ? ` com ${c.collab.partner.name}` : ''}` : 'Desdobramento interno'}
-                            style={{ fontSize: '12px', padding: '3px 9px', borderRadius: '12px', border: '1px solid var(--color-border, rgba(0,0,0,0.12))', color: 'var(--color-text, #111)', textDecoration: 'none', background: 'var(--color-surface, #f5f5f5)' }}
-                          >
-                            {c.name}
-                          </Link>
-                        ))}
-                        {!brand.parentBrandId && (brand.myRole === 'OWNER' || brand.myRole === 'ADMIN' || brand.myRole === 'EDITOR') && (
-                          <button
-                            type="button"
-                            onClick={() => openCollabModal(brand)}
-                            style={{ fontSize: '12px', padding: '3px 9px', borderRadius: '12px', border: '1px dashed var(--color-border, rgba(0,0,0,0.25))', background: 'transparent', cursor: 'pointer', color: 'var(--color-text-secondary, #666)' }}
-                          >
-                            + Desdobramento
-                          </button>
-                        )}
-                      </div>
-                    )}
+                      {filterMode === 'my' && (filhos.length > 0 || podeDesdobrar) && (
+                        <div className={styles.collabs}>
+                          {filhos.map((c) => (
+                            <Link
+                              key={c.slug}
+                              href={`/${c.slug}/galeria`}
+                              className={styles.collabLink}
+                              title={c.kind === 'PARTNERSHIP' ? `Parceria${c.collab?.partner?.name ? ` com ${c.collab.partner.name}` : ''}` : 'Desdobramento interno'}
+                            >
+                              {c.name}
+                            </Link>
+                          ))}
+                          {podeDesdobrar && (
+                            <button type="button" className={styles.collabAdd} onClick={() => openCollabModal(brand)}>
+                              <Plus size={12} /> Desdobramento
+                            </button>
+                          )}
+                        </div>
+                      )}
 
-                    {filterMode === 'my' && (brand.myRole === 'OWNER' || brand.myRole === 'ADMIN') && (
-                      <button
-                        className={styles.cardEditBtn}
-                        onClick={(e) => { e.preventDefault(); openEditModal(brand); }}
-                        title="Editar marca"
-                      >
-                        <Edit3 size={13} />
-                      </button>
-                    )}
-                    {filterMode === 'my' && brand.myRole === 'OWNER' && (
-                      <button
-                        className={styles.cardDeleteBtn}
-                        onClick={(e) => { e.preventDefault(); setDeleteTarget(brand); }}
-                        title="Apagar marca"
-                      >
-                        <Trash2 size={13} />
-                      </button>
-                    )}
-                  </div>
-                ))}
+                      {filterMode === 'my' && (brand.myRole === 'OWNER' || brand.myRole === 'ADMIN') && (
+                        <button
+                          type="button"
+                          className={styles.cardEditBtn}
+                          onClick={(e) => { e.preventDefault(); openEditModal(brand); }}
+                          title="Editar marca"
+                          aria-label={`Editar ${brand.name}`}
+                        >
+                          <Edit3 size={13} />
+                        </button>
+                      )}
+                      {filterMode === 'my' && brand.myRole === 'OWNER' && (
+                        <button
+                          type="button"
+                          className={styles.cardDeleteBtn}
+                          onClick={(e) => { e.preventDefault(); setDeleteTarget(brand); }}
+                          title="Apagar marca"
+                          aria-label={`Apagar ${brand.name}`}
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
-            </div>
+            </section>
           ))}
 
           {filtered.length === 0 && (
