@@ -90,7 +90,7 @@ Legenda: **P0** destrava o fluxo principal · **P1** dia a dia · **P2** conveni
 | `GET /settings/:slug/config` | `get_brand_kit` (existe) | read | — |
 | `PUT /settings/:slug/config` | `update_brand_kit` (cores, fontes, diretrizes, logo por URL pública, `presentationConfig`). **Sem** `ignoreAiCostLimit`/pesquisa automática (só ADMIN, no app). | brand | P1 |
 | `GET /brands/:slug/profile` | `get_brand_profile` (cérebro) | read | P0 |
-| `PUT /brands/:slug/profile` | `update_brand_profile` (snapshot antes) | brand | P1 |
+| `PUT /brands/:slug/profile` | `update_brand_profile` (snapshot antes) | brand | P1 ✅ (escopo `designer.brand`, `previous` devolvido para desfazer) |
 | `POST …/profile/import` | — ✗ **decidido** (usa IA do servidor): o agente lê o material e grava com `update_brand_profile` | — | — |
 | `GET/PUT /brands/:slug/memory` | `get_brand_memory` / `update_brand_memory` | read / brand | P1 / P2 |
 | `POST …/brandbook/ingest`, `ingest-canva`, `confirm-logo` | — ✗ **decidido** (extração com IA do servidor): o agente lê o brandbook e grava com `update_brand_kit` / `update_brand_profile` | — | — |

@@ -70,7 +70,7 @@ describe('autenticação (401 com WWW-Authenticate)', () => {
     expect(res.status).toBe(401);
     const header = res.headers['www-authenticate'];
     // Formato EXATO do doc de auth do ChatGPT, e sem `error` (nenhuma credencial foi enviada).
-    expect(header).toBe(`Bearer resource_metadata="${METADATA_URL}", scope="designer.read designer.write designer.edit_all designer.export designer.preview"`);
+    expect(header).toBe(`Bearer resource_metadata="${METADATA_URL}", scope="designer.read designer.write designer.edit_all designer.export designer.preview designer.brand"`);
     // O metadata que o header aponta realmente existe e descreve o recurso certo.
     const meta = await request(h.app).get(new URL(METADATA_URL).pathname);
     expect(meta.body.resource).toBe(RESOURCE);
@@ -236,6 +236,7 @@ describe('descoberta (initialize / tools/list)', () => {
       'save_presentation',
       'set_slide_photo',
       'start_frontend_session',
+      'update_brand_profile',
       'update_slide',
       'upload_asset',
     ]);
@@ -252,6 +253,8 @@ describe('descoberta (initialize / tools/list)', () => {
         restore_version: { destructiveHint: true, idempotentHint: false },
         set_slide_photo: { destructiveHint: false, idempotentHint: true },
         upload_asset: { destructiveHint: false, idempotentHint: false },
+        // Ficha da marca (designer.brand): sobrescreve campos que valem para todas as peças futuras.
+        update_brand_profile: { destructiveHint: true, idempotentHint: false },
         // Saída do Designer: openWorldHint verdadeiro (o arquivo vira um link, o Canva recebe um design).
         export_file: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
         export_to_canva: { destructiveHint: false, idempotentHint: false, openWorldHint: true },
@@ -271,7 +274,8 @@ describe('descoberta (initialize / tools/list)', () => {
       expect(exportReads.every((n) => !(n in writeHints))).toBe(true);
       // Doc do Apps SDK: securitySchemes no descritor + espelho em _meta.
       const isPreview = tool.name.endsWith('_frontend_session');
-      const scopes = [isPreview ? 'designer.preview' : isExport ? 'designer.export' : writes ? 'designer.write' : 'designer.read'];
+      const isBrand = tool.name === 'update_brand_profile';
+      const scopes = [isBrand ? 'designer.brand' : isPreview ? 'designer.preview' : isExport ? 'designer.export' : writes ? 'designer.write' : 'designer.read'];
       expect(tool.securitySchemes).toEqual([{ type: 'oauth2', scopes }]);
       expect(tool._meta.securitySchemes).toEqual([{ type: 'oauth2', scopes }]);
       expect(tool.inputSchema.type).toBe('object');

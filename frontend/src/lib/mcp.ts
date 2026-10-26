@@ -36,6 +36,7 @@ export const WRITE_SCOPE = 'designer.write';
 export const EDIT_ALL_SCOPE = 'designer.edit_all';
 export const EXPORT_SCOPE = 'designer.export';
 export const PREVIEW_SCOPE = 'designer.preview';
+export const BRAND_SCOPE = 'designer.brand';
 
 const ENTITIES: Record<string, string> = { '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'", '&#x27;': "'" };
 
@@ -85,11 +86,17 @@ export function canPreview(scopes: readonly string[]): boolean {
   return scopes.includes(PREVIEW_SCOPE);
 }
 
+/** Alterar a ficha da marca (Cérebro de IA): escopo à parte, desligado por padrão. */
+export function canEditBrand(scopes: readonly string[]): boolean {
+  return scopes.includes(BRAND_SCOPE);
+}
+
 /** "Só ver", "Ver e salvar peças" ou "Ver e editar todas as peças", com " · pode exportar" quando vale: o que o agente pode fazer, em palavras. */
 export function describeAccess(scopes: readonly string[]): string {
   const base = canEditAll(scopes) ? 'Ver e editar todas as peças' : canWrite(scopes) ? 'Ver e salvar peças' : 'Só ver';
   const withExport = canExport(scopes) ? `${base} · pode exportar` : base;
-  return canPreview(scopes) ? `${withExport} · abre o Designer no navegador (só leitura)` : withExport;
+  const withPreview = canPreview(scopes) ? `${withExport} · abre o Designer no navegador (só leitura)` : withExport;
+  return canEditBrand(scopes) ? `${withPreview} · pode alterar o Cérebro da IA` : withPreview;
 }
 
 const ROLE_LABEL: Record<ConsentBrand['role'], string> = {

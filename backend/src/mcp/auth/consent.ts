@@ -9,6 +9,7 @@ import { rateLimit } from '../../middleware/rateLimit.js';
 import {
   isMcpScope,
   normalizeScopes,
+  BRAND_SCOPE,
   PREVIEW_SCOPE,
   ROLES_FOR_SCOPE,
   WRITE_SCOPE,
@@ -167,8 +168,9 @@ export function createConsentRouter(deps: ConsentDeps): Router {
         // ── approve ──
         // Escopos: por padrão o que o cliente pediu; o usuário pode reduzir, nunca ampliar.
         // `designer.preview` (sessão de navegador) é DESLIGADO por padrão: só entra quando quem decide o lista em `scopes`.
-        // Sem lista, vale o que o cliente pediu MENOS o preview (um cliente sem `scope` pede tudo, e isso não pode ligá-lo).
-        let granted: McpScope[] = pending.scopes.filter((s) => s !== PREVIEW_SCOPE);
+        // `designer.brand` (alterar a ficha da marca) também vem desligado, pelo mesmo motivo.
+        // Sem lista, vale o que o cliente pediu MENOS o preview e a ficha (um cliente sem `scope` pede tudo, e isso não pode ligá-los).
+        let granted: McpScope[] = pending.scopes.filter((s) => s !== PREVIEW_SCOPE && s !== BRAND_SCOPE);
         if (granted.length === 0) throw createError(400, 'Selecione ao menos um escopo.', 'MCP_BAD_SCOPE');
         if (body.scopes) {
           const wanted = body.scopes.filter(isMcpScope);

@@ -82,13 +82,13 @@ describe('cliente MCP oficial com token', () => {
     expect(tools.map((t) => t.name).sort()).toEqual([
       'create_version', 'end_frontend_session', 'export_file', 'export_to_canva', 'get_brand_kit', 'get_brand_profile', 'get_canva_export_status',
       'get_design', 'get_designer_brief', 'get_export_status', 'get_integrations_status', 'get_photo_slots', 'list_assets',
-      'list_brands', 'list_designs', 'list_versions', 'restore_version', 'save_presentation', 'set_slide_photo', 'start_frontend_session', 'update_slide',
+      'list_brands', 'list_designs', 'list_versions', 'restore_version', 'save_presentation', 'set_slide_photo', 'start_frontend_session', 'update_brand_profile', 'update_slide',
       'upload_asset',
     ]);
     for (const tool of tools) {
       expect(tool.annotations).toMatchObject({
-        readOnlyHint: !['save_presentation', 'update_slide', 'create_version', 'restore_version', 'set_slide_photo', 'upload_asset', 'export_file', 'export_to_canva', 'start_frontend_session', 'end_frontend_session'].includes(tool.name),
-        destructiveHint: tool.name === 'restore_version',
+        readOnlyHint: !['save_presentation', 'update_slide', 'create_version', 'restore_version', 'set_slide_photo', 'upload_asset', 'update_brand_profile', 'export_file', 'export_to_canva', 'start_frontend_session', 'end_frontend_session'].includes(tool.name),
+        destructiveHint: tool.name === 'restore_version' || tool.name === 'update_brand_profile',
         openWorldHint: tool.name.includes('export'),
       });
       expect(tool.outputSchema?.type).toBe('object');
@@ -212,7 +212,7 @@ describe('OAuth completo conduzido pelo cliente oficial do SDK', () => {
     // O que o SDK mandou no /authorize prova S256 + resource + escopo vindos do nosso metadata.
     expect(provider.authorizeUrl?.searchParams.get('code_challenge_method')).toBe('S256');
     expect(provider.authorizeUrl?.searchParams.get('resource')).toBe(`${baseUrl}/mcp`);
-    expect(provider.authorizeUrl?.searchParams.get('scope')).toBe('designer.read designer.write designer.edit_all designer.export designer.preview');
+    expect(provider.authorizeUrl?.searchParams.get('scope')).toBe('designer.read designer.write designer.edit_all designer.export designer.preview designer.brand');
     expect(provider.clientInfo?.client_id).toBeTruthy();
     expect((provider.clientInfo as { client_secret?: string }).client_secret).toBeUndefined();
     // iss e state voltam na resposta de autorização.
