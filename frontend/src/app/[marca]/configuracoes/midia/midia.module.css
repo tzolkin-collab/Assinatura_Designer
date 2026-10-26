@@ -111,6 +111,14 @@
   object-fit: cover;
 }
 
+/* Vetor (SVG): sem proporção própria, o "cover" o esticava por cima do selo de origem. */
+.thumbImg[src*='.svg'] {
+  object-fit: contain;
+  padding: 28px;
+  box-sizing: border-box;
+  background: #fff;
+}
+
 .sourceBadge {
   position: absolute;
   top: 8px;

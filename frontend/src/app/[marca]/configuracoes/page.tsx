@@ -3,9 +3,8 @@
 import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, ChevronRight, Trash2, X } from 'lucide-react';
+import { ChevronRight, Trash2, X } from 'lucide-react';
 import PageHeader from '@/components/ui/PageHeader';
-import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import styles from './configuracoes.module.css';
 import { api } from '@/lib/api';
@@ -47,56 +46,40 @@ export default function ConfiguracoesPage() {
 
   return (
     <div>
-      <Link href={`/${params.marca}/galeria`} className={styles.backLink}>
-        <ArrowLeft size={16} />
-        Voltar para galeria
-      </Link>
-
       <PageHeader
-        title="Configurações do Projeto"
-        description={`Gerencie as configurações internas de "${marca}".`}
+        title="Configurações"
+        description={`Ajustes internos de ${marca}.`}
       />
 
-      <div className={styles.infoRow}>
-        <div className={styles.infoItem}>
-          <span className={styles.infoLabel}>Slug</span>
-          <code className={styles.infoValue}>{params.marca}</code>
-        </div>
-        <div className={styles.infoItem}>
-          <span className={styles.infoLabel}>Projeto</span>
-          <span className={styles.infoValue}>{marca}</span>
-        </div>
-      </div>
-
-      <div className={styles.sections}>
+      <nav className={styles.sections} aria-label="Seções de configuração">
         {CONFIG_SECTIONS.map((section) => (
           <Link
             key={section.key}
             href={`/${params.marca}/configuracoes/${section.key}`}
             className={styles.sectionLink}
           >
-            <Card variant="section" hover padding="md" style={{ height: '100%' }}>
-              <div className={styles.sectionRow}>
-                <div className={styles.sectionIcon}>{section.icon}</div>
-                <div className={styles.sectionText}>
-                  <h3 className={styles.sectionTitle}>{section.label}</h3>
-                  <p className={styles.sectionDesc}>{section.description}</p>
-                </div>
-                <ChevronRight size={16} className={styles.sectionArrow} />
-              </div>
-            </Card>
+            <span className={styles.sectionIcon}>{section.icon}</span>
+            <span className={styles.sectionText}>
+              <span className={styles.sectionTitle}>{section.label}</span>
+              <span className={styles.sectionDesc}>{section.description}</span>
+            </span>
+            <ChevronRight size={16} className={styles.sectionArrow} aria-hidden="true" />
           </Link>
         ))}
-      </div>
+      </nav>
+
+      <p className={styles.slugNote}>
+        Endereço da marca: <code>/{params.marca}</code>
+      </p>
 
       <div className={styles.dangerZone}>
-        <h3 className={styles.dangerTitle}>Zona de Perigo</h3>
+        <h3 className={styles.dangerTitle}>Zona de perigo</h3>
         <div className={styles.dangerRow}>
           <div>
             <p className={styles.dangerLabel}>Apagar marca</p>
             <p className={styles.dangerDesc}>Remove permanentemente a marca e todo o seu conteúdo.</p>
           </div>
-          <Button size="sm" onClick={() => setShowDeleteModal(true)} style={{ backgroundColor: 'transparent', borderColor: '#ef4444', color: '#ef4444' }}>
+          <Button size="sm" onClick={() => setShowDeleteModal(true)} style={{ backgroundColor: 'transparent', borderColor: 'var(--color-error)', color: 'var(--color-error)' }}>
             <Trash2 size={14} />
             Apagar marca
           </Button>
