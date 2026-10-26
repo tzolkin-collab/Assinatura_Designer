@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { generateHtmlDesignBatched, logoBackgroundRule, brainTextRule, type GenerateHtmlDesignInput } from '../lib/htmlDesign';
+import { generateHtmlDesignBatched, describeLogoVariant, logoBackgroundRule, brainTextRule, type GenerateHtmlDesignInput } from '../lib/htmlDesign';
 import { REFERENCE_ASSET_TAGS } from '../lib/designerBrain/referenceTags';
 
 const h = vi.hoisted(() => ({
@@ -89,6 +89,20 @@ describe('logo com variantes oficiais', () => {
     expect(r).toContain('a mesma cor do lugar');
     expect(r).not.toContain('superfície CLARA');
     expect(r).toContain('NUNCA aplique filtro de inversão');
+  });
+
+  it('com fundo exato medido, a regra manda pintar a área do logo com o HEX do arquivo', () => {
+    const r = logoBackgroundRule(true, true);
+    expect(r).toContain('HEX EXATO');
+    expect(r).toContain('versão transparente');
+    expect(logoBackgroundRule(true)).not.toContain('HEX EXATO');
+  });
+
+  it('a linha da variante traz o fundo exato e a versão transparente', () => {
+    const l = describeLogoVariant({ url: 'https://x/a.png', label: 'Wordmark', bgHex: '#410B1C', ink: '#8E232D', transparentUrl: 'https://x/t.png' });
+    expect(l).toContain('fundo exato #410B1C');
+    expect(l).toContain('https://x/t.png');
+    expect(describeLogoVariant({ url: 'https://x/a.png', label: 'W' })).toBe('- W: https://x/a.png');
   });
 
   it('com variantes o logo existe: a regra de texto não manda omitir nem digitar o nome', () => {

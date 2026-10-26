@@ -44,6 +44,10 @@ export const logoFileSchema = z.object({
   url: httpsUrl,
   /** Ex.: "wordmark sobre fundo escuro", "monograma". */
   label: text(120).optional(),
+  /** Medidos pelo sistema ao salvar (lib/logoEnrich): fundo exato do arquivo, tinta e versão transparente. */
+  bgHex: z.string().regex(/^#[0-9A-F]{6}$/).optional(),
+  ink: z.string().regex(/^#[0-9A-F]{6}$/).optional(),
+  transparentUrl: httpsUrl.optional(),
 });
 
 export const brandProfileSchema = z.object({
