@@ -206,8 +206,9 @@
   gap: var(--space-2);
 }
 .emptyTitle {
+  font-family: var(--font-serif);
   font-size: var(--text-xl);
-  font-weight: 600;
+  font-weight: 500;
   line-height: var(--leading-tight);
   color: var(--color-text);
   margin: 0;
@@ -267,8 +268,8 @@
   padding: 0;
 }
 .rootStart .emptyTitle {
-  font-size: clamp(1.5rem, 1rem + 1.6vw, 2rem);
-  letter-spacing: -0.02em;
+  font-size: clamp(1.875rem, 1rem + 2vw, 2.5rem);
+  letter-spacing: -0.015em;
 }
 .rootStart .emptySubtitle {
   font-size: var(--text-base);
@@ -432,8 +433,14 @@
   padding-bottom: var(--space-8);
 }
 @media (max-width: 640px) {
+  /* No celular o título quebra em duas linhas e o selo "IA hoje", solto no canto, caía em cima dele.
+     Aqui a barra volta para o fluxo: uma faixa de 56px ao lado do botão de menu, título logo abaixo. */
+  .rootStart .chatHeader {
+    position: static;
+    padding: 8px 16px;
+  }
   .rootStart .thread {
-    padding: var(--space-6) var(--space-4) 0;
+    padding: var(--space-2) var(--space-4) 0;
   }
   .rootStart .inputArea,
   .startRecent {
