@@ -4,7 +4,7 @@ import { useParams } from 'next/navigation';
 import PageHeader from '@/components/ui/PageHeader';
 import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
-import { Download, FileDown, Loader2, Maximize2, X, Folder, FolderPlus, ChevronRight, ChevronDown, Plus, Trash2, LayoutGrid, List, Sparkles, MessageSquareText, ExternalLink, Edit3, FolderInput, PenLine, Send, Presentation, Image as LucideImage, Globe, Check, Copy, Search } from 'lucide-react';
+import { Download, FileDown, Loader2, Maximize2, X, FolderPlus, ChevronRight, ChevronDown, Plus, Trash2, LayoutGrid, List, Sparkles, MessageSquareText, ExternalLink, Edit3, FolderInput, PenLine, Send, Presentation, Image as LucideImage, Globe, Check, Copy, Search, FolderOpen } from 'lucide-react';
 import Link from 'next/link';
 import Image from 'next/image';
 import styles from './brand-galeria.module.css';
@@ -14,15 +14,16 @@ import { ChatHistoryModal } from './components/ChatHistoryModal';
 import { FolderModal } from './components/FolderModal';
 
 import { useBrandPosts, useBrand, type Post } from '@/lib/hooks';
-import { useState, useEffect, useMemo } from 'react';
+import { Fragment, useState, useEffect, useMemo } from 'react';
 import { api, getApiErrorMessage } from '@/lib/api';
 import { exportarDeck, type DeckFileFormat } from '@/lib/deckFile';
 import { publishPost, unpublishPost } from '@/lib/presentationHosting';
 import { useBrandPermissions } from '@/hooks/useBrandPermissions';
 import { extractChatHistory, extractDimensions, extractPreviewSource, extractSessionId, extractUsedAssets, getAspectRatioTag, type FabricaChatHistoryMessage, type HtmlDesignPostContent } from '@/lib/designContent';
 import dynamic from 'next/dynamic';
+import { artesDaPasta, caminhoDaPasta, collectSubtree, groupByParent, resumoDaPasta, type FolderNode } from './pastas';
+import { FolderTile } from './components/FolderTile';
 const HtmlSlideRenderer = dynamic(() => import('@/components/DesignDocument/HtmlSlideRenderer'), { ssr: false });
-const AiSpendBadge = dynamic(() => import('@/components/AiUsage/AiSpendBadge'), { ssr: false });
 
 function formatPostType(type: string) {
   switch (type) {
@@ -57,37 +58,6 @@ function formatChatTimestamp(timestamp: number) {
 function formatAttachmentLabel(name: string, mimeType: string) {
   if (mimeType.startsWith('image/')) return `${name} · imagem`;
   return name;
-}
-
-type FolderNode = { id: string; name: string; parentId: string | null };
-
-/** Agrupa as pastas por pai. O backend devolve lista plana; a árvore é montada aqui. */
-function groupByParent(folders: FolderNode[]): Map<string | null, FolderNode[]> {
-  const byParent = new Map<string | null, FolderNode[]>();
-  // Um pai que não está na lista (não deveria acontecer) viraria uma pasta órfã e
-  // invisível; tratamos como raiz para nunca sumir com a pasta do usuário.
-  const ids = new Set(folders.map(f => f.id));
-  for (const folder of folders) {
-    const parent = folder.parentId && ids.has(folder.parentId) ? folder.parentId : null;
-    const siblings = byParent.get(parent) ?? [];
-    siblings.push(folder);
-    byParent.set(parent, siblings);
-  }
-  return byParent;
-}
-
-/** Ids da subárvore de `folderId`, incluindo ela mesma: destinos proibidos ao mover. */
-function collectSubtree(folderId: string, byParent: Map<string | null, FolderNode[]>): Set<string> {
-  const blocked = new Set<string>([folderId]);
-  const queue = [folderId];
-  while (queue.length) {
-    const current = queue.shift()!;
-    for (const child of byParent.get(current) ?? []) {
-      blocked.add(child.id);
-      queue.push(child.id);
-    }
-  }
-  return blocked;
 }
 
 export default function BrandGaleriaPage() {
@@ -268,7 +238,6 @@ export default function BrandGaleriaPage() {
   const [activeFolder, setActiveFolder] = useState<string | null>(null);
   const [newFolderName, setNewFolderName] = useState('');
   const [creatingFolder, setCreatingFolder] = useState(false);
-  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   // Pasta que vai receber a nova subpasta (null = criar na raiz).
   const [newFolderParentId, setNewFolderParentId] = useState<string | null>(null);
 
@@ -337,16 +306,6 @@ export default function BrandGaleriaPage() {
     setShowFolderModal(true);
   };
 
-  const toggleFolder = (folderId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setExpandedFolders(prev => {
-      const next = new Set(prev);
-      if (next.has(folderId)) next.delete(folderId);
-      else next.add(folderId);
-      return next;
-    });
-  };
-
   const handleCreateFolder = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newFolderName.trim() || creatingFolder) return;
@@ -357,8 +316,8 @@ export default function BrandGaleriaPage() {
       const data = await api.post<FolderNode>(`/folders/${slug}`, { name: newFolderName, parentId });
       if (data) {
         setFolders(prev => [data, ...prev]);
-        // Sem isto a subpasta nasce escondida dentro de um pai colapsado.
-        if (parentId) setExpandedFolders(prev => new Set(prev).add(parentId));
+        // Abre o pai: é ali que a subpasta nova aparece, na fileira de baixo.
+        if (parentId) setActiveFolder(parentId);
         setNewFolderName('');
         setNewFolderParentId(null);
         setShowFolderModal(false);
@@ -373,7 +332,6 @@ export default function BrandGaleriaPage() {
   const handleMoveFolder = async (folderId: string, parentId: string | null) => {
     const previous = folders;
     setFolders(prev => prev.map(f => (f.id === folderId ? { ...f, parentId } : f)));
-    if (parentId) setExpandedFolders(prev => new Set(prev).add(parentId));
     try {
       await api.patch<FolderNode>(`/folders/${folderId}`, { parentId });
     } catch (err) {
@@ -479,95 +437,13 @@ export default function BrandGaleriaPage() {
       await api.delete(`/folders/${folderId}`);
       // O banco apaga a subárvore em cascata; a tela precisa refletir o mesmo.
       setFolders(prev => prev.filter(f => !removed.has(f.id)));
-      if (activeFolder && removed.has(activeFolder)) setActiveFolder(null);
+      if (activeFolder && removed.has(activeFolder)) {
+        setActiveFolder(folders.find(f => f.id === folderId)?.parentId ?? null);
+      }
       if (mutate) mutate(); // os posts das pastas removidas voltaram para "Sem Pasta"
     } catch (err) {
       console.error('Failed to delete folder:', err);
     }
-  };
-
-  /** Desenha a subárvore de `parentId`. A indentação é a única pista de profundidade. */
-  const renderFolderTree = (parentId: string | null, depth: number): React.ReactNode => {
-    const children = foldersByParent.get(parentId) ?? [];
-
-    return children.map(folder => {
-      const subfolders = foldersByParent.get(folder.id) ?? [];
-      const hasChildren = subfolders.length > 0;
-      const isExpanded = expandedFolders.has(folder.id);
-
-      return (
-        <div key={folder.id}>
-          <div
-            className={`${styles.folderRow} ${activeFolder === folder.id ? styles.folderCardActive : ''} ${dragOverFolderId === folder.id ? styles.folderCardDragOver : ''}`}
-            style={{ marginLeft: `calc(${depth} * var(--space-6))` }}
-            onClick={() => setActiveFolder(folder.id)}
-            draggable={canEdit}
-            onDragStart={(e) => handleFolderDragStart(folder.id, e)}
-            onDragEnd={() => { setDraggedFolderId(null); setDragOverFolderId(null); }}
-            onDragOver={(e) => handleDragOver(e, folder.id)}
-            onDragLeave={() => setDragOverFolderId(null)}
-            onDrop={(e) => handleDrop(e, folder.id)}
-          >
-            <button
-              type="button"
-              className={styles.folderChevron}
-              onClick={(e) => toggleFolder(folder.id, e)}
-              disabled={!hasChildren}
-              aria-label={isExpanded ? 'Recolher subpastas' : 'Expandir subpastas'}
-              aria-expanded={hasChildren ? isExpanded : undefined}
-            >
-              {hasChildren
-                ? (isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />)
-                : <span className={styles.chevronPlaceholder} />}
-            </button>
-
-            <Folder size={16} />
-            {renamingFolderId === folder.id ? (
-              <form onSubmit={(e) => handleRenameFolder(e, folder.id)} style={{ flex: 1, display: 'flex', gap: '4px' }}>
-                <input
-                  type="text"
-                  value={renamingFolderName}
-                  onChange={(e) => setRenamingFolderName(e.target.value)}
-                  autoFocus
-                  style={{ flex: 1, padding: '2px 6px', fontSize: '13px', borderRadius: '4px', border: '1px solid var(--color-border)' }}
-                  onBlur={() => setRenamingFolderId(null)}
-                />
-              </form>
-            ) : (
-              <span className={styles.folderName}>{folder.name}</span>
-            )}
-
-            {canEdit && renamingFolderId !== folder.id && (
-              <>
-                <button
-                  className={styles.closeBtn}
-                  onClick={(e) => { e.stopPropagation(); setRenamingFolderId(folder.id); setRenamingFolderName(folder.name); }}
-                  title="Renomear pasta"
-                >
-                  <Edit3 size={12} />
-                </button>
-                <button
-                  className={styles.closeBtn}
-                  onClick={(e) => openFolderModal(folder.id, e)}
-                  title="Criar subpasta"
-                >
-                  <FolderPlus size={12} />
-                </button>
-                <button
-                  className={styles.closeBtn}
-                  onClick={(e) => handleDeleteFolder(folder.id, e)}
-                  title="Excluir Pasta"
-                >
-                  <Trash2 size={12} />
-                </button>
-              </>
-            )}
-          </div>
-
-          {hasChildren && isExpanded && renderFolderTree(folder.id, depth + 1)}
-        </div>
-      );
-    });
   };
 
   const filteredPosts = posts.filter(post => {
@@ -591,10 +467,13 @@ export default function BrandGaleriaPage() {
 
   const presentationCount = posts.filter(p => p.type === 'PRESENTATION').length;
   const designCount = posts.length - presentationCount;
-  const inBundle = (p: Post) => (activeBundle === 'PRESENTATION' ? p.type === 'PRESENTATION' : p.type !== 'PRESENTATION');
-  const bundleTotal = posts.filter(inBundle).length;
-  const unassignedTotal = posts.filter(p => inBundle(p) && !p.folderId).length;
-
+  const pastaAtual = activeFolder && activeFolder !== 'unassigned' ? folders.find(f => f.id === activeFolder) ?? null : null;
+  const caminho = pastaAtual ? caminhoDaPasta(pastaAtual.id, folders) : [];
+  const pastasAqui = foldersByParent.get(pastaAtual?.id ?? null) ?? [];
+  const renomeandoAtual = !!pastaAtual && renamingFolderId === pastaAtual.id;
+  // "Galeria" no caminho da pasta aberta também é alvo: arte solta ali sai da pasta;
+  // pasta solta ali vai para a raiz.
+  const alvoDaRaiz = draggedFolderId ? 'root' : 'unassigned';
 
   const handleDownload = (e: React.MouseEvent, url: string, filename: string) => {
     e.preventDefault();
@@ -756,22 +635,18 @@ export default function BrandGaleriaPage() {
         />
       )}
 
-      <div className={styles.pageTop}>
-        <PageHeader
-          title="Galeria"
-          description={`Artes e apresentações geradas para ${brand?.name ?? marca}.`}
-        />
-
-        <div className={styles.toolbar}>
-          <AiSpendBadge slug={slug} />
+      <PageHeader
+        title="Galeria"
+        description={`Artes e apresentações geradas para ${brand?.name ?? marca}.`}
+        actions={(
           <Link href={`/${slug}/fabrica`}>
             <Button size="sm">
               <Sparkles size={14} />
-              Nova Arte
+              Nova arte
             </Button>
           </Link>
-        </div>
-      </div>
+        )}
+      />
 
       <div className={styles.controls}>
         <div className={styles.bundleTabs} role="tablist" aria-label="Tipo de material">
@@ -800,6 +675,24 @@ export default function BrandGaleriaPage() {
         </div>
 
         <div className={styles.controlsEnd}>
+          {/* Formato era uma segunda fileira de chips só na aba Designs; virou um seletor na mesma linha. */}
+          {activeBundle === 'DESIGNS' && (
+            <label className={styles.formatSelect}>
+              <select
+                value={activeFormat}
+                onChange={(e) => setActiveFormat(e.target.value as typeof activeFormat)}
+                aria-label="Filtrar por formato"
+              >
+                <option value="all">Todos os formatos</option>
+                <option value="1:1">1:1 · Quadrado</option>
+                <option value="3:4">3:4 · Retrato</option>
+                <option value="4:5">4:5 · Feed</option>
+                <option value="16:9">16:9 · Paisagem</option>
+                <option value="9:16">9:16 · Story</option>
+              </select>
+              <ChevronDown size={14} aria-hidden="true" />
+            </label>
+          )}
           <label className={styles.search}>
             <Search size={15} aria-hidden="true" />
             <input
@@ -833,67 +726,143 @@ export default function BrandGaleriaPage() {
         </div>
       </div>
 
-      {activeBundle === 'DESIGNS' && (
-        <div className={styles.formatFilters}>
-          {(['all', '1:1', '3:4', '4:5', '16:9', '9:16'] as const).map((fmt) => (
+      {/* Pasta aberta: caminho clicável (e alvo de arrasto) e as ações à vista, sem menu escondido. */}
+      {pastaAtual && (
+        <div className={styles.folderHead}>
+          <nav className={styles.crumbs} aria-label="Caminho da pasta">
             <button
-              key={fmt}
               type="button"
-              className={`${styles.formatChip} ${activeFormat === fmt ? styles.formatChipActive : ''}`}
-              onClick={() => setActiveFormat(fmt)}
+              className={`${styles.crumb} ${dragOverFolderId === alvoDaRaiz ? styles.crumbDragOver : ''}`}
+              onClick={() => setActiveFolder(null)}
+              onDragOver={(e) => handleDragOver(e, alvoDaRaiz)}
+              onDragLeave={() => setDragOverFolderId(null)}
+              onDrop={(e) => handleDrop(e, alvoDaRaiz)}
+              title="Solte uma arte aqui para tirá-la da pasta"
             >
-              {fmt === 'all' ? 'Todos' :
-               fmt === '1:1' ? '1:1 · Quadrado' :
-               fmt === '3:4' ? '3:4 · Retrato' :
-               fmt === '4:5' ? '4:5 · iPhone' :
-               fmt === '16:9' ? '16:9 · Paisagem' :
-               '9:16 · Story'}
+              Galeria
             </button>
-          ))}
+            {caminho.slice(0, -1).map((f) => (
+              <Fragment key={f.id}>
+                <ChevronRight size={14} aria-hidden="true" />
+                <button
+                  type="button"
+                  className={`${styles.crumb} ${dragOverFolderId === f.id ? styles.crumbDragOver : ''}`}
+                  onClick={() => setActiveFolder(f.id)}
+                  onDragOver={(e) => handleDragOver(e, f.id)}
+                  onDragLeave={() => setDragOverFolderId(null)}
+                  onDrop={(e) => handleDrop(e, f.id)}
+                >
+                  {f.name}
+                </button>
+              </Fragment>
+            ))}
+          </nav>
+
+          <div className={styles.folderHeadRow}>
+            {renomeandoAtual ? (
+              <form onSubmit={(e) => handleRenameFolder(e, pastaAtual.id)} className={styles.folderHeadForm}>
+                <FolderOpen size={24} aria-hidden="true" />
+                <input
+                  type="text"
+                  value={renamingFolderName}
+                  onChange={(e) => setRenamingFolderName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Escape') setRenamingFolderId(null); }}
+                  autoFocus
+                  aria-label="Novo nome da pasta"
+                  className={styles.folderHeadInput}
+                  onBlur={() => setRenamingFolderId(null)}
+                />
+              </form>
+            ) : (
+              <h2 className={styles.folderHeadTitle}>
+                <FolderOpen size={24} aria-hidden="true" />
+                {pastaAtual.name}
+              </h2>
+            )}
+            {canEdit && !renomeandoAtual && (
+              <div className={styles.folderHeadActions}>
+                <button
+                  type="button"
+                  className={styles.ghostBtn}
+                  onClick={() => { setRenamingFolderId(pastaAtual.id); setRenamingFolderName(pastaAtual.name); }}
+                >
+                  <Edit3 size={14} aria-hidden="true" /> Renomear
+                </button>
+                <button type="button" className={styles.ghostBtn} onClick={(e) => openFolderModal(pastaAtual.id, e)}>
+                  <FolderPlus size={14} aria-hidden="true" /> Nova subpasta
+                </button>
+                <button
+                  type="button"
+                  className={`${styles.ghostBtn} ${styles.ghostDanger}`}
+                  onClick={(e) => void handleDeleteFolder(pastaAtual.id, e)}
+                >
+                  <Trash2 size={14} aria-hidden="true" /> Excluir
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
-      <div className={styles.foldersContainer}>
-        <div className={styles.foldersGrid}>
-          <div
-            className={`${styles.folderCard} ${activeFolder === null ? styles.folderCardActive : ''} ${dragOverFolderId === 'root' ? styles.folderCardDragOver : ''}`}
-            onClick={() => setActiveFolder(null)}
-            onDragOver={(e) => handleDragOver(e, 'root')}
-            onDragLeave={() => setDragOverFolderId(null)}
-            onDrop={(e) => handleDrop(e, 'root')}
-            title="Arraste uma pasta para cá para tirá-la de dentro de outra"
-          >
-            <span className={styles.folderName}>Todas</span>
-            <span className={styles.folderCount}>{bundleTotal}</span>
+      {/* Pastas (ou subpastas da aberta) como quadros com as capas do que está dentro. */}
+      {(pastasAqui.length > 0 || !pastaAtual) && (
+        <section className={styles.foldersSection} aria-label={pastaAtual ? 'Subpastas' : 'Pastas'}>
+          <div className={styles.sectionHead}>
+            <h2 className={styles.sectionTitle}>
+              {pastaAtual ? 'Subpastas' : 'Pastas'}
+              {pastasAqui.length > 0 && <span className={styles.sectionCount}>{pastasAqui.length}</span>}
+            </h2>
+            {!pastaAtual && (
+              <button
+                type="button"
+                className={styles.ghostBtn}
+                onClick={() => openFolderModal(null)}
+                disabled={!canEdit}
+                title={canEdit ? undefined : hint}
+              >
+                <FolderPlus size={14} aria-hidden="true" /> Nova pasta
+              </button>
+            )}
           </div>
-          <div
-            className={`${styles.folderCard} ${activeFolder === 'unassigned' ? styles.folderCardActive : ''} ${dragOverFolderId === 'unassigned' ? styles.folderCardDragOver : ''}`}
-            onClick={() => setActiveFolder('unassigned')}
-            onDragOver={(e) => handleDragOver(e, 'unassigned')}
-            onDragLeave={() => setDragOverFolderId(null)}
-            onDrop={(e) => handleDrop(e, 'unassigned')}
-          >
-            <span className={styles.folderName}>Sem pasta</span>
-            <span className={styles.folderCount}>{unassignedTotal}</span>
-          </div>
-          <button
-            type="button"
-            className={styles.newFolderBtn}
-            onClick={() => openFolderModal(null)}
-            disabled={!canEdit}
-            title={canEdit ? undefined : hint}
-          >
-            <FolderPlus size={14} />
-            Nova pasta
-          </button>
-        </div>
+          {pastasAqui.length === 0 ? (
+            <p className={styles.sectionHint}>Crie uma pasta e arraste as artes para ela.</p>
+          ) : (
+            <div className={styles.folderGrid}>
+              {pastasAqui.map((folder) => {
+                // A pasta é a mesma nas duas abas: o quadro mostra tudo o que ela guarda,
+                // senão uma pasta só de apresentações aparecia "Vazia" na aba Designs.
+                const artes = artesDaPasta(folder.id, foldersByParent, posts);
+                const subpastas = foldersByParent.get(folder.id)?.length ?? 0;
+                return (
+                  <FolderTile
+                    key={folder.id}
+                    name={folder.name}
+                    capas={artes}
+                    resumo={resumoDaPasta(artes.length, subpastas)}
+                    dragOver={dragOverFolderId === folder.id}
+                    draggable={canEdit}
+                    onOpen={() => setActiveFolder(folder.id)}
+                    onDragStart={(e) => handleFolderDragStart(folder.id, e)}
+                    onDragEnd={() => { setDraggedFolderId(null); setDragOverFolderId(null); }}
+                    onDragOver={(e) => handleDragOver(e, folder.id)}
+                    onDragLeave={() => setDragOverFolderId(null)}
+                    onDrop={(e) => handleDrop(e, folder.id)}
+                  />
+                );
+              })}
+            </div>
+          )}
+        </section>
+      )}
 
-        {folders.length > 0 && (
-          <div className={styles.folderTree}>
-            {renderFolderTree(null, 0)}
-          </div>
-        )}
-      </div>
+      {(pastasAqui.length > 0 || !pastaAtual) && (
+        <div className={styles.sectionHead}>
+          <h2 className={styles.sectionTitle}>
+            {pastaAtual ? 'Nesta pasta' : 'Todas as artes'}
+            <span className={styles.sectionCount}>{filteredPosts.length}</span>
+          </h2>
+        </div>
+      )}
 
       {loading ? (
         <div className={styles.loadingState} role="status" aria-live="polite">Carregando galeria…</div>
@@ -924,9 +893,11 @@ export default function BrandGaleriaPage() {
                     className={`${styles.postThumb} ${activeBundle === 'PRESENTATION' ? styles.postThumbPresentation : styles.postThumbDesign}`}
                     onClick={() => void openPreview(post)}
                   >
-                    <div className={styles.thumbOverlay}>
-                      <span className={styles.hoverText}>{openingPostId === post.id ? 'Abrindo…' : 'Visualizar'}</span>
-                    </div>
+                    {openingPostId === post.id && (
+                      <div className={styles.thumbOverlay} role="status">
+                        <span className={styles.hoverText}>Abrindo…</span>
+                      </div>
+                    )}
 
                     {post.status === 'FAILED' || post.status === 'GENERATING' ? (
                       <div className={styles.thumbEmpty}>
@@ -940,7 +911,7 @@ export default function BrandGaleriaPage() {
                         alt="Post thumbnail"
                         fill
                         className={styles.thumbImage}
-                        sizes="260px"
+                        sizes="(max-width: 640px) 100vw, 380px"
                         unoptimized
                         priority={index < 4}
                       />

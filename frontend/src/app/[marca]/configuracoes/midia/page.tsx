@@ -14,6 +14,7 @@ import Card from '@/components/ui/Card';
 import Button from '@/components/ui/Button';
 import configStyles from '../configuracoes.module.css';
 import styles from './midia.module.css';
+import { desembrulhar } from '@/lib/desembrulhar';
 import { api, getApiErrorMessage } from '@/lib/api';
 import { useBrandPermissions } from '@/hooks/useBrandPermissions';
 import type { CanvaDesign } from '@/components/Fabrica/CanvaPopup';
@@ -124,8 +125,8 @@ export default function MidiaPage() {
 
   const fetchFolders = async () => {
     try {
-      const res = await api.get<{ data: FolderNode[] }>(`/folders/${slug}?type=MEDIA`);
-      setFolders(res?.data || []);
+      const lista = desembrulhar(await api.get<FolderNode[] | { data: FolderNode[] }>(`/folders/${slug}?type=MEDIA`));
+      setFolders(Array.isArray(lista) ? lista : []);
     } catch (e) {
       console.error('Falha ao carregar pastas de media:', e);
     }
@@ -156,7 +157,7 @@ export default function MidiaPage() {
     if (!newFolderName.trim() || creatingFolder) return;
     setCreatingFolder(true);
     try {
-      const { data } = await api.post<{ data: FolderNode }>(`/folders/${slug}`, { name: newFolderName, parentId: newFolderParentId, type: 'MEDIA' });
+      const data = desembrulhar(await api.post<FolderNode | { data: FolderNode }>(`/folders/${slug}`, { name: newFolderName, parentId: newFolderParentId, type: 'MEDIA' }));
       if (data) {
         setFolders(prev => [...prev, data]);
         if (newFolderParentId) setExpandedFolders(prev => new Set(prev).add(newFolderParentId));
@@ -174,9 +175,9 @@ export default function MidiaPage() {
     e.preventDefault();
     if (!renamingFolderName.trim()) return;
     try {
-      const updated = await api.patch<{ data: FolderNode }>(`/folders/${folderId}`, { name: renamingFolderName.trim() });
-      if (updated?.data) {
-        setFolders((prev) => prev.map((f) => (f.id === folderId ? { ...f, name: updated.data.name } : f)));
+      const updated = desembrulhar(await api.patch<FolderNode | { data: FolderNode }>(`/folders/${folderId}`, { name: renamingFolderName.trim() }));
+      if (updated) {
+        setFolders((prev) => prev.map((f) => (f.id === folderId ? { ...f, name: updated.name } : f)));
       }
       setRenamingFolderId(null);
       setRenamingFolderName('');
@@ -206,9 +207,9 @@ export default function MidiaPage() {
   const handleMoveFolder = async (folderId: string, newParentId: string | null) => {
     if (folderId === newParentId) return;
     try {
-      const updated = await api.patch<{ data: FolderNode }>(`/folders/${folderId}`, { parentId: newParentId });
-      if (updated?.data) {
-        setFolders(prev => prev.map(f => f.id === folderId ? { ...f, parentId: updated.data.parentId } : f));
+      const updated = desembrulhar(await api.patch<FolderNode | { data: FolderNode }>(`/folders/${folderId}`, { parentId: newParentId }));
+      if (updated) {
+        setFolders(prev => prev.map(f => f.id === folderId ? { ...f, parentId: updated.parentId } : f));
         if (newParentId) setExpandedFolders(prev => new Set(prev).add(newParentId));
       }
     } catch (err) {
@@ -388,7 +389,7 @@ export default function MidiaPage() {
       if (activeFolder === 'unassigned') return !a.folderId;
       return a.folderId === activeFolder;
     });
-  }, [assets, filterSource, filterTag]);
+  }, [assets, filterSource, filterTag, activeFolder]);
 
   const handleImportAttachments = async (
     _text: string,

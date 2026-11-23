@@ -17,6 +17,7 @@ const ArtifactPanel = dynamic(() => import('@/components/Fabrica/ArtifactPanel')
 import { RealtimePreview } from '@/components/Fabrica/RealtimePreview';
 const AiSpendBadge = dynamic(() => import('@/components/AiUsage/AiSpendBadge'), { ssr: false });
 import { ChatMessageRow } from '@/components/Fabrica/ChatMessageRow';
+import { RecentArts } from '@/components/Fabrica/RecentArts';
 import SlideThumb from '@/components/DesignDocument/SlideThumb';
 import BriefingPanel from '@/components/Fabrica/BriefingPanel';
 import { composeBriefing, EMPTY_BRIEFING, isBriefingEmpty, type Briefing } from '@/lib/briefing';
@@ -480,6 +481,17 @@ export default function FabricaPage() {
 
   const displayMessages = messages;
 
+  // Fábrica vazia: sem conversa, sem arte e sem nada rodando. Nesse estado o preview à direita
+  // só dizia "A arte aparece aqui" e a caixa de pedido ficava espremida no rodapé de uma coluna
+  // estreita. Agora a caixa vai para o centro, larga, com as últimas artes da marca embaixo; o
+  // preview volta assim que a primeira mensagem sai.
+  const starting =
+    displayMessages.length === 0 &&
+    currentDesign.length === 0 &&
+    workerStatus !== 'running' &&
+    !isStreaming &&
+    !activeQuestion;
+
   // ── Normaliza o formato do design pro preview (html-design, legacy) ─
   const designKind = (currentDesign[0] as { kind?: string } | undefined)?.kind;
   const isHtmlDesign = designKind === 'html-design';
@@ -507,7 +519,7 @@ export default function FabricaPage() {
     : 'saved';
 
   return (
-    <div className={s.root}>
+    <div className={`${s.root} ${starting ? s.rootStart : ''}`}>
 
       {/* Asana popup */}
       {showAsana && (
@@ -558,7 +570,7 @@ export default function FabricaPage() {
           </div>
           <div className={s.chatHeaderRight}>
             <AiSpendBadge slug={marca} compact />
-            <button
+            {!starting && <button
               className={s.newConvBtn}
               onClick={handleNewConversation}
               disabled={!canGenerate}
@@ -566,7 +578,7 @@ export default function FabricaPage() {
               aria-label="Iniciar nova conversa"
             >
               <MessageSquarePlus size={14} /> Nova
-            </button>
+            </button>}
             <div className={s.connectionBadge} role="status" title={connected ? 'Conectado' : 'Reconectando...'}>
               <span className={`${s.connectionDot} ${connected ? s.connectionOnline : s.connectionOffline}`} />
               {!connected && <span className={s.connectionLabel}>Reconectando...</span>}
@@ -585,30 +597,12 @@ export default function FabricaPage() {
         >
           {displayMessages.length === 0 ? (
             <div className={s.emptyState}>
-              <p className={s.emptyTitle}>O que você quer criar?</p>
+              <h1 className={s.emptyTitle}>
+                O que vamos criar{brandName ? <> para <span className={s.emptyBrand}>{brandName}</span></> : ''}?
+              </h1>
               <p className={s.emptySubtitle}>
-                Descreva a peça — apresentação, carrossel, proposta — e o agente conduz o processo.
+                Descreva a peça. O agente pergunta o que faltar e gera com a ficha da marca.
               </p>
-
-              {/* Sugestões de Prompt para quebrar Blank Page */}
-              <div className={s.suggestChips}>
-                {[
-                  'Carrossel com 5 dicas de finanças',
-                  'Apresentação comercial de 6 slides',
-                  'Proposta de serviços em PDF',
-                ].map((sug, i) => (
-                  <button
-                    key={i}
-                    className={s.suggestChip}
-                    onClick={() => {
-                      setInput(sug);
-                      inputRef.current?.focus();
-                    }}
-                  >
-                    {sug}
-                  </button>
-                ))}
-              </div>
             </div>
           ) : (
             displayMessages.map(msg => {
@@ -833,6 +827,23 @@ export default function FabricaPage() {
               <FolderPicker marca={marca} sessionId={sessionId} disabled={busy || !canGenerate} />
 
               <BriefingPanel value={briefing} onChange={setBriefing} disabled={busy || !canGenerate} />
+
+              {/* Modo de aprovação da sessão. Era uma faixa inteira ("Aprovação: Auto | Manual")
+                  acima do preview; aqui fica junto do pedido, e dá para escolher antes de começar.
+                  Desligado (padrão) = a Fábrica aprova sozinha e segue. */}
+              <button
+                type="button"
+                className={`${s.approvalBtn} ${reviewMode === 'manual' ? s.approvalBtnOn : ''}`}
+                aria-pressed={reviewMode === 'manual'}
+                onClick={() => setReviewMode(reviewMode === 'manual' ? 'auto' : 'manual')}
+                disabled={!connected}
+                title={reviewMode === 'manual'
+                  ? 'Cada peça espera a sua aprovação. Clique para a Fábrica aprovar sozinha.'
+                  : 'A Fábrica aprova sozinha e segue. Clique para aprovar cada peça.'}
+              >
+                <span className={s.approvalBox} aria-hidden="true">{reviewMode === 'manual' && <Check size={11} />}</span>
+                Aprovo cada peça
+              </button>
             </div>
 
             <div className={`${s.inputBar} ${!canGenerate ? s.inputBarDisabled : ''}`}>
@@ -905,39 +916,40 @@ export default function FabricaPage() {
               ? 'Enter envia uma orientação · Ctrl+Enter pausa e envia agora · Shift+Enter nova linha'
               : 'Enter envia · Shift+Enter nova linha · / para comandos'}
           </p>
+
+          {/* Pontos de partida para a página em branco: preenchem a caixa, não enviam. */}
+          {starting && canGenerate && (
+            <div className={s.suggestChips}>
+              {[
+                'Apresentação comercial de 6 slides',
+                'Carrossel de 5 slides para o Instagram',
+                'Proposta de serviços em PDF',
+              ].map((sug) => (
+                <button
+                  key={sug}
+                  type="button"
+                  className={s.suggestChip}
+                  onClick={() => {
+                    setInput(sug);
+                    inputRef.current?.focus();
+                  }}
+                >
+                  {sug}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
+
+        {starting && (
+          <div className={s.startRecent}>
+            <RecentArts marca={marca} brandName={brandName || marca} />
+          </div>
+        )}
       </aside>
 
       {/* ── Right panel: preview ───────────────────────────────────────────── */}
       <main className={`${s.previewPanel} ${currentDesign.length === 0 && workerStatus !== 'running' ? s.previewPanelIdle : ''}`}>
-
-        {/* Modo de revisão: configuração PERMANENTE da sessão. Morava dentro do
-            card de notificação — some quando o card some, e o usuário perdia o
-            controle sem entender por quê. Aqui fica sempre alcançável, ao lado do
-            preview, que é onde a revisão de fato acontece. */}
-        <div className={s.previewBar}>
-          <span className={s.previewBarLabel}>Aprovação</span>
-          <div className={s.modeToggle} role="group" aria-label="Modo de aprovação">
-            <button
-              type="button"
-              className={`${s.modeBtn} ${reviewMode === 'auto' ? s.modeBtnOn : ''}`}
-              onClick={() => setReviewMode('auto')}
-              aria-pressed={reviewMode === 'auto'}
-              title="A Fábrica aprova sozinha e segue"
-            >
-              Auto
-            </button>
-            <button
-              type="button"
-              className={`${s.modeBtn} ${reviewMode === 'manual' ? s.modeBtnOn : ''}`}
-              onClick={() => setReviewMode('manual')}
-              aria-pressed={reviewMode === 'manual'}
-              title="Cada peça espera sua aprovação"
-            >
-              Manual
-            </button>
-          </div>
-        </div>
 
         {/* Ancorado, não flutuante: como bloco no fluxo ele empurra o preview em
             vez de cobrir justamente a arte sobre a qual você precisa decidir. */}
@@ -1000,19 +1012,12 @@ export default function FabricaPage() {
               </div>
             )}
 
-            {/* Save status badge */}
-            {saveStatus && (
-              <div className={`${s.saveBadge} ${saveStatus === 'saving' ? s.saveBadgeSaving : s.saveBadgeSaved}`}>
-                {saveStatus === 'saving' ? (
-                  <>
-                    <Loader2 size={12} className={s.saveBadgeSpin} />
-                    Salvando rascunho…
-                  </>
-                ) : (
-                  <>
-                    <Check size={12} /> Salvo
-                  </>
-                )}
+            {/* Só "Salvando rascunho…" enquanto gera. O "Salvo" fixo ocupava uma linha para dizer
+                o que é verdade o tempo todo: o pipeline persiste cada slide ao sair. */}
+            {saveStatus === 'saving' && (
+              <div className={`${s.saveBadge} ${s.saveBadgeSaving}`}>
+                <Loader2 size={12} className={s.saveBadgeSpin} />
+                Salvando rascunho…
               </div>
             )}
 
@@ -1036,46 +1041,45 @@ export default function FabricaPage() {
               ) : null}
             </div>
 
-            {/* Slide navigation */}
+            {/* Navegação numa linha só: setas nas pontas e as miniaturas no meio. Antes eram
+                duas faixas (‹ 1/3 › e, abaixo, as miniaturas); a contagem já está na barra. */}
             {slideCount > 1 && (
               <div className={s.slideNav}>
                 <button
+                  type="button"
                   className={s.slideNavBtn}
                   onClick={() => setPreviewSlide(Math.max(0, safeSlide - 1))}
                   disabled={safeSlide === 0}
+                  aria-label="Slide anterior"
                 >‹</button>
-                <span className={s.slideNavLabel}>
-                  {safeSlide + 1} / {slideCount}
-                </span>
+                {/* Faixa de miniaturas: o slide de verdade; o que ainda não chegou é um espaço reservado */}
+                <div className={s.thumbStrip}>
+                  {Array.from({ length: slideCount }).map((_, i) => {
+                    const pronto = isHtmlDesign && htmlDesignContent?.slides?.[i];
+                    return (
+                      <button
+                        key={i}
+                        type="button"
+                        className={`${s.thumb} ${i === safeSlide ? s.thumbActive : ''}`}
+                        onClick={() => setPreviewSlide(i)}
+                        aria-label={`Slide ${i + 1}`}
+                        aria-current={i === safeSlide ? 'true' : undefined}
+                      >
+                        {pronto && htmlDesignContent
+                          ? <SlideThumb content={htmlDesignContent} index={i} className={s.thumbFrame} />
+                          : <span className={s.thumbPending} />}
+                        <span className={s.thumbNum}>{i + 1}</span>
+                      </button>
+                    );
+                  })}
+                </div>
                 <button
+                  type="button"
                   className={s.slideNavBtn}
                   onClick={() => setPreviewSlide(Math.min(slideCount - 1, safeSlide + 1))}
                   disabled={safeSlide >= slideCount - 1}
+                  aria-label="Próximo slide"
                 >›</button>
-              </div>
-            )}
-
-            {/* Faixa de miniaturas: o slide de verdade; o que ainda não chegou é um espaço reservado */}
-            {slideCount > 1 && (
-              <div className={s.thumbStrip}>
-                {Array.from({ length: slideCount }).map((_, i) => {
-                  const pronto = isHtmlDesign && htmlDesignContent?.slides?.[i];
-                  return (
-                    <button
-                      key={i}
-                      type="button"
-                      className={`${s.thumb} ${i === safeSlide ? s.thumbActive : ''}`}
-                      onClick={() => setPreviewSlide(i)}
-                      aria-label={`Slide ${i + 1}`}
-                      aria-current={i === safeSlide ? 'true' : undefined}
-                    >
-                      {pronto && htmlDesignContent
-                        ? <SlideThumb content={htmlDesignContent} index={i} className={s.thumbFrame} />
-                        : <span className={s.thumbPending} />}
-                      <span className={s.thumbNum}>{i + 1}</span>
-                    </button>
-                  );
-                })}
               </div>
             )}
           </div>

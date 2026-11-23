@@ -312,7 +312,7 @@ export function ArtifactPanel({
           {botaoAba('fonte', 'Fonte', Code2)}
         </div>
 
-        <span className={styles.meta}>
+        <span className={`${styles.meta} ${styles.optional}`}>
           {temArtefato
             ? `${slideCount} slide${slideCount > 1 ? 's' : ''}${gerando ? ' · gerando…' : ''}`
             : gerando ? 'gerando…' : ''}
@@ -321,7 +321,9 @@ export function ArtifactPanel({
         {/* Custo estimado do deck. Refaz a leitura a cada slide que entra e quando a geração
             termina (cada slide persistido já tem seus steps no rastro), então o valor acompanha
             a geração sem polling. Ancorado à esquerda: aqui o chip está longe da borda direita. */}
-        <GenerationCostChip postId={postId} refreshKey={`${gerando ? 'g' : 'i'}:${slideCount}`} align="start" />
+        <span className={styles.optional}>
+          <GenerationCostChip postId={postId} refreshKey={`${gerando ? 'g' : 'i'}:${slideCount}`} align="start" />
+        </span>
 
         <div className={styles.toolbarEnd}>
           <div ref={boxRef} className={styles.menuWrap}>
@@ -335,7 +337,7 @@ export function ArtifactPanel({
               className={styles.btn}
             >
               {job ? <Loader2 size={14} className={styles.spin} /> : <Download size={14} />}
-              {job ? `${job.formato.toUpperCase()} ${job.done}/${job.total}` : 'Baixar'}
+              <span className={styles.btnLabel}>{job ? `${job.formato.toUpperCase()} ${job.done}/${job.total}` : 'Baixar'}</span>
               {!job && <ChevronDown size={13} />}
             </button>
 
@@ -343,7 +345,7 @@ export function ArtifactPanel({
               <div className={styles.menu} role="menu">
                 {itemMenu('PPTX editável', 'Texto, formas e imagens editáveis (PowerPoint/Canva)', () => void baixarDeck('pptx'))}
                 {itemMenu('PDF do deck', 'Uma página por slide, texto de verdade', () => void baixarDeck('pdf'))}
-                {itemMenu('ZIP com os PNGs', `${slideCount} imagem${slideCount > 1 ? 'ns' : ''} em alta`, () => void baixarDeck('zip'))}
+                {itemMenu('ZIP com os PNGs', `${slideCount} ${slideCount > 1 ? 'imagens' : 'imagem'} em alta`, () => void baixarDeck('zip'))}
                 <div className={styles.menuRule} />
                 {itemMenu('PNG deste slide', `Slide ${slideIndex + 1}`, () =>
                   void comErro(() => baixarSlide(postId!, slideIndex, 'png')),
@@ -353,6 +355,17 @@ export function ArtifactPanel({
                 )}
                 {itemMenu('JSON do design', 'A fonte do deck inteiro', () =>
                   void comErro(async () => baixarIrJson(design, postId)),
+                )}
+                {/* Sem vínculo com o Canva, o envio mora aqui: antes era uma faixa inteira acima
+                    do slide só para dizer "Não exportado". Com vínculo, a faixa volta (abaixo). */}
+                {!canvaDesignId && (
+                  <>
+                    <div className={styles.menuRule} />
+                    {itemMenu('Enviar para o Canva', 'Vira um design editável na sua conta do Canva', () => {
+                      setMenuAberto(false);
+                      void handleExportCanva();
+                    }, exportandoCanva)}
+                  </>
                 )}
               </div>
             )}
@@ -369,13 +382,13 @@ export function ArtifactPanel({
             className={[styles.btn, publicSlug ? styles.btnOn : ''].join(' ')}
           >
             <Globe size={14} />
-            {publicSlug ? 'Hospedado' : 'Hospedar'}
+            <span className={styles.btnLabel}>{publicSlug ? 'Hospedado' : 'Hospedar'}</span>
           </button>
         </div>
       </div>
 
-      {/* Canva: uma linha só. Detalhe e ações de sincronização aparecem quando já há vínculo. */}
-      {postId && (
+      {/* Canva: uma linha só, e só quando há o que dizer (vínculo existente ou envio em curso). */}
+      {postId && (canvaDesignId || exportandoCanva) && (
         <div className={styles.canva}>
           <span className={[styles.canvaDot, canvaDesignId ? styles.canvaDotOn : ''].join(' ')} />
           <span className={styles.canvaTitle}>

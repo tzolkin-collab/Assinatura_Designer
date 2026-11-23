@@ -203,22 +203,21 @@
   flex: 1;
   padding: 50px 20px;
   text-align: center;
-  gap: 12px;
+  gap: var(--space-2);
 }
-
-@keyframes floatIcon {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-5px); }
-}
-
 .emptyTitle {
+  font-family: var(--font-serif);
   font-size: var(--text-xl);
-  font-weight: 600;
+  font-weight: 500;
+  line-height: var(--leading-tight);
   color: var(--color-text);
   margin: 0;
   letter-spacing: -0.01em;
+  text-wrap: balance;
 }
-
+.emptyBrand {
+  white-space: nowrap;
+}
 .emptySubtitle {
   font-size: var(--text-sm);
   color: var(--color-text-secondary);
@@ -226,33 +225,244 @@
   margin: 0;
   max-width: 300px;
 }
-
 .suggestChips {
   display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  width: 100%;
-  max-width: 320px;
-  margin-top: var(--space-5);
-  border-top: 1px solid var(--color-border);
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.suggestChip {
+  background: var(--color-bg-secondary);
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: color var(--transition-fast), border-color var(--transition-fast);
+}
+.suggestChip:hover {
+  color: var(--color-text);
+  border-color: var(--color-border-hover);
 }
 
-.suggestChip {
-  background: none;
-  border: none;
-  border-bottom: 1px solid var(--color-border);
-  padding: var(--space-3) var(--space-1);
+/* ── Fábrica vazia: a caixa de pedido no centro ─────────────────────────────────
+   Sem conversa e sem arte, o preview some e a coluna do chat ocupa a tela. Título,
+   caixa e últimas artes formam um bloco centrado na vertical (margens automáticas
+   em cima e embaixo). A primeira mensagem devolve o layout de duas colunas. */
+.rootStart .previewPanel {
+  display: none;
+}
+.rootStart .chatPanel {
+  width: 100%;
+  border-right: none;
+  overflow-y: auto;
+}
+.rootStart .thread {
+  flex: 0 0 auto;
+  margin-top: auto;
+  overflow: visible;
+  padding: var(--space-20) var(--space-6) 0;
+}
+.rootStart .emptyState {
+  flex: none;
+  padding: 0;
+}
+.rootStart .emptyTitle {
+  font-size: clamp(1.875rem, 1rem + 2vw, 2.5rem);
+  letter-spacing: -0.015em;
+}
+.rootStart .emptySubtitle {
+  font-size: var(--text-base);
+  max-width: 560px;
+  text-wrap: balance;
+}
+.rootStart .inputArea {
+  width: min(760px, 100% - 48px);
+  align-self: center;
+  padding: 0;
+  margin-top: var(--space-8);
+  gap: var(--space-4);
+}
+/* A caixa é o contorno de tudo, na tela vazia e na conversa: texto em cima; anexo,
+   Referências, Pasta, Briefing, aprovação e enviar na linha de baixo. .inputBar vira
+   display:contents para que o campo, o anexo e os botões de envio entrem na mesma grade
+   que a linha de opções (que vive fora dele no DOM). Os painéis de Referências e Briefing
+   abrem dentro da própria linha, então a caixa cresce em vez de empilhar faixas. */
+.inputWrap {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-areas:
+    "field field field field"
+    "attach tools pause send";
+  align-items: end;
+  column-gap: var(--space-1);
+  row-gap: var(--space-2);
+  padding: var(--space-3) var(--space-2) var(--space-2) var(--space-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-hover);
+  border-radius: var(--radius-xl);
+  transition: border-color var(--transition-fast);
+}
+.inputWrap:focus-within {
+  border-color: var(--color-text);
+  outline: 1px solid var(--color-text);
+}
+.inputWrap:has(.inputBarDisabled) {
+  background: var(--color-bg-secondary);
+}
+/* Seletores com .inputWrap na frente: as regras antigas de .inputBar, .inputField e
+   .optionsRow vêm mais abaixo no arquivo e ganhariam por ordem. */
+.inputWrap > .inputBar {
+  display: contents;
+}
+.inputWrap .inputBar .inputField {
+  grid-area: field;
+  align-self: start;
+  min-height: 44px;
+  padding: 2px 0;
+}
+.inputWrap .inputBar > .iconBtn {
+  grid-area: attach;
+  margin-left: calc(-1 * var(--space-2));
+}
+.inputWrap .pauseSendBtn {
+  grid-area: pause;
+}
+.inputWrap .sendBtn {
+  grid-area: send;
+}
+.inputWrap > .optionsRow {
+  grid-area: tools;
+  /* Na coluna da conversa as ferramentas quebram em duas linhas; pela base, a de baixo
+     fica na altura do anexo e do enviar. */
+  align-self: end;
+  margin: 0;
+  gap: 0;
+  --folder-picker-bg: transparent;
+  --folder-picker-border: transparent;
+}
+/* Dentro da caixa os gatilhos perdem a borda de pílula: viram botões discretos, como o anexo. */
+.inputWrap > .optionsRow > * > button:first-child {
+  border-color: transparent;
+  background: transparent;
+  padding: 0 var(--space-2);
+}
+.inputWrap > .optionsRow > * > button:first-child:hover {
+  background: var(--color-bg-secondary);
+}
+.approvalBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  height: 30px;
+  padding: 0 var(--space-2);
+  font: inherit;
   font-size: var(--text-sm);
   font-weight: 500;
-  color: var(--color-text);
-  text-align: left;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
   cursor: pointer;
-  transition: color var(--transition-fast), padding var(--transition-fast);
+  white-space: nowrap;
+  transition: background-color var(--transition-fast), color var(--transition-fast);
 }
-
-.suggestChip:hover {
-  color: var(--color-brand);
-  padding-left: var(--space-2);
+.approvalBtn:hover:not(:disabled) {
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+}
+.approvalBtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.approvalBox {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border: 1.5px solid currentColor;
+  border-radius: 4px;
+}
+.approvalBtnOn {
+  color: var(--color-text);
+}
+.approvalBtnOn .approvalBox {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: #fff;
+}
+.approvalBtn:focus-visible {
+  outline: 2px solid var(--color-brand);
+  outline-offset: 2px;
+}
+/* Na tela vazia a caixa é o centro da página: maior, com sombra e texto maior. */
+.rootStart .inputWrap {
+  min-height: 132px;
+  column-gap: var(--space-2);
+  row-gap: var(--space-3);
+  padding: var(--space-4) var(--space-3) var(--space-3) var(--space-4);
+  box-shadow: var(--shadow-md);
+}
+.rootStart .inputWrap .inputBar .inputField {
+  min-height: 52px;
+  font-size: var(--text-lg);
+}
+.rootStart .inputWrap .sendBtn {
+  width: 36px;
+  height: 36px;
+}
+/* Sem a barra de cima: o nome da marca já está no título. Gasto e conexão ficam no canto. */
+.rootStart .chatHeader {
+  position: absolute;
+  top: 0;
+  right: 0;
+  border-bottom: none;
+  background: transparent;
+}
+.rootStart .chatHeaderLeft {
+  display: none;
+}
+.rootStart .inputHint {
+  display: none;
+}
+.startRecent {
+  width: min(1120px, 100% - 48px);
+  align-self: center;
+  margin: var(--space-16, 64px) 0 auto;
+  padding-bottom: var(--space-8);
+}
+@media (max-width: 640px) {
+  /* No celular o título quebra em duas linhas e o selo "IA hoje", solto no canto, caía em cima dele.
+     Aqui a barra volta para o fluxo: uma faixa de 56px ao lado do botão de menu, título logo abaixo. */
+  .rootStart .chatHeader {
+    position: static;
+    padding: 8px 16px;
+  }
+  .rootStart .thread {
+    padding: var(--space-2) var(--space-4) 0;
+  }
+  .rootStart .inputArea,
+  .startRecent {
+    width: calc(100% - 32px);
+  }
+  .rootStart .inputArea {
+    margin-top: var(--space-6);
+  }
+  /* Uma linha que rola de lado: empilhadas, as três sugestões empurravam as artes para fora da tela. */
+  .rootStart .suggestChips {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    margin-right: -16px;
+    padding-right: 16px;
+  }
+  .rootStart .suggestChip {
+    flex-shrink: 0;
+  }
+  .startRecent {
+    margin-top: var(--space-10, 40px);
+  }
 }
 
 /* Messages */
@@ -1405,9 +1615,10 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 12px;
-  padding: 10px;
+  gap: var(--space-2);
+  padding: 0 var(--space-4) var(--space-4);
   flex-shrink: 0;
+  min-width: 0;
 }
 
 .slideNavBtn {
@@ -1448,9 +1659,10 @@
 .thumbStrip {
   display: flex;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-4) var(--space-4);
+  padding: 2px;
   overflow-x: auto;
-  flex-shrink: 0;
+  flex: 0 1 auto;
+  min-width: 0;
   justify-content: safe center;
 }
 
@@ -1670,53 +1882,11 @@
 /* Barra permanente do preview: abriga o que é CONFIGURAÇÃO, não evento. O modo de
    aprovação morava dentro do card de notificação — sumia junto com ele, levando o
    controle embora sem aviso. */
-.previewBar {
-  display: flex;
-  align-items: center;
-  gap: var(--space-3);
-  min-height: 56px;
-  padding: var(--space-2) var(--space-5);
-  background: var(--color-bg);
-  border-bottom: 1px solid var(--color-border);
-  flex-shrink: 0;
-}
 
-.previewBarLabel {
-  font-size: var(--text-sm);
-  font-weight: 500;
-  color: var(--color-text-secondary);
-}
 
-.modeToggle {
-  display: inline-flex;
-  gap: 2px;
-  padding: 2px;
-  background: var(--color-bg-tertiary);
-  border-radius: var(--radius-lg);
-}
 
-.modeBtn {
-  font-size: var(--text-sm);
-  font-weight: 500;
-  padding: 4px 14px;
-  border-radius: var(--radius-md);
-  border: 0;
-  background: transparent;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  transition: background-color var(--transition-fast), color var(--transition-fast);
-}
 
-.modeBtn:hover {
-  color: var(--color-text-secondary);
-}
 
-.modeBtnOn {
-  background: var(--color-surface);
-  color: var(--color-text);
-  font-weight: 600;
-  box-shadow: var(--shadow-sm);
-}
 
 .previewCancelBtn {
   display: inline-flex;

@@ -4,17 +4,14 @@ import {
   BookOpen,
   Brain,
   Factory,
-  FolderKanban,
   GalleryHorizontalEnd,
   Images,
   LayoutDashboard,
   LayoutGrid,
   MonitorPlay,
   Palette,
-  PenTool,
   Settings,
   SlidersHorizontal,
-  Users,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -30,10 +27,12 @@ export interface NavDef {
   href: string;
 }
 
-/** Páginas que não dependem de marca. */
+/**
+ * Páginas que não dependem de marca. "Projetos da equipe" saiu em 22/11/2026: repetia o filtro
+ * "Descobrir" da própria galeria (/projetos agora redireciona para lá).
+ */
 export const GLOBAL_NAV: NavDef[] = [
   { label: 'Minhas marcas', icon: LayoutGrid, href: '/galeria' },
-  { label: 'Projetos da equipe', icon: FolderKanban, href: '/projetos' },
   { label: 'Configurações gerais', icon: Settings, href: '/configuracoes' },
 ];
 
@@ -50,7 +49,8 @@ export function brandNav(marca: string): NavDef[] {
     { label: 'Cérebro da IA', icon: Brain, href: `/${marca}/cerebro` },
     { label: 'Galeria', icon: GalleryHorizontalEnd, href: `/${marca}/galeria` },
     { label: 'Fábrica', icon: Factory, href: `/${marca}/fabrica` },
-    { label: 'Editor', icon: PenTool, href: `/${marca}/editor` },
+    // "Editor" saiu do menu em 22/11/2026: não era uma tela, só reabria a última apresentação.
+    // O endereço continua funcionando; o editor se abre pela Galeria e pelo /editor da Fábrica.
     { label: 'Publicadas', icon: MonitorPlay, href: `/${marca}/apresentacoes` },
   ];
 }
@@ -63,12 +63,17 @@ export interface SettingsSection {
   icon: LucideIcon;
 }
 
-/** Seções de configuração de uma marca: usadas pelo menu lateral E pela tela de configurações. */
+/**
+ * Seções de configuração de uma marca: usadas pelo menu lateral E pela tela de configurações.
+ * "Equipe e permissões" saiu em 22/11/2026: todo usuário da equipe interna vira membro de toda
+ * marca automaticamente (backend/src/lib/internalTeam.ts), então remover ou convidar pela tela
+ * não fazia o que prometia. O endereço antigo redireciona para as configurações.
+ */
 export const BRAND_SETTINGS: SettingsSection[] = [
   {
     key: 'agent',
-    label: 'Agente e memória',
-    description: 'Instruções do agente de IA e as regras e preferências que ele aprendeu sobre a marca.',
+    label: 'Instruções do agente',
+    description: 'O que o chat da Fábrica segue ao conversar sobre a marca. Na geração valem as regras do Cérebro.',
     icon: Bot,
   },
   {
@@ -76,12 +81,6 @@ export const BRAND_SETTINGS: SettingsSection[] = [
     label: 'Branding',
     description: 'Identidade visual: cores, tipografia (Google Fonts) e diretrizes da marca.',
     icon: Palette,
-  },
-  {
-    key: 'equipe',
-    label: 'Equipe e permissões',
-    description: 'Convide clientes e designers e defina quem pode editar ou apenas visualizar.',
-    icon: Users,
   },
   {
     key: 'midia',

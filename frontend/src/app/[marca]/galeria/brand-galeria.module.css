@@ -1,13 +1,4 @@
 
-.pageTop {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: var(--space-4);
-  flex-wrap: wrap;
-  margin-bottom: var(--space-5);
-}
-
 /* Linha de controles: tipo de material à esquerda; busca e modo de visualização à direita. */
 .controls {
   display: flex;
@@ -182,11 +173,11 @@
 }
 
 .gridPresentations {
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
 }
 
 .gridDesigns {
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr));
 }
 
 .gridAnimations {
@@ -223,40 +214,6 @@
   color: var(--color-text);
   border-bottom-color: var(--color-brand-fill);
   font-weight: 600;
-}
-
-.formatFilters {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2);
-  margin-bottom: var(--space-4);
-}
-
-.formatChip {
-  display: inline-flex;
-  align-items: center;
-  padding: 6px 12px;
-  border-radius: var(--radius-full);
-  font-size: var(--text-xs);
-  font-weight: 500;
-  color: var(--color-text-secondary);
-  background-color: var(--color-bg-secondary);
-  border: 1px solid transparent;
-  cursor: pointer;
-  transition: all var(--transition-fast);
-}
-
-.formatChip:hover {
-  background-color: var(--color-surface);
-  border-color: var(--color-border);
-  color: var(--color-text);
-}
-
-.formatChipActive {
-  background-color: var(--color-brand-light);
-  color: var(--color-brand);
-  border-color: color-mix(in srgb, var(--color-brand-fill) 20%, transparent);
 }
 
 @keyframes slideInUp {
@@ -320,8 +277,6 @@
   position: absolute;
   inset: 0;
   background-color: rgba(29, 28, 26, 0.4);
-  opacity: 0;
-  transition: opacity var(--transition-fast);
   z-index: 5;
   display: flex;
   align-items: center;
@@ -362,7 +317,7 @@
 }
 
 .postCard:hover .postThumb {
-  border-color: var(--color-text-tertiary);
+  border-color: var(--color-text);
 }
 
 
@@ -372,10 +327,6 @@
   cursor: grabbing;
 }
 
-
-.postCard:hover .thumbOverlay {
-  opacity: 1;
-}
 
 .postCreator {
   font-size: 11px;
@@ -716,161 +667,293 @@
   color: var(--color-text);
 }
 
-/* Folders */
-.foldersContainer {
-  margin-bottom: var(--space-6);
-}
-
-.foldersHeader {
+/* Pastas: quadro com as capas do que está dentro, nome e resumo embaixo (mesma gramática
+   das artes: moldura + nome + meta). */
+.sectionHead {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
   margin-bottom: var(--space-4);
 }
 
-.foldersTitle {
-  font-size: var(--text-xl);
-  font-weight: 600;
-  color: var(--color-text);
+.sectionTitle {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
   margin: 0;
-}
-
-.foldersGrid {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.folderCard {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  height: 32px;
-  padding: 0 var(--space-3);
-  background-color: var(--color-surface);
-  border: 1px solid var(--color-border-hover);
-  border-radius: var(--radius-full);
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  transition: background-color var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
-}
-
-.folderTree {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-  margin-top: var(--space-3);
-}
-
-/* Linha da árvore: mesmo visual do card, porém em largura cheia — a indentação
-   (margin-left por profundidade) é o que comunica o aninhamento. */
-.folderRow {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding: var(--space-2) var(--space-3);
-  border-bottom: 1px solid var(--color-border);
-  cursor: pointer;
-  transition: background-color var(--transition-fast);
-}
-
-.folderRow:hover {
-  background-color: var(--color-bg-secondary);
-}
-
-.folderChevron {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  border: none;
-  background: none;
-  color: var(--color-text-secondary);
-  cursor: pointer;
-}
-
-.folderChevron:disabled {
-  cursor: default;
-}
-
-/* Mantém o alinhamento das pastas-folha com as que têm chevron. */
-.chevronPlaceholder {
-  display: block;
-  width: 14px;
-  height: 14px;
-}
-
-.folderCard:hover {
-  background-color: var(--color-bg-secondary);
+  font-family: var(--font-serif);
+  font-size: 1.375rem;
+  font-weight: 500;
   color: var(--color-text);
 }
 
-.folderCardActive {
-  background-color: var(--color-text);
-  border-color: var(--color-text);
-  color: var(--color-bg);
-}
-
-.folderCardActive:hover {
-  background-color: var(--color-accent-hover);
-  color: var(--color-bg);
-}
-
-.folderCardDragOver {
-  background-color: var(--color-brand-light);
-  border-color: var(--color-brand-fill);
-  color: var(--color-text);
-}
-
-.folderName {
+.sectionCount {
   font-size: var(--text-sm);
   font-weight: 500;
-  flex: 1;
-}
-
-.folderCount {
-  font-size: var(--text-xs);
-  font-weight: 600;
-  opacity: 0.65;
+  color: var(--color-text-tertiary);
   font-variant-numeric: tabular-nums;
 }
 
-.newFolderBtn {
+.sectionHint {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+.foldersSection {
+  margin-bottom: var(--space-12);
+}
+
+.folderGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr));
+  gap: var(--space-6) var(--space-5);
+}
+
+.folderTile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Mosaico 2×2 num quadro 16:9: cada célula também é 16:9, então o slide aparece inteiro,
+   sem corte. Uma capa só ocupa o quadro todo; com 2 ou 3, as células que sobram ficam vazias. */
+.folderFrame {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 2px;
+  aspect-ratio: 16 / 9;
+  margin-bottom: var(--space-2);
+  overflow: hidden;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.folderFrame[data-n='1'] {
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
+}
+
+.folderCover {
+  position: relative;
+  overflow: hidden;
+  background: var(--color-surface);
+}
+
+.folderEmpty {
+  grid-column: 1 / -1;
+  grid-row: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-tertiary);
+  font-size: var(--text-sm);
+}
+
+.folderTile:hover .folderFrame {
+  border-color: var(--color-text);
+}
+
+.folderTileDragOver .folderFrame {
+  border-color: var(--color-brand-fill);
+  box-shadow: 0 0 0 3px var(--color-brand-light);
+}
+
+.folderTileName {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.folderTileName svg {
+  flex-shrink: 0;
+  color: var(--color-text-secondary);
+}
+
+.folderTileLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folderTileMeta {
+  padding-left: 24px;
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+}
+
+/* Pasta aberta: caminho em cima, nome grande com as ações ao lado. */
+.folderHead {
+  margin-bottom: var(--space-10);
+}
+
+.crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  margin: 0 0 var(--space-2) calc(-1 * var(--space-2));
+  color: var(--color-text-tertiary);
+}
+
+.crumb {
+  padding: 2px var(--space-2);
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.crumb:hover {
+  color: var(--color-text);
+  background: var(--color-bg-secondary);
+}
+
+.crumbDragOver {
+  color: var(--color-text);
+  background: var(--color-brand-light);
+  border: 1px dashed var(--color-brand-fill);
+}
+
+.folderHeadRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3) var(--space-6);
+}
+
+.folderHeadTitle,
+.folderHeadForm {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 1.75rem;
+  font-weight: 500;
+  line-height: 1.2;
+  color: var(--color-text);
+}
+
+.folderHeadTitle svg,
+.folderHeadForm svg {
+  flex-shrink: 0;
+  color: var(--color-text-secondary);
+}
+
+/* Prefixo .folderHeadForm para vencer o estilo global de input. */
+.folderHeadForm .folderHeadInput {
+  width: min(420px, 70vw);
+  padding: 0 0 2px;
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid var(--color-text);
+  border-radius: 0;
+  color: inherit;
+  font: inherit;
+  outline: none;
+}
+
+.folderHeadActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.ghostBtn {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
   height: 32px;
   padding: 0 var(--space-3);
-  background: transparent;
-  border: 1px dashed var(--color-border-hover);
-  border-radius: var(--radius-full);
+  background: none;
+  border: 0;
+  border-radius: var(--radius-md);
   color: var(--color-text-secondary);
-  font-family: inherit;
+  font: inherit;
   font-size: var(--text-sm);
   font-weight: 500;
   cursor: pointer;
-  transition: color var(--transition-fast), border-color var(--transition-fast), background-color var(--transition-fast);
+  transition: color var(--transition-fast), background-color var(--transition-fast);
 }
 
-.newFolderBtn:hover:not(:disabled) {
+.ghostBtn:hover:not(:disabled) {
   color: var(--color-text);
-  border-color: var(--color-text-tertiary);
   background: var(--color-bg-secondary);
 }
 
-.newFolderBtn:disabled {
+.ghostBtn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
-.folderCard:focus-visible,
-.newFolderBtn:focus-visible,
+.ghostDanger:hover:not(:disabled) {
+  color: var(--color-danger);
+}
+
+/* Formato (só na aba Designs): seletor na linha da busca. */
+.formatSelect {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  color: var(--color-text-tertiary);
+}
+
+.formatSelect select {
+  appearance: none;
+  height: 34px;
+  padding: 0 32px 0 var(--space-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-hover);
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.formatSelect select:focus-visible {
+  outline: 2px solid var(--color-brand-fill);
+  outline-offset: 2px;
+}
+
+.formatSelect svg {
+  position: absolute;
+  right: 10px;
+  pointer-events: none;
+}
+
 .toggleBtn:focus-visible,
 .renameBtn:focus-visible,
-.bundleTab:focus-visible {
+.bundleTab:focus-visible,
+.folderTile:focus-visible,
+.crumb:focus-visible,
+.ghostBtn:focus-visible {
   outline: 2px solid var(--color-brand-fill);
   outline-offset: 2px;
 }
@@ -1820,5 +1903,57 @@
   .search {
     flex: 1;
     width: auto;
+  }
+}
+
+@media (max-width: 640px) {
+  /* Na aba Designs o formato ganha linha própria; busca e modo de visualização ficam abaixo. */
+  .controlsEnd {
+    flex-wrap: wrap;
+  }
+
+  .formatSelect {
+    flex: 1 1 100%;
+  }
+
+  .formatSelect select {
+    width: 100%;
+  }
+}
+
+/* Celular: a linha das abas fica logo abaixo delas, e não embaixo da busca que quebrou de linha. */
+@media (max-width: 640px) {
+  .controls {
+    border-bottom: 0;
+    margin-bottom: 0;
+  }
+
+  .bundleTabs {
+    width: 100%;
+    border-bottom: 1px solid var(--color-border);
+  }
+}
+
+@media (max-width: 640px) {
+  .folderGrid {
+    grid-template-columns: none;
+    grid-auto-flow: column;
+    grid-auto-columns: 62%;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    scrollbar-width: none;
+    padding-bottom: 2px;
+  }
+
+  .folderGrid::-webkit-scrollbar {
+    display: none;
+  }
+
+  .folderTile {
+    scroll-snap-align: start;
+  }
+
+  .foldersSection {
+    margin-bottom: var(--space-8);
   }
 }

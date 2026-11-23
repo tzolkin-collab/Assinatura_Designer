@@ -30,7 +30,7 @@
 }
 
 .primary:active:not(:disabled) {
-  background-color: #000000;
+  background-color: var(--color-accent-hover);
 }
 
 .secondary {

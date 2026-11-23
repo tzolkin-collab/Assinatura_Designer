@@ -1,5 +1,7 @@
 /* Painel do artefato (lado direito da Fábrica): barra de ferramentas, faixa do Canva e diálogo de hospedagem. */
 .root {
+  /* A barra se adapta à largura do PAINEL, não da janela: em 1024 o painel tem ~380px. */
+  container-type: inline-size;
   /* No fluxo do painel de preview, abaixo da barra de aprovação e do cartão de notificação.
      Com position:absolute + inset:0 ele cobria os dois: o modo Auto/Manual e os pedidos de
      aprovação ficavam escondidos atrás do artefato assim que existia uma arte. */
@@ -14,7 +16,10 @@
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  flex-wrap: wrap;
+  /* Uma linha só. Quebrando, a barra virava três faixas e, no celular, tomava a área
+     inteira do preview: o slide não aparecia. O que não cabe some (abaixo), não quebra. */
+  flex-wrap: nowrap;
+  min-width: 0;
   padding: 0 var(--space-4);
   border-bottom: 1px solid var(--color-border);
   background: var(--color-bg);
@@ -377,4 +382,17 @@
 .qr img {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
+}
+
+/* Painel estreito: some primeiro o que é informativo (contagem e custo), depois os rótulos
+   dos botões (ficam o ícone e o title). */
+@container (max-width: 560px) {
+  .optional {
+    display: none;
+  }
+}
+@container (max-width: 420px) {
+  .btnLabel {
+    display: none;
+  }
 }

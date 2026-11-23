@@ -3,8 +3,9 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import {
-  AlertTriangle, Check, Copy, ExternalLink, Loader2, Pencil, RefreshCw, Search, X,
+  AlertTriangle, Check, ChevronDown, Copy, ExternalLink, Loader2, Pencil, RefreshCw, Search, X,
 } from 'lucide-react';
+import PageHeader from '@/components/ui/PageHeader';
 import CoverFrame from './CoverFrame';
 import UnpublishDialog from './UnpublishDialog';
 import {
@@ -18,6 +19,7 @@ import {
   type PublishedFilters,
   type PublishedPost,
   type PublishedSort,
+  type PublishedType,
 } from '@/lib/publishedPresentations';
 import styles from './PublishedPresentations.module.css';
 
@@ -33,17 +35,30 @@ interface ViewProps {
   onUnpublish: (post: PublishedPost) => Promise<void>;
 }
 
+/** "20 nov 2026": curta o bastante para a meta não quebrar linha; a data longa fica no title. */
+function formatShortDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  const mes = d.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '');
+  return `${d.getDate()} ${mes} ${d.getFullYear()}`;
+}
+
 const SORT_LABELS: Record<PublishedSort, string> = {
   recent: 'Mais recentes',
   edited: 'Editadas por último',
   name: 'Nome (A–Z)',
 };
 
+/**
+ * Publicadas: uma linha por link no ar, como a lista de deploys/domínios da Vercel. Antes era
+ * uma grade de cartões com selos em cima do slide e um campo de link truncado
+ * ("apresentacao/liderar-se…"); o que a tela existe para entregar, o endereço, era o que menos
+ * se lia. Agora o endereço aparece inteiro e "Copiar link" é a primeira ação.
+ */
 export default function PublishedPresentationsView({ slug, posts, loading, error, origin, onRetry, onUnpublish }: ViewProps) {
   const [filters, setFilters] = useState<PublishedFilters>({ query: '', type: 'ALL', sort: 'recent' });
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [copyFailedId, setCopyFailedId] = useState<string | null>(null);
-  const [focusedId, setFocusedId] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<PublishedPost | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -59,8 +74,8 @@ export default function PublishedPresentationsView({ slug, posts, loading, error
       setCopiedId(post.id);
       setTimeout(() => setCopiedId((id) => (id === post.id ? null : id)), 2000);
     } catch {
-      // Sem permissão de área de transferência (comum fora de HTTPS): o campo do endereço é
-      // selecionável, então a pessoa ainda consegue copiar à mão.
+      // Sem permissão de área de transferência (comum fora de HTTPS): aparece o campo com o
+      // endereço inteiro, já selecionado, para copiar à mão.
       setCopyFailedId(post.id);
     }
   };
@@ -81,20 +96,10 @@ export default function PublishedPresentationsView({ slug, posts, loading, error
 
   return (
     <div className={styles.page}>
-      <header className={styles.header}>
-        <div>
-          <h1 className={styles.title}>Apresentações publicadas</h1>
-          <p className={styles.subtitle}>
-            Qualquer pessoa com o endereço acessa, sem login. O link mostra sempre a <strong>versão mais recente</strong>:
-            o que você altera no editor já está no ar.
-          </p>
-        </div>
-        {!loading && posts.length > 0 && (
-          <span className={styles.count} aria-label={`${posts.length} publicadas`}>
-            {posts.length} {posts.length === 1 ? 'publicada' : 'publicadas'}
-          </span>
-        )}
-      </header>
+      <PageHeader
+        title="Publicadas"
+        description="Links públicos: abrem sem login e mostram sempre a versão mais recente do que está no editor."
+      />
 
       {error && (
         <div className={styles.errorBox} role="alert">
@@ -108,60 +113,68 @@ export default function PublishedPresentationsView({ slug, posts, loading, error
 
       {!loading && posts.length > 0 && (
         <div className={styles.toolbar}>
-          <label className={styles.search}>
-            <Search size={15} aria-hidden="true" />
-            <input
-              type="search"
-              placeholder="Buscar por nome ou endereço"
-              value={filters.query}
-              onChange={(e) => setFilters((f) => ({ ...f, query: e.target.value }))}
-              aria-label="Buscar apresentações"
-            />
-          </label>
+          <h2 className={styles.listTitle}>
+            No ar
+            <span className={styles.listCount}>
+              {filtering ? `${visible.length} de ${posts.length}` : posts.length}
+            </span>
+          </h2>
 
-          {types.length > 1 && (
-            <div className={styles.chips} role="group" aria-label="Filtrar por tipo">
-              {(['ALL', ...types] as const).map((t) => (
-                <button
-                  key={t}
-                  type="button"
-                  className={`${styles.chip} ${filters.type === t ? styles.chipActive : ''}`}
-                  aria-pressed={filters.type === t}
-                  onClick={() => setFilters((f) => ({ ...f, type: t }))}
+          <div className={styles.toolbarEnd}>
+            <label className={styles.search}>
+              <Search size={15} aria-hidden="true" />
+              <input
+                type="search"
+                placeholder="Buscar por nome ou endereço"
+                value={filters.query}
+                onChange={(e) => setFilters((f) => ({ ...f, query: e.target.value }))}
+                aria-label="Buscar apresentações"
+              />
+            </label>
+
+            {types.length > 1 && (
+              <label className={styles.select}>
+                <select
+                  value={filters.type}
+                  onChange={(e) => setFilters((f) => ({ ...f, type: e.target.value as PublishedType | 'ALL' }))}
+                  aria-label="Filtrar por tipo"
                 >
-                  {t === 'ALL' ? 'Todas' : TYPE_LABELS[t]}
-                </button>
-              ))}
-            </div>
-          )}
+                  <option value="ALL">Todos os tipos</option>
+                  {types.map((t) => <option key={t} value={t}>{TYPE_LABELS[t]}</option>)}
+                </select>
+                <ChevronDown size={14} aria-hidden="true" />
+              </label>
+            )}
 
-          <label className={styles.sort}>
-            <span className={styles.srOnly}>Ordenar por</span>
-            <select
-              value={filters.sort}
-              onChange={(e) => setFilters((f) => ({ ...f, sort: e.target.value as PublishedSort }))}
-            >
-              {(Object.keys(SORT_LABELS) as PublishedSort[]).map((s) => (
-                <option key={s} value={s}>{SORT_LABELS[s]}</option>
-              ))}
-            </select>
-          </label>
+            <label className={styles.select}>
+              <select
+                value={filters.sort}
+                onChange={(e) => setFilters((f) => ({ ...f, sort: e.target.value as PublishedSort }))}
+                aria-label="Ordenar por"
+              >
+                {(Object.keys(SORT_LABELS) as PublishedSort[]).map((s) => (
+                  <option key={s} value={s}>{SORT_LABELS[s]}</option>
+                ))}
+              </select>
+              <ChevronDown size={14} aria-hidden="true" />
+            </label>
+          </div>
         </div>
       )}
 
       {loading ? (
-        <div className={styles.grid} aria-busy="true" aria-label="Carregando apresentações publicadas">
+        <ul className={styles.list} aria-busy="true" aria-label="Carregando apresentações publicadas">
           {[0, 1, 2].map((i) => (
-            <div key={i} className={`${styles.card} ${styles.skeleton}`} aria-hidden="true">
+            <li key={i} className={`${styles.row} ${styles.skeleton}`} aria-hidden="true">
               <div className={styles.skeletonCover} />
-              <div className={styles.skeletonBody}>
+              <div className={styles.info}>
+                <div className={styles.skeletonLine} style={{ width: '55%', height: 18 }} />
                 <div className={styles.skeletonLine} style={{ width: '70%' }} />
-                <div className={styles.skeletonLine} style={{ width: '45%' }} />
-                <div className={styles.skeletonLine} style={{ height: 36 }} />
+                <div className={styles.skeletonLine} style={{ width: '40%' }} />
               </div>
-            </div>
+            </li>
           ))}
-        </div>
+        </ul>
       ) : posts.length === 0 ? (
         error ? null : (
           <div className={styles.empty}>
@@ -191,78 +204,75 @@ export default function PublishedPresentationsView({ slug, posts, loading, error
           )}
         </div>
       ) : (
-        <ul className={styles.grid}>
+        <ul className={styles.list}>
           {visible.map((post) => {
             const title = displayTitle(post);
             const edited = isEditedAfterPublish(post);
             const copied = copiedId === post.id;
+            const endereco = shortPublicUrl(origin, post.publicSlug);
             return (
-              <li key={post.id} className={styles.card}>
+              <li key={post.id} className={styles.row}>
                 <a href={publicUrl(post)} target="_blank" rel="noreferrer" className={styles.coverLink} aria-label={`Abrir “${title}” em uma nova aba`}>
                   <CoverFrame cover={post.cover} type={post.type} />
-                  <span className={styles.coverBadge}>{TYPE_LABELS[post.type]}</span>
-                  {post.slideCount > 0 && (
-                    <span className={styles.coverCount}>{post.slideCount} {post.slideCount === 1 ? 'slide' : 'slides'}</span>
-                  )}
                 </a>
 
-                <div className={styles.body}>
-                  <h2 className={styles.cardTitle} title={title}>{title}</h2>
+                <div className={styles.info}>
+                  <h3 className={styles.rowTitle} title={title}>{title}</h3>
+                  <a href={publicUrl(post)} target="_blank" rel="noreferrer" className={styles.url} title={publicUrl(post)}>
+                    {endereco}
+                  </a>
                   <p className={styles.meta}>
-                    <span>Publicada em {formatPublishedDate(post.publishedAt)}</span>
-                    {edited && (
-                      <span
-                        className={styles.edited}
-                        title={`Alterada em ${formatPublishedDate(post.updatedAt)}, depois de publicada. O link já mostra a versão atual.`}
-                      >
-                        Alterada depois
-                      </span>
-                    )}
+                    <span>{TYPE_LABELS[post.type]}</span>
+                    {post.slideCount > 0 && <span>{post.slideCount} {post.slideCount === 1 ? 'slide' : 'slides'}</span>}
+                    <span title={formatPublishedDate(post.publishedAt)}>publicada {formatShortDate(post.publishedAt)}</span>
                   </p>
-
-                  <div className={styles.linkRow}>
-                    <input
-                      className={styles.linkInput}
-                      readOnly
-                      // O host é igual em todos os cartões; o que distingue é o final. Com o campo em foco
-                      // (ou se a cópia automática falhar) mostra o endereço inteiro, pronto para copiar.
-                      value={focusedId === post.id || copyFailedId === post.id
-                        ? shortPublicUrl(origin, post.publicSlug)
-                        : `apresentacao/${post.publicSlug}`}
-                      title={publicUrl(post)}
-                      aria-label={`Endereço público de ${title}`}
-                      onFocus={(e) => { setFocusedId(post.id); requestAnimationFrame(() => e.currentTarget.select()); }}
-                      onBlur={() => setFocusedId((id) => (id === post.id ? null : id))}
-                    />
-                    <button
-                      type="button"
-                      className={`${styles.copyBtn} ${copied ? styles.copyBtnDone : ''}`}
-                      onClick={() => copy(post)}
+                  {edited && (
+                    <p
+                      className={styles.edited}
+                      title={`Alterada em ${formatPublishedDate(post.updatedAt)}, depois de publicada. O link já mostra a versão atual.`}
                     >
-                      {copied ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
-                      {copied ? 'Copiado' : 'Copiar'}
-                    </button>
-                  </div>
-                  <p className={styles.srOnly} role="status" aria-live="polite">{copied ? 'Link copiado' : ''}</p>
-                  {copyFailedId === post.id && (
-                    <p className={styles.copyError} role="alert">
-                      Não consegui copiar automaticamente. Selecione o endereço acima e use Ctrl+C.
+                      Alterada depois de publicar
                     </p>
                   )}
-
-                  <div className={styles.actions}>
-                    <a href={publicUrl(post)} target="_blank" rel="noreferrer" className={styles.action}>
-                      <ExternalLink size={14} aria-hidden="true" /> Abrir
-                    </a>
-                    <Link href={`/${slug}/editor/${post.id}`} className={styles.action}>
-                      <Pencil size={14} aria-hidden="true" /> Editar
-                    </Link>
-                    <button type="button" className={`${styles.action} ${styles.actionDanger}`} onClick={() => setConfirming(post)}>
-                      {busy && confirming?.id === post.id ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : null}
-                      Despublicar
-                    </button>
-                  </div>
+                  {copyFailedId === post.id && (
+                    <div className={styles.copyFallback}>
+                      <input
+                        className={styles.linkInput}
+                        readOnly
+                        autoFocus
+                        value={publicUrl(post)}
+                        aria-label={`Endereço público de ${title}`}
+                        onFocus={(e) => e.currentTarget.select()}
+                      />
+                      <p className={styles.copyError} role="alert">
+                        Não consegui copiar automaticamente. O endereço está selecionado: use Ctrl+C.
+                      </p>
+                    </div>
+                  )}
                 </div>
+
+                <div className={styles.actions}>
+                  <button
+                    type="button"
+                    className={`${styles.copyBtn} ${copied ? styles.copyBtnDone : ''}`}
+                    onClick={() => copy(post)}
+                  >
+                    {copied ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
+                    {copied ? 'Copiado' : 'Copiar link'}
+                  </button>
+                  {/* No celular Abrir e Editar ficam só com o ícone, para as quatro ações caberem numa linha. */}
+                  <a href={publicUrl(post)} target="_blank" rel="noreferrer" className={styles.action} aria-label={`Abrir “${title}”`}>
+                    <ExternalLink size={14} aria-hidden="true" /> <span className={styles.actionLabel}>Abrir</span>
+                  </a>
+                  <Link href={`/${slug}/editor/${post.id}`} className={styles.action} aria-label={`Editar “${title}”`}>
+                    <Pencil size={14} aria-hidden="true" /> <span className={styles.actionLabel}>Editar</span>
+                  </Link>
+                  <button type="button" className={`${styles.action} ${styles.actionDanger}`} onClick={() => setConfirming(post)}>
+                    {busy && confirming?.id === post.id ? <Loader2 size={14} className="animate-spin" aria-hidden="true" /> : null}
+                    Despublicar
+                  </button>
+                </div>
+                <p className={styles.srOnly} role="status" aria-live="polite">{copied ? 'Link copiado' : ''}</p>
               </li>
             );
           })}

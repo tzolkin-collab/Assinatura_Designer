@@ -55,7 +55,10 @@ export default function GaleriaPage() {
   }, []);
   
   // Filtros
-  const [filterMode, setFilterMode] = useState<'my' | 'discover'>('my');
+  // ?modo=descobrir abre direto em Descobrir: é para onde o antigo /projetos redireciona.
+  const [filterMode, setFilterMode] = useState<'my' | 'discover'>(
+    () => (searchParams?.get('modo') === 'descobrir' ? 'discover' : 'my'),
+  );
   const [showFilterDropdown, setShowFilterDropdown] = useState(false);
   const [requestingAccessSlug, setRequestingAccessSlug] = useState<string | null>(null);
 

@@ -162,8 +162,9 @@ export default function FolderPicker({ marca, sessionId, disabled }: FolderPicke
         aria-label={`Salvar em: ${selecionada ? selecionada.name : 'sem pasta'}`}
         style={{
           display: 'flex', alignItems: 'center', gap: 6,
-          background: 'var(--color-surface)',
-          border: '1px solid var(--color-border-hover)',
+          // Variáveis com padrão: quem embute o seletor (a caixa da Fábrica vazia) tira a pílula sem !important.
+          background: 'var(--folder-picker-bg, var(--color-surface))',
+          border: '1px solid var(--folder-picker-border, var(--color-border-hover))',
           borderRadius: 999, height: 30, padding: '0 12px',
           cursor: disabled || !pronto ? 'not-allowed' : 'pointer',
           opacity: disabled || !pronto ? 0.5 : 1,
